@@ -11,7 +11,8 @@ case class StreamPrefetchParameters(
   streamSize: Int,
   ageWidth: Int,
   blockBytes: Int,
-  reallocStreamOnMissInstantly: Boolean
+  reallocStreamOnMissInstantly: Boolean,
+  cacheName: String // distinguish between different prefetchers
 ) {
   def streamWidth = log2Up(streamCnt)
   def idxWidth = log2Up(streamSize)
@@ -107,7 +108,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val buf = RegInit(VecInit(Seq.fill(streamSize)(0.U.asTypeOf(new PrefetchReq))))
   val valid = RegInit(VecInit(Seq.fill(streamSize)(false.B)))
   val head = RegInit(0.U(log2Up(streamSize).W))
-  val tail = RegInit(0.U(log2Up(streamCnt).W))
+  val tail = RegInit(0.U(log2Up(streamSize).W))
 
   val s_idle :: s_req :: s_resp :: s_finish :: Nil = Enum(4)
   val state = RegInit(VecInit(Seq.fill(streamSize)(s_idle)))
@@ -247,20 +248,20 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   }
 
   // debug info
-  XSDebug(p"StreamBuf ${io.streamBufId} io.req:    v=${io.req.valid} r=${io.req.ready} ${io.req.bits}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} io.resp:   v=${io.resp.valid} r=${io.resp.ready} ${io.resp.bits}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} io.finish: v=${io.finish.valid} r=${io.finish.ready} ${io.finish.bits}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} io.update: v=${io.update.valid} ${io.update.bits}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} io.alloc:  v=${io.alloc.valid} ${io.alloc.bits}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} io.req:    v=${io.req.valid} r=${io.req.ready} ${io.req.bits}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} io.resp:   v=${io.resp.valid} r=${io.resp.ready} ${io.resp.bits}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} io.finish: v=${io.finish.valid} r=${io.finish.ready} ${io.finish.bits}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} io.update: v=${io.update.valid} ${io.update.bits}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} io.alloc:  v=${io.alloc.valid} ${io.alloc.bits}\n")
   for (i <- 0 until streamSize) {
-    XSDebug(p"StreamBuf ${io.streamBufId} [${i.U}] io.addrs: ${io.addrs(i).valid} 0x${Hexadecimal(io.addrs(i).bits)} " +
+    XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} [${i.U}] io.addrs: ${io.addrs(i).valid} 0x${Hexadecimal(io.addrs(i).bits)} " +
       p"buf: ${buf(i)} valid: ${valid(i)} state: ${state(i)} isPfting: ${isPrefetching(i)} " +
       p"deqLater: ${deqLater(i)} deqValid: ${deqValid(i)}\n")
   }
-  XSDebug(p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead} blockBytes: ${blockBytes.U}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq}\n")
-  XSDebug(needRealloc, p"StreamBuf ${io.streamBufId} needRealloc: ${needRealloc} reallocReq: ${reallocReq}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} prefetchPrior: ")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead} blockBytes: ${blockBytes.U}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq}\n")
+  XSDebug(needRealloc, s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} needRealloc: ${needRealloc} reallocReq: ${reallocReq}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} prefetchPrior: ")
   (0 until streamSize).foreach(i => XSDebug(false, true.B, p"${prefetchPrior(i)} "))
   XSDebug(false, true.B, "\n")
 }
@@ -368,8 +369,8 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
     i.U === io.resp.bits.stream && buf.io.resp.ready}).asUInt.orR
   
   // debug info
-  XSDebug(p"io: ${io}\n")
-  XSDebug(p"bufValids: ${Binary(bufValids.asUInt)} hit: ${hit} ages: ")
+  XSDebug(s"${p.cacheName} " + p"io: ${io}\n")
+  XSDebug(s"${p.cacheName} " + p"bufValids: ${Binary(bufValids.asUInt)} hit: ${hit} ages: ")
   (0 until streamCnt).foreach(i => XSDebug(false, true.B, p"${Hexadecimal(ages(i))} "))
   XSDebug(false, true.B, "\n")
 }
