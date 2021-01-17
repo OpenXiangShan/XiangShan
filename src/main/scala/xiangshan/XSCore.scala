@@ -274,20 +274,20 @@ case class EnviromentParameters
   EnableDebug: Boolean = false
 )
 
-object AddressSpace extends HasXSParameter {
-  // (start, size)
-  // address out of MMIO will be considered as DRAM
-  def mmio = List(
-    (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
-    (0x40000000L, 0x40000000L)   // external devices
-  )
+// object AddressSpace extends HasXSParameter {
+//   // (start, size)
+//   // address out of MMIO will be considered as DRAM
+//   def mmio = List(
+//     (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
+//     (0x40000000L, 0x40000000L)   // external devices
+//   )
 
-  def isMMIO(addr: UInt): Bool = mmio.map(range => {
-    require(isPow2(range._2))
-    val bits = log2Up(range._2)
-    (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
-  }).reduce(_ || _)
-}
+//   def isMMIO(addr: UInt): Bool = mmio.map(range => {
+//     require(isPow2(range._2))
+//     val bits = log2Up(range._2)
+//     (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
+//   }).reduce(_ || _)
+// }
 
 
 
@@ -332,6 +332,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
