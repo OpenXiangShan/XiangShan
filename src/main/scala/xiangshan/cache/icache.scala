@@ -177,7 +177,13 @@ class ICacheMetaArray extends ICachArray
     val readResp = Output(Vec(nWays,UInt(tagBits.W)))
   }}
 
-  val metaArray = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays, shouldReset = true))
+  val metaArray = Module(new SRAMWrapper(
+    "Icache_Meta",
+    UInt(encTagBits.W),
+    set=nSets,
+    way=nWays,
+    shouldReset = true
+  ))
 
   //read
   metaArray.io.r.req.valid := io.read.valid
@@ -205,7 +211,12 @@ class ICacheDataArray extends ICachArray
     val readResp = Output(Vec(blockWords,Vec(nWays,UInt(encRowBits.W))))
   }}
 
-  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(UInt(encRowBits.W), set=nSets, way = nWays))}
+  val dataArray = List.fill(blockWords){ Module(new SRAMWrapper(
+    "Icache_Data",
+    UInt(encRowBits.W),
+    set=nSets,
+    way = nWays
+  ))}
 
   //read
   //do ECC decoding after way choose
