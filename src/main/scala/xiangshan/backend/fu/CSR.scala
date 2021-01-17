@@ -609,6 +609,9 @@ class CSR extends FunctionUnit with HasCSRConst
   val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && raiseException
   val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
   val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
+  val hasInstrAccessFault = csrio.exception.bits.cf.exceptionVec(instrAccessFault) && raiseException
+  val hasLoadAccessFault = csrio.exception.bits.cf.exceptionVec(loadAccessFault) && raiseException
+  val hasStoreAccessFault = csrio.exception.bits.cf.exceptionVec(storeAccessFault) && raiseException
 
   val csrExceptionVec = Wire(Vec(16, Bool()))
   csrExceptionVec.map(_ := false.B)
@@ -622,6 +625,8 @@ class CSR extends FunctionUnit with HasCSRConst
   csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
+  csrExceptionVec(loadAccessFault) := hasLoadAccessFault
+  csrExceptionVec(storeAccessFault) := hasStoreAccessFault
   val iduExceptionVec = cfIn.exceptionVec
   val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }

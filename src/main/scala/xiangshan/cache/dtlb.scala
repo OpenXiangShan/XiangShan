@@ -185,10 +185,15 @@ object TlbCmd {
   def write = "b01".U
   def exec  = "b10".U
 
-  def apply() = UInt(2.W)
-  def isRead(a: UInt) = a===read
-  def isWrite(a: UInt) = a===write
-  def isExec(a: UInt) = a===exec
+  def atom_read  = "b100".U // lr
+  def atom_write = "b101".U // sc / amo
+
+  def apply() = UInt(3.W)
+  def isRead(a: UInt) = a(1,0)===read
+  def isWrite(a: UInt) = a(1,0)===write
+  def isExec(a: UInt) = a(1,0)===exec
+
+  def isAtom(a: UInt) = a(2)
 }
 
 class TlbReq extends TlbBundle {
@@ -207,8 +212,14 @@ class TlbReq extends TlbBundle {
 class TlbResp extends TlbBundle {
   val paddr = UInt(PAddrBits.W)
   val miss = Bool()
+  val mmio = Bool()
   val excp = new Bundle {
     val pf = new Bundle {
+      val ld = Bool()
+      val st = Bool()
+      val instr = Bool()
+    }
+    val af = new Bundle {
       val ld = Bool()
       val st = Bool()
       val instr = Bool()
@@ -340,6 +351,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.excp.pf.ld    := ldPf || update
     resp(i).bits.excp.pf.st    := stPf || update
     resp(i).bits.excp.pf.instr := instrPf || update
+
+    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
+    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
+    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
+    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
+    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
 
     (hit, miss, pfHitVec, multiHit)
   }
