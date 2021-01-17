@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.fu.HasCSRConst
+import xiangshan.backend.fu.util.HasCSRConst
 import chisel3.ExcitingUtils._
 
 trait HasTlbConst extends HasXSParameter {

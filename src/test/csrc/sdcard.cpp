@@ -11,10 +11,14 @@ void sd_setaddr(uint32_t addr) {
   //assert(0);
 }
 
-void sd_read(uint32_t *data) {
-  fread(data, 4, 1, fp);
-  //printf("read data = 0x%08x\n", *data);
-  //assert(0);
+uint32_t sd_read(int ren) {
+  if (ren) {
+    uint32_t data;
+    fread(&data, 4, 1, fp);
+    //printf("read data = 0x%08x\n", *data);
+    return data;
+  }
+  return 0xdeadbeaf;
 }
 
 void init_sd(void) {

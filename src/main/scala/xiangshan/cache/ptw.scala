@@ -323,7 +323,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
-  val tlbl2 = Module(new SRAMTemplate(new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen), set = TlbL2LineNum)) // (total 256, one line is 4 => 64 lines)
+  val tlbl2 = Module(new SRAMWrapper(
+    "L2TLB",
+    new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
+    set = TlbL2LineNum
+  )) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
   val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
 
@@ -334,8 +338,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = Reg(UInt(PtwL1EntrySize.W))
-
-  val ptwl2 = Module(new SRAMTemplate(new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen), set = PtwL2LineNum)) // (total 256, one line is 4 => 64 lines)
+  val ptwl2 = Module(new SRAMWrapper(
+    "L2PTW",
+    new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
+    set = PtwL2LineNum
+  )) // (total 256, one line is 4 => 64 lines)
   val l2v   = RegInit(0.U(PtwL2LineNum.W)) // valid
   val l2g   = Reg(UInt(PtwL2LineNum.W)) // global
 

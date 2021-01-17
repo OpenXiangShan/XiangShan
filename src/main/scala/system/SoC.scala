@@ -5,14 +5,14 @@ import device.{AXI4Timer, TLTimer, AXI4Plic}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLFuzzer, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
 import utils.DebugIdentityNode
-import xiangshan.{HasXSParameter, XSCore}
+import utils.XSInfo
+import xiangshan.{HasXSParameter, XSCore, HasXSLog}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
-import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
-import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
+import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
 
 case class SoCParameters
 (
@@ -69,20 +69,19 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // -------------------------------------------------
   private val l3_xbar = TLXbar()
 
-  private val l3_banks = (0 until L3NBanks) map (i =>
-      LazyModule(new InclusiveCache(
-        CacheParameters(
-          level = 3,
-          ways = L3NWays,
-          sets = L3NSets,
-          blockBytes = L3BlockSize,
-          beatBytes = L2BusWidth / 8,
-          cacheName = s"L3_$i"
-        ),
-      InclusiveCacheMicroParameters(
-        writeBytes = 8
-      )
-    )))
+  private val l3_node = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 3,
+      ways = L3NWays,
+      sets = L3NSets,
+      blockBytes = L3BlockSize,
+      beatBytes = L2BusWidth / 8,
+      cacheName = "L3"
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 8
+    )
+  )).node
 
   // L3 to memory network
   // -------------------------------------------------
@@ -129,14 +128,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     DebugIdentityNode() :=
     tlError_xbar
 
-  def bankFilter(bank: Int) = AddressSet(
-    base = bank * L3BlockSize,
-    mask = ~BigInt((L3NBanks -1) * L3BlockSize))
-
-  for(i <- 0 until L3NBanks) {
-    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
-    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
-  }
+  val bankedNode =
+    BankBinder(L3NBanks, L3BlockSize) :*= l3_node :*= TLBuffer() :*= DebugIdentityNode() :*= l3_xbar
 
   for(i <- 0 until L3NBanks) {
     mem(i) :=
@@ -144,7 +137,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
       TLCacheCork() :=
-      l3_banks(i).node
+      bankedNode
   }
 
   private val clint = LazyModule(new TLTimer(

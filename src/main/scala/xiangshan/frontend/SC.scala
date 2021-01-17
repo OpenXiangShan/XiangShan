@@ -44,7 +44,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
 
   val table = List.fill(TageBanks) {
     List.fill(2) {
-      Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, shouldReset=false, holdRead=true, singlePort=false))
+      Module(new SRAMWrapper("SC_Table", SInt(ctrBits.W), set=nRows, shouldReset=false, holdRead=true, singlePort=false))
     }
   }
 
@@ -60,7 +60,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
   }
 
   def getIdx(hist: UInt, pc: UInt) = {
-    (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> 1.U))(log2Ceil(nRows)-1,0)
+    (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits.U))(log2Ceil(nRows)-1,0)
   }
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
@@ -75,14 +75,14 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
 
   val table_r = WireInit(0.U.asTypeOf(Vec(TageBanks,Vec(2, SInt(ctrBits.W)))))
 
-  val baseBank = io.req.bits.pc(log2Up(TageBanks), 1)
+  val baseBank = io.req.bits.pc(log2Up(TageBanks), instOffsetBits)
   val baseBankLatch = RegEnable(baseBank, enable=io.req.valid)
 
   val bankIdxInOrder = VecInit((0 until TageBanks).map(b => (baseBankLatch +& b.U)(log2Up(TageBanks)-1, 0)))
   val realMask = circularShiftLeft(io.req.bits.mask, TageBanks, baseBank)
   val maskLatch = RegEnable(io.req.bits.mask, enable=io.req.valid)
 
-  val update_idx = getIdx(io.update.hist, io.update.pc - (io.update.fetchIdx << 1))
+  val update_idx = getIdx(io.update.hist, io.update.pc - (io.update.fetchIdx << instOffsetBits))
   val update_wdata = ctrUpdate(io.update.oldCtr, io.update.taken)
 
 

@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
 // import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
@@ -25,7 +26,7 @@ class LoadUnit_S0 extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  val s0_vaddr = io.in.bits.src1 + s0_uop.ctrl.imm
+  val s0_vaddr = io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN)
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
@@ -280,6 +281,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   intHitLoadOut.bits.redirect := DontCare
   intHitLoadOut.bits.brUpdate := DontCare
   intHitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  intHitLoadOut.bits.debug.isPerfCnt := false.B
   intHitLoadOut.bits.fflags := DontCare
 
   load_s2.io.out.ready := true.B

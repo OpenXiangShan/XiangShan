@@ -169,7 +169,9 @@ class StoreMissQueue extends DCacheModule
   val tag_match   = Mux1H(idx_matches, tag_matches)
   val idx_match   = idx_matches.reduce(_||_)
 
-  XSDebug("idx_match: %b tag_match: %b\n", idx_match, tag_match)
+  when (io.lsu.req.valid) {
+    XSDebug("idx_match: %b tag_match: %b\n", idx_match, tag_match)
+  }
 
   val req             = io.lsu.req
   val entry_alloc_idx = Wire(UInt())
