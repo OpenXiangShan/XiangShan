@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
+import bus.tilelink.TLParameters
 
 case class ICacheParameters(
     nSets: Int = 64,
@@ -27,7 +28,7 @@ case class ICacheParameters(
   def replacement = new RandomReplacement(nWays)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
+trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst with HasInstrMMIOConst {
   val cacheParams = icacheParameters
   val groupAlign = log2Up(cacheParams.blockBytes)
   val packetInstNum = packetBytes/instBytes
@@ -35,7 +36,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val ptrHighBit = log2Up(groupBytes) - 1 
   val ptrLowBit = log2Up(packetBytes)
 
-  def accessBorder =  0x80000000L
   def cacheID = 0
   def insLen = if (HasCExtension) 16 else 32
   def RVCInsLen = 16
@@ -43,11 +43,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   def encRowBits = cacheParams.dataCode.width(rowBits)
   def encTagBits = cacheParams.tagCode.width(tagBits)
 
-  // ICache MSHR settings
-
-  def MMIOWordBits = 64
-  def MMIOBeats = blockBits/MMIOWordBits
-  def MMIOWorByte  = MMIOWordBits / 8
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -57,12 +52,18 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
 }
 
+trait HasFrontEndExceptionNo {
+  def accessFault = 0
+  def pageFault   = 1
+}
+
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
 
 abstract class ICacheModule extends XSModule
   with HasICacheParameters
   with ICacheBase
+  with HasFrontEndExceptionNo
 
 abstract class ICacheArray extends XSModule
   with HasICacheParameters
@@ -81,6 +82,7 @@ class ICacheResp extends ICacheBundle
 {
   val pc = UInt(VAddrBits.W)
   val data = UInt((FetchWidth * 32).W)
+  val mmio = Bool()
   val mask = UInt(PredictWidth.W)
   val ipf = Bool()
   val acf = Bool()
@@ -315,17 +317,14 @@ class ICache extends ICacheModule
   val s2_tlb_resp = WireInit(io.tlb.resp.bits)
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
-  val s2_access_fault = WireInit(false.B)
   val s2_allValid = s2_valid && io.tlb.resp.valid
+  val s2_mmio = WireInit(false.B)
+
   s2_fire := s2_allValid && s3_ready
+  s2_ready := s3_ready || !s2_valid
   when(s1_fire)       { s2_valid := true.B }
   .elsewhen(s2_flush) { s2_valid := false.B }
   .elsewhen(s2_fire)  { s2_valid := false.B }
-    val s2_mmio = WireInit(false.B)
-
-  //physical address < 0x80000000
-  //TODO: May have bugs
-  s2_access_fault := (s2_tlb_resp.paddr < accessBorder.U) && s2_valid
 
   // SRAM(Meta and Data) read reseponse
   val metas = metaArray.io.readResp
@@ -342,14 +341,21 @@ class ICache extends ICacheModule
 
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
-  s2_mmio := s2_valid && AddressSpace.isMMIO(s2_tlb_resp.paddr)
-  s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
-  s2_ready := s3_ready || !s2_valid
+  //deal with icache exception
+  val icacheExceptionVec = Wire(Vec(8,Bool()))
+  val hasIcacheException = icacheExceptionVec.asUInt().orR()
+  icacheExceptionVec := DontCare
+  icacheExceptionVec(accessFault) := s2_tlb_resp.excp.af.instr && s2_allValid
+  icacheExceptionVec(pageFault) := s2_tlb_resp.excp.pf.instr && s2_allValid
+
+  s2_mmio := s2_valid && io.tlb.resp.valid && s2_tlb_resp.mmio && !hasIcacheException
+  s2_hit := s3_valid && ParallelOR(hitVec) 
+
 
   assert(!(s2_hit && s2_mmio),"MMIO address should not hit in icache")
 
-
-  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
+  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b mmio:%d \n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_mmio)
+  XSDebug("[Stage 2] exception: af:%d  pf:%d  \n",icacheExceptionVec(accessFault),icacheExceptionVec(pageFault))
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
   XSDebug(p"[Stage 2] tlb resp: v ${io.tlb.resp.valid} r ${io.tlb.resp.ready} ${s2_tlb_resp}\n")
   XSDebug("[Stage 2] tag: %x  hit:%d mmio:%d\n",s2_tag,s2_hit,s2_mmio)
@@ -365,9 +371,10 @@ class ICache extends ICacheModule
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_mmio = RegEnable(next=s2_mmio,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
-  val s3_miss = s3_valid && !s3_hit
+  val s3_miss = s3_valid && !s3_hit && !s3_mmio
   val s3_idx = get_idx(s3_req_pc)
-  val s3_access_fault = RegEnable(s2_access_fault,init=false.B,enable=s2_fire)
+  val s3_exception_vec = RegEnable(next= icacheExceptionVec,init=0.U.asTypeOf(Vec(8,Bool())), enable=s2_fire)
+  val s3_has_exception = s3_exception_vec.asUInt.orR
   when(s3_flush)                  { s3_valid := false.B }
   .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B }
   .elsewhen(io.resp.fire())       { s3_valid := false.B }
@@ -394,13 +401,13 @@ class ICache extends ICacheModule
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
-  icacheMissQueue.io.req.valid := s3_miss && !s3_mmio && !s3_flush && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.valid := s3_miss && !s3_has_exception && !s3_flush && !blocking//TODO: specificate flush condition
   icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := s3_flush
 
   when(icacheMissQueue.io.req.fire() || io.mmio_acquire.fire()){blocking := true.B}
-  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) || s3_flush) ){blocking := false.B}
+  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) ||  io.mmio_grant.fire() || s3_flush) ){blocking := false.B}
 
   XSDebug(blocking && s3_flush,"check for icache non-blocking")
   //cache flush register
@@ -441,8 +448,9 @@ class ICache extends ICacheModule
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc,s3_req_mask )
 
   //FIXME!!
-  val mmio_mask = VecInit(Seq.fill(PredictWidth){true.B}).asUInt
-  val mmioDataOut = cutHelper(io.mmio_grant.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W))),s3_req_pc(5,1),mmio_mask)
+  val mmio_packet = io.mmio_grant.bits.data
+
+  XSDebug("mmio data  %x\n", mmio_packet)
 
 
   s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire()) || io.mmio_grant.fire()))
@@ -454,10 +462,11 @@ class ICache extends ICacheModule
     val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc, s3_req_mask)
     val refillData = cutHelper(refillDataVec, s3_req_pc,s3_req_mask)
     wayResp.pc := s3_req_pc
-    wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_valid && s3_mmio ,mmioDataOut ,refillData))
-    wayResp.mask := s3_req_mask
-    wayResp.ipf := s3_tlb_resp.excp.pf.instr
-    wayResp.acf := s3_access_fault
+    wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
+    wayResp.mask := Mux(s3_mmio,mmioMask,s3_req_mask)
+    wayResp.ipf := s3_exception_vec(pageFault)
+    wayResp.acf := s3_exception_vec(accessFault)
+    wayResp.mmio := s3_mmio
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
     pds(i).io.prev_pc := io.prev_pc
@@ -473,7 +482,7 @@ class ICache extends ICacheModule
   }
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
+  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d mmio :%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr, s3_mmio)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
   XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
@@ -494,12 +503,13 @@ class ICache extends ICacheModule
   io.req.ready := s2_ready
 
   //icache response: to pre-decoder
-  io.resp.valid := s3_valid && (s3_hit || icacheMissQueue.io.resp.valid)
-  io.resp.bits.data := Mux(s3_mmio,mmioDataOut,Mux((s3_valid && s3_hit),outPacket,refillDataOut))
-  io.resp.bits.mask := s3_req_mask  //FIXME!!
+  io.resp.valid := s3_valid && (s3_hit || s3_has_exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
+  io.resp.bits.data := Mux(s3_mmio,mmio_packet,Mux((s3_valid && s3_hit),outPacket,refillDataOut))
+  io.resp.bits.mask := Mux(s3_mmio,mmioMask,s3_req_mask)
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
-  io.resp.bits.acf := s3_access_fault
+  io.resp.bits.acf := s3_exception_vec(accessFault)
+  io.resp.bits.mmio := s3_mmio
 
   //to itlb
   io.tlb.resp.ready := true.B // DontCare

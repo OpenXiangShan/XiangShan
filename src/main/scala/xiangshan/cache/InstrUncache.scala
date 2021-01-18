@@ -2,12 +2,12 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
+import utils._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 import xiangshan._
-import xiangshan.{HasXSLog, MicroOp, Redirect}
+import xiangshan.frontend._
 
 class InsUncacheReq extends ICacheBundle
 {
@@ -17,7 +17,7 @@ class InsUncacheReq extends ICacheBundle
 
 class InsUncacheResp extends ICacheBundle
 {
-  val data = Vec(MMIOBeats,UInt(MMIOWordBits.W))
+  val data = UInt((mmioBeats * mmioBusWidth).W)
   val id   = UInt(3.W)
 }
 
@@ -42,8 +42,8 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
   val state = RegInit(s_invalid)
 
   val req       = Reg(new InsUncacheReq )
-  val respDataReg = Reg(Vec(MMIOBeats,UInt(MMIOWordBits.W)))
-  val refillCounter = Counter(MMIOBeats)
+  val respDataReg = Reg(Vec(mmioBeats,UInt(mmioBusWidth.W)))
+  val beatCounter = Counter(mmioBeats)
 
 
   // assign default values to output signals
@@ -56,10 +56,16 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
 
   io.mmio_grant.ready     := false.B
 
-
-  XSDebug("entry: %d state: %d\n", io.id, state)
-
   val needFlush = RegInit(false.B)
+
+  XSDebug("[ICache MMIO]entry: %d state: %d needFlush%d  flush:%d\n", io.id, state, needFlush,io.flush)
+  XSDebug("[ICache MMIO]req.addr: %x req.id \n", req.addr)
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
+
+  XSDebug("[ICache MMIO]respReg:  %x\n",respDataReg.asUInt)
+
+
   when(io.flush && (state =/= s_invalid) && (state =/= s_send_resp)){ needFlush := true.B }
   .elsewhen((state=== s_send_resp) && needFlush){ needFlush := false.B }
 
@@ -67,7 +73,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
   // s_invalid: receive requests
   when (state === s_invalid) {
     io.req.ready := true.B
-    refillCounter.value := 0.U
+    beatCounter.value := 0.U
 
     when (io.req.fire()) {
       req   := io.req.bits
@@ -75,16 +81,13 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     }
   }
 
-  // --------------------------------------------
-  // refill
-  // TODO: determine 'lgSize' in memend
 
   when (state === s_refill_req) {
     io.mmio_acquire.valid := true.B
     io.mmio_acquire.bits  :=  edge.Get(
           fromSource      = io.id,
-          toAddress       = req.addr + refillCounter.value << log2Up(MMIOWorByte).U,
-          lgSize          = log2Up(MMIOWorByte).U
+          toAddress       = req.addr + (beatCounter.value << log2Ceil(mmioBusBytes).U),
+          lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 
     when (io.mmio_acquire.fire()) {
@@ -98,21 +101,22 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     io.mmio_grant.ready := true.B
 
     when (io.mmio_grant.fire()) {
-      respDataReg(refillCounter.value) := io.mmio_grant.bits.data
+      respDataReg(beatCounter.value) := io.mmio_grant.bits.data
       assert(refill_done, "MMIO response should be one beat only!")
-      state := Mux(needFlush || io.flush,s_invalid,Mux(refillCounter.value === (MMIOBeats - 1).U,s_send_resp,s_refill_req))
-      refillCounter.inc()
+      state := Mux(needFlush || io.flush, s_invalid,Mux(beatCounter.value === (mmioBeats - 1).U,s_send_resp,s_refill_req))
+      beatCounter.inc()
     }
   }
 
   // --------------------------------------------
   when (state === s_send_resp) {
     io.resp.valid := true.B
-    io.resp.bits.data := respDataReg
+    io.resp.bits.data := respDataReg.asUInt
     io.resp.bits.id := req.id
     // meta data should go with the response
     when (io.resp.fire() || needFlush) {
       state := s_invalid
+      beatCounter.value := 0.U
     }
   }
 }
