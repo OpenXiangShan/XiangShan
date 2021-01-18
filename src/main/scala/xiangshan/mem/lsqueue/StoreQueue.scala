@@ -43,6 +43,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
+    val sqempty = Output(Bool())
   })
 
   // data modules
@@ -359,6 +360,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       validCounter + enqNumber <= (StoreQueueSize - RenameWidth).U
     )
   )
+
+  // io.sqempty will be used by sbuffer
+  // We delay it for 1 cycle for better timing
+  // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
+  // for 1 cycle will also promise that sq is empty in that cycle
+  io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
