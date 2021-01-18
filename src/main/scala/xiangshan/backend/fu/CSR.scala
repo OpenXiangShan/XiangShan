@@ -166,7 +166,7 @@ class CSR extends FunctionUnit with HasCSRConst
   if (HasFPU) { extList = extList ++ List('f', 'd') }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal)
-  
+
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
@@ -176,7 +176,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mhartNo = hartId()
   val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)  // another option: "h8000c0100".U
-  
+
   // mstatus Value Table
   // | sd   |
   // | pad1 |
@@ -196,7 +196,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // | spp  | 0 |
   // | pie  | 0000 | pie.h is used as UBE
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
-  
+
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
   def mstatusUpdateSideEffect(mstatus: UInt): UInt = {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -318,11 +318,11 @@ class CSR extends FunctionUnit with HasCSRConst
   // Emu perfcnt
   val hasEmuPerfCnt = !env.FPGAPlatform
   val nrEmuPerfCnts = if (hasEmuPerfCnt) 0x80 else 0x3
-  
+
   val emuPerfCnts    = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
   val emuPerfCntCond = List.fill(nrEmuPerfCnts)(WireInit(false.B))
   (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
-  
+
   val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
   val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
   println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
@@ -336,7 +336,7 @@ class CSR extends FunctionUnit with HasCSRConst
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
-  
+
   // CSR reg map
   val basicPrivMapping = Map(
 
@@ -424,11 +424,11 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
-                pmpMapping ++ 
-                emuPerfCntsLoMapping ++ 
+                pmpMapping ++
+                emuPerfCntsLoMapping ++
                 (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
                 (if (HasFPU) fcsrMapping else Nil)
-    
+
   val addr = src2(11, 0)
   val csri = src2(16, 12)
   val rdata = Wire(UInt(XLEN.W))
@@ -609,6 +609,9 @@ class CSR extends FunctionUnit with HasCSRConst
   val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && raiseException
   val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
   val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
+  val hasInstrAccessFault = csrio.exception.bits.cf.exceptionVec(instrAccessFault) && raiseException
+  val hasLoadAccessFault = csrio.exception.bits.cf.exceptionVec(loadAccessFault) && raiseException
+  val hasStoreAccessFault = csrio.exception.bits.cf.exceptionVec(storeAccessFault) && raiseException
 
   val csrExceptionVec = Wire(Vec(16, Bool()))
   csrExceptionVec.map(_ := false.B)
@@ -622,6 +625,8 @@ class CSR extends FunctionUnit with HasCSRConst
   csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
+  csrExceptionVec(loadAccessFault) := hasLoadAccessFault
+  csrExceptionVec(storeAccessFault) := hasStoreAccessFault
   val iduExceptionVec = cfIn.exceptionVec
   val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
@@ -749,20 +754,20 @@ class CSR extends FunctionUnit with HasCSRConst
     "loopWrong"   -> (0x1037, "perfCntloopWrong")
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
-    (0 until dcacheParameters.nMissEntries).map(i => 
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    (0 until dcacheParameters.nMissEntries).map(i =>
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 

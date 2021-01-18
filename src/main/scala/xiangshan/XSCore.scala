@@ -89,7 +89,9 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
+  TlbSPEntrySize: Int = 4,
   TlbL2EntrySize: Int = 256, // or 512
+  TlbL2SPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
   NumPerfCounters: Int = 16,
@@ -165,7 +167,9 @@ trait HasXSParameter {
   val RefillSize = core.RefillSize
   val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
   val TlbEntrySize = core.TlbEntrySize
+  val TlbSPEntrySize = core.TlbSPEntrySize
   val TlbL2EntrySize = core.TlbL2EntrySize
+  val TlbL2SPEntrySize = core.TlbL2SPEntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
@@ -181,32 +185,6 @@ trait HasXSParameter {
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     nMissEntries = 8
-  )
-
-  // icache prefetcher
-  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = false,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = l1plusCacheParameters.blockBytes,
-      reallocStreamOnMissInstantly = true
-    )
-  )
-
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true
-    )
   )
 
   val dcacheParameters = DCacheParameters(
@@ -240,6 +218,34 @@ trait HasXSParameter {
 
   // on chip network configurations
   val L3BusWidth = 256
+
+  // icache prefetcher
+  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
+    enable = true,
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 2,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = l1plusCacheParameters.blockBytes,
+      reallocStreamOnMissInstantly = true,
+      cacheName = "icache"
+    )
+  )
+
+  // dcache prefetcher
+  val l2PrefetcherParameters = L2PrefetcherParameters(
+    enable = true,
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 4,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = L2BlockSize,
+      reallocStreamOnMissInstantly = true,
+      cacheName = "dcache"
+    )
+  )
 }
 
 trait HasXSLog { this: RawModule =>
@@ -275,20 +281,20 @@ case class EnviromentParameters
   EnablePerfDebug: Boolean = true
 )
 
-object AddressSpace extends HasXSParameter {
-  // (start, size)
-  // address out of MMIO will be considered as DRAM
-  def mmio = List(
-    (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
-    (0x40000000L, 0x40000000L)   // external devices
-  )
+// object AddressSpace extends HasXSParameter {
+//   // (start, size)
+//   // address out of MMIO will be considered as DRAM
+//   def mmio = List(
+//     (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
+//     (0x40000000L, 0x40000000L)   // external devices
+//   )
 
-  def isMMIO(addr: UInt): Bool = mmio.map(range => {
-    require(isPow2(range._2))
-    val bits = log2Up(range._2)
-    (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
-  }).reduce(_ || _)
-}
+//   def isMMIO(addr: UInt): Bool = mmio.map(range => {
+//     require(isPow2(range._2))
+//     val bits = log2Up(range._2)
+//     (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
+//   }).reduce(_ || _)
+// }
 
 
 
@@ -333,6 +339,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)

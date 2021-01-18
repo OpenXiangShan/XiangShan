@@ -17,12 +17,13 @@ package object backend {
 
   // jump
   object JumpOpType {
-    def jal  = "b11_000".U
-    def jalr = "b11_010".U
+    def jal  = "b00".U
+    def jalr = "b01".U
+    def auipc = "b10".U
 //    def call = "b11_011".U
 //    def ret  = "b11_100".U
-    def jumpOpIsJal(op: UInt) = !op(1)
-    def jumpOpisJalr(op: UInt) = op(1)
+    def jumpOpisJalr(op: UInt) = op(0)
+    def jumpOpisAuipc(op: UInt) = op(1)
   }
 
   object FenceOpType {

@@ -55,7 +55,7 @@ class JBTAC extends XSModule {
    val isRVC = Bool()
  }
 
- val jbtac = List.fill(JbtacBanks)(Module(new SRAMTemplate(jbtacEntry(), set = JbtacSize / JbtacBanks, shouldReset = true, holdRead = true, singlePort = false)))
+ val jbtac = List.fill(JbtacBanks)(Module(new SRAMWrapper("JBTac", jbtacEntry(), set = JbtacSize / JbtacBanks, shouldReset = true, holdRead = true, singlePort = false)))
 
  val readEntries = Wire(Vec(JbtacBanks, jbtacEntry()))
 
