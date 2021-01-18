@@ -120,13 +120,21 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
 
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Arbiter[FuOutput] = {
     if (needArbiter) {
-      val arb = Module(new Arbiter(new FuOutput(in.head.bits.len), in.size))
-      arb.io.in <> in
-      arb.io.out.ready := out.ready
-      out.bits.data := arb.io.out.bits.data
-      out.bits.uop := arb.io.out.bits.uop
-      out.valid := arb.io.out.valid
-      arb
+      if(in.size == 1){
+        in.head.ready := out.ready
+        out.bits.data := in.head.bits.data
+        out.bits.uop := in.head.bits.uop
+        out.valid := in.head.valid
+        null
+      } else {
+        val arb = Module(new Arbiter(new FuOutput(in.head.bits.len), in.size))
+        arb.io.in <> in
+        arb.io.out.ready := out.ready
+        out.bits.data := arb.io.out.bits.data
+        out.bits.uop := arb.io.out.bits.uop
+        out.valid := arb.io.out.valid
+        arb
+      }
     } else {
       in.foreach(_.ready := out.ready)
       val sel = Mux1H(in.map(x => x.valid -> x))
