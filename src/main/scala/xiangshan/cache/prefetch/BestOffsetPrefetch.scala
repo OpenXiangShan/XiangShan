@@ -37,7 +37,7 @@ class ScoreTableEntry(p: BOPParameters) extends PrefetchBundle {
   val score = UInt(p.scoreBits.W)
 
   def apply(offset: UInt, score: UInt) = {
-    val entry = new ScoreTableEntry(p)
+    val entry = Wire(new ScoreTableEntry(p))
     entry.offset := offset
     entry.score := score
     entry
@@ -215,7 +215,7 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   val bestOffset = RegInit(new ScoreTableEntry(p).apply(1.U, 0.U)) // the entry with the highest score while traversing
   val testOffset = WireInit(st(ptr).offset)
   def winner(e1: ScoreTableEntry, e2: ScoreTableEntry): ScoreTableEntry = {
-    val w = new ScoreTableEntry(p)
+    val w = Wire(new ScoreTableEntry(p))
     w := Mux(e1.score > e2.score, e1, e2)
     w
   }

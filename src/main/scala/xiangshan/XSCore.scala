@@ -232,7 +232,7 @@ trait HasXSParameter {
   // dcache prefetcher
   val l2PrefetcherParameters = L2PrefetcherParameters(
     enable = true,
-    _type = "stream",
+    _type = "bop",// "stream" or "bop"
     streamParams = StreamPrefetchParameters(
       streamCnt = 4,
       streamSize = 4,
@@ -240,7 +240,16 @@ trait HasXSParameter {
       blockBytes = L2BlockSize,
       reallocStreamOnMissInstantly = true,
       cacheName = "dcache"
-    )
+    ),
+    bopParams = BOPParameters(
+      rrTableEntries = 256,
+      rrTagBits = 12,
+      scoreBits = 5,
+      roundMax = 100,
+      badScore = 1,
+      blockBytes = L2BlockSize,
+      nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
+    ),
   )
 }
 
