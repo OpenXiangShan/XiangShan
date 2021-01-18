@@ -110,6 +110,10 @@ package object xiangshan {
     def isException(level: UInt) = level(1) && level(0)
   }
 
+  object ExceptionVec {
+    def apply() = Vec(16, Bool())
+  }
+
   object PMAMode {
     def R = "b1".U << 0 //readable
     def W = "b1".U << 1 //writeable

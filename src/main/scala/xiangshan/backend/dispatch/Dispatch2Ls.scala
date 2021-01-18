@@ -83,6 +83,7 @@ class Dispatch2Ls extends XSModule {
       enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
         io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
     }
+    enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
