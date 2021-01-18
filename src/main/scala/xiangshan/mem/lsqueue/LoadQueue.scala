@@ -294,8 +294,12 @@ class LoadQueue extends XSModule
 
   // Stage 0
   // Generate writeback indexes
+  val wbSelectedMask = RegInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(LoadQueueSize.W))))
+  val selected = (0 until LoadPipelineWidth).map(i => {
+    wbSelectedMask(i).asUInt
+  }).reduce(_ | _)
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && !writebacked(i) && datavalid(i)
+    allocated(i) && !writebacked(i) && datavalid(i) && !selected(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
   val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
   val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
@@ -314,18 +318,19 @@ class LoadQueue extends XSModule
   (0 until LoadPipelineWidth).map(i => {
     val canGo = io.ldout(i).fire() || !loadWbSelV(i)
     val valid = loadWbSelVGen(i)
-    // store selected index in pipeline reg
     loadWbSel(i) := RegEnable(loadWbSelGen(i), valid && canGo)
-    // Mark them as writebacked, so they will not be selected in the next cycle
-    when(valid && canGo){
-      writebacked(loadWbSelGen(i)) := true.B
-    }
-    // update loadWbSelValidReg
     when(io.ldout(i).fire()){
+      // Mark them as writebacked, so they will not be selected in the next cycle
+      writebacked(loadWbSel(i)) := true.B
+      // update loadWbSelValidReg
       loadWbSelV(i) := false.B
+      // store selected index in pipeline reg
+      wbSelectedMask(i) := 0.U
     }
     when(valid && canGo){
       loadWbSelV(i) := true.B
+      // store selected index in pipeline reg
+      wbSelectedMask(i) := UIntToOH(loadWbSelGen(i))
     }
   })
   
