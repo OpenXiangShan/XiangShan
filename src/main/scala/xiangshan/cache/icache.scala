@@ -318,6 +318,7 @@ class ICache extends ICacheModule
   val s2_hit = WireInit(false.B)
   val s2_access_fault = WireInit(false.B)
   val s2_allValid = s2_valid && io.tlb.resp.valid
+  val s3_has_exception = (s2_tlb_resp.excp.pf.instr || s2_access_fault) && s2_allValid
   s2_fire := s2_allValid && s3_ready
   when(s1_fire)       { s2_valid := true.B }
   .elsewhen(s2_flush) { s2_valid := false.B }
@@ -340,7 +341,7 @@ class ICache extends ICacheModule
   val hasInvalidWay = invalidVec.orR
   val refillInvalidWaymask = PriorityMask(invalidVec)
 
-  val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
+  val waymask = Mux(s3_has_exception,1.U(nWays.W),Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask)))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
   s2_ready := s3_ready || !s2_valid
@@ -457,10 +458,6 @@ class ICache extends ICacheModule
   // if a fetch packet triggers page fault, at least send a valid instruction
   io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
   val s3_noHit = s3_wayMask === 0.U
-  when ((io.prev_ipf || s3_tlb_resp.excp.pf.instr) && s3_noHit) {
-    io.pd_out.pc := pds(0).io.out.pc
-    io.pd_out.mask := 1.U(PredictWidth.W)
-  }
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
