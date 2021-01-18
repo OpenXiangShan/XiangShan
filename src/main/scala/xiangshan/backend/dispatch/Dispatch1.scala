@@ -8,9 +8,10 @@ import utils.{XSDebug, XSError, XSInfo}
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
+import xiangshan.backend.fu.HasExceptionNO
 
 // read rob and enqueue
-class Dispatch1 extends XSModule {
+class Dispatch1 extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
@@ -116,6 +117,7 @@ class Dispatch1 extends XSModule {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
+  val hasException = VecInit(io.fromRename.map(r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR))
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Roq is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isNoSpecExec(i) && (!io.enqRoq.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
@@ -156,17 +158,17 @@ class Dispatch1 extends XSModule {
     // We use notBlockedByPrevious here.
     io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
     io.toIntDq.req(i).bits  := updatedUop(i)
-    io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && thisCanActualOut(i) &&
+    io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
     io.toFpDq.needAlloc(i)  := io.fromRename(i).valid && isFp(i)
     io.toFpDq.req(i).bits   := updatedUop(i)
-    io.toFpDq.req(i).valid  := io.fromRename(i).valid && isFp(i) && thisCanActualOut(i) &&
+    io.toFpDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isFp(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
 
     io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isLs(i)
     io.toLsDq.req(i).bits   := updatedUop(i)
-    io.toLsDq.req(i).valid  := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) &&
+    io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isLs(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")

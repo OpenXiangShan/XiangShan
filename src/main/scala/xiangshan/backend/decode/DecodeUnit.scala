@@ -458,10 +458,8 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cs.ldest := Mux(cs.fpWen || cs.rfWen, ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
 
   // fill in exception vector
-  cf_ctrl.cf.exceptionVec.map(_ := false.B)
+  cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
-  cf_ctrl.cf.exceptionVec(instrPageFault) := io.enq.ctrl_flow.exceptionVec(instrPageFault)
-  cf_ctrl.cf.exceptionVec(instrAccessFault) := io.enq.ctrl_flow.exceptionVec(instrAccessFault)
   
   // fix frflags
   //                           fflags    zero csrrs rd    csr

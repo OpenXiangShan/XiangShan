@@ -15,7 +15,6 @@ class LQDataEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  val exception = UInt(16.W) // TODO: opt size
   val fwdMask = Vec(8, Bool())
 }
 
@@ -236,7 +235,6 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
   // data module
   val paddrModule = Module(new PaddrModule(size, numRead = 3, numWrite = 2))
   val maskModule = Module(new MaskModule(size, numRead = 3, numWrite = 2))
-  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), size, numRead = 3, numWrite = 2))
   val coredataModule = Module(new CoredataModule(size, numRead = 3, numWrite = 3))
 
   // read data
@@ -244,26 +242,22 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
   (0 until wbNumRead).map(i => {
     paddrModule.io.raddr(i) := io.wb.raddr(i)
     maskModule.io.raddr(i) := io.wb.raddr(i)
-    exceptionModule.io.raddr(i) := io.wb.raddr(i)
     coredataModule.io.raddr(i) := io.wb.raddr(i)
 
     io.wb.rdata(i).paddr := paddrModule.io.rdata(i)
     io.wb.rdata(i).mask := maskModule.io.rdata(i)
     io.wb.rdata(i).data := coredataModule.io.rdata(i)
-    io.wb.rdata(i).exception := exceptionModule.io.rdata(i)
     io.wb.rdata(i).fwdMask := DontCare
   })
   
   // read port wbNumRead
   paddrModule.io.raddr(wbNumRead) := io.uncache.raddr
   maskModule.io.raddr(wbNumRead) := io.uncache.raddr
-  exceptionModule.io.raddr(wbNumRead) := io.uncache.raddr
   coredataModule.io.raddr(wbNumRead) := io.uncache.raddr
 
   io.uncache.rdata.paddr := paddrModule.io.rdata(wbNumRead)
   io.uncache.rdata.mask := maskModule.io.rdata(wbNumRead)
-  io.uncache.rdata.data := exceptionModule.io.rdata(wbNumRead)
-  io.uncache.rdata.exception := coredataModule.io.rdata(wbNumRead)
+  io.uncache.rdata.data := coredataModule.io.rdata(wbNumRead)
   io.uncache.rdata.fwdMask := DontCare
   
   // write data
@@ -271,19 +265,16 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
   (0 until wbNumWrite).map(i => {
     paddrModule.io.wen(i) := false.B
     maskModule.io.wen(i) := false.B
-    exceptionModule.io.wen(i) := false.B
     coredataModule.io.wen(i) := false.B
     coredataModule.io.fwdMaskWen(i) := false.B
     coredataModule.io.paddrWen(i) := false.B
 
     paddrModule.io.waddr(i) := io.wb.waddr(i)
     maskModule.io.waddr(i) := io.wb.waddr(i)
-    exceptionModule.io.waddr(i) := io.wb.waddr(i)
     coredataModule.io.waddr(i) := io.wb.waddr(i)
 
     paddrModule.io.wdata(i) := io.wb.wdata(i).paddr
     maskModule.io.wdata(i) := io.wb.wdata(i).mask
-    exceptionModule.io.wdata(i) := io.wb.wdata(i).exception
     coredataModule.io.wdata(i) := io.wb.wdata(i).data
     coredataModule.io.fwdMaskWdata(i) := io.wb.wdata(i).fwdMask.asUInt
     coredataModule.io.paddrWdata(i) := io.wb.wdata(i).paddr
@@ -291,7 +282,6 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
     when(io.wb.wen(i)){
       paddrModule.io.wen(i) := true.B
       maskModule.io.wen(i) := true.B
-      exceptionModule.io.wen(i) := true.B
       coredataModule.io.wen(i) := true.B
       coredataModule.io.fwdMaskWen(i) := true.B
       coredataModule.io.paddrWen(i) := true.B

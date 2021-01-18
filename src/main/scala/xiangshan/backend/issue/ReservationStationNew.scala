@@ -501,6 +501,7 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
+  exuInput.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
   val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   exuInput.src1 := regValues(0)
@@ -542,6 +543,7 @@ class ReservationStationData
     bpQueue.io.redirect := io.redirect
     io.selectedUop.valid := bpQueue.io.out.valid
     io.selectedUop.bits  := bpQueue.io.out.bits
+    io.selectedUop.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
 
     XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
       p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
