@@ -544,7 +544,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
               dQueue.enqMessage(acq.issueGrant(allocId))
             }
             else { //is AcquireBlock
-              if (state.masterPerm == branch) { //grow from branch
+              if (growFrom(a_acq.param) == branch) { //grow from branch
                 dQueue.enqMessage(acq.issueGrant(allocId))
               }
               else {
