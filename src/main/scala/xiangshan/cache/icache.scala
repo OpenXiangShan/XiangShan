@@ -59,11 +59,13 @@ trait HasFrontEndExceptionNo {
 
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
+  with HasInstrMMIOConst
 
 abstract class ICacheModule extends XSModule
   with HasICacheParameters
   with ICacheBase
   with HasFrontEndExceptionNo
+  with HasInstrMMIOConst
 
 abstract class ICacheArray extends XSModule
   with HasICacheParameters

@@ -9,6 +9,13 @@ import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 
+trait HasInstrMMIOConst extends HasXSParameter{
+  def mmioBusWidth = 64
+  def mmioBusBytes = mmioBusWidth /8
+  def mmioBeats = FetchWidth * 4 / mmioBusWidth
+  def mmioMask  = VecInit(List.fill(PredictWidth)(true.B)).asUInt
+}
+
 trait HasIFUConst extends HasXSParameter {
   val resetVector = 0x80000000L//TODO: set reset vec
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
