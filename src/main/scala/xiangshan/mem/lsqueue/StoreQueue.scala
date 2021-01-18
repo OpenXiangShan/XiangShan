@@ -66,7 +66,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // ptr
   require(StoreQueueSize > RenameWidth)
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
-  val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
+  val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth+2).map(_.U.asTypeOf(new SqPtr))))
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
@@ -77,10 +77,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val headMask = UIntToMask(enqPtr, StoreQueueSize)
 
   // Read dataModule
-  // deqPtr and deqPtr+1 entry will be read from dataModule
+  // readPtr and readPtr+1 entry will be read from dataModule
+  // if !sbuffer.fire(), read the same ptr
+  // if sbuffer.fire(), read next
+  val readPtr = WireInit(VecInit(Seq.tabulate(StorePipelineWidth)(i => 
+    deqPtrExt(i.U +& io.sbuffer(0).fire().asUInt +& io.sbuffer(1).fire().asUInt).value
+  )))
   val dataModuleRead = dataModule.io.rdata
   for (i <- 0 until StorePipelineWidth) {
-    dataModule.io.raddr(i) := deqPtrExt(i).value
+    dataModule.io.raddr(i) := readPtr(i)
   }
   vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.sqIdx.value
   exceptionModule.io.raddr(0) := deqPtr // read exception
@@ -288,22 +293,25 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // Commited stores will not be cancelled and can be sent to lower level.
   // remove retired insts from sq, add retired store to sbuffer
   for (i <- 0 until StorePipelineWidth) {
-    val ptr = deqPtrExt(i).value
-    val ismmio = mmio(ptr)
-    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !ismmio
+    // We use RegNext to prepare data for sbuffer
+    val ptr = readPtr(i) 
+    // if !sbuffer.fire(), read the same ptr
+    // if sbuffer.fire(), read next
+    val ismmio = RegNext(mmio(ptr))
+    io.sbuffer(i).valid := RegNext(allocated(ptr) && commited(ptr) && !ismmio, init = false.B)
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr := dataModuleRead(i).paddr
-    io.sbuffer(i).bits.data := dataModuleRead(i).data
-    io.sbuffer(i).bits.mask := dataModuleRead(i).mask
+    io.sbuffer(i).bits.addr := RegNext(dataModuleRead(i).paddr)
+    io.sbuffer(i).bits.data := RegNext(dataModuleRead(i).data)
+    io.sbuffer(i).bits.mask := RegNext(dataModuleRead(i).mask)
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := DontCare
     io.sbuffer(i).bits.meta.mmio     := false.B
-    io.sbuffer(i).bits.meta.mask     := dataModuleRead(i).mask
+    io.sbuffer(i).bits.meta.mask     := io.sbuffer(i).bits.mask
 
     when (io.sbuffer(i).fire()) {
-      allocated(ptr) := false.B
-      XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
+      allocated(RegNext(ptr)) := false.B
+      XSDebug("sbuffer "+i+" fire: ptr %d\n", RegNext(ptr))
     }
   }
   when (io.sbuffer(1).fire()) {
