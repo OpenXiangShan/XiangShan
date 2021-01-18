@@ -88,7 +88,7 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
 
     dPrefetch.io.finish.ready := true.B
 
-  } else if (l2PrefetcherParameters.enable && (l2PrefetcherParameters._type == "stream" || l2PrefetcherParameters._type == "bop")) {
+  } else if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "stream") {
     val streamParams = l2PrefetcherParameters.streamParams
     val dPrefetch = Module(new StreamPrefetch(streamParams))
     dPrefetch.io.train.valid := io.in.fire()
@@ -116,12 +116,7 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
   } else {
     bus.a.valid := false.B
     bus.a.bits := DontCare
-    bus.b.ready := true.B
-    bus.c.valid := false.B
-    bus.c.bits := DontCare
     bus.d.ready := true.B
-    bus.e.valid := false.B
-    bus.e.bits := DontCare
   }
 
   bus.b.ready := true.B

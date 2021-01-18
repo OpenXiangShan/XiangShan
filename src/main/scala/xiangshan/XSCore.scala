@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache, MemoryOpConstants, MissReq}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -19,6 +19,7 @@ import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
 import freechips.rocketchip.tile.HasFPUParameters
+import sifive.blocks.inclusivecache.PrefetcherIO
 import utils._
 
 case class XSCoreParameters
@@ -340,6 +341,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 {
   val io = IO(new Bundle {
     val externalInterrupt = new ExternalInterruptIO
+    val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -453,7 +455,16 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr    <> integerBlock.io.csrio.tlb
 
-  l2Prefetcher.io.in <> memBlock.io.toDCachePrefetch
+  val l2PrefetcherIn = Wire(Decoupled(new MissReq))
+  if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "bop") {
+    l2PrefetcherIn.valid := io.l2ToPrefetcher.acquire.valid
+    l2PrefetcherIn.bits := DontCare
+    l2PrefetcherIn.bits.addr := io.l2ToPrefetcher.acquire.bits.address
+    l2PrefetcherIn.bits.cmd := Mux(io.l2ToPrefetcher.acquire.bits.write, MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
+  } else {
+    l2PrefetcherIn <> memBlock.io.toDCachePrefetch
+  }
+  l2Prefetcher.io.in <> l2PrefetcherIn
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
