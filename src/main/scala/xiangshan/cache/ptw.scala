@@ -379,6 +379,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
     val ramData = tlbl2.io.r.resp.data(0)
 
+    assert(tlbl2.io.r.req.ready || !tlbl2.io.r.req.valid)
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
@@ -420,7 +421,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val idx  = RegEnable(l2addr(log2Up(PtwL2LineSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
 
-    assert(ptwl2.io.r.req.ready)
+    assert(ptwl2.io.r.req.ready || !readRam)
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
     val ramData = ptwl2.io.r.resp.data(0)
