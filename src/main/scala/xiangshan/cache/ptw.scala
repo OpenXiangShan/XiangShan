@@ -371,7 +371,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * tlbl2
    */
   val (tlbHit, tlbHitData) = {
-    assert(tlbl2.io.r.req.ready)
 
     val ridx = genTlbL2Idx(req.vpn)
     val vidx = RegEnable(tlbv(ridx), validOneCycle)
