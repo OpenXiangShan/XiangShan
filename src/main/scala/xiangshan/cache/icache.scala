@@ -349,7 +349,7 @@ class ICache extends ICacheModule
   icacheExceptionVec(pageFault) := s2_tlb_resp.excp.pf.instr && s2_allValid
 
   s2_mmio := s2_valid && io.tlb.resp.valid && s2_tlb_resp.mmio && !hasIcacheException
-  s2_hit := s3_valid && ParallelOR(hitVec) 
+  s2_hit := s2_valid && ParallelOR(hitVec) 
 
 
   assert(!(s2_hit && s2_mmio),"MMIO address should not hit in icache")
@@ -378,7 +378,6 @@ class ICache extends ICacheModule
   when(s3_flush)                  { s3_valid := false.B }
   .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B }
   .elsewhen(io.resp.fire())       { s3_valid := false.B }
-  val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
   // icache hit
   // data ECC encoding
@@ -389,7 +388,6 @@ class ICache extends ICacheModule
     (0 until blockWords).map{r =>
       val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
       val decodedRow = cacheParams.dataCode.decode(row)
-      assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
       decodedRow.corrected
     }
   )
@@ -482,7 +480,7 @@ class ICache extends ICacheModule
   }
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d mmio :%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr, s3_mmio)
+  XSDebug("[Stage 3] valid:%d miss:%d  pc: 0x%x mmio :%d mask: %b ipf:%d\n",s3_valid, s3_miss,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr, s3_mmio)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
   XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
