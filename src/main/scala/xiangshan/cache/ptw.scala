@@ -156,6 +156,94 @@ class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
   }
 }
 
+class L2TlbEntry extends TlbBundle {
+  val tag = UInt(vpnLen.W) // tag is vpn
+  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
+  val ppn = UInt(ppnLen.W)
+  val perm = new PtePermBundle
+
+  def hit(vpn: UInt):Bool = {
+    val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
+    val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
+      Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
+    val mask = maskLevel(level)
+    (mask&this.tag) === (mask&vpn)
+  }
+
+  def apply(pte: UInt, level: UInt, vpn: UInt) = {
+    this.tag := vpn
+    this.level := level
+    this.ppn := pte.asTypeOf(pteBundle).ppn
+    this.perm := pte.asTypeOf(pteBundle).perm
+    this
+  }
+
+  override def toPrintable: Printable = {
+    p"vpn:0x${Hexadecimal(tag)} level:${level} ppn:${Hexadecimal(ppn)} perm:${perm}"
+  }
+}
+
+class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+  require(log2Up(num)==log2Down(num))
+  /* vpn can be divide into three part */
+  // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
+  val cutLen  = log2Up(num)
+
+  val tag     = UInt(tagLen.W) // NOTE: high part of vpn
+  val ppns    = Vec(num, UInt(ppnLen.W))
+  val perms    = Vec(num, new PtePermBundle)
+  val vs      = Vec(num, Bool())
+
+  def tagClip(vpn: UInt) = { // full vpn => tagLen
+    vpn(vpn.getWidth-1, vpn.getWidth-tagLen)
+  }
+
+  // NOTE: get insize idx
+  def idxClip(vpn: UInt) = {
+    vpn(cutLen-1, 0)
+  }
+
+  def hit(vpn: UInt) = {
+    (tag === tagClip(vpn)) && vs(idxClip(vpn))
+  }
+
+  def genEntries(data: UInt, level: UInt, vpn: UInt): L2TlbEntires = {
+    require((data.getWidth / XLEN) == num,
+      "input data length must be multiple of pte length")
+    assert(level===2.U, "tlb entries only support 4K pages")
+
+    val ts = Wire(new L2TlbEntires(num, tagLen))
+    ts.tag := tagClip(vpn)
+    for (i <- 0 until num) {
+      val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      ts.ppns(i) := pte.ppn
+      ts.perms(i):= pte.perm // this.perms has no v
+      ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+    }
+
+    ts
+  }
+
+  def get(vpn: UInt): L2TlbEntry = {
+    val t = Wire(new L2TlbEntry)
+    val idx = idxClip(vpn)
+    t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
+    t.level := 2.U // L2TlbEntries only support 4k page
+    t.ppn := ppns(idx)
+    t.perm := perms(idx)
+    t
+  }
+
+  override def cloneType: this.type = (new L2TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def toPrintable: Printable = {
+    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // NOTE: if num is not 4, please comment this toPrintable
+    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
+    p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
+  }
+}
+
 class PtwReq extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
@@ -165,8 +253,8 @@ class PtwReq extends PtwBundle {
 }
 
 class PtwResp extends PtwBundle {
-  val entry = new TlbEntry
-  val pf  = Bool() // simple pf no matter cmd
+  val entry = new L2TlbEntry
+  val pf  = Bool()
 
   override def toPrintable: Printable = {
     p"entry:${entry} pf:${pf}"
@@ -235,13 +323,26 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
-  val tlbl2 = Module(new SRAMTemplate(new TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen), set = TlbL2LineNum)) // (total 256, one line is 4 => 64 lines)
+  val tlbl2 = Module(new SRAMWrapper(
+    "L2TLB",
+    new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
+    set = TlbL2LineNum
+  )) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
   val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
+
+  val sp = Reg(Vec(TlbL2SPEntrySize, new L2TlbEntry)) // (total 16, one is 4M or 1G)
+  val spv = RegInit(0.U(TlbL2SPEntrySize.W))
+  val spg = Reg(UInt(TlbL2SPEntrySize.W))
+
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = Reg(UInt(PtwL1EntrySize.W))
-  val ptwl2 = Module(new SRAMTemplate(new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen), set = PtwL2LineNum)) // (total 256, one line is 4 => 64 lines)
+  val ptwl2 = Module(new SRAMWrapper(
+    "L2PTW",
+    new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
+    set = PtwL2LineNum
+  )) // (total 256, one line is 4 => 64 lines)
   val l2v   = RegInit(0.U(PtwL2LineNum.W)) // valid
   val l2g   = Reg(UInt(PtwL2LineNum.W)) // global
 
@@ -279,7 +380,18 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
-    (ramData.hit(req.vpn) && vidx, ramData.get(req.vpn))
+
+    val spHitVec = sp.zipWithIndex.map{ case (a,i) =>
+      RegNext(a.hit(req.vpn) && spv(i), validOneCycle)
+    }
+    val spHitData = ParallelMux(spHitVec zip sp)
+    val spHit = Cat(spHitVec).orR
+
+    XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
+
+    assert(RegNext(!(ramData.hit(req.vpn) && spHit)), "pages should not be normal page and super page as well")
+
+    (ramData.hit(req.vpn) && vidx || spHit, Mux(spHit, spHitData, ramData.get(req.vpn)))
   }
 
   /*
@@ -361,7 +473,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
             state := state_idle
           }.otherwise {
             state := state_wait_ready
-            latch.entry := new TlbEntry().genTlbEntry(memRdata, level, req.vpn)
+            latch.entry := Wire(new L2TlbEntry()).apply(memRdata, level, req.vpn)
             latch.pf := memPte.isPf(level)
           }
         }.otherwise {
@@ -418,7 +530,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
-      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memSelData, Mux(level===3.U, 2.U, level), req.vpn)))
+      Mux(state===state_wait_ready, latch.entry, Wire(new L2TlbEntry()).apply(memSelData, Mux(level===3.U, 2.U, level), req.vpn)))
     resp(i).bits.pf  := Mux(level===3.U || notFound, true.B, Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf(level))))
     // TODO: the pf must not be correct, check it
   }
@@ -434,13 +546,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
+      val rfOH = UIntToOH(refillIdx)
       ptwl1(refillIdx).refill(l1addr, memSelData)
-      l1v := l1v | UIntToOH(refillIdx)
-      l1g := (l1g & ~UIntToOH(refillIdx)) | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
+      l1v := l1v | rfOH
+      l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
     }
     when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = genPtwL2Idx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
+      val rfOH = UIntToOH(refillIdx)
       //TODO: check why the old refillIdx is right
 
       assert(ptwl2.io.w.req.ready)
@@ -451,25 +565,33 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         data = ps,
         waymask = -1.S.asUInt
       )
-      l2v := l2v | UIntToOH(refillIdx)
-      l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      l2v := l2v | rfOH
+      l2g := (l2g & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)
       XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)} ps:${ps}\n")
     }
     when (memPte.isLeaf() && (level===2.U)) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
+      val rfOH = UIntToOH(refillIdx)
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
-      val ts = new TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen).genEntries(memRdata, level, req.vpn)
+      val ts = new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen).genEntries(memRdata, level, req.vpn)
       tlbl2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
         data = ts,
         waymask = -1.S.asUInt
       )
-      tlbv := tlbv | UIntToOH(refillIdx)
-      tlbg := (tlbg & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      tlbv := tlbv | rfOH
+      tlbg := (tlbg & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)
       XSDebug(p"tlbl2 refillIdx:${Hexadecimal(refillIdx)} ts:${ts}\n")
+    }
+    when (memPte.isLeaf() && (level===1.U || level===0.U)) {
+      val refillIdx = LFSR64()(log2Up(TlbL2SPEntrySize)-1,0) // TODO: may be LRU
+      val rfOH = UIntToOH(refillIdx)
+      sp(refillIdx) := Wire(new L2TlbEntry()).apply(memSelData, Mux(level===3.U, 2.U, level), req.vpn)
+      spv := spv | rfOH
+      spg := (spg & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
     }
   }
 
@@ -488,25 +610,29 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       when (sfence.bits.rs2) {
         // all va && all asid
         tlbv := 0.U
-        tlbg := 0.U
+        spv := 0.U
+        // tlbg := 0.U
         l1v  := 0.U
         l2v  := 0.U
-        l2g  := 0.U
+        // l2g  := 0.U
       } .otherwise {
         // all va && specific asid except global
         tlbv := tlbv & tlbg
+        spv  := spv  & spg
         l1v  := l1v  & l1g
         l2v  := l2v  & l2g
       }
     } .otherwise {
+      val sfenceTlbL2IdxOH = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
       when (sfence.bits.rs2) {
         // specific leaf of addr && all asid
-        tlbv := tlbv & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
-        tlbg := tlbg & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+        tlbv := tlbv & ~sfenceTlbL2IdxOH
+        tlbg := tlbg & ~sfenceTlbL2IdxOH
       } .otherwise {
         // specific leaf of addr && specific asid
-        tlbv := tlbv & (~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))| tlbg)
+        tlbv := tlbv & (~sfenceTlbL2IdxOH| tlbg)
       }
+      spv := 0.U
     }
   }
 

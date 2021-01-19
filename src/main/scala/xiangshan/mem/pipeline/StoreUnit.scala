@@ -85,11 +85,12 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := AddressSpace.isMMIO(s1_paddr)
+  io.lsq.bits.mmio := io.dtlbResp.bits.mmio
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
+  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
 
   // mmio inst with exception will be writebacked immediately
-  val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  val hasException = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
   io.out.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
 

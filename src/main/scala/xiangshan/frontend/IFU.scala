@@ -8,6 +8,7 @@ import utils._
 import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
+import chisel3.ExcitingUtils._
 
 trait HasIFUConst extends HasXSParameter {
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -476,6 +477,35 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits := fetchPacketWire
   io.fetchPacket.valid := fetchPacketValid
 
+//  if(IFUDebug) {
+    val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
+    val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
+    val predictor = predictor_s4
+
+    fetchPacketWire.bpuMeta.map(_.predictor := predictor)
+ // }
+
+  // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
+  // val predWrong = cfiUpdate.valid && cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
+
+  // val ubtbRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 0.U
+  // val ubtbWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 0.U
+  // val btbRight  = predRight && cfiUpdate.bits.bpuMeta.predictor === 1.U
+  // val btbWrong  = predWrong && cfiUpdate.bits.bpuMeta.predictor === 1.U
+  // val tageRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 2.U
+  // val tageWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 2.U
+  // val loopRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 3.U
+  // val loopWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 3.U
+
+  // ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
+  // ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
+  // ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
+  // ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
+  // ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
+  // ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
+  // ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
+  // ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
+
   // debug info
   if (IFUDebug) {
     XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
@@ -487,6 +517,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_snpc)
     XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
+    XSDebug("[predictor] predictor_s3=%d, predictor_s4=%d, predictor=%d\n", predictor_s3, predictor_s4, predictor)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", icache.io.req.valid, icache.io.req.ready, icache.io.req.bits.addr)
     XSDebug("[IF1][ghr] hist=%b\n", if1_gh.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", if1_gh.asUInt)

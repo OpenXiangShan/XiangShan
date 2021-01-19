@@ -129,4 +129,7 @@ class Dispatch2Fp extends XSModule {
 //        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)}), " +
 //        p"(${readPortIndexReg(i)+2.U}, ${uopReg(i).psrc3}, ${Hexadecimal(io.enqIQData(i).src3)})\n")
 //  }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+
 }

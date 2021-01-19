@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.brq.BrqEnqIO
 import utils._
+import xiangshan.backend.decode.Instructions.{AUIPC, MRET, SRET}
 
 class DecodeStage extends XSModule {
   val io = IO(new Bundle() {
@@ -31,12 +32,14 @@ class DecodeStage extends XSModule {
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
 
-    val isMret = io.in(i).bits.instr === BitPat("b001100000010_00000_000_00000_1110011")
-    val isSret = io.in(i).bits.instr === BitPat("b000100000010_00000_000_00000_1110011")
-    val thisBrqValid = !io.in(i).bits.brUpdate.pd.notCFI || isMret || isSret
+    val isMret = io.in(i).bits.instr === MRET
+    val isSret = io.in(i).bits.instr === SRET
+    val isAuiPc = io.in(i).bits.instr === AUIPC
+    val thisBrqValid = !io.in(i).bits.brUpdate.pd.notCFI || isMret || isSret || isAuiPc
     io.enqBrq.needAlloc(i) := thisBrqValid
     io.enqBrq.req(i).valid := io.in(i).valid && thisBrqValid && io.out(i).ready
     io.enqBrq.req(i).bits  := io.in(i).bits
+    io.enqBrq.req(i).bits.instr := decoders(i).io.deq.cf_ctrl.cf.instr
 
     io.out(i).valid      := io.in(i).valid && io.enqBrq.req(i).ready
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl

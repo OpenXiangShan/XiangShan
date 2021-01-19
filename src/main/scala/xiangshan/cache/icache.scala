@@ -177,7 +177,13 @@ class ICacheMetaArray extends ICachArray
     val readResp = Output(Vec(nWays,UInt(tagBits.W)))
   }}
 
-  val metaArray = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays, shouldReset = true))
+  val metaArray = Module(new SRAMWrapper(
+    "Icache_Meta",
+    UInt(encTagBits.W),
+    set=nSets,
+    way=nWays,
+    shouldReset = true
+  ))
 
   //read
   metaArray.io.r.req.valid := io.read.valid
@@ -205,7 +211,12 @@ class ICacheDataArray extends ICachArray
     val readResp = Output(Vec(blockWords,Vec(nWays,UInt(encRowBits.W))))
   }}
 
-  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(UInt(encRowBits.W), set=nSets, way = nWays))}
+  val dataArray = List.fill(blockWords){ Module(new SRAMWrapper(
+    "Icache_Data",
+    UInt(encRowBits.W),
+    set=nSets,
+    way = nWays
+  ))}
 
   //read
   //do ECC decoding after way choose
@@ -307,6 +318,7 @@ class ICache extends ICacheModule
   val s2_hit = WireInit(false.B)
   val s2_access_fault = WireInit(false.B)
   val s2_allValid = s2_valid && io.tlb.resp.valid
+  val s3_has_exception = (s2_tlb_resp.excp.pf.instr || s2_access_fault) && s2_allValid
   s2_fire := s2_allValid && s3_ready
   when(s1_fire)       { s2_valid := true.B }
   .elsewhen(s2_flush) { s2_valid := false.B }
@@ -329,7 +341,7 @@ class ICache extends ICacheModule
   val hasInvalidWay = invalidVec.orR
   val refillInvalidWaymask = PriorityMask(invalidVec)
 
-  val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
+  val waymask = Mux(s3_has_exception,1.U(nWays.W),Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask)))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
   s2_ready := s3_ready || !s2_valid
@@ -440,19 +452,12 @@ class ICache extends ICacheModule
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
     pds(i).io.prev_pc := io.prev_pc
-    // if a fetch packet triggers page fault, set the pf instruction to nop
-    when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
-      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-      (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
-      pds(i).io.in.data := instrs.asUInt
-    }.elsewhen (HasCExtension.B && io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
-      pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
-      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-      (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
-      pds(i).io.in.data := instrs.asUInt
-    }
   }
+  
+  
+  // if a fetch packet triggers page fault, at least send a valid instruction
   io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
+  val s3_noHit = s3_wayMask === 0.U
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)

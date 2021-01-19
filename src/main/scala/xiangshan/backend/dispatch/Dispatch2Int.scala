@@ -91,6 +91,7 @@ class Dispatch2Int extends XSModule {
     val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
     enq.bits.src1State := src1Ready(readPortIndex(i))
     enq.bits.src2State := src2Ready(readPortIndex(i))
+    enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
@@ -137,4 +138,7 @@ class Dispatch2Int extends XSModule {
 //        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
 //        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+
 }
