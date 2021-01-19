@@ -246,7 +246,7 @@ trait HasXSParameter {
       rrTableEntries = 256,
       rrTagBits = 12,
       scoreBits = 5,
-      roundMax = 100,
+      roundMax = 10,
       badScore = 1,
       blockBytes = L2BlockSize,
       nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large

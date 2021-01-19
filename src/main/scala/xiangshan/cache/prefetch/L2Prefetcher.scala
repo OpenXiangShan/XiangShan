@@ -27,7 +27,7 @@ case class L2PrefetcherParameters(
   def nEntries: Int = {
     if (enable && _type == "stream") { streamParams.streamCnt * streamParams.streamSize }
     else if (enable && _type == "bop") { bopParams.nEntries }
-    else 0
+    else 1
   }
   def totalWidth: Int = {
     if (enable && _type == "stream") streamParams.totalWidth

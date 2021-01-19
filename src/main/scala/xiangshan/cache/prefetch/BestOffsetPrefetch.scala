@@ -15,7 +15,7 @@ case class BOPParameters(
   // TODO: Is 256-offset necessary, which will cross pages?
   offsetList: Seq[Int] = Seq(
       1,   2,   3,   4,   5,   6,   8,   9,  10,  12,
-     15,  16,  18,  20,  24,  25,  27,  30,  32/*,  36,
+     15,  16/*,  18,  20,  24,  25,  27,  30,  32,  36,
      40,  45,  48,  50,  54,  60,  64,  72,  75,  80,
      81,  90,  96, 100, 108, 120, 125, 128, 135, 144,
     150, 160, 162, 180, 192, 200, 216, 225, 240, 243,
@@ -117,7 +117,7 @@ class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
   override def toPrintable: Printable = {
     p"train: v=${train.valid} ${train.bits} " +
       p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
-      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}" +
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits} " +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
   override def cloneType: this.type = (new BestOffsetPrefetchIO(p)).asInstanceOf[this.type]
@@ -207,12 +207,12 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   def scoreMax = p.scoreMax
   def badScore = p.badScore
 
-  val prefetchOffset = RegInit(1.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
+  val prefetchOffset = RegInit(4.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
   val st = RegInit(VecInit(offsetList.map(off => new ScoreTableEntry(p).apply(off.U, 0.U))))
   val ptr = RegInit(0.U(log2Up(scores).W))
   val round = RegInit(0.U(roundBits.W))
 
-  val bestOffset = RegInit(new ScoreTableEntry(p).apply(1.U, 0.U)) // the entry with the highest score while traversing
+  val bestOffset = RegInit(new ScoreTableEntry(p).apply(4.U, 0.U)) // the entry with the highest score while traversing
   val testOffset = WireInit(st(ptr).offset)
   def winner(e1: ScoreTableEntry, e2: ScoreTableEntry): ScoreTableEntry = {
     val w = Wire(new ScoreTableEntry(p))
