@@ -378,7 +378,7 @@ class ICache extends ICacheModule
     (0 until blockWords).map{r =>
       val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
       val decodedRow = cacheParams.dataCode.decode(row)
-      assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
+      // assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
       decodedRow.corrected
     }
   )

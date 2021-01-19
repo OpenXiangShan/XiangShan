@@ -15,7 +15,7 @@ trait HasSbufferCst extends HasXSParameter {
 
   val evictCycle = 1 << 20
   require(isPow2(evictCycle))
-  val countBits = log2Up(evictCyclei+1)
+  val countBits = log2Up(evictCycle+1)
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = tag + offset
