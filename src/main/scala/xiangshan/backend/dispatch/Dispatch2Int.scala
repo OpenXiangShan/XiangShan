@@ -61,12 +61,15 @@ class Dispatch2Int extends XSModule {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
     io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
     io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
-    io.readState(2*i  ).req := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-    io.readState(2*i+1).req := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
   val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
   intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
   intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
+
+  for (i <- 0 until dpParams.IntDqDeqWidth) {
+    io.readState(2*i  ).req := io.fromDq(i).bits.psrc1
+    io.readState(2*i+1).req := io.fromDq(i).bits.psrc2
+  }
 
   /**
     * Part 3: dispatch to reservation stations
@@ -89,8 +92,8 @@ class Dispatch2Int extends XSModule {
     
     val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
     val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
-    enq.bits.src1State := src1Ready(readPortIndex(i))
-    enq.bits.src2State := src2Ready(readPortIndex(i))
+    enq.bits.src1State := src1Ready(indexVec(i))
+    enq.bits.src2State := src2Ready(indexVec(i))
     enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
