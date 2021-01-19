@@ -306,13 +306,14 @@ class LoadQueue extends XSModule
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && datavalid(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
-  val loadEvenSelVec = getEvenBits(loadWbSelVec)
-  val loadOddSelVec = getOddBits(loadWbSelVec)
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
   // generate lastCycleSelect mask 
   val evenSelectMask = Mux(loadWbSelV(0), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
   val oddSelectMask = Mux(loadWbSelV(1), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  // generate real select vec
+  val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
+  val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
 
   def toVec(a: UInt): Vec[Bool] = {
     VecInit(a.asBools)
@@ -320,9 +321,9 @@ class LoadQueue extends XSModule
 
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
-  loadWbSelGen(0) := Cat(getFirstOne(toVec(loadEvenSelVec & evenSelectMask), evenDeqMask), 0.U(1.W))
+  loadWbSelGen(0) := Cat(getFirstOne(toVec(loadEvenSelVec), evenDeqMask), 0.U(1.W))
   loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
-  loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec & oddSelectMask), oddDeqMask), 1.U(1.W))
+  loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
   
   (0 until LoadPipelineWidth).map(i => {
