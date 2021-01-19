@@ -742,8 +742,8 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwCycleCnt" -> (0x1026, "perfCntPtwCycleCnt"  ),
     "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
     "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
-    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt")
-    // "FetchFromICache" -> (0x102a, "CntFetchFromICache"),
+    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
+    "ICacheMMIO" -> (0x102a, "perfCntIcacheMMIOCnt")
     // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
     // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),

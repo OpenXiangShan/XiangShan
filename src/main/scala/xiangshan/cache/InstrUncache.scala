@@ -103,6 +103,10 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     when (io.mmio_grant.fire()) {
       respDataReg(beatCounter.value) := io.mmio_grant.bits.data
       assert(refill_done, "MMIO response should be one beat only!")
+      println(mmioBusWidth)
+      println(mmioBusBytes)
+      println(mmioBeats)
+      println(mmioBeats - 1)
       state := Mux(needFlush || io.flush, s_invalid,Mux(beatCounter.value === (mmioBeats - 1).U,s_send_resp,s_refill_req))
       beatCounter.inc()
     }

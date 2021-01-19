@@ -12,7 +12,7 @@ import freechips.rocketchip.tile.HasLazyRoCC
 trait HasInstrMMIOConst extends HasXSParameter{
   def mmioBusWidth = 64
   def mmioBusBytes = mmioBusWidth /8
-  def mmioBeats = FetchWidth * 4 / mmioBusWidth
+  def mmioBeats = FetchWidth * 4 * 8 / mmioBusWidth
   def mmioMask  = VecInit(List.fill(PredictWidth)(true.B)).asUInt
 }
 

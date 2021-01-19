@@ -59,13 +59,11 @@ trait HasFrontEndExceptionNo {
 
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
-  with HasInstrMMIOConst
 
 abstract class ICacheModule extends XSModule
   with HasICacheParameters
   with ICacheBase
   with HasFrontEndExceptionNo
-  with HasInstrMMIOConst
 
 abstract class ICacheArray extends XSModule
   with HasICacheParameters
@@ -373,10 +371,10 @@ class ICache extends ICacheModule
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_mmio = RegEnable(next=s2_mmio,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
-  val s3_miss = s3_valid && !s3_hit && !s3_mmio
   val s3_idx = get_idx(s3_req_pc)
   val s3_exception_vec = RegEnable(next= icacheExceptionVec,init=0.U.asTypeOf(Vec(8,Bool())), enable=s2_fire)
   val s3_has_exception = s3_exception_vec.asUInt.orR
+  val s3_miss = s3_valid && !s3_hit && !s3_mmio && !s3_has_exception
   when(s3_flush)                  { s3_valid := false.B }
   .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B }
   .elsewhen(io.resp.fire())       { s3_valid := false.B }
@@ -547,6 +545,7 @@ class ICache extends ICacheModule
   if (!env.FPGAPlatform ) {
     ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
     ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
+    ExcitingUtils.addSource( s3_mmio && blocking && io.resp.fire(), "perfCntIcacheMMIOCnt", Perf)
   }
 }
 
