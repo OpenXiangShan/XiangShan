@@ -23,12 +23,13 @@ class BypassQueue(number: Int) extends XSModule {
   } else if(number == 0) {
     io.in <> io.out
     io.out.valid := io.in.valid
+    // NOTE: no delay bypass don't care redirect
   } else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
       val bits = new MicroOp
     })))
-    queue(0).valid := io.in.valid
+    queue(0).valid := io.in.valid && !io.in.bits.roqIdx.needFlush(io.redirect)
     queue(0).bits  := io.in.bits
     (0 until (number-1)).map{i =>
       queue(i+1) := queue(i)
@@ -51,7 +52,7 @@ class RSCtrlDataIO(srcNum: Int) extends XSBundle {
 
   val fuReady   = Input(Bool())
   val srcUpdate = Input(Vec(IssQueSize+1, Vec(srcNum, Bool()))) // Note: the last one for enq
-  val redVec    = Input(UInt(IssQueSize.W))
+  val redVec    = Input(Vec(IssQueSize, Bool()))
   val feedback  = Input(Vec(IssQueSize+1, Bool())) // Note: the last one for hit
 
   override def cloneType: RSCtrlDataIO.this.type = new RSCtrlDataIO(srcNum).asInstanceOf[this.type]
@@ -105,12 +106,10 @@ class ReservationStationCtrl
    */
 
 
-  val s_idle :: s_valid :: s_selected :: s_bubble :: s_wait :: s_replay :: Nil = Enum(6)
+  val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
   /* state machine
    * s_idle     : empty slot, init state, set when deq
    * s_valid    : ready to be secleted
-   * s_selected : the not bubble that selected
-   * s_bubble   : the bubble that selected
    * s_wait     : wait for feedback
    * s_replay   : replay after some particular cycle
    */
@@ -150,26 +149,31 @@ class ReservationStationCtrl
   // with   replay, select is just two stage with deq.
   val issFire = Wire(Bool())
   val moveMask = WireInit(0.U(iqSize.W))
-  val selectMask = WireInit(VecInit((0 until iqSize).map(i => readyIdxQue(i))))
-  // val selIdx = ParallelMux(selectMask zip idxQueue) // NOTE: the idx in the idxQueue
-  val (selPtr, haveReady) = PriorityEncoderWithFlag(selectMask) // NOTE: the idx of idxQueue
-  val selIdx = idxQueue(selPtr)
-  val selIdxReg = RegNext(selIdx) // NOTE: may dup with other signal, fix it later
-  val redSel = redVec(selIdx)
-  val selValid = !redSel && haveReady
+  val lastSelMask = Wire(UInt(iqSize.W))
+  val selectMask = WireInit(VecInit((0 until iqSize).map(i => readyIdxQue(i)))).asUInt & lastSelMask
+  val selIdx = ParallelPriorityMux(selectMask.asBools zip idxQueue) // NOTE: the idx in the idxQueue
+  val selPtr = ParallelPriorityMux(selectMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of idxQueue
+  val haveReady = Cat(selectMask).orR
+  val selIdxReg = RegNext(selIdx)
+  val selValid = haveReady
   val selReg = RegNext(selValid)
   val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr))
+  lastSelMask := ~Mux(selReg, UIntToOH(selPtrReg), 0.U)
+  assert(RegNext(!(haveReady && selPtr >= tailPtr.asUInt)), "bubble should not have valid state like s_valid or s_wait")
 
   // sel bubble
-  val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i))))
+  val lastBubMask = Wire(UInt(iqSize.W))
+  val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i)))).asUInt & lastBubMask
   // val bubIdx = ParallelMux(bubMask zip idxQueue) // NOTE: the idx in the idxQueue
-  val (bubPtr, findBubble) = PriorityEncoderWithFlag(bubMask) // NOTE: the idx of the idxQueue
+  val bubPtr= ParallelPriorityMux(bubMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of the idxQueue
+  val findBubble = Cat(bubMask).orR
   val haveBubble = findBubble && (bubPtr < tailPtr.asUInt)
   val bubIdx = idxQueue(bubPtr)
-  val bubIdxReg = RegNext(bubIdx) // NOTE: may dup with other signal, fix it later
   val bubValid = haveBubble && (if (feedback) true.B else !selValid)
   val bubReg = RegNext(bubValid)
   val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr))
+  lastBubMask := ~Mux(bubReg, UIntToOH(bubPtrReg), 0.U) & (if(feedback) ~(0.U(iqSize.W))
+                                                           else         Mux(RegNext(selValid && io.redirect.valid), 0.U, ~(0.U(iqSize.W))))
 
   // deq
   val dequeue = if (feedback) bubReg
@@ -189,11 +193,10 @@ class ReservationStationCtrl
   when(dequeue){
     idxQueue.last := idxQueue(deqPtr)
   }
-  when (selValid) {
-    stateQueue(selIdx) := s_selected
-  }
-  when (bubValid) {
-    stateQueue(bubIdx) := s_bubble
+
+  when (issFire) {
+    if (feedback) { when (stateQueue(selIdxReg) === s_valid) { stateQueue(selIdxReg) := s_wait } }
+    else { stateQueue(selIdxReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
   }
 
   // redirect and feedback && wakeup
@@ -206,7 +209,7 @@ class ReservationStationCtrl
     }
     // feedback
     when (fbMatchVec(i)) {
-      stateQueue(i) := Mux(fbHit, s_idle, s_replay)
+      stateQueue(i) := Mux(!fbHit && (stateQueue(i) === s_wait || stateQueue(i) === s_valid), s_replay, s_idle)
       cntQueue(i) := Mux(fbHit, cnt, (replayDelay-1).U)
     }
     // wakeup
@@ -216,20 +219,6 @@ class ReservationStationCtrl
         srcQueue(i)(j) := true.B
         XSDebug(p"srcHit: i:${i.U} j:${j.U} src:${srcQueue(i)(j)}\n")
       }
-    }
-    // mask last selectet slot and deal with the mask
-    // TODO: state queu change may have long 'when' chain -> long latency
-    when (stateQueue(i) === s_selected) {
-      when (io.data.fuReady) {
-        if (feedback) {
-          stateQueue(i) := s_wait
-        }  else {
-          stateQueue(i) := s_idle
-        }
-      }.otherwise { stateQueue(i) := s_valid }
-    }
-    when (stateQueue(i) === s_bubble) {
-      stateQueue(i) := s_idle
     }
     // redirect
     when (redVec(i) && stateQueue(i) =/= s_idle) {
@@ -294,16 +283,16 @@ class ReservationStationCtrl
 
   val print = !(tailPtr.asUInt===0.U) || io.enqCtrl.valid || enqueue || dequeue
   XSDebug(print || true.B, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady}) nonBlocked:${nonBlocked.B} needfb:${feedback.B}\n")
-  XSDebug(print , p"tailPtr:${tailPtr} enq:${enqueue} deq:${dequeue} isFull:${isFull} " +
+  XSDebug(print || true.B, p"tailPtr:${tailPtr} enq:${enqueue} deq:${dequeue} isFull:${isFull} " +
     p"vIdxQue:${Binary(validIdxQue.asUInt)} rIdxQue:${Binary(readyIdxQue.asUInt)}\n")
   XSDebug(print && Cat(redVecPtr).orR, p"Redirect: ${Hexadecimal(redVecPtr.asUInt)}\n")
   XSDebug(print && Cat(fbMatchVec).orR, p"Feedback: ${Hexadecimal(fbMatchVec.asUInt)} Hit:${fbHit}\n")
-  XSDebug(print, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} bubMask:${Binary(bubMask.asUInt)}\n")
-  XSDebug(print, p"selIdxWire:${selPtr} haveReady:${haveReady} redSel:${redSel}" +
-    p"selV:${selValid} selReg:${selReg} selPtrReg:${selPtrReg} selIdx:${selIdx} selIdxReg:${selIdxReg}\n")
-  XSDebug(print, p"bubValid:${bubValid} haveBub:${haveBubble} bubPtr:${bubPtr} findBub:${findBubble} " +
-    p"bubReg:${bubReg} bubPtrReg:${bubPtrReg} bubIdx:${bubIdx} bubIdxReg:${bubIdxReg}\n")
-  XSDebug(print, p"issValid:${issValid} issueFire:${issFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
+  XSDebug(print || true.B, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} bubMask:${Binary(bubMask.asUInt)}\n")
+  XSDebug(print || true.B, p"selPtr:${selPtr} haveReady:${haveReady} " +
+    p"selV:${selValid} selReg:${selReg} selPtrReg:${selPtrReg} selIdx:${selIdx} lastSelMask:${Hexadecimal(lastSelMask)}\n")
+  XSDebug(print || true.B, p"bubValid:${bubValid} haveBub:${haveBubble} bubPtr:${bubPtr} findBub:${findBubble} " +
+    p"bubReg:${bubReg} bubPtrReg:${bubPtrReg} bubIdx:${bubIdx} lastBubMask:${Hexadecimal(lastBubMask)}\n")
+  XSDebug(print || true.B, p"issValid:${issValid} issueFire:${issFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
   XSDebug(p" :Idx|v|r|s |cnt|s1:s2:s3\n")
   for(i <- srcQueue.indices) {
     XSDebug(p"${i.U}: ${idxQueue(i)}|${validIdxQue(i)}|${readyIdxQue(i)}|${stateIdxQue(i)}|${cntIdxQue(i)}|" +
@@ -388,7 +377,7 @@ class ReservationStationData
   val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, iqSize, 1))
   uopMem.io <> DontCare
   uopMem.io.wen.foreach(_ := false.B)
-  
+
   // uop -- read = iqSize write = 1
   // uopMem 's read ports have fixed values
   uopMem.io.raddr.zipWithIndex.foreach{ case(r, i) => r := i.U }
@@ -403,8 +392,10 @@ class ReservationStationData
 
   val uop = WireInit(VecInit((0 until iqSize).map(i => uopRead(i.U))))
 
+  val redHit = WireInit(false.B)
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
+  val selVRed = sel.valid && ~redHit
   val deq   = RegEnable(sel.bits, sel.valid)
   val enqCtrl = io.ctrl.enqCtrl
   val enqUop = enqCtrl.bits
@@ -507,7 +498,7 @@ class ReservationStationData
   if (srcNum > 1) exuInput.src2 := regValues(1)
   if (srcNum > 2) exuInput.src3 := regValues(2)
 
-  io.deq.valid := RegNext(sel.valid)
+  io.deq.valid := RegNext(selVRed)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
 
   // to ctrl
@@ -523,7 +514,8 @@ class ReservationStationData
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }
-  io.ctrl.redVec   := VecInit(uop.map(_.roqIdx.needFlush(io.redirect))).asUInt
+  io.ctrl.redVec   := uop.map(_.roqIdx.needFlush(io.redirect))
+  redHit := io.ctrl.redVec(sel.bits)
 
   io.ctrl.feedback := DontCare
   if (feedback) {
@@ -536,12 +528,18 @@ class ReservationStationData
   // bypass send
   io.selectedUop <> DontCare
   if (fastWakeup) {
-    val bpQueue = Module(new BypassQueue(fixedDelay))
-    bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
-    bpQueue.io.in.bits := uop(sel.bits)
-    bpQueue.io.redirect := io.redirect
-    io.selectedUop.valid := bpQueue.io.out.valid
-    io.selectedUop.bits  := bpQueue.io.out.bits
+    if (fixedDelay == 0) {
+      io.selectedUop.valid := sel.valid
+      io.selectedUop.bits  := uop(sel.bits)
+    } else {
+      val bpQueue = Module(new BypassQueue(fixedDelay))
+      bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
+      bpQueue.io.in.bits  := uop(sel.bits)
+      bpQueue.io.redirect := io.redirect
+      io.selectedUop.valid := bpQueue.io.out.valid
+      io.selectedUop.bits  := bpQueue.io.out.bits
+    }
+
 
     XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
       p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
@@ -550,7 +548,7 @@ class ReservationStationData
 
 
   // log
-  XSDebug(io.ctrl.redVec.orR, p"Red: ${Binary(io.ctrl.redVec)}\n")
+  XSDebug(Cat(io.ctrl.redVec).orR, p"Red: ${io.ctrl.redVec}\n")
   XSDebug(io.feedback.valid && feedback.B, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
   XSDebug(true.B, p"out(${io.deq.valid} ${io.deq.ready})\n")
   XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): deqPtr:${deq} pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
