@@ -134,4 +134,8 @@ class Dispatch2Ls extends XSModule {
 //        p"(${readPort(i)  }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
 //        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+  XSPerf("waitInstr", PopCount(io.fromDq.map(r => r.valid && !r.ready)))
+
 }

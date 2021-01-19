@@ -197,6 +197,7 @@ class LoadQueue extends XSModule
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         miss(loadWbIndex) := dcacheMissed
         pending(loadWbIndex) := io.loadIn(i).bits.mmio
+        uop(loadWbIndex).debugInfo.issueTime := io.loadIn(i).bits.uop.debugInfo.issueTime
       }
     }
 

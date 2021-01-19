@@ -142,6 +142,8 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
+  val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
+
   // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
   //   this.histPtr := histPtr
   //   this.tageMeta := tageMeta
@@ -160,7 +162,7 @@ class Predecode extends XSBundle with HasIFUConst {
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
-class CfiUpdateInfo extends XSBundle {
+class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
@@ -241,6 +243,16 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
+class PerfDebugInfo extends XSBundle {
+  // val fetchTime = UInt(64.W)
+  val renameTime = UInt(64.W)
+  val dispatchTime = UInt(64.W)
+  val issueTime = UInt(64.W)
+  val writebackTime = UInt(64.W)
+  // val commitTime = UInt(64.W)
+}
+
+// Separate LSQ
 class LSIdx extends XSBundle {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
@@ -254,6 +266,7 @@ class MicroOp extends CfCtrl {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
+  val debugInfo = new PerfDebugInfo
 }
 
 class Redirect extends XSBundle {
