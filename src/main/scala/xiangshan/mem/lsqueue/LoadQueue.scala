@@ -291,34 +291,50 @@ class LoadQueue extends XSModule
 
   // Stage 0
   // Generate writeback indexes
+
+  def getEvenBits(input: UInt): UInt = {
+    require(input.getWidth == LoadQueueSize)
+    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i)})).asUInt
+  }
+  def getOddBits(input: UInt): UInt = {
+    require(input.getWidth == LoadQueueSize)
+    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i+1)})).asUInt
+  }
+
+  val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W))) // index selected last cycle
+  val loadWbSelV = RegInit(VecInit(List.fill(LoadPipelineWidth)(false.B))) // index selected in last cycle is valid
+
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && datavalid(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
-  val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
-  val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
-  val evenDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i)})).asUInt
-  val oddDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i+1)})).asUInt
+  val evenDeqMask = getEvenBits(deqMask)
+  val oddDeqMask = getOddBits(deqMask)
+  // generate lastCycleSelect mask 
+  val evenSelectMask = Mux(loadWbSelV(0), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
+  val oddSelectMask = Mux(loadWbSelV(1), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  // generate real select vec
+  val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
+  val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
+
+  def toVec(a: UInt): Vec[Bool] = {
+    VecInit(a.asBools)
+  }
 
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
-  loadWbSelGen(0) := Cat(getFirstOne(loadEvenSelVec, evenDeqMask), 0.U(1.W))
+  loadWbSelGen(0) := Cat(getFirstOne(toVec(loadEvenSelVec), evenDeqMask), 0.U(1.W))
   loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
-  loadWbSelGen(1) := Cat(getFirstOne(loadOddSelVec, oddDeqMask), 1.U(1.W))
+  loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
-
-  val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
-  val loadWbSelV = RegInit(VecInit(List.fill(LoadPipelineWidth)(false.B)))
+  
   (0 until LoadPipelineWidth).map(i => {
     val canGo = io.ldout(i).fire() || !loadWbSelV(i)
     val valid = loadWbSelVGen(i)
-    // store selected index in pipeline reg
     loadWbSel(i) := RegEnable(loadWbSelGen(i), valid && canGo)
-    // Mark them as writebacked, so they will not be selected in the next cycle
-    when(valid && canGo){
-      writebacked(loadWbSelGen(i)) := true.B
-    }
-    // update loadWbSelValidReg
     when(io.ldout(i).fire()){
+      // Mark them as writebacked, so they will not be selected in the next cycle
+      writebacked(loadWbSel(i)) := true.B
+      // update loadWbSelValidReg
       loadWbSelV(i) := false.B
     }
     when(valid && canGo){
