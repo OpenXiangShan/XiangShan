@@ -406,7 +406,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     waiting := false.B
   }
   // ptw <> DontCare // TODO: need check it
-  ptw.req.valid := hasMissReq && !sfence.valid && !waiting
+  ptw.req.valid := hasMissReq && !sfence.valid && !waiting && !RegNext(refill)
   ptw.resp.ready := waiting
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))

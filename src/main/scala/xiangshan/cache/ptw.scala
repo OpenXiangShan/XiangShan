@@ -326,7 +326,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val tlbl2 = Module(new SRAMWrapper(
     "L2TLB",
     new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
-    set = TlbL2LineNum
+    set = TlbL2LineNum,
+    singlePort = true
   )) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
   val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
@@ -341,7 +342,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl2 = Module(new SRAMWrapper(
     "L2PTW",
     new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
-    set = PtwL2LineNum
+    set = PtwL2LineNum,
+    singlePort = true
   )) // (total 256, one line is 4 => 64 lines)
   val l2v   = RegInit(0.U(PtwL2LineNum.W)) // valid
   val l2g   = Reg(UInt(PtwL2LineNum.W)) // global
@@ -369,7 +371,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * tlbl2
    */
   val (tlbHit, tlbHitData) = {
-    assert(tlbl2.io.r.req.ready)
 
     val ridx = genTlbL2Idx(req.vpn)
     val vidx = RegEnable(tlbv(ridx), validOneCycle)
@@ -377,19 +378,20 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
     val ramData = tlbl2.io.r.resp.data(0)
 
+    assert(tlbl2.io.r.req.ready || !tlbl2.io.r.req.valid)
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
 
     val spHitVec = sp.zipWithIndex.map{ case (a,i) =>
-      RegNext(a.hit(req.vpn) && spv(i), validOneCycle)
+      RegEnable(a.hit(req.vpn) && spv(i), validOneCycle)
     }
     val spHitData = ParallelMux(spHitVec zip sp)
     val spHit = Cat(spHitVec).orR
 
     XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
 
-    assert(RegNext(!(ramData.hit(req.vpn) && spHit)), "pages should not be normal page and super page as well")
+    assert(RegNext(!(ramData.hit(req.vpn) && vidx && spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
 
     (ramData.hit(req.vpn) && vidx || spHit, Mux(spHit, spHitData, ramData.get(req.vpn)))
   }
@@ -418,7 +420,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val idx  = RegEnable(l2addr(log2Up(PtwL2LineSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
 
-    assert(ptwl2.io.r.req.ready)
+    assert(ptwl2.io.r.req.ready || !readRam)
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
     val ramData = ptwl2.io.r.resp.data(0)
