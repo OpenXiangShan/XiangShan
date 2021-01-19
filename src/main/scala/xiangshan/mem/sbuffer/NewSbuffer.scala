@@ -108,6 +108,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val sqempty = Input(Bool())
     val flush = new Bundle {
       val valid = Input(Bool())
       val empty = Output(Bool())
@@ -291,7 +292,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   do_eviction := validCount >= 12.U
 
-  io.flush.empty := empty
+  io.flush.empty := empty && io.sqempty
   lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
   switch(sbuffer_state){
     is(x_idle){

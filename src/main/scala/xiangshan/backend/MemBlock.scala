@@ -250,6 +250,7 @@ class MemBlockImp
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
+  lsq.io.sqempty        <> sbuffer.io.sqempty
 
   // Sbuffer
   sbuffer.io.dcache     <> dcache.io.lsu.store
