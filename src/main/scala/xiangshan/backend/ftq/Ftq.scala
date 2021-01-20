@@ -16,24 +16,34 @@ object FtqPtr extends HasXSParameter {
   }
 }
 
-class FtqRead extends Bundle {
-  val ptr = Input(new FtqPtr)
-  val entry = Output(new FtqEntry)
+object GetPcByFtq extends HasXSParameter {
+  def apply(ftqPC: UInt, ftqOffset: UInt) = {
+    assert(ftqPC.getWidth == (VAddrBits - log2Up(PredictWidth) - instOffsetBits))
+    assert(ftqOffset.getWidth == log2Up(PredictWidth))
+    Cat(ftqPC, ftqOffset, 0.U(instOffsetBits.W))
+  }
 }
 
-class Ftq extends XSModule with HasCircularQueuePtrHelper {
+
+class FtqRead extends Bundle {
+  val ptr = Output(new FtqPtr)
+  val entry = Input(new FtqEntry)
+}
+
+class Ftq extends XSModule with HasCircularQueuePtrHelper with NeedImpl {
   val io = IO(new Bundle() {
     val enq = Flipped(DecoupledIO(new FtqEntry))
     val leftOne = Output(Bool())
+    val enqPtr = Output(new FtqPtr)
     // roq commit, read out fectch packet and deq
-    val commit_idxes = Vec(CommitWidth, Flipped(ValidIO(new FtqPtr)))
+    val roq_commits = Vec(CommitWidth, ValidIO(new RoqCommitInfo))
     val commit_cfiUpdate = Vec(CommitWidth, ValidIO(new CfiUpdateInfo))
     // redirect, reset enq ptr
     val redirect = Input(ValidIO(new Redirect))
     // exu write back, update info
     val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    // pc read reqs (1 for load replay / exceptions, 1 for jump/auipc)
-    val ftqRead = Vec(2, Output(new FtqEntry))
+    // pc read reqs (1 for load replay / exceptions, 1 for jump/auipc, 1 for misprediction)
+    val ftqRead = Vec(3, Flipped(new FtqRead))
   })
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))

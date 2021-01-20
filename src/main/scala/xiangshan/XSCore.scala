@@ -177,6 +177,9 @@ trait HasXSParameter {
   val NumPerfCounters = core.NumPerfCounters
   val NrExtIntr = core.NrExtIntr
 
+  val instBytes = if (HasCExtension) 2 else 4
+  val instOffsetBits = log2Ceil(instBytes)
+
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),

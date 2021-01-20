@@ -21,8 +21,6 @@ trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
 trait HasIFUConst extends HasXSParameter {
   val resetVector = 0x10000000L//TODO: set reset vec
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
-  val instBytes = if (HasCExtension) 2 else 4
-  val instOffsetBits = log2Ceil(instBytes)
   val groupBytes = 64 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
   val groupWidth = groupBytes / instBytes
