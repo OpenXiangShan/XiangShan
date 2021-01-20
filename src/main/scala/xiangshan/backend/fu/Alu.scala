@@ -67,7 +67,6 @@ class Alu extends FunctionUnit with HasRedirectOut {
   // Only brTag, level, roqIdx are needed
   // other infos are stored in brq
   redirectOut := DontCare
-  redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
   redirectOut.roqIdx := uop.roqIdx
 
@@ -78,7 +77,6 @@ class Alu extends FunctionUnit with HasRedirectOut {
   // Only taken really needed, do we need brTag ?
   brUpdate := DontCare
   brUpdate.taken := isBranch && taken
-  brUpdate.brTag := uop.brTag
 
 //  brUpdate := uop.cf.brUpdate
 //  // override brUpdate

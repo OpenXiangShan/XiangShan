@@ -3,8 +3,6 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
-import xiangshan.backend.brq.BrqPtr
-import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -255,7 +253,6 @@ class CtrlSignals extends XSBundle {
 class CfCtrl extends XSBundle {
   val cf = new CtrlFlow
   val ctrl = new CtrlSignals
-  val brTag = new BrqPtr
 }
 
 class PerfDebugInfo extends XSBundle {
@@ -290,7 +287,6 @@ class Redirect extends XSBundle {
   val interrupt = Bool()
   val pc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
-  val brTag = new BrqPtr
 
   def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)

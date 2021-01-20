@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.brq.BrqPtr
 
 trait HasFreeListConsts extends HasXSParameter {
   def FL_SIZE: Int = NRPhyRegs-32
@@ -109,7 +108,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
-  XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
+  XSDebug(io.redirect.valid, p"redirect\n")
 
   val enableFreelistCheck = false
   if (enableFreelistCheck) {

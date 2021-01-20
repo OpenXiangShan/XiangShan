@@ -89,7 +89,6 @@ class Rename extends XSModule {
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
-    uops(i).brTag := io.in(i).bits.brTag
 
     val inValid = io.in(i).valid
 

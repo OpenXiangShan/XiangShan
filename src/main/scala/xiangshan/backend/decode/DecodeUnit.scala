@@ -443,7 +443,6 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
 
   // output
   cf_ctrl.cf := ctrl_flow
-  cf_ctrl.brTag := DontCare
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)

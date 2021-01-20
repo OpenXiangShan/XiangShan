@@ -6,7 +6,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.DecodeStage
 import xiangshan.backend.rename.{BusyTable, Rename}
-import xiangshan.backend.brq.{Brq, BrqPcRead}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs

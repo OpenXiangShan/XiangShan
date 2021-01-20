@@ -44,7 +44,6 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOut := DontCare
 //  redirectOut.pc := uop.cf.pc
   redirectOut.target := target
-  redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
 //  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
@@ -52,7 +51,6 @@ class Jump extends FunctionUnit with HasRedirectOut {
   brUpdate := DontCare //uop.cf.brUpdate
 //  brUpdate.pc := uop.cf.pc
   brUpdate.target := target
-  brUpdate.brTarget := target
   brUpdate.taken := true.B
 
   // Output
@@ -64,15 +62,14 @@ class Jump extends FunctionUnit with HasRedirectOut {
   io.out.bits.data := res
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d)\n",
     io.in.valid,
     io.in.ready,
     io.out.valid,
     io.out.ready,
     io.redirectIn.valid,
     io.redirectIn.bits.level,
-    redirectHit,
-    io.redirectIn.bits.brTag.value
+    redirectHit
   )
   XSDebug(io.in.valid, "src1:%x offset:%x func:%b type:JUMP pc:%x res:%x\n", src1, offset, func, pc, res)
 }

@@ -71,7 +71,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
 
   when(csr.io.out.valid){
     io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid
-    io.toInt.bits.redirect.brTag := uop.brTag
     io.toInt.bits.redirect.level := RedirectLevel.flushAfter
     io.toInt.bits.redirect.interrupt := DontCare
     io.toInt.bits.redirect.roqIdx := uop.roqIdx
