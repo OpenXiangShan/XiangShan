@@ -445,6 +445,10 @@ class ICache extends ICacheModule
   val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc,s3_req_mask )
 
+  val is_same_cacheline = s3_miss && s2_valid  && (groupAligned(s2_req_pc) ===groupAligned(s3_req_pc))
+  val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
+  val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
+
   //FIXME!!
   val mmio_packet = io.mmio_grant.bits.data
 
@@ -458,7 +462,7 @@ class ICache extends ICacheModule
   for (i <- 0 until nWays) {
     val wayResp = Wire(new ICacheResp)
     val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc, s3_req_mask)
-    val refillData = cutHelper(refillDataVec, s3_req_pc,s3_req_mask)
+    val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
     wayResp.mask := Mux(s3_mmio,mmioMask,s3_req_mask)
