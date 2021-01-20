@@ -262,8 +262,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val writebackData = Module(new SyncDataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
   val writebackDataRead = writebackData.io.rdata
 
-  val exceptionVecWritePortNum = RenameWidth + 1 + 2 + 2 // CSR, 2*load, 2*store
-  val exceptionData = Module(new SyncDataModuleTemplate(ExceptionVec(), RoqSize, CommitWidth, exceptionVecWritePortNum))
+  val exceptionDataRead = Wire(Vec(CommitWidth, ExceptionVec()))
 
   io.roqDeqPtr := deqPtr
 
@@ -337,7 +336,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val deqWritebackData = writebackDataRead(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  val deqExceptionVec = exceptionData.io.rdata(0)
+  val deqExceptionVec = exceptionDataRead(0)
   // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
   // However, we cannot determine whether a load/store instruction is MMIO.
   // Thus, we don't allow load/store instructions to trigger an interrupt.
@@ -347,9 +346,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val isFlushPipe = writebacked(deqPtr.value) && deqWritebackData.flushPipe
   io.redirectOut := DontCare
   io.redirectOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
-  io.redirectOut.bits.level := Mux(isFlushPipe, RedirectLevel.flushAll, RedirectLevel.exception)
+  io.redirectOut.bits.level := Mux(intrEnable || exceptionEnable, RedirectLevel.exception, RedirectLevel.flushAll)
   io.redirectOut.bits.interrupt := intrEnable
-  io.redirectOut.bits.target := Mux(isFlushPipe, deqDispatchData.pc + 4.U, io.csr.trapTarget)
+  io.redirectOut.bits.target := Mux(intrEnable || exceptionEnable, io.csr.trapTarget, deqDispatchData.pc + 4.U)
 
   io.exception := debug_deqUop
   io.exception.ctrl.commitType := deqDispatchData.commitType
@@ -399,7 +398,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
-  val commit_exception = exceptionData.io.rdata.map(_.asUInt.orR)
+  val commit_exception = exceptionDataRead.map(_.asUInt.orR)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i) || commit_exception(i) || writebackDataRead(i).flushPipe))
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
@@ -473,7 +472,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.state := state
   deqPtrGenModule.io.deq_v := commit_v
   deqPtrGenModule.io.deq_w := commit_w
-  deqPtrGenModule.io.deq_exceptionVec := exceptionData.io.rdata
+  deqPtrGenModule.io.deq_exceptionVec := exceptionDataRead
   deqPtrGenModule.io.deq_flushPipe := writebackDataRead.map(_.flushPipe)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
@@ -631,29 +630,47 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
   writebackData.io.raddr := commitReadAddr_next
 
-  for (i <- 0 until RenameWidth) {
-    exceptionData.io.wen(i) := canEnqueue(i)
-    exceptionData.io.waddr(i) := enqPtrVec(i).value
-    exceptionData.io.wdata(i) := selectAll(io.enq.req(i).bits.cf.exceptionVec, false, true)
+  for (i <- 0 until 16) {
+    val exceptionData = Module(new SyncDataModuleTemplate(Bool(), RoqSize, CommitWidth, RenameWidth + writebackCount(i)))
+    var wPortIdx = 0
+    for (j <- 0 until RenameWidth) {
+      exceptionData.io.wen  (wPortIdx) := canEnqueue(j)
+      exceptionData.io.waddr(wPortIdx) := enqPtrVec(j).value
+      exceptionData.io.wdata(wPortIdx) := (if (allPossibleSet.contains(i)) io.enq.req(j).bits.cf.exceptionVec(i) else false.B)
+      wPortIdx = wPortIdx + 1
+    }
+    if (csrWbCount(i) > 0) {
+      exceptionData.io.wen  (wPortIdx) := io.exeWbResults(6).valid
+      exceptionData.io.waddr(wPortIdx) := io.exeWbResults(6).bits.uop.roqIdx.value
+      exceptionData.io.wdata(wPortIdx) := io.exeWbResults(6).bits.uop.cf.exceptionVec(i)
+      wPortIdx = wPortIdx + 1
+    }
+    if (atomicsWbCount(i) > 0) {
+      exceptionData.io.wen  (wPortIdx) := io.exeWbResults(4).valid
+      exceptionData.io.waddr(wPortIdx) := io.exeWbResults(4).bits.uop.roqIdx.value
+      exceptionData.io.wdata(wPortIdx) := io.exeWbResults(4).bits.uop.cf.exceptionVec(i)
+      wPortIdx = wPortIdx + 1
+    }
+    if (loadWbCount(i) > 0) {
+      exceptionData.io.wen  (wPortIdx) := io.exeWbResults(5).valid
+      exceptionData.io.waddr(wPortIdx) := io.exeWbResults(5).bits.uop.roqIdx.value
+      exceptionData.io.wdata(wPortIdx) := io.exeWbResults(5).bits.uop.cf.exceptionVec(i)
+      wPortIdx = wPortIdx + 1
+    }
+    if (storeWbCount(i) > 0) {
+      exceptionData.io.wen  (wPortIdx) := io.exeWbResults(16).valid
+      exceptionData.io.waddr(wPortIdx) := io.exeWbResults(16).bits.uop.roqIdx.value
+      exceptionData.io.wdata(wPortIdx) := io.exeWbResults(16).bits.uop.cf.exceptionVec(i)
+      wPortIdx = wPortIdx + 1
+      exceptionData.io.wen  (wPortIdx) := io.exeWbResults(17).valid
+      exceptionData.io.waddr(wPortIdx) := io.exeWbResults(17).bits.uop.roqIdx.value
+      exceptionData.io.wdata(wPortIdx) := io.exeWbResults(17).bits.uop.cf.exceptionVec(i)
+      wPortIdx = wPortIdx + 1
+    }
+
+    exceptionData.io.raddr := VecInit(deqPtrVec_next.map(_.value))
+    exceptionDataRead.zip(exceptionData.io.rdata).map{ case (d, r) => d(i) := r }
   }
-  def connectWbExc(index: Int, i: Int) = {
-    exceptionData.io.wen(index) := io.exeWbResults(i).valid
-    exceptionData.io.waddr(index) := io.exeWbResults(i).bits.uop.roqIdx.value
-  }
-  // csr
-  connectWbExc(RenameWidth, 6)
-  exceptionData.io.wdata(RenameWidth) := selectCSR(io.exeWbResults(6).bits.uop.cf.exceptionVec)
-  // load
-  connectWbExc(RenameWidth+1, 4)
-  exceptionData.io.wdata(RenameWidth+1) := selectAtomics(io.exeWbResults(4).bits.uop.cf.exceptionVec)
-  connectWbExc(RenameWidth+2, 5)
-  exceptionData.io.wdata(RenameWidth+2) := selectAtomics(io.exeWbResults(5).bits.uop.cf.exceptionVec)
-  // store
-  connectWbExc(RenameWidth+3, 16)
-  exceptionData.io.wdata(RenameWidth+3) := selectStore(io.exeWbResults(16).bits.uop.cf.exceptionVec)
-  connectWbExc(RenameWidth+4, 17)
-  exceptionData.io.wdata(RenameWidth+4) := selectStore(io.exeWbResults(17).bits.uop.cf.exceptionVec)
-  exceptionData.io.raddr := VecInit(deqPtrVec_next.map(_.value))
 
   /**
     * debug info
