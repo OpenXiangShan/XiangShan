@@ -302,6 +302,22 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     debugPrintln(f"MaskedWrite, Addr: $alignAddr%x ,old sbData:$oldData%x , new sbData: $res%x , mask:$alignMask%x")
   }
 
+  def insertMaskedWordWrite(addr:BigInt, newWordData: BigInt, wordByteMask: BigInt):Unit = {
+    //addr and mask must be aligned to block
+    val alignAddr = addrAlignBlock(addr)
+    val start_word = wordInBlock(addr)
+    val alignData = dataConcatWord(0, newWordData, start_word)
+    val alignMask = maskConcatWord(0, wordByteMask, start_word)
+    val addrState = getState(alignAddr)
+    //new data
+    val oldData = scoreboardRead(alignAddr)
+    val res = writeMaskedData(oldData, alignData, alignMask)
+    addrState.dirty = true
+    addrState.data = res
+    scoreboardWrite(alignAddr, res)
+    debugPrintln(f"MaskedWrite, Addr: $alignAddr%x ,old sbData:$oldData%x , new sbData: $res%x , mask:$alignMask%x")
+  }
+
   //full block read
   def insertRead(addr: BigInt, readData: BigInt): Unit = {
     //Do not call masked read for performance

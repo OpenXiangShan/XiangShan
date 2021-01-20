@@ -64,7 +64,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     val rand = new Random(0xbeef)
     val addr_pool = {
-      for (_ <- 0 until 16) yield BigInt(rand.nextInt(0xfff) << 12) | 0x80000000L.U.litValue()
+      for (_ <- 0 until 64) yield BigInt(rand.nextInt(0xfffff) << 6) | 0x80000000L.U.litValue()
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
     println(f"addr pool length: $addr_list_len")
@@ -97,6 +97,10 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.dcacheIO.store.resp.initSink().setSinkClock(c.clock)
         c.io.dcacheIO.store.req.valid.poke(false.B)
         c.io.dcacheIO.store.resp.ready.poke(false.B)
+        c.io.dcacheIO.atomics.req.initSource().setSourceClock(c.clock)
+        c.io.dcacheIO.atomics.resp.initSink().setSinkClock(c.clock)
+        c.io.dcacheIO.atomics.req.valid.poke(false.B)
+        c.io.dcacheIO.atomics.resp.ready.poke(false.B)
 
         c.io.slaveIO.AChannel.initSink().setSinkClock(c.clock)
         c.io.slaveIO.CChannel.initSink().setSinkClock(c.clock)
@@ -110,7 +114,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.DChannel.valid.poke(false.B)
 
 
-        val total_clock = 50000
+        val total_clock = 500
 
         c.reset.poke(true.B)
         c.clock.step(100)
@@ -149,6 +153,14 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               }
             }
           }
+          if (coreAgent.outerAMO.size <= 0) {
+            if (true) {
+              for (i <- 0 until 4) {
+                val addr = getRandomElement(addr_pool, rand)
+                coreAgent.addAMO(addr)
+              }
+            }
+          }
           //========= core poke ============
           val loadPortsReqValid = ListBuffer.fill(loadPortNum)(false)
           val loadPortsRespReady = ListBuffer.fill(loadPortNum)(true)
@@ -181,6 +193,21 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           }
           coreIO.store.req.valid.poke(storePortReqValid.B)
           coreIO.store.resp.ready.poke(storePortRespReady.B)
+
+          var amoPortReqValid = false
+          val amoPortRespReady = true
+          coreAgent.issueAMOReq()
+          val amoReq = coreAgent.peekAMOReq()
+          if (amoReq.isDefined) {
+            amoPortReqValid = true
+            coreIO.atomics.req.bits.cmd.poke(amoReq.get.cmd.U)
+            coreIO.atomics.req.bits.addr.poke(amoReq.get.addr.U)
+            coreIO.atomics.req.bits.data.poke(amoReq.get.data.U)
+            coreIO.atomics.req.bits.mask.poke(amoReq.get.mask.U)
+            coreIO.atomics.req.bits.meta.id.poke(amoReq.get.id.U)
+          }
+          coreIO.atomics.req.valid.poke(amoPortReqValid.B)
+          coreIO.atomics.resp.ready.poke(amoPortRespReady.B)
 
           //========= slave ============
           //randomly add when empty
@@ -318,6 +345,21 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreAgent.fireStoreResp(storeM)
           }
 
+          val amoPortReqReady = peekBoolean(coreIO.atomics.req.ready)
+          if (amoPortReqValid && amoPortReqReady) {
+            coreAgent.fireAMOReq()
+          }
+          val amoPortRespValid = peekBoolean(coreIO.atomics.resp.valid)
+          if (amoPortRespValid && amoPortRespReady) {
+            val amoM = new LitDCacheWordResp(
+              data = peekBigInt(coreIO.atomics.resp.bits.data),
+              miss = false,
+              replay = false,
+              id = peekBigInt(coreIO.atomics.resp.bits.meta.id)
+            )
+            coreAgent.fireAMOResp(amoM)
+          }
+
           val lsqRespValid = peekBoolean(coreIO.lsq.valid)
           if (lsqRespValid) {
             val lsqM = new LitDCacheLineResp(
@@ -332,6 +374,17 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
           c.clock.step()
         }
+        c.io.dcacheIO.load.foreach { l =>
+          l.s1_kill.poke(true.B)
+//          l.s1_paddr.poke(0x80000000L.U)
+          l.req.valid.poke(false.B)
+          l.resp.ready.poke(true.B)
+        }
+        c.io.dcacheIO.store.req.valid.poke(false.B)
+        c.io.dcacheIO.store.resp.ready.poke(true.B)
+        c.io.dcacheIO.atomics.req.valid.poke(false.B)
+        c.io.dcacheIO.atomics.resp.ready.poke(true.B)
+        c.clock.step(10)
       }
   }
 }

@@ -6,7 +6,9 @@ import xiangshan.cache.MemoryOpConstants
 class LitDCacheWordReq(
                         val cmd: BigInt,
                         val addr: BigInt,
+                        var data: BigInt = 0,
                         val mask: BigInt,
+                        var id: BigInt = 0,
                       ) {
 }
 
@@ -14,6 +16,7 @@ class LitDCacheWordResp(
                          val data: BigInt,
                          val miss: Boolean,
                          val replay: Boolean,
+                         var id: BigInt = 0,
                        ) {
 
 }
@@ -38,6 +41,7 @@ class LitDCacheLineResp(
 trait LitMemOp {
   val M_XRD: BigInt = MemoryOpConstants.M_XRD.litValue()
   val M_XWR: BigInt = MemoryOpConstants.M_XWR.litValue()
+  val M_XA_SWAP: BigInt = MemoryOpConstants.M_XA_SWAP.litValue()
 }
 
 class DCacheLoadTrans extends TLCTrans with LitMemOp {
@@ -108,5 +112,36 @@ class DCacheStoreCallerTrans extends DCacheStoreTrans with TLCCallerTrans {
     resp = Some(inResp)
   }
 
+}
+
+class DCacheAMOTrans extends TLCTrans with LitMemOp {
+  var req: Option[LitDCacheWordReq] = None
+  var resp: Option[LitDCacheWordResp] = None
+}
+
+class DCacheAMOCallerTrans extends DCacheAMOTrans with TLCCallerTrans {
+  var reqIssued: Option[Boolean] = None
+
+  def prepareAMOSwap(addr: BigInt, data: BigInt, mask: BigInt): Unit = {
+    req = Some(
+      new LitDCacheWordReq(
+        cmd = M_XA_SWAP,
+        addr = addr,
+        data = data,
+        mask = mask,
+      )
+    )
+    reqIssued = Some(true)
+  }
+
+  def issueReq(allodId: BigInt = 0): LitDCacheWordReq = {
+    req.get.id = allodId
+    reqIssued = Some(true)
+    req.get
+  }
+
+  def pairResp(inResp: LitDCacheWordResp): Unit = {
+    resp = Some(inResp)
+  }
 }
 

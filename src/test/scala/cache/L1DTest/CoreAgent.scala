@@ -8,18 +8,24 @@ import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
 class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                 , scoreboard: mutable.Map[BigInt, ScoreboardData], portNum: Int = 2)
-               (implicit p: Parameters) extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
+               (implicit p: Parameters) extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) with LitMemOp {
   private val loadPortsReqMessage = ArrayBuffer.fill[Option[LitDCacheWordReq]](portNum)(None)
   private val s0_loadTrans = ArrayBuffer.fill[Option[DCacheLoadCallerTrans]](portNum)(None)
   private val s1_loadTrans = ArrayBuffer.fill[Option[DCacheLoadCallerTrans]](portNum)(None)
   private val s2_loadTrans = ArrayBuffer.fill[Option[DCacheLoadCallerTrans]](portNum)(None)
   private var storePortReqMessage: Option[LitDCacheLineReq] = None
+  private var amoPortReqMessage: Option[LitDCacheWordReq] = None
 
   val outerLoad: ListBuffer[DCacheLoadCallerTrans] = ListBuffer()
   val outerStore: ListBuffer[DCacheStoreCallerTrans] = ListBuffer()
+  val outerAMO: ListBuffer[DCacheAMOCallerTrans] = ListBuffer()
+
+  private val maxStoreId = 255
+  private val maxAMOId = 0
 
   private val lsqWaiting: mutable.Queue[DCacheLoadCallerTrans] = mutable.Queue[DCacheLoadCallerTrans]()
   private val storeIdMap: mutable.Map[BigInt, DCacheStoreCallerTrans] = mutable.Map[BigInt, DCacheStoreCallerTrans]()
+  private val amoIdMap: mutable.Map[BigInt, DCacheAMOCallerTrans] = mutable.Map[BigInt, DCacheAMOCallerTrans]()
 
   def issueLoadReq(): Unit = {
     for (i <- 0 until portNum) {
@@ -108,7 +114,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     if (storePortReqMessage.isEmpty) {
       val nextStore = outerStore.find(s => !s.reqIssued.getOrElse(true))
       if (nextStore.isDefined) {
-        val allocId = (0 to 255).find(i => !storeIdMap.contains(BigInt(i)))
+        val allocId = (0 to maxStoreId).find(i => !storeIdMap.contains(BigInt(i)))
         if (allocId.isDefined) {
           //alloc & issue
           storePortReqMessage = Some(nextStore.get.issueReq(BigInt(allocId.get)))
@@ -139,6 +145,42 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     outerStore -= storeTrans
     //confirm data write
     insertMaskedWrite(storeReq.addr, storeReq.data, storeReq.mask)
+  }
+
+  def issueAMOReq(): Unit = {
+    if (amoPortReqMessage.isEmpty) {
+      val nextAMO = outerAMO.find(a => !a.reqIssued.getOrElse(true))
+      if (nextAMO.isDefined) {
+        val allocId = (0 to maxAMOId).find(i => !amoIdMap.contains(BigInt(i)))
+        if (allocId.isDefined) {
+          val aid = allocId.get
+          //alloc & issue
+          amoPortReqMessage = Some(nextAMO.get.issueReq(BigInt(aid)))
+          amoIdMap(BigInt(aid))
+        }
+      }
+    }
+  }
+
+  def peekAMOReq(): Option[LitDCacheWordReq] = {
+    amoPortReqMessage
+  }
+
+  def fireAMOReq(): Unit = {
+    amoPortReqMessage = None
+  }
+
+  def fireAMOResp(resp: LitDCacheWordResp): Unit = {
+    val aid = resp.id
+    val amoT = amoIdMap(aid)
+    val amoReq = amoT.req.get
+    amoT.pairResp(resp)
+    amoIdMap.remove(aid)
+    outerAMO -= amoT
+    if (amoReq.cmd == M_XA_SWAP) {
+      insertMaskedWordRead(amoReq.addr, resp.data, amoReq.mask)
+      insertMaskedWordWrite(amoReq.addr, amoReq.data, amoReq.mask)
+    }
   }
 
   override def step(): Unit = {
@@ -181,6 +223,27 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     )
     storeT.prepareStore(addr, randomBlockData(), blockMask)
     outerStore.append(storeT)
+  }
+
+  def addAMO(addr: BigInt): Unit = {
+    val amoT = new DCacheAMOCallerTrans()
+
+    val wordCnt = rand.nextInt(8)
+
+    val lgSize = rand.nextInt(4)
+    val rsize = 1 << lgSize
+    // addr must be aligned to size
+    val offset = (rand.nextInt(8) >> lgSize) << lgSize
+    val laddr = addr + wordCnt * 8 + offset
+    // generate mask from  raddr and rsize
+    val mask = (BigInt(1) << rsize) - 1
+    val wmask = mask << offset
+    val wdata = (0 until 4).foldLeft(BigInt(0))(
+      (d, _) => (d << 16) | BigInt(rand.nextInt(0xffff))
+    )
+    //TODO: only swap for now
+    amoT.prepareAMOSwap(addr, wdata, wmask)
+    outerAMO.append(amoT)
   }
 
 }
