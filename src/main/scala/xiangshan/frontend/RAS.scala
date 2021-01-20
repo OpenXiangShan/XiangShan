@@ -7,6 +7,11 @@ import xiangshan.backend.ALUOpType
 import utils._
 import chisel3.experimental.chiselName
 
+class RASEntry() extends XSBundle {
+    val retAddr = UInt(VAddrBits.W)
+    val ctr = UInt(8.W) // layer of nested call functions
+}
+
 @chiselName
 class RAS extends BasePredictor
 {
@@ -33,10 +38,6 @@ class RAS extends BasePredictor
         val meta = Output(new RASBranchInfo)
     }
 
-    class RASEntry() extends XSBundle {
-        val retAddr = UInt(VAddrBits.W)
-        val ctr = UInt(8.W) // layer of nested call functions
-    }
     
     def rasEntry() = new RASEntry
 

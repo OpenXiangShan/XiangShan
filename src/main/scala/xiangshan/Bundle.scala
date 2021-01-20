@@ -13,6 +13,7 @@ import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
 import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
+import xiangshan.frontend.RASEntry
 import utils._
 
 import scala.math.max
