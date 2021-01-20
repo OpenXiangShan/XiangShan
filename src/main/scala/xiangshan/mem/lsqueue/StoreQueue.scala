@@ -298,14 +298,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // remove retired insts from sq, add retired store to sbuffer
   for (i <- 0 until StorePipelineWidth) {
     // We use RegNext to prepare data for sbuffer
-    val ptr = deqPtrExtNext(i).value
+    val ptr = deqPtrExt(i).value
     // if !sbuffer.fire(), read the same ptr
     // if sbuffer.fire(), read next
-    io.sbuffer(i).valid := RegNext(allocated(ptr) && commited(ptr) && !mmio(ptr))
+    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr := RegNext(dataModuleRead(i).paddr)
-    io.sbuffer(i).bits.data := RegNext(dataModuleRead(i).data)
-    io.sbuffer(i).bits.mask := RegNext(dataModuleRead(i).mask)
+    io.sbuffer(i).bits.addr := dataModuleRead(i).paddr
+    io.sbuffer(i).bits.data := dataModuleRead(i).data
+    io.sbuffer(i).bits.mask := dataModuleRead(i).mask
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := DontCare
@@ -313,8 +313,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta.mask     := io.sbuffer(i).bits.mask
 
     when (io.sbuffer(i).fire()) {
-      allocated(RegNext(ptr)) := false.B
-      XSDebug("sbuffer "+i+" fire: ptr %d\n", RegNext(ptr))
+      allocated(ptr) := false.B
+      XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
   when (io.sbuffer(1).fire()) {
