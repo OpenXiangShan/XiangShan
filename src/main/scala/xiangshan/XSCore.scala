@@ -56,6 +56,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
+  FtqSize: Int = 48,
   IssQueSize: Int = 12,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
@@ -147,6 +148,7 @@ trait HasXSParameter {
   val RenameWidth = core.RenameWidth
   val CommitWidth = core.CommitWidth
   val BrqSize = core.BrqSize
+  val FtqSize = core.FtqSize
   val IssQueSize = core.IssQueSize
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
