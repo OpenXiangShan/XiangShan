@@ -39,7 +39,7 @@ jobs:
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
       - name: Build EMU
         run:
-          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220
+          make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME B=0 E=0 -j220
       - name: Run cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
@@ -49,7 +49,7 @@ jobs:
           do
               t=${test%.c}
               echo $t
-              make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
+              make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run B=0 E=0 | grep "HIT GOOD TRAP"
               if [[ $? != 0 ]];
               then
                   echo $t fail
@@ -59,10 +59,10 @@ jobs:
           exit $ret
       - name: Run riscv-tests
         run: |
-          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run 2> /dev/null
+          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run B=0 E=0
       - name: Run microbench
         run: |
-          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
+          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run B=0 E=0
       - name: Run coremark
         run: |
-          make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> /dev/null
+          make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run B=0 E=0

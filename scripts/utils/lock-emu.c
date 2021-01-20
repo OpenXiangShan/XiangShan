@@ -23,7 +23,9 @@ int main(int argc, char* argv[]){
         fd = tryLock(argv[1]);
         if(fd > 0){
             getlogin_r(user, BUF_SIZE);
-            write(fd, user, strlen(user));
+            int len = strlen(user);
+            user[len] = '\0';
+            write(fd, user, len+1);
             break;
         } else {
             // someone is holding the lock...

@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.SelImm
+import xiangshan.backend.decode.{ImmUnion, Imm_U}
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
 
@@ -435,10 +436,10 @@ class ReservationStationData
           io.srcRegValue(0)
         )
         dataWrite(enqPtrReg, 0, src1Mux)
-        // TODO: opt this, a full map is not necesscary here
-        val imm32 = LookupTree(
-          enqUopReg.ctrl.selImm,
-          ImmUnion.immSelMap.map(x => x._1 -> x._2.toImm32(enqUopReg.ctrl.imm))
+        // alu only need U type and I type imm
+        val imm32 = Mux(enqUopReg.ctrl.selImm === SelImm.IMM_U,
+          ImmUnion.U.toImm32(enqUopReg.ctrl.imm),
+          ImmUnion.I.toImm32(enqUopReg.ctrl.imm)
         )
         val imm64 = SignExt(imm32, XLEN)
         val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
@@ -500,6 +501,7 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
+  exuInput.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
   val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   exuInput.src1 := regValues(0)
@@ -541,6 +543,7 @@ class ReservationStationData
     bpQueue.io.redirect := io.redirect
     io.selectedUop.valid := bpQueue.io.out.valid
     io.selectedUop.bits  := bpQueue.io.out.bits
+    io.selectedUop.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
 
     XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
       p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +

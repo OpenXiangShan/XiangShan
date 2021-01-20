@@ -269,6 +269,23 @@ class ICache extends ICacheModule
     cutPacket.asUInt
   }
 
+  def cutHelperMMIO(sourceVec: Vec[UInt], pc: UInt, mask: UInt) = {
+    val sourceVec_inst = Wire(Vec(mmioBeats * mmioBusBytes/instBytes,UInt(insLen.W)))
+    (0 until mmioBeats).foreach{ i =>
+      (0 until mmioBusBytes/instBytes).foreach{ j =>
+        sourceVec_inst(i*mmioBusBytes/instBytes + j) := sourceVec(i)(j*insLen+insLen-1, j*insLen)
+      }
+    }
+    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
+    val insLenLog = log2Ceil(insLen)
+    val start = (pc >> insLenLog.U)(log2Ceil(mmioBeats * mmioBusBytes/instBytes) -1, 0)
+    val outMask = mask >> start
+    (0 until PredictWidth ).foreach{ i =>
+      cutPacket(i) := Mux(outMask(i).asBool,sourceVec_inst(start + i.U),0.U)
+    }
+    (cutPacket.asUInt, outMask.asUInt)
+  }
+
   // generate the one hot code according to a UInt between 0-8
   def PriorityMask(sourceVec: UInt) : UInt = {
     val oneHot = Mux(sourceVec >= 8.U, "b1000".U,
@@ -339,7 +356,6 @@ class ICache extends ICacheModule
   val hasInvalidWay = invalidVec.orR
   val refillInvalidWaymask = PriorityMask(invalidVec)
 
-  val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
   //deal with icache exception
   val icacheExceptionVec = Wire(Vec(8,Bool()))
@@ -351,6 +367,7 @@ class ICache extends ICacheModule
   s2_mmio := s2_valid && io.tlb.resp.valid && s2_tlb_resp.mmio && !hasIcacheException
   s2_hit := s2_valid && ParallelOR(hitVec) 
 
+  val waymask = Mux(hasIcacheException,1.U(nWays.W),Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask)))
 
   assert(!(s2_hit && s2_mmio),"MMIO address should not hit in icache")
 
@@ -388,6 +405,7 @@ class ICache extends ICacheModule
     (0 until blockWords).map{r =>
       val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
       val decodedRow = cacheParams.dataCode.decode(row)
+      // assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
       decodedRow.corrected
     }
   )
@@ -450,7 +468,9 @@ class ICache extends ICacheModule
   val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
 
   //FIXME!!
-  val mmio_packet = io.mmio_grant.bits.data
+  val mmioDataVec = io.mmio_grant.bits.data.asTypeOf(Vec(mmioBeats,UInt(mmioBusWidth.W)))
+  val mmio_packet = cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)._1
+  val mmio_mask   = cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)._2
 
   XSDebug("mmio data  %x\n", mmio_packet)
 
@@ -465,7 +485,7 @@ class ICache extends ICacheModule
     val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
-    wayResp.mask := Mux(s3_mmio,mmioMask,s3_req_mask)
+    wayResp.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
     wayResp.ipf := s3_exception_vec(pageFault)
     wayResp.acf := s3_exception_vec(accessFault)
     wayResp.mmio := s3_mmio
@@ -478,10 +498,6 @@ class ICache extends ICacheModule
   // if a fetch packet triggers page fault, at least send a valid instruction
   io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
   val s3_noHit = s3_wayMask === 0.U
-  when ((io.prev_ipf || s3_tlb_resp.excp.pf.instr) && s3_noHit) {
-    io.pd_out.pc := pds(0).io.out.pc
-    io.pd_out.mask := 1.U(PredictWidth.W)
-  }
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d miss:%d  pc: 0x%x mmio :%d mask: %b ipf:%d\n",s3_valid, s3_miss,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr, s3_mmio)
@@ -507,7 +523,7 @@ class ICache extends ICacheModule
   //icache response: to pre-decoder
   io.resp.valid := s3_valid && (s3_hit || s3_has_exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
   io.resp.bits.data := Mux(s3_mmio,mmio_packet,Mux((s3_valid && s3_hit),outPacket,refillDataOut))
-  io.resp.bits.mask := Mux(s3_mmio,mmioMask,s3_req_mask)
+  io.resp.bits.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
   io.resp.bits.acf := s3_exception_vec(accessFault)
@@ -532,7 +548,7 @@ class ICache extends ICacheModule
 
   //To icache Uncache
   io.mmio_acquire.valid := s3_mmio && s3_valid
-  io.mmio_acquire.bits.addr := s3_tlb_resp.paddr
+  io.mmio_acquire.bits.addr := mmioBusAligned(s3_tlb_resp.paddr)
   io.mmio_acquire.bits.id := cacheID.U
 
   io.mmio_grant.ready := io.resp.ready

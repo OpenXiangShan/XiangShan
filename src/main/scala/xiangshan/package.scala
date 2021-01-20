@@ -48,10 +48,11 @@ package object xiangshan {
 
     def apply() = UInt(log2Up(num).W)
 
-    def isIntExu(fuType: UInt) =  !fuType(3)
+    def isIntExu(fuType: UInt) = !fuType(3)
+    def isJumpExu(fuType: UInt) = fuType === jmp
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
-    def isLoadExu(fuType: UInt) = fuType === ldu || fuType===mou
+    def isLoadExu(fuType: UInt) = fuType === ldu || fuType === mou
     def isStoreExu(fuType: UInt) = fuType === stu
 
     val functionNameMap = Map(
@@ -107,6 +108,10 @@ package object xiangshan {
     def isUnconditional(level: UInt) = level(1)
     def flushItself(level: UInt) = level(0)
     def isException(level: UInt) = level(1) && level(0)
+  }
+
+  object ExceptionVec {
+    def apply() = Vec(16, Bool())
   }
 
   object PMAMode {
