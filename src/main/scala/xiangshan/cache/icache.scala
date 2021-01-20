@@ -183,7 +183,8 @@ class ICacheMetaArray extends ICachArray
     UInt(encTagBits.W),
     set=nSets,
     way=nWays,
-    shouldReset = true
+    shouldReset = true,
+    singlePort = true
   ))
 
   //read
@@ -216,7 +217,8 @@ class ICacheDataArray extends ICachArray
     "Icache_Data",
     UInt(encRowBits.W),
     set=nSets,
-    way = nWays
+    way = nWays,
+    singlePort = true
   ))}
 
   //read
