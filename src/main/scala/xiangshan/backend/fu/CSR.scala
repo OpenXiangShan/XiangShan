@@ -745,24 +745,32 @@ class CSR extends FunctionUnit with HasCSRConst
     "btbWrong"    -> (0x1033, "perfCntbtbWrong"),
     "tageRight"   -> (0x1034, "perfCnttageRight"),
     "tageWrong"   -> (0x1035, "perfCnttageWrong"),
-    "loopRight"   -> (0x1036, "perfCntloopRight"),
-    "loopWrong"   -> (0x1037, "perfCntloopWrong")
+    "rasRight"    -> (0x1036, "perfCntrasRight"),
+    "rasWrong"    -> (0x1037, "perfCntrasWrong"),
+    "loopRight"   -> (0x1038, "perfCntloopRight"),
+    "loopWrong"   -> (0x1039, "perfCntloopWrong"),
+    "s1Right"     -> (0x103a, "perfCntuS1Right"),
+    "s1Wrong"     -> (0x103b, "perfCntuS1Wrong"),
+    "s2Right"     -> (0x103c, "perfCntuS2Right"),
+    "s2Wrong"     -> (0x103d, "perfCntuS2Wrong"),
+    "s3Right"     -> (0x103e, "perfCntuS3Right"),
+    "s3Wrong"     -> (0x103f, "perfCntuS3Wrong"),
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i => 
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x1040 + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x1040 + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x1040 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x1040 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 
@@ -778,7 +786,7 @@ class CSR extends FunctionUnit with HasCSRConst
       //   }
       // }
   }
-
+  
   val xstrap = WireInit(false.B)
   if (!env.FPGAPlatform && EnableBPU) {
     ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)

@@ -228,6 +228,13 @@ class RAS extends BasePredictor
     io.meta.rasToqAddr := DontCare
 
     if (BPUDebug && debug) {
+        val rasAns = Wire(new PredictorAnswer)
+        rasAns.hit := io.out.valid
+        rasAns.taken := DontCare
+        rasAns.target := io.out.bits.target
+
+        ExcitingUtils.addSource(rasAns, "rasAns")
+        
         val spec_debug = spec.debugIO
         val commit_debug = commit.debugIO
         XSDebug("----------------RAS(spec)----------------\n")

@@ -308,17 +308,39 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   val predictor = io.cfiInfo.bits.bpuMeta.predictor
 
-  val ubtbRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
-  val ubtbWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
+  val cfiCountValid = io.cfiInfo.valid && !io.cfiInfo.bits.isReplay
 
-  val btbRight  = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
-  val btbWrong  =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
+  val ubtbAns = io.cfiInfo.bits.bpuMeta.ubtbAns
+  val btbAns = io.cfiInfo.bits.bpuMeta.btbAns
+  val tageAns = io.cfiInfo.bits.bpuMeta.tageAns
+  val rasAns = io.cfiInfo.bits.bpuMeta.rasAns
+  val loopAns = io.cfiInfo.bits.bpuMeta.loopAns
 
-  val tageRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
-  val tageWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
+  // Pipeline stage counter
+  val s1Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 0.U
+  val s1Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 0.U
 
-  val loopRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
-  val loopWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
+  val s2Right  =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 1.U
+  val s2Wrong  =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 1.U
+
+  val s3Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 2.U
+  val s3Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 2.U
+
+  // Predictor counter
+  val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
+  val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
+
+  val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
+  val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
+
+  val tageRight = cfiCountValid && tageAns.hit && io.cfiInfo.bits.taken === tageAns.taken
+  val tageWrong = cfiCountValid && tageAns.hit && io.cfiInfo.bits.taken =/= tageAns.taken
+
+  val rasRight = cfiCountValid && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
+  val rasWrong = cfiCountValid && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
+
+  val loopRight = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken === loopAns.taken
+  val loopWrong = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken =/= loopAns.taken
 
   if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
@@ -333,12 +355,21 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(mbpRRight, "perfCntCondBpRRight", Perf)
     ExcitingUtils.addSource(mbpRWrong, "perfCntCondBpRWrong", Perf)
 
+    ExcitingUtils.addSource(s1Right, "perfCntS1Right", Perf)
+    ExcitingUtils.addSource(s1Wrong, "perfCntS1Wrong", Perf)
+    ExcitingUtils.addSource(s2Right, "perfCntS2Right", Perf)
+    ExcitingUtils.addSource(s2Wrong, "perfCntS2Wrong", Perf)
+    ExcitingUtils.addSource(s3Right, "perfCntS3Right", Perf)
+    ExcitingUtils.addSource(s3Wrong, "perfCntS3Wrong", Perf)
+    
     ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
     ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
     ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
     ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
     ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
     ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
+    ExcitingUtils.addSource(rasRight, "perfCntrasRight", Perf)
+    ExcitingUtils.addSource(rasWrong, "perfCntrasWrong", Perf)
     ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
     ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
   }

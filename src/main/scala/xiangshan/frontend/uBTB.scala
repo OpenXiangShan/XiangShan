@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import chisel3.experimental.chiselName
+import chisel3.ExcitingUtils._
 
 import scala.math.min
 
@@ -259,6 +260,17 @@ class MicroBTB extends BasePredictor
     }
 
     if (BPUDebug && debug) {
+        val ubtbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+        // ubtbAns.hit := io.pc.valid && read_hit_vec.asUInt.orR
+
+        ubtbAns.zipWithIndex.foreach{ case(x,i) =>
+          x.hit := io.out.hits(i)
+          x.taken := io.out.takens(i)
+          x.target := io.out.targets(i)
+        }
+
+        ExcitingUtils.addSource(ubtbAns, "ubtbAns")
+
         XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x \n",io.pc.bits,read_req_tag)
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {

@@ -408,6 +408,16 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   if (BPUDebug && debug) {
+    val loopAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+
+    loopAns.zipWithIndex.foreach{ case(x,i) =>
+      x.hit := io.resp.exit(i)
+      x.taken := false.B
+      x.target := DontCare
+    }
+
+    ExcitingUtils.addSource(loopAns, "loopAns")
+
     // debug info
     XSDebug("[IF2][req] fire=%d fetchpc=%x\n", if2_fire, io.pc.bits)
     XSDebug("[IF3][req] fire=%d fetchpc=%x\n", if3_fire, pc)

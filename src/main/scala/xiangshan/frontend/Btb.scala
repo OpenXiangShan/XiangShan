@@ -208,6 +208,16 @@ class BTB extends BasePredictor with BTBParams{
 
 
   if (BPUDebug && debug) {
+    val btbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+
+    btbAns.zipWithIndex.foreach{ case(x,i) =>
+      x.hit := io.resp.hits(i)
+      x.taken := DontCare
+      x.target := io.resp.targets(i)
+    }
+
+    ExcitingUtils.addSource(btbAns, "btbAns")
+
     val debug_verbose = true
     val validLatch = RegNext(io.pc.valid)
     XSDebug(io.pc.valid, "read: pc=0x%x, mask=%b\n", if1_packetAlignedPC, if1_mask)

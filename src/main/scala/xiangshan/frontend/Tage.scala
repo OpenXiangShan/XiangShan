@@ -633,6 +633,16 @@ class Tage extends BaseTage {
 
 
   if (BPUDebug && debug) {
+    val tageAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+
+    tageAns.zipWithIndex.foreach{ case(x,i) =>
+      x.hit := io.resp.hits(i)
+      x.taken := io.resp.takens(i)
+      x.target := DontCare
+    }
+
+    ExcitingUtils.addSource(tageAns, "tageAns")
+
     val m = updateMeta
     val bri = u.bpuMeta
     val if4_resps = RegEnable(if3_resps, s3_fire)
