@@ -327,17 +327,31 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val s3Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 2.U
 
   // Predictor counter
-  val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
-  val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
+  // val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
+  // val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
 
-  val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
-  val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
+  val ubtbRight = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+    io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken, // taken
+    io.cfiInfo.bits.taken === ubtbAns.taken) // noTaken
+  val ubtbWrong = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+    io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken, // taken
+    io.cfiInfo.bits.taken =/= ubtbAns.taken) // noTaken
 
-  val tageRight = cfiCountValid && tageAns.hit && io.cfiInfo.bits.taken === tageAns.taken
-  val tageWrong = cfiCountValid && tageAns.hit && io.cfiInfo.bits.taken =/= tageAns.taken
+  // val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
+  // val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
 
-  val rasRight = cfiCountValid && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
-  val rasWrong = cfiCountValid && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
+  val btbRight = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+    io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken, // taken
+    io.cfiInfo.bits.taken === btbAns.taken) // noTaken
+  val btbWrong = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+    io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken, // taken
+    io.cfiInfo.bits.taken =/= btbAns.taken) // noTaken
+
+  val tageRight = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken === tageAns.taken // DontCare jal
+  val tageWrong = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken =/= tageAns.taken // DontCare jal
+
+  val rasRight = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
+  val rasWrong = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
 
   val loopRight = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken === loopAns.taken
   val loopWrong = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken =/= loopAns.taken

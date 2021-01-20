@@ -206,8 +206,7 @@ class BTB extends BasePredictor with BTBParams{
   edata.io.w.req.bits.setIdx := updateRow
   edata.io.w.req.bits.data := u.target
 
-
-  if (BPUDebug && debug) {
+  if (!env.FPGAPlatform && BPUDebug) {
     val btbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
 
     btbAns.zipWithIndex.foreach{ case(x,i) =>
@@ -217,7 +216,10 @@ class BTB extends BasePredictor with BTBParams{
     }
 
     ExcitingUtils.addSource(btbAns, "btbAns")
+  }
 
+
+  if (BPUDebug && debug) {
     val debug_verbose = true
     val validLatch = RegNext(io.pc.valid)
     XSDebug(io.pc.valid, "read: pc=0x%x, mask=%b\n", if1_packetAlignedPC, if1_mask)

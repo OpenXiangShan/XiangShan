@@ -104,9 +104,11 @@ class BIM extends BasePredictor with BimParams {
     bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
   }
 
-  if (BPUDebug && debug) {
+  if (!env.FPGAPlatform && BPUDebug) {
     ExcitingUtils.addSource(io.resp.ctrs, "bimResp")
+  }
 
+  if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
     XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x", io.update.valid, u.pc, u.pnpc, u.target)
     XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)

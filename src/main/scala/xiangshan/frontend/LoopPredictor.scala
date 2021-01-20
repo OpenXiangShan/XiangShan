@@ -403,11 +403,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).meta
   }
 
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && BPUDebug) {
     ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
-  }
 
-  if (BPUDebug && debug) {
     val loopAns = Wire(Vec(PredictWidth, new PredictorAnswer))
 
     loopAns.zipWithIndex.foreach{ case(x,i) =>
@@ -417,7 +415,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
     }
 
     ExcitingUtils.addSource(loopAns, "loopAns")
+  }
 
+  if (BPUDebug && debug) {
     // debug info
     XSDebug("[IF2][req] fire=%d fetchpc=%x\n", if2_fire, io.pc.bits)
     XSDebug("[IF3][req] fire=%d fetchpc=%x\n", if3_fire, pc)

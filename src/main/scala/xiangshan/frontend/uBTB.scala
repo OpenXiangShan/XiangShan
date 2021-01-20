@@ -259,18 +259,20 @@ class MicroBTB extends BasePredictor
         metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
     }
 
-    if (BPUDebug && debug) {
-        val ubtbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
-        // ubtbAns.hit := io.pc.valid && read_hit_vec.asUInt.orR
+    if (!env.FPGAPlatform && BPUDebug) {
+      val ubtbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+      // ubtbAns.hit := io.pc.valid && read_hit_vec.asUInt.orR
 
-        ubtbAns.zipWithIndex.foreach{ case(x,i) =>
+      ubtbAns.zipWithIndex.foreach{ case(x,i) =>
           x.hit := io.out.hits(i)
           x.taken := io.out.takens(i)
           x.target := io.out.targets(i)
-        }
+      }
 
-        ExcitingUtils.addSource(ubtbAns, "ubtbAns")
+      ExcitingUtils.addSource(ubtbAns, "ubtbAns")
+    }
 
+    if (BPUDebug && debug) {
         XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x \n",io.pc.bits,read_req_tag)
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {

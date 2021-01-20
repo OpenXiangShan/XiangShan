@@ -630,9 +630,7 @@ class Tage extends BaseTage {
     scTables(i).io.update.fetchIdx := u.bpuMeta.fetchIdx
   }
 
-
-
-  if (BPUDebug && debug) {
+  if (!env.FPGAPlatform && BPUDebug) {
     val tageAns = Wire(Vec(PredictWidth, new PredictorAnswer))
 
     tageAns.zipWithIndex.foreach{ case(x,i) =>
@@ -642,7 +640,9 @@ class Tage extends BaseTage {
     }
 
     ExcitingUtils.addSource(tageAns, "tageAns")
+  }
 
+  if (BPUDebug && debug) {
     val m = updateMeta
     val bri = u.bpuMeta
     val if4_resps = RegEnable(if3_resps, s3_fire)

@@ -749,12 +749,12 @@ class CSR extends FunctionUnit with HasCSRConst
     "rasWrong"    -> (0x1037, "perfCntrasWrong"),
     "loopRight"   -> (0x1038, "perfCntloopRight"),
     "loopWrong"   -> (0x1039, "perfCntloopWrong"),
-    "s1Right"     -> (0x103a, "perfCntuS1Right"),
-    "s1Wrong"     -> (0x103b, "perfCntuS1Wrong"),
-    "s2Right"     -> (0x103c, "perfCntuS2Right"),
-    "s2Wrong"     -> (0x103d, "perfCntuS2Wrong"),
-    "s3Right"     -> (0x103e, "perfCntuS3Right"),
-    "s3Wrong"     -> (0x103f, "perfCntuS3Wrong"),
+    "s1Right"     -> (0x103a, "perfCntS1Right"),
+    "s1Wrong"     -> (0x103b, "perfCntS1Wrong"),
+    "s2Right"     -> (0x103c, "perfCntS2Right"),
+    "s2Wrong"     -> (0x103d, "perfCntS2Wrong"),
+    "s3Right"     -> (0x103e, "perfCntS3Right"),
+    "s3Wrong"     -> (0x103f, "perfCntS3Wrong"),
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i => 

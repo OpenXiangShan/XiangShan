@@ -497,12 +497,14 @@ class IFU extends XSModule with HasIFUConst
   val bimResp_s3 = RegEnable(bimResp, if2_fire)
   val bimResp_s4 = RegEnable(bimResp_s3, if3_fire)
 
-  ExcitingUtils.addSink(ubtbAns, "ubtbAns")
-  ExcitingUtils.addSink(btbAns, "btbAns")
-  ExcitingUtils.addSink(bimResp, "bimResp")
-  ExcitingUtils.addSink(tageAns, "tageAns")
-  ExcitingUtils.addSink(rasAns, "rasAns")
-  ExcitingUtils.addSink(loopAns, "loopAns")
+  if (!env.FPGAPlatform && IFUDebug) {
+    ExcitingUtils.addSink(ubtbAns, "ubtbAns")
+    ExcitingUtils.addSink(btbAns, "btbAns")
+    ExcitingUtils.addSink(bimResp, "bimResp")
+    ExcitingUtils.addSink(tageAns, "tageAns")
+    ExcitingUtils.addSink(rasAns, "rasAns")
+    ExcitingUtils.addSink(loopAns, "loopAns")
+  }
 
   fetchPacketWire.bpuMeta.zipWithIndex.foreach{ case(x,i) =>
     x.predictor := predictor
