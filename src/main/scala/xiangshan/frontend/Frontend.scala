@@ -18,6 +18,9 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
     val backend = new FrontendToBackendIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
+    val mmio_acquire = DecoupledIO(new InsUncacheReq)
+    val mmio_grant  = Flipped(DecoupledIO(new InsUncacheResp))
+    val mmio_flush = Output(Bool())
   })
 
   val ifu = Module(new IFU)
@@ -36,6 +39,9 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
   ifu.io.icacheMemGrant.valid := io.icacheMemGrant.valid && grantClientId === icacheMissQueueId.U
   ifu.io.icacheMemGrant.bits := io.icacheMemGrant.bits
   ifu.io.icacheMemGrant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
+  io.mmio_acquire <> ifu.io.mmio_acquire
+  io.mmio_flush   <> ifu.io.mmio_flush
+  ifu.io.mmio_grant <> io.mmio_grant
   l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
   l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
   l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)

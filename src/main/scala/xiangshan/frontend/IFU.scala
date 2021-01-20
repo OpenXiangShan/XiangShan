@@ -10,8 +10,16 @@ import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 
+trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
+  def mmioBusWidth = 64
+  def mmioBusBytes = mmioBusWidth /8
+  def mmioBeats = FetchWidth * 4 * 8 / mmioBusWidth
+  def mmioMask  = VecInit(List.fill(PredictWidth)(true.B)).asUInt
+  def mmioBusAligned(pc :UInt): UInt = align(pc, mmioBusBytes)
+}
+
 trait HasIFUConst extends HasXSParameter {
-  val resetVector = 0x80000000L//TODO: set reset vec
+  val resetVector = 0x10000000L//TODO: set reset vec
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -71,6 +79,10 @@ class IFUIO extends XSBundle
   val tlbCsr = Input(new TlbCsrBundle)
   // from tlb
   val ptw = new TlbPtwIO
+  // icache uncache
+  val mmio_acquire = DecoupledIO(new InsUncacheReq)
+  val mmio_grant  = Flipped(DecoupledIO(new InsUncacheResp))
+  val mmio_flush = Output(Bool())
 }
 
 class PrevHalfInstr extends XSBundle {
@@ -418,6 +430,9 @@ class IFU extends XSModule with HasIFUConst
   icache.io.prev.bits := if3_prevHalfInstr.bits.instr
   icache.io.prev_ipf := if3_prevHalfInstr.bits.ipf
   icache.io.prev_pc := if3_prevHalfInstr.bits.pc
+  icache.io.mmio_acquire <> io.mmio_acquire
+  icache.io.mmio_grant <> io.mmio_grant
+  icache.io.mmio_flush <> io.mmio_flush
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
   io.prefetchTrainReq := icache.io.prefetchTrainReq
