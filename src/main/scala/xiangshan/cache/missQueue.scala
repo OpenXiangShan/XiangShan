@@ -495,8 +495,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     if (!env.FPGAPlatform) {
       ExcitingUtils.addSource(
         BoolStopWatch(
-          start = entry.io.req.fire(), 
-          stop = entry.io.resp.fire(),
+          start = entry.io.block_idx.valid, 
+          stop = !entry.io.block_idx.valid,
           startHighPriority = true),
         "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
         Perf
