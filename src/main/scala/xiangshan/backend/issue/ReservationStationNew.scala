@@ -243,7 +243,7 @@ class ReservationStationCtrl
   val tailDec = tailPtr-1.U
   tailPtr := Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
 
-  io.enqCtrl.ready := !isFull || dequeue
+  io.enqCtrl.ready := !isFull || (if(feedback) dequeue else false.B)
   val enqUop      = io.enqCtrl.bits
   val srcSeq      = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq  = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
