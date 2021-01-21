@@ -114,7 +114,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   ftq.io.ftqRead(2) <> DontCare // TODO: read exception pc / load replay pc form here
 
   io.frontend.redirect_cfiUpdate := frontendRedirect
-  io.frontend.commit_cfiUpdate := ftq.io.commit_cfiUpdate
+  io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
 
   decode.io.in <> io.frontend.cfVec
 

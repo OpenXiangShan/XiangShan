@@ -348,7 +348,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.redirectOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
   io.redirectOut.bits.level := Mux(intrEnable || exceptionEnable, RedirectLevel.exception, RedirectLevel.flushAll)
   io.redirectOut.bits.interrupt := intrEnable
-  io.redirectOut.bits.target := Mux(intrEnable || exceptionEnable, io.csr.trapTarget, deqDispatchData.pc + 4.U)
+  io.redirectOut.bits.cfiUpdate.target := Mux(intrEnable || exceptionEnable, io.csr.trapTarget, deqDispatchData.pc + 4.U)
 
   io.exception := debug_deqUop
   io.exception.ctrl.commitType := deqDispatchData.commitType
@@ -360,7 +360,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   XSDebug(io.redirectOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.cf.pc)} intr $intrEnable " +
-    p"excp $exceptionEnable flushPipe $isFlushPipe target 0x${Hexadecimal(io.redirectOut.bits.target)} " +
+    p"excp $exceptionEnable flushPipe $isFlushPipe target 0x${Hexadecimal(io.redirectOut.bits.cfiUpdate.target)} " +
     p"Trap_target 0x${Hexadecimal(io.csr.trapTarget)} exceptionVec ${Binary(deqExceptionVec.asUInt)}\n")
 
 

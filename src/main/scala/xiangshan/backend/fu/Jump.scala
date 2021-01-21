@@ -43,7 +43,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOutValid := valid
   redirectOut := DontCare
 //  redirectOut.pc := uop.cf.pc
-  redirectOut.target := target
+  redirectOut.cfiUpdate.target := target
   redirectOut.level := RedirectLevel.flushAfter
 //  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx

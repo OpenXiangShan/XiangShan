@@ -36,7 +36,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper with NeedImpl {
     val leftOne = Output(Bool())
     val enqPtr = Output(new FtqPtr)
     // roq commit, read out fectch packet and deq
-    val roq_commits = Vec(CommitWidth, ValidIO(new RoqCommitInfo))
+    val roq_commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommitInfo)))
     val commit_ftqEntry = ValidIO(new FtqEntry)
     // redirect, reset enq ptr
     val redirect = Input(ValidIO(new Redirect))
