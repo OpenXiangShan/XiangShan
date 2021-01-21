@@ -127,7 +127,6 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
   val tageMeta = new TageMeta
-  val specCnt = UInt(10.W)
   // for global history
 
   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
@@ -159,13 +158,14 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
-  val bpuMeta = new BpuMeta
   val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
-  val rasToqAddr = UInt(VAddrBits.W)
+  val rasEntry = new RASEntry
   val hist = new GlobalHistory
   val predHist = new GlobalHistory
+  val specCnt = UInt(10.W)
   // need pipeline update
+  val sawNotTakenBranch = Bool()
+  val predTaken = Bool()
   val target = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
@@ -197,7 +197,7 @@ class FtqEntry extends XSBundle {
     val cfiIsCall, cfiIsRet, cfiIsRVC = Bool()
     val br_mask = Vec(PredictWidth, Bool())
     val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
-
+    val specCnt = Vec(PredictWidth, UInt(10.W))
     val valids = Vec(PredictWidth, Bool())
 
     // backend update
