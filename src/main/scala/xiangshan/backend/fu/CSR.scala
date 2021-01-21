@@ -502,14 +502,17 @@ class CSR extends FunctionUnit with HasCSRConst
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  csrio.isPerfCnt := (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  csrio.isPerfCnt := addrInPerfCnt
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
+  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted)
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
@@ -797,6 +800,11 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
     "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
     "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
+    "ICacheMMIO" -> (0x102a, "perfCntIcacheMMIOCnt"),
+    // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
+    // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
+    // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
+    // "ExitLoop3" -> (0x102e, "CntExitLoop3")
     
     "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
     "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),

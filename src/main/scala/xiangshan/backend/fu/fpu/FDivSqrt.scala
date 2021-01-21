@@ -74,7 +74,7 @@ class FDivSqrt extends FPUSubModule {
   val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
 
   io.in.ready := state===s_idle
-  io.out.valid := state===s_finish && !(killReg || kill)
+  io.out.valid := state===s_finish && !killReg
   io.out.bits.uop := uopReg
   io.out.bits.data := RegNext(data, divSqrtRawValid)
   fflags := RegNext(flags, divSqrtRawValid)
