@@ -52,7 +52,7 @@ class RSCtrlDataIO(srcNum: Int) extends XSBundle {
 
   val fuReady   = Input(Bool())
   val srcUpdate = Input(Vec(IssQueSize+1, Vec(srcNum, Bool()))) // Note: the last one for enq
-  val redVec    = Input(Vec(IssQueSize, Bool()))
+  val redirectVec    = Input(Vec(IssQueSize, Bool()))
   val feedback  = Input(Vec(IssQueSize+1, Bool())) // Note: the last one for hit
 
   override def cloneType: RSCtrlDataIO.this.type = new RSCtrlDataIO(srcNum).asInstanceOf[this.type]
@@ -102,7 +102,7 @@ class ReservationStationCtrl
    * valid queue : from state queue, valid or not
    * empty queue : from state queue, empty or not(not valid and not replay)
    * src   queue : record rdy or not
-   * cnt   queue : record replay cycle
+   * count   queue : record replay cycle
    */
 
 
@@ -117,69 +117,69 @@ class ReservationStationCtrl
   val validQueue    = VecInit(stateQueue.map(_ === s_valid))
   val emptyQueue    = VecInit(stateQueue.map(_ === s_idle))
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, Bool())))
-  val cntQueue      = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
+  val countQueue      = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
 
   // rs queue part:
   // val tailPtr       = RegInit(0.U((iqIdxWidth+1).W))
   val tailPtr       = RegInit(0.U.asTypeOf(new CircularQueuePtr(iqSize)))
-  val idxQueue      = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
+  val indexQueue      = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
 
   // turn to indexed index
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until iqSize).map(f))
-  val stateIdxQue = widthMap(i => stateQueue(idxQueue(i))) // NOTE: only use for debug, remove it later
-  val validIdxQue = widthMap(i => validQueue(idxQueue(i)))
-  val emptyIdxQue = widthMap(i => emptyQueue(idxQueue(i)))
-  val srcIdxQue   = widthMap(i => srcQueue(idxQueue(i)))
-  val cntIdxQue   = widthMap(i => cntQueue(idxQueue(i))) // NOTE: only use for debug, remove it later
+  val stateIdxQue = widthMap(i => stateQueue(indexQueue(i))) // NOTE: only use for debug, remove it later
+  val validIdxQue = widthMap(i => validQueue(indexQueue(i)))
+  val emptyIdxQue = widthMap(i => emptyQueue(indexQueue(i)))
+  val srcIdxQue   = widthMap(i => srcQueue(indexQueue(i)))
+  val cntIdxQue   = widthMap(i => countQueue(indexQueue(i))) // NOTE: only use for debug, remove it later
   val readyIdxQue = VecInit(srcIdxQue.zip(validIdxQue).map{ case (a,b) => Cat(a).andR & b })
 
   // redirect
-  val redVec      = io.data.redVec
-  val redVecPtr   = widthMap(i => io.data.redVec(idxQueue(i)))
-  val fbMatchVec = Wire(UInt(iqSize.W))
+  val redirectVec      = io.data.redirectVec
+  val redirectVecPtr   = widthMap(i => io.data.redirectVec(indexQueue(i)))
+  val feedbackMatchVec = Wire(UInt(iqSize.W))
   if (feedback) {
-    fbMatchVec := widthMap(i => io.data.feedback(i) && (stateQueue(i) === s_wait || stateQueue(i)===s_valid)).asUInt
+    feedbackMatchVec := widthMap(i => io.data.feedback(i) && (stateQueue(i) === s_wait || stateQueue(i)===s_valid)).asUInt
   } else {
-    fbMatchVec := 0.U
+    feedbackMatchVec := 0.U
   }
-  val fbHit       = io.data.feedback(IssQueSize)
+  val feedbackHit       = io.data.feedback(IssQueSize)
 
   // select ready
   // for no replay, select just equal to deq (attached)
   // with   replay, select is just two stage with deq.
-  val issFire = Wire(Bool())
+  val issueFire = Wire(Bool())
   val moveMask = WireInit(0.U(iqSize.W))
   val lastSelMask = Wire(UInt(iqSize.W))
   val selectMask = WireInit(VecInit((0 until iqSize).map(i => readyIdxQue(i)))).asUInt & lastSelMask
-  val selIdx = ParallelPriorityMux(selectMask.asBools zip idxQueue) // NOTE: the idx in the idxQueue
-  val selPtr = ParallelPriorityMux(selectMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of idxQueue
+  val selectIndex = ParallelPriorityMux(selectMask.asBools zip indexQueue) // NOTE: the idx in the indexQueue
+  val selectPtr = ParallelPriorityMux(selectMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of indexQueue
   val haveReady = Cat(selectMask).orR
-  val selIdxReg = RegNext(selIdx)
-  val selValid = haveReady
-  val selReg = RegNext(selValid)
-  val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr))
-  lastSelMask := ~Mux(selReg, UIntToOH(selPtrReg), 0.U)
-  assert(RegNext(!(haveReady && selPtr >= tailPtr.asUInt)), "bubble should not have valid state like s_valid or s_wait")
+  val selectIndexReg = RegNext(selectIndex)
+  val selectValid = haveReady
+  val selectReg = RegNext(selectValid)
+  val selectPtrReg = RegNext(Mux(moveMask(selectPtr), selectPtr-1.U, selectPtr))
+  lastSelMask := ~Mux(selectReg, UIntToOH(selectPtrReg), 0.U)
+  assert(RegNext(!(haveReady && selectPtr >= tailPtr.asUInt)), "bubble should not have valid state like s_valid or s_wait")
 
   // sel bubble
-  val lastBubMask = Wire(UInt(iqSize.W))
-  val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i)))).asUInt & lastBubMask
-  // val bubIdx = ParallelMux(bubMask zip idxQueue) // NOTE: the idx in the idxQueue
-  val bubPtr= ParallelPriorityMux(bubMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of the idxQueue
-  val findBubble = Cat(bubMask).orR
-  val haveBubble = findBubble && (bubPtr < tailPtr.asUInt)
-  val bubIdx = idxQueue(bubPtr)
-  val bubValid = haveBubble && (if (feedback) true.B else !selValid)
-  val bubReg = RegNext(bubValid)
-  val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr))
-  lastBubMask := ~Mux(bubReg, UIntToOH(bubPtrReg), 0.U) & (if(feedback) ~(0.U(iqSize.W))
-                                                           else         Mux(RegNext(selValid && io.redirect.valid), 0.U, ~(0.U(iqSize.W))))
+  val lastbubbleMask = Wire(UInt(iqSize.W))
+  val bubbleMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i)))).asUInt & lastbubbleMask
+  // val bubbleIndex = ParallelMux(bubbleMask zip indexQueue) // NOTE: the idx in the indexQueue
+  val bubblePtr= ParallelPriorityMux(bubbleMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of the indexQueue
+  val findBubble = Cat(bubbleMask).orR
+  val haveBubble = findBubble && (bubblePtr < tailPtr.asUInt)
+  val bubbleIndex = indexQueue(bubblePtr)
+  val bubbleValid = haveBubble && (if (feedback) true.B else !selectValid)
+  val bubbleReg = RegNext(bubbleValid)
+  val bubblePtrReg = RegNext(Mux(moveMask(bubblePtr), bubblePtr-1.U, bubblePtr))
+  lastbubbleMask := ~Mux(bubbleReg, UIntToOH(bubblePtrReg), 0.U) & (if(feedback) ~(0.U(iqSize.W))
+                                                           else         Mux(RegNext(selectValid && io.redirect.valid), 0.U, ~(0.U(iqSize.W))))
 
   // deq
-  val dequeue = if (feedback) bubReg
-                else          bubReg || issFire
-  val deqPtr =  if (feedback) bubPtrReg
-                else Mux(selReg, selPtrReg, bubPtrReg)
+  val dequeue = if (feedback) bubbleReg
+                else          bubbleReg || issueFire
+  val deqPtr =  if (feedback) bubblePtrReg
+                else Mux(selectReg, selectPtrReg, bubblePtrReg)
   moveMask := {
     (Fill(iqSize, 1.U(1.W)) << deqPtr)(iqSize-1, 0)
   } & Fill(iqSize, dequeue)
@@ -187,30 +187,30 @@ class ReservationStationCtrl
   // move, move happens when deq
   for(i <- 0 until iqSize-1){
     when(moveMask(i)){
-      idxQueue(i) := idxQueue(i+1)
+      indexQueue(i) := indexQueue(i+1)
     }
   }
   when(dequeue){
-    idxQueue.last := idxQueue(deqPtr)
+    indexQueue.last := indexQueue(deqPtr)
   }
 
-  when (issFire) {
-    if (feedback) { when (stateQueue(selIdxReg) === s_valid) { stateQueue(selIdxReg) := s_wait } }
-    else { stateQueue(selIdxReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
+  when (issueFire) {
+    if (feedback) { when (stateQueue(selectIndexReg) === s_valid) { stateQueue(selectIndexReg) := s_wait } }
+    else { stateQueue(selectIndexReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
   }
 
   // redirect and feedback && wakeup
   for (i <- 0 until iqSize) {
     // replay
-    val cnt = cntQueue(i)
+    val count = countQueue(i)
     when (stateQueue(i) === s_replay) {
-      cnt := cnt - 1.U
-      when (cnt === 0.U) { stateQueue(i) := s_valid }
+      count := count - 1.U
+      when (count === 0.U) { stateQueue(i) := s_valid }
     }
     // feedback
-    when (fbMatchVec(i)) {
-      stateQueue(i) := Mux(!fbHit && (stateQueue(i) === s_wait || stateQueue(i) === s_valid), s_replay, s_idle)
-      cntQueue(i) := Mux(fbHit, cnt, (replayDelay-1).U)
+    when (feedbackMatchVec(i)) {
+      stateQueue(i) := Mux(!feedbackHit && (stateQueue(i) === s_wait || stateQueue(i) === s_valid), s_replay, s_idle)
+      countQueue(i) := Mux(feedbackHit, count, (replayDelay-1).U)
     }
     // wakeup
     val hitVec = io.data.srcUpdate(i)
@@ -221,18 +221,18 @@ class ReservationStationCtrl
       }
     }
     // redirect
-    when (redVec(i) && stateQueue(i) =/= s_idle) {
+    when (redirectVec(i) && stateQueue(i) =/= s_idle) {
       stateQueue(i) := s_idle
     }
   }
 
   // output
-  val issValid = selReg && !redVecPtr(selPtrReg)
+  val issueValid = selectReg && !redirectVecPtr(selectPtrReg)
   if (nonBlocked) {
-    issFire := issValid
+    issueFire := issueValid
     assert(RegNext(io.data.fuReady), "if fu wanna fast wakeup, it should not block")
   } else {
-    issFire := issValid && io.data.fuReady
+    issueFire := issueValid && io.data.fuReady
   }
 
   // enq
@@ -250,7 +250,7 @@ class ReservationStationCtrl
   val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
 
   val enqPtr = Mux(tailPtr.flag, deqPtr, tailPtr.value)
-  val enqIdx = idxQueue(enqPtr)
+  val enqIdx = indexQueue(enqPtr)
   val enqBpVec = io.data.srcUpdate(IssQueSize)
 
   def stateCheck(src: UInt, srcType: UInt): Bool = {
@@ -270,8 +270,8 @@ class ReservationStationCtrl
 
   // other to Data
   io.data.enqPtr := enqIdx
-  io.data.deqPtr.valid  := selValid
-  io.data.deqPtr.bits   := selIdx
+  io.data.deqPtr.valid  := selectValid
+  io.data.deqPtr.bits   := selectIndex
   io.data.enqCtrl.valid := enqueue
   io.data.enqCtrl.bits  := io.enqCtrl.bits
 
@@ -282,20 +282,20 @@ class ReservationStationCtrl
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
   val print = !(tailPtr.asUInt===0.U) || io.enqCtrl.valid || enqueue || dequeue
-  XSDebug(print || true.B, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady}) nonBlocked:${nonBlocked.B} needfb:${feedback.B}\n")
+  XSDebug(print || true.B, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issueValid} ${io.data.fuReady}) nonBlocked:${nonBlocked.B} needfb:${feedback.B}\n")
   XSDebug(print || true.B, p"tailPtr:${tailPtr} enq:${enqueue} deq:${dequeue} isFull:${isFull} " +
     p"vIdxQue:${Binary(validIdxQue.asUInt)} rIdxQue:${Binary(readyIdxQue.asUInt)}\n")
-  XSDebug(print && Cat(redVecPtr).orR, p"Redirect: ${Hexadecimal(redVecPtr.asUInt)}\n")
-  XSDebug(print && Cat(fbMatchVec).orR, p"Feedback: ${Hexadecimal(fbMatchVec.asUInt)} Hit:${fbHit}\n")
-  XSDebug(print || true.B, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} bubMask:${Binary(bubMask.asUInt)}\n")
-  XSDebug(print || true.B, p"selPtr:${selPtr} haveReady:${haveReady} " +
-    p"selV:${selValid} selReg:${selReg} selPtrReg:${selPtrReg} selIdx:${selIdx} lastSelMask:${Hexadecimal(lastSelMask)}\n")
-  XSDebug(print || true.B, p"bubValid:${bubValid} haveBub:${haveBubble} bubPtr:${bubPtr} findBub:${findBubble} " +
-    p"bubReg:${bubReg} bubPtrReg:${bubPtrReg} bubIdx:${bubIdx} lastBubMask:${Hexadecimal(lastBubMask)}\n")
-  XSDebug(print || true.B, p"issValid:${issValid} issueFire:${issFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
-  XSDebug(p" :Idx|v|r|s |cnt|s1:s2:s3\n")
+  XSDebug(print && Cat(redirectVecPtr).orR, p"Redirect: ${Hexadecimal(redirectVecPtr.asUInt)}\n")
+  XSDebug(print && Cat(feedbackMatchVec).orR, p"Feedback: ${Hexadecimal(feedbackMatchVec.asUInt)} Hit:${feedbackHit}\n")
+  XSDebug(print || true.B, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} bubbleMask:${Binary(bubbleMask.asUInt)}\n")
+  XSDebug(print || true.B, p"selectPtr:${selectPtr} haveReady:${haveReady} " +
+    p"selV:${selectValid} selectReg:${selectReg} selectPtrReg:${selectPtrReg} selectIndex:${selectIndex} lastSelMask:${Hexadecimal(lastSelMask)}\n")
+  XSDebug(print || true.B, p"bubbleValid:${bubbleValid} haveBub:${haveBubble} bubblePtr:${bubblePtr} findBub:${findBubble} " +
+    p"bubbleReg:${bubbleReg} bubblePtrReg:${bubblePtrReg} bubbleIndex:${bubbleIndex} lastbubbleMask:${Hexadecimal(lastbubbleMask)}\n")
+  XSDebug(print || true.B, p"issueValid:${issueValid} issueFire:${issueFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
+  XSDebug(p" :Idx|v|r|s |count|s1:s2:s3\n")
   for(i <- srcQueue.indices) {
-    XSDebug(p"${i.U}: ${idxQueue(i)}|${validIdxQue(i)}|${readyIdxQue(i)}|${stateIdxQue(i)}|${cntIdxQue(i)}|" +
+    XSDebug(p"${i.U}: ${indexQueue(i)}|${validIdxQue(i)}|${readyIdxQue(i)}|${stateIdxQue(i)}|${cntIdxQue(i)}|" +
       List.tabulate(srcNum)(j => p"${srcIdxQue(i)(j)}").reduce(_ + ":" + _) + "\n")
   }
 }
@@ -392,10 +392,9 @@ class ReservationStationData
 
   val uop = WireInit(VecInit((0 until iqSize).map(i => uopRead(i.U))))
 
-  val redHit = WireInit(false.B)
+  val redirectHit = WireInit(false.B)
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
-  val selVRed = sel.valid && ~redHit
   val deq   = RegEnable(sel.bits, sel.valid)
   val enqCtrl = io.ctrl.enqCtrl
   val enqUop = enqCtrl.bits
@@ -473,18 +472,18 @@ class ReservationStationData
     val srcSeq = Seq(uop(i).psrc1, uop(i).psrc2, uop(i).psrc3)
     val srcTypeSeq = Seq(uop(i).ctrl.src1Type, uop(i).ctrl.src2Type, uop(i).ctrl.src3Type)
     for (j <- 0 until srcNum) {
-      val (wuHit, wuData) = wakeup(srcSeq(j), srcTypeSeq(j))
-      val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
-      when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-      when (wuHit) { /* data(i)(j) := wuData */dataWrite(i.U, j, wuData) }
-      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bpData */dataWrite(i.U, j, bpData) }
+      val (wakeupHit, wakeupData) = wakeup(srcSeq(j), srcTypeSeq(j))
+      val (bypassHit, bypassHitReg, bypassData) = bypass(srcSeq(j), srcTypeSeq(j))
+      when (wakeupHit || bypassHit) { io.ctrl.srcUpdate(i)(j) := true.B }
+      when (wakeupHit) { /* data(i)(j) := wakeupData */dataWrite(i.U, j, wakeupData) }
+      when (bypassHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bypassData */dataWrite(i.U, j, bypassData) }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
       //       enq bp is done at below
-      XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)}\n")
-      XSDebug(bpHit, p"BPHit: (${i.U})(${j.U})\n")
-      XSDebug(bpHitReg, p"BPHitData: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)}\n")
+      XSDebug(wakeupHit, p"wakeupHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wakeupData)}\n")
+      XSDebug(bypassHit, p"bypassHit: (${i.U})(${j.U})\n")
+      XSDebug(bypassHitReg, p"bypassHitData: (${i.U})(${j.U}) Data:0x${Hexadecimal(bypassData)}\n")
     }
   }
 
@@ -499,24 +498,24 @@ class ReservationStationData
   if (srcNum > 1) exuInput.src2 := regValues(1)
   if (srcNum > 2) exuInput.src3 := regValues(2)
 
-  io.deq.valid := RegNext(selVRed)
+  io.deq.valid := RegNext(sel.valid && ~redirectHit)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
 
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
-    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    when (bpHitReg) { /* data(enqPtrReg)(i) := bpData */dataWrite(enqPtrReg, i, bpData) }
-    h := bpHit
+    val (bypassHit, bypassHitReg, bypassData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    when (bypassHitReg) { /* data(enqPtrReg)(i) := bypassData */dataWrite(enqPtrReg, i, bypassData) }
+    h := bypassHit
     // NOTE: enq bp is done here
-    XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
-    XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
+    XSDebug(bypassHit, p"EnqbypassHit: (${i.U})\n")
+    XSDebug(bypassHitReg, p"EnqbypassHitData: (${i.U}) data:${Hexadecimal(bypassData)}\n")
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }
-  io.ctrl.redVec   := uop.map(_.roqIdx.needFlush(io.redirect))
-  redHit := io.ctrl.redVec(sel.bits)
+  io.ctrl.redirectVec   := uop.map(_.roqIdx.needFlush(io.redirect))
+  redirectHit := io.ctrl.redirectVec(sel.bits)
 
   io.ctrl.feedback := DontCare
   if (feedback) {
@@ -551,7 +550,7 @@ class ReservationStationData
 
 
   // log
-  XSDebug(Cat(io.ctrl.redVec).orR, p"Red: ${io.ctrl.redVec}\n")
+  XSDebug(Cat(io.ctrl.redirectVec).orR, p"Red: ${io.ctrl.redirectVec}\n")
   XSDebug(io.feedback.valid && feedback.B, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
   XSDebug(true.B, p"out(${io.deq.valid} ${io.deq.ready})\n")
   XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): deqPtr:${deq} pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
