@@ -198,6 +198,7 @@ class FtqEntry extends XSBundle {
 
     val brMask = Vec(PredictWidth, Bool())
     val jalMask = Vec(PredictWidth, Bool())
+    val valids = Vec(PredictWidth, Bool())
 
     // backend update
     val mispred = Vec(PredictWidth, Bool())
