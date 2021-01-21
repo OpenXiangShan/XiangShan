@@ -332,8 +332,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       read_emu_regs(reg);
       void* get_img_start();
       long get_img_size();
-      ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
-      ref_difftest_setregs(reg);
+      ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), 0);
+      ref_difftest_setregs(reg, 0);
       printf("The first instruction has commited. Difftest enabled. \n");
     }
 
@@ -504,23 +504,23 @@ void Emulator::snapshot_save(const char *filename) {
   stream.unbuf_write(get_ram_start(), size);
 
   uint64_t ref_r[DIFFTEST_NR_REG];
-  ref_difftest_getregs(&ref_r);
+  ref_difftest_getregs(&ref_r, 0);
   stream.unbuf_write(ref_r, sizeof(ref_r));
 
   uint64_t nemu_this_pc = get_nemu_this_pc();
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-  ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
+  ref_difftest_memcpy_from_ref(buf, 0x80000000, size, 0);
   stream.unbuf_write(buf, size);
   munmap(buf, size);
 
   struct SyncState sync_mastate;
-  ref_difftest_get_mastatus(&sync_mastate);
+  ref_difftest_get_mastatus(&sync_mastate, 0);
   stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
   uint64_t csr_buf[4096];
-  ref_difftest_get_csr(csr_buf);
+  ref_difftest_get_csr(csr_buf, 0);
   stream.unbuf_write(&csr_buf, sizeof(csr_buf));
 
   long sdcard_offset;
@@ -553,7 +553,7 @@ void Emulator::snapshot_load(const char *filename) {
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
-  ref_difftest_memcpy_from_dut(0x80000000, buf, size);
+  ref_difftest_memcpy_from_dut(0x80000000, buf, size, 0);
   munmap(buf, size);
 
   struct SyncState sync_mastate;

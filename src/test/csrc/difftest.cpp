@@ -12,19 +12,19 @@
 #define DEBUG_RETIRE_TRACE_SIZE 16
 #define DEBUG_WB_TRACE_SIZE 16
 
-void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
-void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n) = NULL;
-void (*ref_difftest_getregs)(void *c) = NULL;
-void (*ref_difftest_setregs)(const void *c) = NULL;
-void (*ref_difftest_get_mastatus)(void *s) = NULL;
-void (*ref_difftest_set_mastatus)(const void *s) = NULL;
-void (*ref_difftest_get_csr)(void *c) = NULL;
-void (*ref_difftest_set_csr)(const void *c) = NULL;
-vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
-int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) = NULL;
-static void (*ref_difftest_exec)(uint64_t n) = NULL;
-static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
-static void (*ref_isa_reg_display)(void) = NULL;
+void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n, int coreid) = NULL;
+void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n, int coreid) = NULL;
+void (*ref_difftest_getregs)(void *c, int coreid) = NULL;
+void (*ref_difftest_setregs)(const void *c, int coreid) = NULL;
+void (*ref_difftest_get_mastatus)(void *s, int coreid) = NULL;
+void (*ref_difftest_set_mastatus)(const void *s, int coreid) = NULL;
+void (*ref_difftest_get_csr)(void *c, int coreid) = NULL;
+void (*ref_difftest_set_csr)(const void *c, int coreid) = NULL;
+vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para, int coreid) = NULL;
+int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid) = NULL;
+static void (*ref_difftest_exec)(uint64_t n, int coreid) = NULL;
+static void (*ref_difftest_raise_intr)(uint64_t NO, int coreid) = NULL;
+static void (*ref_isa_reg_display)(int coreid) = NULL;
 
 static bool is_skip_ref;
 static bool is_skip_dut;
@@ -41,7 +41,7 @@ void difftest_skip_ref() {
 void difftest_skip_dut() {
   if (is_skip_dut) return;
 
-  ref_difftest_exec(1);
+  ref_difftest_exec(1, 0);
   is_skip_dut = true;
 }
 
@@ -51,49 +51,49 @@ void init_difftest() {
   puts("Using " REF_SO " for difftest");
   assert(handle);
 
-  ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
+  ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t, int))dlsym(handle, "difftest_memcpy_from_dut");
   assert(ref_difftest_memcpy_from_dut);
 
-  ref_difftest_memcpy_from_ref = (void (*)(void *, paddr_t, size_t))dlsym(handle, "difftest_memcpy_from_ref");
+  ref_difftest_memcpy_from_ref = (void (*)(void *, paddr_t, size_t, int))dlsym(handle, "difftest_memcpy_from_ref");
   assert(ref_difftest_memcpy_from_ref);
 
-  ref_difftest_getregs = (void (*)(void *))dlsym(handle, "difftest_getregs");
+  ref_difftest_getregs = (void (*)(void *, int))dlsym(handle, "difftest_getregs");
   assert(ref_difftest_getregs);
 
-  ref_difftest_setregs = (void (*)(const void *))dlsym(handle, "difftest_setregs");
+  ref_difftest_setregs = (void (*)(const void *, int))dlsym(handle, "difftest_setregs");
   assert(ref_difftest_setregs);
 
-  ref_difftest_get_mastatus = (void (*)(void *))dlsym(handle, "difftest_get_mastatus");
+  ref_difftest_get_mastatus = (void (*)(void *, int))dlsym(handle, "difftest_get_mastatus");
   assert(ref_difftest_get_mastatus);
 
-  ref_difftest_set_mastatus = (void (*)(const void *))dlsym(handle, "difftest_set_mastatus");
+  ref_difftest_set_mastatus = (void (*)(const void *, int))dlsym(handle, "difftest_set_mastatus");
   assert(ref_difftest_set_mastatus);
 
-  ref_difftest_get_csr = (void (*)(void *))dlsym(handle, "difftest_get_csr");
+  ref_difftest_get_csr = (void (*)(void *, int))dlsym(handle, "difftest_get_csr");
   assert(ref_difftest_get_csr);
 
-  ref_difftest_set_csr = (void (*)(const void *))dlsym(handle, "difftest_set_csr");
+  ref_difftest_set_csr = (void (*)(const void *, int))dlsym(handle, "difftest_set_csr");
   assert(ref_difftest_set_csr);
 
-  ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
+  ref_disambiguate_exec = (vaddr_t (*)(void *, int))dlsym(handle, "disambiguate_exec");
   assert(ref_disambiguate_exec);
 
-  ref_difftest_store_commit = (int (*)(uint64_t*, uint64_t*, uint8_t*))dlsym(handle, "difftest_store_commit");
+  ref_difftest_store_commit = (int (*)(uint64_t*, uint64_t*, uint8_t*, int))dlsym(handle, "difftest_store_commit");
   assert(ref_difftest_store_commit);
 
-  ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
+  ref_difftest_exec = (void (*)(uint64_t, int))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
-  ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
+  ref_difftest_raise_intr = (void (*)(uint64_t, int))dlsym(handle, "difftest_raise_intr");
   assert(ref_difftest_raise_intr);
 
-  ref_isa_reg_display = (void (*)(void))dlsym(handle, "isa_reg_display");
+  ref_isa_reg_display = (void (*)(int))dlsym(handle, "isa_reg_display");
   assert(ref_isa_reg_display);
 
-  void (*ref_difftest_init)(void) = (void (*)(void))dlsym(handle, "difftest_init");
+  void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
 
-  ref_difftest_init();
+  ref_difftest_init(0);
 }
 
 static const char *reg_name[DIFFTEST_NR_REG] = {
@@ -140,7 +140,7 @@ void difftest_display(uint8_t mode) {
         j, pc_wb_queue[j], wen_wb_queue[j]!=0, wdst_wb_queue[j], wdata_wb_queue[j], (j==((wb_pointer-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
   }
   printf("\n==============  Reg Diff  ==============\n");
-  ref_isa_reg_display();
+  ref_isa_reg_display(0);
   printf("priviledgeMode: %d\n", mode);
 }
 
@@ -171,12 +171,12 @@ int difftest_step(DiffState *s) {
     struct SyncState sync;
     sync.lrscValid = 0;
     sync.lrscAddr = 0;
-    ref_difftest_set_mastatus((uint64_t*)&sync); // sync lr/sc microarchitectural regs
+    ref_difftest_set_mastatus((uint64_t*)&sync, 0); // sync lr/sc microarchitectural regs
   }
 
   // single step difftest
   if (s->intrNO) {
-    ref_difftest_raise_intr(s->intrNO);
+    ref_difftest_raise_intr(s->intrNO, 0);
     // ref_difftest_exec(1);//TODO
   }
   else {
@@ -191,14 +191,14 @@ int difftest_step(DiffState *s) {
         // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
         // printf("SKIP %d\n", i);
         // to skip the checking of an instruction, just copy the reg state to reference design
-        ref_difftest_getregs(&ref_r);
+        ref_difftest_getregs(&ref_r, 0);
         ref_r[DIFFTEST_THIS_PC] += selectBit(s->isRVC, i) ? 2 : 4;
         if(selectBit(s->wen, i)){
           if(s->wdst[i] != 0){
             ref_r[s->wdst[i]] = s->wdata[i];
           }
         }
-        ref_difftest_setregs(ref_r);
+        ref_difftest_setregs(ref_r, 0);
       }else{
         // single step exec
         // IPF, LPF, SPF
@@ -208,14 +208,14 @@ int difftest_step(DiffState *s) {
           ds.exceptionNo = s->cause;
           ds.mtval = s->reg_scala[DIFFTEST_MTVAL];
           ds.stval = s->reg_scala[DIFFTEST_STVAL];
-          ref_disambiguate_exec(&ds);
+          ref_disambiguate_exec(&ds, 0);
         }else{
-          ref_difftest_exec(1);
+          ref_difftest_exec(1, 0);
         }
       }
     }
   }
-  ref_difftest_getregs(&ref_r);
+  ref_difftest_getregs(&ref_r, 0);
 
   uint64_t next_pc = ref_r[DIFFTEST_THIS_PC];
   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
@@ -255,5 +255,5 @@ int difftest_step(DiffState *s) {
 }
 
 int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
-  return ref_difftest_store_commit(saddr, sdata, smask);
+  return ref_difftest_store_commit(saddr, sdata, smask, 0);
 }
