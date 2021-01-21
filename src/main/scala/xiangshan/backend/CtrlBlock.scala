@@ -166,7 +166,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
 
   roq.io.redirect <> backendRedirect
-  roq.io.exeWbResults.take(roqWbSize-1).zip(
+  roq.io.exeWbResults.zip(
     io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
   ).foreach{
     case(x, y) =>

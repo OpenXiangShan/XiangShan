@@ -37,12 +37,12 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper with NeedImpl {
     val enqPtr = Output(new FtqPtr)
     // roq commit, read out fectch packet and deq
     val roq_commits = Vec(CommitWidth, ValidIO(new RoqCommitInfo))
-    val commit_cfiUpdate = Vec(CommitWidth, ValidIO(new CfiUpdateInfo))
+    val commit_ftqEntry = ValidIO(new FtqEntry)
     // redirect, reset enq ptr
     val redirect = Input(ValidIO(new Redirect))
     // exu write back, update info
     val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    // pc read reqs (1 for load replay / exceptions, 1 for jump/auipc, 1 for misprediction)
+    // pc read reqs (0: jump/auipc 1: redirect 2: load replay / exceptions)
     val ftqRead = Vec(3, Flipped(new FtqRead))
   })
 
@@ -53,6 +53,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper with NeedImpl {
   // enq
   io.leftOne := validEntries === (FtqSize - 1).U
   io.enq.ready := validEntries < FtqSize.U
+
+
+
 
 
 

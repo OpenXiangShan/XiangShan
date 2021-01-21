@@ -196,10 +196,13 @@ class FtqEntry extends XSBundle {
     val rasTop = new RASEntry()
     val metas = Vec(PredictWidth, new BpuMeta)
 
-    val brMask = UInt(PredictWidth.W)
-    val jalMask = UInt(PredictWidth.W)
+    val brMask = Vec(PredictWidth, Bool())
+    val jalMask = Vec(PredictWidth, Bool())
 
-    val mispred = UInt(PredictWidth.W)
+    // backend update
+    val mispred = Vec(PredictWidth, Bool())
+    val taken = Vec(PredictWidth, Bool())
+    val jalr_target = UInt(VAddrBits.W)
 }
 
 
@@ -285,8 +288,7 @@ class Redirect extends XSBundle {
   val roqIdx = new RoqPtr
   val level = RedirectLevel()
   val interrupt = Bool()
-  val pc = UInt(VAddrBits.W)
-  val target = UInt(VAddrBits.W)
+  val cfiUpdate = new CfiUpdateInfo
 
   def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
@@ -377,8 +379,8 @@ class FrontendToBackendIO extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val fetchInfo = DecoupledIO(new FtqEntry)
   // from backend
-  val redirect_cfiUpdate = Flipped(ValidIO(new CfiUpdateInfo))
-  val commit_cfiUpdate = Flipped(Vec(CommitWidth, ValidIO(new CfiUpdateInfo)))
+  val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
+  val commit_cfiUpdate = Flipped(ValidIO(new FtqEntry))
 }
 
 class TlbCsrBundle extends XSBundle {
