@@ -13,9 +13,9 @@ trait HasSbufferCst extends HasXSParameter {
   def s_prepare = 2.U(2.W)
   def s_inflight = 3.U(2.W)
 
-  val evictCycle = 8192
+  val evictCycle = 1 << 20
   require(isPow2(evictCycle))
-  val countBits = 1 + log2Up(evictCycle)
+  val countBits = log2Up(evictCycle+1)
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = tag + offset
@@ -108,6 +108,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val sqempty = Input(Bool())
     val flush = new Bundle {
       val valid = Input(Bool())
       val empty = Output(Bool())
@@ -291,7 +292,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   do_eviction := validCount >= 12.U
 
-  io.flush.empty := empty
+  io.flush.empty := empty && io.sqempty
   lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
   switch(sbuffer_state){
     is(x_idle){

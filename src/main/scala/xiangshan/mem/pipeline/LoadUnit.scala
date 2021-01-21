@@ -91,9 +91,9 @@ class LoadUnit_S1 extends XSModule {
 
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.dtlbResp.bits.paddr
-  val s1_exception = io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  val s1_exception = selectLoad(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mmio = !s1_tlb_miss && io.dtlbResp.bits.mmio
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
@@ -124,6 +124,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.mmio := s1_mmio && !s1_exception
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
+  io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -147,7 +148,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_mmio = io.in.bits.mmio
-  val s2_exception = io.in.bits.uop.cf.exceptionVec.asUInt.orR
+  val s2_exception = selectLoad(io.in.bits.uop.cf.exceptionVec, false).asUInt.orR
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
@@ -192,7 +193,9 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  io.out.bits.miss := s2_cache_miss && !fullForward
+  // when exception occurs, set it to not miss and let it write back to roq (via int port)
+  io.out.bits.miss := s2_cache_miss && !fullForward && !s2_exception
+  io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   io.out.bits.mmio := s2_mmio
 
   io.in.ready := io.out.ready || !io.in.valid
@@ -269,12 +272,14 @@ class LoadUnit extends XSModule with HasLoadHelper {
   // Load queue will be updated at s2 for both hit/miss int/fp load
   io.lsq.loadIn.valid := load_s2.io.out.valid
   io.lsq.loadIn.bits := load_s2.io.out.bits
-  val s2Valid = load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
+
+  // write to rob and writeback bus
+  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss
   val refillFpLoad = io.lsq.ldout.bits.uop.ctrl.fpWen
 
   // Int load, if hit, will be writebacked at s2
   val intHitLoadOut = Wire(Valid(new ExuOutput))
-  intHitLoadOut.valid := s2Valid && !load_s2.io.out.bits.uop.ctrl.fpWen 
+  intHitLoadOut.valid := s2_wb_valid && !load_s2.io.out.bits.uop.ctrl.fpWen
   intHitLoadOut.bits.uop := load_s2.io.out.bits.uop
   intHitLoadOut.bits.data := load_s2.io.out.bits.data
   intHitLoadOut.bits.redirectValid := false.B
@@ -288,10 +293,10 @@ class LoadUnit extends XSModule with HasLoadHelper {
 
   io.ldout.bits := Mux(intHitLoadOut.valid, intHitLoadOut.bits, io.lsq.ldout.bits)
   io.ldout.valid := intHitLoadOut.valid || io.lsq.ldout.valid && !refillFpLoad
-  
+
   // Fp load, if hit, will be send to recoder at s2, then it will be recoded & writebacked at s3
   val fpHitLoadOut = Wire(Valid(new ExuOutput))
-  fpHitLoadOut.valid := s2Valid && load_s2.io.out.bits.uop.ctrl.fpWen
+  fpHitLoadOut.valid := s2_wb_valid && load_s2.io.out.bits.uop.ctrl.fpWen
   fpHitLoadOut.bits := intHitLoadOut.bits
 
   val fpLoadOut = Wire(Valid(new ExuOutput))
