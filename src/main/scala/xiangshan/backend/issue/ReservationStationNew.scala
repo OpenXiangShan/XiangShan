@@ -387,7 +387,7 @@ class ReservationStationData
   val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, iqSize, 1))
   uopMem.io <> DontCare
   uopMem.io.wen.foreach(_ := false.B)
-  
+
   // uop -- read = iqSize write = 1
   // uopMem 's read ports have fixed values
   uopMem.io.raddr.zipWithIndex.foreach{ case(r, i) => r := i.U }
@@ -476,6 +476,19 @@ class ReservationStationData
     (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
   }
 
+  // NOTE: special case that bypass(fast) when enq for bypass's uop will arrive one cylce later
+  val lastFastUops = Reg(Vec(wakeupCnt, Valid(new MicroOp)))
+  for (i <- 0 until wakeupCnt) {
+    lastFastUops(i) := io.broadcastedUops(i)
+  }
+  def lastBypass(src: UInt, srcType: UInt, valid: Bool = true.B) : (Bool, Bool, UInt) = {
+    val hitVec = lastFastUops.map(port => wbHit(port.bits, src, srcType) && port.valid && valid)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+
+    val hit = ParallelOR(hitVec)
+    (hit, RegNext(hit), RegNext(ParallelMux(hitVec zip io.writeBackedData)))
+  }
+
   io.ctrl.srcUpdate.map(a => a.map(_ := false.B))
   for (i <- 0 until iqSize) {
     val srcSeq = Seq(uop(i).psrc1, uop(i).psrc2, uop(i).psrc3)
@@ -513,17 +526,21 @@ class ReservationStationData
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) => // h: port, i: 0~srcNum-1
-    val (bpHit, bpHitReg, bpData) = bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    val (wuHit, wuData)           = wakeup(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (bpHit, bpHitReg, bpData)    = bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (wuHit, wuData)              = wakeup(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (lbpHit, lbpHitReg, lbpDataReg) = lastBypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
     val wuHitReg = RegNext(wuHit)
     val wuDataReg = RegNext(wuData)
     when (bpHitReg) { dataWrite(enqPtrReg, i, bpData) }
     when (wuHitReg) { dataWrite(enqPtrReg, i, wuDataReg) }
-    h := bpHit || wuHit
+    when (lbpHitReg) { dataWrite(enqPtrReg, i, lbpDataReg) }
+    h := bpHit || wuHit || lbpHit
     // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
+    XSDebug(lbpHit, p"EnqLBPHit: (${i.U})\n")
     XSDebug(wuHit, p"EnqWuHit: (${Binary(io.ctrl.srcUpdate(iqSize).asUInt())})\n")
     XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
+    XSDebug(lbpHitReg, p"EnqLBPHitData: (${i.U}) data:${Hexadecimal(lbpDataReg)}\n")
     XSDebug(wuHitReg, p"EnqWuHitData: (${i.U}) data:${Hexadecimal(wuDataReg)}\n")
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
