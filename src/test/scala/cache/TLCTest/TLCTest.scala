@@ -335,8 +335,6 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               if (AChannel_valids(i) && AChannel_ready) {
                 masterAgent.fireA()
               }
-              //handle some ID
-              masterAgent.freeSource()
               masterAgent.step()
             }
 
@@ -469,9 +467,6 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               slaveAgent.fireA(aCh)
             }
             slaveAgent.tickA()
-
-            //handle some ID
-            slaveAgent.freeSink()
 
             slaveAgent.step()
             c.clock.step()

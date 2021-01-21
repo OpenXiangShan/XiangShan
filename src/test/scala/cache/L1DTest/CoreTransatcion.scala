@@ -64,21 +64,28 @@ class DCacheLoadCallerTrans extends DCacheLoadTrans with TLCCallerTrans {
     reqIssued = Some(false)
   }
 
-  def issueReq(): LitDCacheWordReq = {
+  def issueLoadReq(): LitDCacheWordReq = {
     reqIssued = Some(true)
+    startTimer()
     req.get
   }
 
-  def replay(): Unit = {
+  def replayLoad(): Unit = {
     reqIssued = Some(false)
+    resetTimer()
   }
 
-  def pairResp(inResp: LitDCacheWordResp): Unit = {
+  def pairLoadResp(inResp: LitDCacheWordResp): Unit = {
     resp = Some(inResp)
+    resetTimer()
+    if (inResp.miss && !inResp.replay) { //if it will be placed into lsq
+      startTimer()
+    }
   }
 
   def pairLsqResp(inResp: LitDCacheLineResp): Unit = {
     lsqResp = Some(inResp)
+    resetTimer()
   }
 }
 
@@ -102,14 +109,16 @@ class DCacheStoreCallerTrans extends DCacheStoreTrans with TLCCallerTrans {
     reqIssued = Some(false)
   }
 
-  def issueReq(allocId: BigInt): LitDCacheLineReq = {
+  def issueStoreReq(allocId: BigInt): LitDCacheLineReq = {
     req.get.id = allocId
     reqIssued = Some(true)
+    startTimer()
     req.get
   }
 
-  def pairResp(inResp: LitDCacheLineResp): Unit = {
+  def pairStoreResp(inResp: LitDCacheLineResp): Unit = {
     resp = Some(inResp)
+    resetTimer()
   }
 
 }
@@ -137,11 +146,13 @@ class DCacheAMOCallerTrans extends DCacheAMOTrans with TLCCallerTrans {
   def issueReq(allodId: BigInt = 0): LitDCacheWordReq = {
     req.get.id = allodId
     reqIssued = Some(true)
+    startTimer()
     req.get
   }
 
   def pairResp(inResp: LitDCacheWordResp): Unit = {
     resp = Some(inResp)
+    resetTimer()
   }
 }
 

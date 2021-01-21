@@ -16,6 +16,11 @@ class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, A
   val outerGet: mutable.Map[BigInt, GetCallerTrans] = mutable.Map[BigInt, GetCallerTrans]()
   val outerPut: mutable.Map[BigInt, PutCallerTrans] = mutable.Map[BigInt, PutCallerTrans]()
 
+  override def transStep(): Unit = {
+    outerGet.foreach(_._2.step())
+    outerPut.foreach(_._2.step())
+  }
+
   var tmpA = new TLCScalaA()
   var a_cnt = 0
   var a_cnt_end = 0

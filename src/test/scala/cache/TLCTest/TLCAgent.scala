@@ -163,7 +163,12 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
 
   var clock = 0
 
+  def transStep(): Unit = {
+    Unit
+  }
+
   def step(): Unit = {
+    transStep()
     clock += 1
   }
 
@@ -302,7 +307,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     debugPrintln(f"MaskedWrite, Addr: $alignAddr%x ,old sbData:$oldData%x , new sbData: $res%x , mask:$alignMask%x")
   }
 
-  def insertMaskedWordWrite(addr:BigInt, newWordData: BigInt, wordByteMask: BigInt):Unit = {
+  def insertMaskedWordWrite(addr: BigInt, newWordData: BigInt, wordByteMask: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
     val start_word = wordInBlock(addr)
@@ -413,6 +418,14 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       sinkIdMap.remove(ID)
       true
     }
+  }
+
+  override def transStep(): Unit = {
+    innerAcquire.foreach(_.step())
+    innerRelease.foreach(_.step())
+    innerProbe.foreach(_.step())
+    innerPut.foreach(_.step())
+    innerGet.foreach(_.step())
   }
 
   override def getState(addr: BigInt): AddrState = {
@@ -801,6 +814,11 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
     pro.prepareProbe(addr, targetPerm)
     innerProbe.append(pro)
   }
+
+  override def step(): Unit = {
+    freeSink()
+    super.step()
+  }
 }
 
 class TLCMasterAgent(ID: Int, name: String = "", val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
@@ -825,6 +843,12 @@ class TLCMasterAgent(ID: Int, name: String = "", val maxSource: Int, addrStateMa
       sourceCMap.remove(id)
       true
     }
+  }
+
+  override def transStep(): Unit = {
+    outerAcquire.foreach(_.step())
+    outerRelease.foreach(_.step())
+    outerProbe.foreach(_.step())
   }
 
   val bList = ListBuffer[TLCScalaB]()
@@ -1155,5 +1179,9 @@ class TLCMasterAgent(ID: Int, name: String = "", val maxSource: Int, addrStateMa
     outerRelease.append(rel)
   }
 
+  override def step(): Unit = {
+    freeSource()
+    super.step()
+  }
 
 }

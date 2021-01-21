@@ -137,24 +137,24 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         for (cl <- 0 until total_clock) {
           //========= core trans ===========
           //randomly add when low size
-          if (coreAgent.outerLoad.size <= 4) {
-            if (true) {
+          if (true) {
+            if (coreAgent.outerLoad.size <= 4) {
               for (i <- 0 until 8) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addLoad(addr)
               }
             }
           }
-          if (coreAgent.outerStore.size <= 4) {
-            if (true) {
+          if (true) {
+            if (coreAgent.outerStore.size <= 4) {
               for (i <- 0 until 8) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addStore(addr)
               }
             }
           }
-          if (coreAgent.outerAMO.size <= 0) {
-            if (true) {
+          if (false) {
+            if (coreAgent.outerAMO.size <= 0) {
               for (i <- 0 until 4) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addAMO(addr)
@@ -310,8 +310,6 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           }
           slaveAgent.tickA()
 
-          //handle some ID
-          slaveAgent.freeSink()
           slaveAgent.step()
 
           //============ core peek ============
@@ -376,7 +374,6 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         }
         c.io.dcacheIO.load.foreach { l =>
           l.s1_kill.poke(true.B)
-//          l.s1_paddr.poke(0x80000000L.U)
           l.req.valid.poke(false.B)
           l.resp.ready.poke(true.B)
         }

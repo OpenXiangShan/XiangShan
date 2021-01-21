@@ -266,6 +266,26 @@ trait PermissionTransition extends TLCOp {
 abstract class TLCTrans extends TLCOp with PermissionTransition with BigIntExtract {
   val blockSizeL2 = BigInt(6)
   val beatFullMask = BigInt(prefix ++ Array.fill(4)(0xff.toByte))
+
+  private var timer = 0
+  private var timerRunning = false
+
+  def step(): Unit = {
+    if (timerRunning) {
+      timer += 1
+      assert(timer <= 1000, "transaction time out!")
+    }
+  }
+
+  def startTimer(): Unit = {
+    timer = 0
+    timerRunning = true
+  }
+
+  def resetTimer(): Unit = {
+    timer = 0
+    timerRunning = false
+  }
 }
 
 trait TLCCallerTrans extends TLCTrans {
@@ -313,6 +333,7 @@ class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
     a.get.param = growParam(nowPerm, targetPerm)
     acquireIssued = Some(true)
     grantPending = Some(true)
+    startTimer()
     a.get
   }
 
@@ -322,6 +343,7 @@ class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
     a.get.param = growParam(nowPerm, targetPerm)
     acquireIssued = Some(true)
     grantPending = Some(true)
+    startTimer()
     a.get
   }
 
@@ -329,6 +351,7 @@ class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
     d = Some(inD)
     grantPending = Some(false)
     grantAckIssued = Some(false)
+    resetTimer()
   }
 
   def issueGrantAck(): TLCScalaE = {
@@ -363,6 +386,7 @@ class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
     d = Some(genD)
     grantIssued = Some(true)
     grantAckPending = Some(true)
+    startTimer()
     d.get
   }
 
@@ -380,12 +404,14 @@ class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
     d = Some(genD)
     grantIssued = Some(true)
     grantAckPending = Some(true)
+    startTimer()
     d.get
   }
 
   def pairGrantAck(inE: TLCScalaE): Unit = {
     e = Some(inE)
     grantAckPending = Some(false)
+    resetTimer()
   }
 
 }
@@ -417,12 +443,14 @@ class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
   def issueProbe(): TLCScalaB = {
     probeIssued = Some(true)
     probeAckPending = Some(true)
+    startTimer()
     b.get
   }
 
   def pairProbeAck(inC: TLCScalaC): Unit = {
     c = Some(inC)
     probeAckPending = Some(false)
+    resetTimer()
   }
 
 }
@@ -494,6 +522,7 @@ class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
     c.get.source = sourceMapId
     releaseIssued = Some(true)
     releaseAckPending = Some(true)
+    startTimer()
     c.get
   }
 
@@ -504,12 +533,14 @@ class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
     c.get.data = inData
     releaseIssued = Some(true)
     releaseAckPending = Some(true)
+    startTimer()
     c.get
   }
 
   def pairReleaseAck(inD: TLCScalaD): Unit = {
     d = Some(inD)
     releaseAckPending = Some(false)
+    resetTimer()
   }
 
 }
@@ -546,12 +577,14 @@ class GetCallerTrans() extends GetTrans with TLCCallerTrans {
 
   def pairGet(inA: TLCScalaA): Unit = {
     a = Some(inA)
-    accessAckDataPending = Some(false)
+    accessAckDataPending = Some(true)
+    startTimer()
   }
 
   def pairAccessAckData(inD: TLCScalaD): Unit = {
     d = Some(inD)
-    accessAckDataPending = Some(true)
+    accessAckDataPending = Some(false)
+    resetTimer()
   }
 }
 
@@ -589,12 +622,14 @@ class PutCallerTrans() extends GetTrans with TLCCallerTrans {
   //inA will be concat in fireQueue
   def pairPut(inA: TLCScalaA): Unit = {
     a = Some(inA)
-    accessAckPending = Some(false)
+    accessAckPending = Some(true)
+    startTimer()
   }
 
   def pairAccessAck(inD: TLCScalaD): Unit = {
     d = Some(inD)
-    accessAckPending = Some(true)
+    accessAckPending = Some(false)
+    resetTimer()
   }
 }
 
@@ -619,16 +654,4 @@ class PutCalleeTrans() extends GetTrans with TLCCalleeTrans {
     accessAckIssued = Some(true)
     d.get
   }
-}
-
-class FakeTrans(val addr: BigInt) extends TLCTrans with BigIntExtract {
-  var data: BigInt = 0
-}
-
-class FakeReadTrans(addr: BigInt) extends FakeTrans(addr) {
-
-}
-
-class FakeWriteTrans(addr: BigInt) extends FakeTrans(addr) {
-  var newData: BigInt = 0
 }

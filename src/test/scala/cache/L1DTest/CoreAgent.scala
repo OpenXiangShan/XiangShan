@@ -20,6 +20,12 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
   val outerStore: ListBuffer[DCacheStoreCallerTrans] = ListBuffer()
   val outerAMO: ListBuffer[DCacheAMOCallerTrans] = ListBuffer()
 
+  override def transStep(): Unit = {
+    outerLoad.foreach(_.step())
+    outerStore.foreach(_.step())
+    outerAMO.foreach(_.step())
+  }
+
   private val maxStoreId = 255
   private val maxAMOId = 0
 
@@ -34,7 +40,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
         if (nextLoad.isDefined) {
           //alloc & issue
           s0_loadTrans(i) = nextLoad
-          loadPortsReqMessage(i) = Some(nextLoad.get.issueReq())
+          loadPortsReqMessage(i) = Some(nextLoad.get.issueLoadReq())
         }
       }
     }
@@ -60,15 +66,14 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
   def fireLoadResp(i: Int, resp: LitDCacheWordResp): Unit = {
     val loadT = s2_loadTrans(i).get
     val loadAddr = loadT.req.get.addr
-    loadT.pairResp(resp)
+    loadT.pairLoadResp(resp)
     if (!resp.miss) {
-      val wc = wordInBlock(loadAddr)
       insertMaskedWordRead(loadAddr, resp.data, loadT.req.get.mask)
       outerLoad -= loadT
     }
     else if (resp.replay) {
       outerLoad -= loadT //drop it
-      loadT.replay() //mark replay
+      loadT.replayLoad() //mark replay
       outerLoad.append(loadT) //pushpack
     }
     else {
@@ -117,7 +122,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
         val allocId = (0 to maxStoreId).find(i => !storeIdMap.contains(BigInt(i)))
         if (allocId.isDefined) {
           //alloc & issue
-          storePortReqMessage = Some(nextStore.get.issueReq(BigInt(allocId.get)))
+          storePortReqMessage = Some(nextStore.get.issueStoreReq(BigInt(allocId.get)))
           storeIdMap(BigInt(allocId.get)) = nextStore.get
         } else
           debugPrintln("cann't alloc ID for core store")
@@ -138,7 +143,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     val storeId = resp.id
     val storeTrans = storeIdMap(storeId)
     val storeReq = storeTrans.req.get
-    storeTrans.pairResp(resp)
+    storeTrans.pairStoreResp(resp)
     //free resource
     storeIdMap.remove(storeId)
     //drop finished store
@@ -194,7 +199,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
         s1_loadTrans(i) = None
       }
     }
-    clock += 1
+    super.step()
   }
 
   def addLoad(addr: BigInt): Unit = {
