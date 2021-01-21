@@ -242,7 +242,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
       cacheParams.tagCode.decode(rdata).corrected)
 
   for (i <- 0 until nWays) {
-    io.resp(i).valid := RegNext(valid_array(io.read.bits.idx)(i))
+    io.resp(i).valid := valid_array(RegNext(io.read.bits.idx))(i)
     io.resp(i).tag   := rtags(i)
   }
 
