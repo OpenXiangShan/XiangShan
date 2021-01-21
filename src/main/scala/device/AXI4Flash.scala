@@ -25,10 +25,12 @@ class AXI4Flash
     )
     def getOffset(addr: UInt) = addr(12,0)
 
-    val rdata = Wire(UInt(64.W))
-    RegMap.generate(mapping, getOffset(raddr), rdata,
-      getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+    val rdata = Wire(Vec(2,UInt(32.W)))
+    (0 until 2).map{ i =>
+      RegMap.generate(mapping, getOffset(raddr + (i * 4).U), rdata(i),
+        getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+    }
 
-    in.r.bits.data := Fill(2, rdata(31,0))
+    in.r.bits.data := rdata.asUInt
   }
 }

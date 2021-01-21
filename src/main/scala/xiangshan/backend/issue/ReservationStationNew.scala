@@ -492,6 +492,7 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
+  exuInput.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
   val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   exuInput.src1 := regValues(0)
@@ -531,6 +532,7 @@ class ReservationStationData
     if (fixedDelay == 0) {
       io.selectedUop.valid := sel.valid
       io.selectedUop.bits  := uop(sel.bits)
+      io.selectedUop.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     } else {
       val bpQueue = Module(new BypassQueue(fixedDelay))
       bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
@@ -538,6 +540,7 @@ class ReservationStationData
       bpQueue.io.redirect := io.redirect
       io.selectedUop.valid := bpQueue.io.out.valid
       io.selectedUop.bits  := bpQueue.io.out.bits
+      io.selectedUop.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     }
 
 

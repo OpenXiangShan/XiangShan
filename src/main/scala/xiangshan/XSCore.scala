@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -277,7 +277,8 @@ abstract class XSBundle extends Bundle
 case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = false,
+  EnablePerfDebug: Boolean = false
 )
 
 // object AddressSpace extends HasXSParameter {
@@ -315,6 +316,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
 
   // outer facing nodes
   val l1pluscache = LazyModule(new L1plusCache())
+  val instrUncache = LazyModule(new InstrUncache())
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
@@ -371,6 +373,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ))
 
   val memBlock = outer.memBlock.module
+  val instrUncache = outer.instrUncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val l2Prefetcher = outer.l2Prefetcher.module
@@ -383,6 +386,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
   l1pluscache.io.flush := frontend.io.l1plusFlush
   frontend.io.fencei := integerBlock.io.fenceio.fencei
+
+  instrUncache.io.req <> frontend.io.mmio_acquire
+  instrUncache.io.resp <> frontend.io.mmio_grant
+  instrUncache.io.flush <> frontend.io.mmio_flush
 
   ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
   ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock

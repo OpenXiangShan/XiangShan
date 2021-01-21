@@ -83,6 +83,7 @@ class Dispatch2Ls extends XSModule {
       enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
         io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
     }
+    enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
@@ -133,4 +134,8 @@ class Dispatch2Ls extends XSModule {
 //        p"(${readPort(i)  }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
 //        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+  XSPerf("waitInstr", PopCount(io.fromDq.map(r => r.valid && !r.ready)))
+
 }

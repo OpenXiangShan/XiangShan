@@ -47,6 +47,67 @@ trait HasExceptionNO {
     storeAddrMisaligned,
     loadAddrMisaligned
   )
+  val frontendSet = List(
+    // instrAddrMisaligned,
+    instrAccessFault,
+    illegalInstr,
+    instrPageFault
+  )
+  val csrSet = List(
+    illegalInstr,
+    breakPoint,
+    ecallU,
+    ecallS,
+    ecallM
+  )
+  val loadUnitSet = List(
+    loadAddrMisaligned,
+    loadAccessFault,
+    loadPageFault
+  )
+  val storeUnitSet = List(
+    storeAddrMisaligned,
+    storeAccessFault,
+    storePageFault
+  )
+  val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
+  val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
+  val csrWbCount = (0 until 16).map(i => if (csrSet.contains(i)) 1 else 0)
+  val loadWbCount = (0 until 16).map(i => if (loadUnitSet.contains(i)) 1 else 0)
+  val storeWbCount = (0 until 16).map(i => if (storeUnitSet.contains(i)) 1 else 0)
+  val atomicsWbCount = (0 until 16).map(i => if (atomicsUnitSet.contains(i)) 1 else 0)
+  val writebackCount = (0 until 16).map(i => csrWbCount(i) + atomicsWbCount(i) + loadWbCount(i) + 2 * storeWbCount(i))
+  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] = {
+    if (dontCareBits) {
+      val new_vec = Wire(ExceptionVec())
+      new_vec := DontCare
+      select.map(i => new_vec(i) := vec(i))
+      return new_vec
+    }
+    else if (falseBits) {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.map(_ := false.B)
+      select.map(i => new_vec(i) := vec(i))
+      return new_vec
+    }
+    else {
+      val new_vec = Wire(Vec(select.length, Bool()))
+      select.zipWithIndex.map{ case(s, i) => new_vec(i) := vec(s) }
+      return new_vec
+    }
+  }
+  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, frontendSet, dontCareBits, falseBits)
+  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, csrSet, dontCareBits, falseBits)
+  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, loadUnitSet, dontCareBits, falseBits)
+  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, storeUnitSet, dontCareBits, falseBits)
+  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, atomicsUnitSet, dontCareBits, falseBits)
+  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
 }
 
 class FpuCsrIO extends XSBundle {
@@ -430,7 +491,7 @@ class CSR extends FunctionUnit with HasCSRConst
                 (if (HasFPU) fcsrMapping else Nil)
 
   val addr = src2(11, 0)
-  val csri = src2(16, 12)
+  val csri = ZeroExt(src2(16, 12), XLEN)
   val rdata = Wire(UInt(XLEN.W))
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
@@ -580,6 +641,17 @@ class CSR extends FunctionUnit with HasCSRConst
   io.in.ready := true.B
   io.out.valid := valid
 
+  val csrExceptionVec = WireInit(cfIn.exceptionVec)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
+  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  // Trigger an illegal instr exception when:
+  // * unimplemented csr is being read/written
+  // * csr access is illegal
+  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
+  cfOut.exceptionVec := csrExceptionVec
+
   /**
     * Exception and Intr
     */
@@ -613,25 +685,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val hasLoadAccessFault = csrio.exception.bits.cf.exceptionVec(loadAccessFault) && raiseException
   val hasStoreAccessFault = csrio.exception.bits.cf.exceptionVec(storeAccessFault) && raiseException
 
-  val csrExceptionVec = Wire(Vec(16, Bool()))
-  csrExceptionVec.map(_ := false.B)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
-  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
-  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
-  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
-  // Trigger an illegal instr exception when:
-  // * unimplemented csr is being read/written
-  // * csr access is illegal
-  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
-  csrExceptionVec(loadPageFault) := hasLoadPageFault
-  csrExceptionVec(storePageFault) := hasStorePageFault
-  csrExceptionVec(loadAccessFault) := hasLoadAccessFault
-  csrExceptionVec(storeAccessFault) := hasStoreAccessFault
-  val iduExceptionVec = cfIn.exceptionVec
-  val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
-  cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
-
-  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
+  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 
@@ -742,12 +796,21 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwCycleCnt" -> (0x1026, "perfCntPtwCycleCnt"  ),
     "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
     "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
-    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt")
-    // "FetchFromICache" -> (0x102a, "CntFetchFromICache"),
+    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
+    "ICacheMMIO" -> (0x102a, "perfCntIcacheMMIOCnt"),
     // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
     // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
     // "ExitLoop3" -> (0x102e, "CntExitLoop3")
+    
+    "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
+    "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),
+    "btbRight"    -> (0x1032, "perfCntbtbRight"),
+    "btbWrong"    -> (0x1033, "perfCntbtbWrong"),
+    "tageRight"   -> (0x1034, "perfCnttageRight"),
+    "tageWrong"   -> (0x1035, "perfCnttageWrong"),
+    "loopRight"   -> (0x1036, "perfCntloopRight"),
+    "loopWrong"   -> (0x1037, "perfCntloopWrong")
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i =>
