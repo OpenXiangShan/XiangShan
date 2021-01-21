@@ -30,7 +30,7 @@ object ExcitingUtils {
       s"type:[$connType] source location:[${sourceModule.getOrElse(strToErrorMsg("Not Found"))}]" +
         s" sink location:[${sinkModule.getOrElse(strToErrorMsg("Not Found"))}]"
 
-    def isLeagleConnection: Boolean = sourceModule.nonEmpty && sinkModule.nonEmpty
+    def islegalConnection: Boolean = sourceModule.nonEmpty && sinkModule.nonEmpty
   }
 
   private val map = mutable.LinkedHashMap[String, Connection]()
@@ -44,6 +44,7 @@ object ExcitingUtils {
     uniqueName: Boolean = false
   ): String = {
     val conn = map.getOrElseUpdate(name, new Connection(connType))
+    require(conn.sourceModule.isEmpty)
     require(conn.connType == connType)
     conn.sourceModule = Some(component.parentModName)
     BoringUtils.addSource(component, name, disableDedup, uniqueName)
@@ -58,6 +59,7 @@ object ExcitingUtils {
     forceExists: Boolean = false
   ): Unit = {
     val conn = map.getOrElseUpdate(name, new Connection(connType))
+    require(conn.sinkModule.isEmpty)
     require(conn.connType == connType)
     conn.sinkModule = Some(component.parentModName)
     BoringUtils.addSink(component, name, disableDedup, forceExists)
@@ -77,14 +79,14 @@ object ExcitingUtils {
 
 
   def checkAndDisplay(): Unit = {
-    var leagle = true
+    var legal = true
     val buf = new mutable.StringBuilder()
     for((id, conn) <- map){
       buf ++= s"Connection:[$id] $conn\n"
-      if(!conn.isLeagleConnection) leagle = false
+      if(!conn.islegalConnection) legal = false
     }
     print(buf)
-    require(leagle, strToErrorMsg("Error: Illeagle connection found!"))
+    require(legal, strToErrorMsg("Error: Illegal connection found!"))
   }
 
 }
