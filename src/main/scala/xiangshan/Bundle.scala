@@ -129,8 +129,6 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val tageMeta = new TageMeta
   val specCnt = UInt(10.W)
   // for global history
-  val predTaken = Bool()
-  val sawNotTakenBranch = Bool()
 
   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
@@ -196,8 +194,11 @@ class FtqEntry extends XSBundle {
     val rasTop = new RASEntry()
     val metas = Vec(PredictWidth, new BpuMeta)
 
-    val brMask = Vec(PredictWidth, Bool())
-    val jalMask = Vec(PredictWidth, Bool())
+    val cfiIsCall, cfiIsRet, cfiIsRVC = Bool()
+    val br_mask = Vec(PredictWidth, Bool())
+    val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
+
+    val valids = Vec(PredictWidth, Bool())
 
     // backend update
     val mispred = Vec(PredictWidth, Bool())
