@@ -37,7 +37,7 @@ class PaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(io.raddr(i))
+    io.rdata(i) := data(RegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
@@ -81,7 +81,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule 
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(io.raddr(i))
+    io.rdata(i) := data(RegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
@@ -137,7 +137,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(io.raddr(i))
+    io.rdata(i) := data(RegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
