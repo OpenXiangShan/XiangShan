@@ -64,7 +64,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     val rand = new Random(0xbeef)
     val addr_pool = {
-      for (_ <- 0 until 64) yield BigInt(rand.nextInt(0xfffff) << 6) | 0x80000000L.U.litValue()
+      for (_ <- 0 until 256) yield BigInt(rand.nextInt(0xfffff) << 6) | 0x80000000L.U.litValue()
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
     println(f"addr pool length: $addr_list_len")
@@ -114,7 +114,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.DChannel.valid.poke(false.B)
 
 
-        val total_clock = 500
+        val total_clock = 50000
 
         c.reset.poke(true.B)
         c.clock.step(100)

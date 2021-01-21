@@ -156,7 +156,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
           val aid = allocId.get
           //alloc & issue
           amoPortReqMessage = Some(nextAMO.get.issueReq(BigInt(aid)))
-          amoIdMap(BigInt(aid))
+          amoIdMap(BigInt(aid)) = nextAMO.get
         }
       }
     }

@@ -131,7 +131,7 @@ class DCacheAMOCallerTrans extends DCacheAMOTrans with TLCCallerTrans {
         mask = mask,
       )
     )
-    reqIssued = Some(true)
+    reqIssued = Some(false)
   }
 
   def issueReq(allodId: BigInt = 0): LitDCacheWordReq = {
