@@ -287,6 +287,8 @@ class MicroOp extends CfCtrl {
 
 class Redirect extends XSBundle {
   val roqIdx = new RoqPtr
+  val ftqIdx = new FtqPtr
+  val ftqOffset = UInt(log2Up(PredictWidth).W)
   val level = RedirectLevel()
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
@@ -325,7 +327,6 @@ class ExuOutput extends XSBundle {
   val fflags  = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect
-  val brUpdate = new CfiUpdateInfo
   val debug = new DebugBundle
 }
 

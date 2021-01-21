@@ -42,7 +42,7 @@ class RedirectGenerator extends XSModule with NeedImpl {
     val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
     val roqRedirect = Flipped(ValidIO(new Redirect))
-    val exuFtqRead = new FtqRead
+    val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3CfiUpdate = Output(ValidIO(new CfiUpdateInfo))
   })
@@ -52,11 +52,11 @@ class RedirectGenerator extends XSModule with NeedImpl {
 
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
           |         |      |    |     |     |         |
-          |         |==== reg & compare ====|         |       ========
-          |                   |                       |
-          |                ftq read                   |
-          |------- mux ------|                        |        Stage2
-                    |                                 |
+          |============= reg & compare ====|          |       ========
+                            |                         |
+                            |                         |
+                            |                         |        Stage2
+                            |                         |
                     redirect (flush backend)          |
                     |                                 |
                === reg ===                            |       ========
@@ -110,8 +110,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   ftq.io.redirect <> backendRedirect
   ftq.io.exuWriteback <> io.fromIntBlock.exuRedirect
 
-  ftq.io.ftqRead(1) <> redirectGen.io.exuFtqRead
-  ftq.io.ftqRead(2) <> DontCare // TODO: read exception pc / load replay pc form here
+  ftq.io.ftqRead(1) <> redirectGen.io.stage2FtqRead
+  ftq.io.ftqRead(2) <> DontCare // TODO: read exception pc form here
 
   io.frontend.redirect_cfiUpdate := frontendRedirect
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
