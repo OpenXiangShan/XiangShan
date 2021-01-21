@@ -515,13 +515,16 @@ class ReservationStationData
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) => // h: port, i: 0~srcNum-1
     val (bpHit, bpHitReg, bpData) = bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
     val (wuHit, wuData)           = wakeup(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val wuHitReg = RegNext(wuHit)
+    val wuDataReg = RegNext(wuData)
     when (bpHitReg) { dataWrite(enqPtrReg, i, bpData) }
-    when (RegNext(wuHit)) { dataWrite(enqPtrReg, i, RegNext(wuData)) }
+    when (wuHitReg) { dataWrite(enqPtrReg, i, wuDataReg) }
     h := bpHit || wuHit
     // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
+    XSDebug(wuHit, p"EnqWuHit: (${Binary(io.ctrl.srcUpdate(iqSize).asUInt())})\n")
     XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
-    XSDebug(wuHit, p"EnqWbHit: (${i.U}) data:${Hexadecimal(wuData)} data will be writen into data at next cycle\n")
+    XSDebug(wuHitReg, p"EnqWuHitData: (${i.U}) data:${Hexadecimal(wuDataReg)}\n")
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }
