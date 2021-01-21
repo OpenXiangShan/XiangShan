@@ -6,7 +6,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
-import utils.DebugIdentityNode
+import utils.{DebugIdentityNode, DataDontCareNode}
 import utils.XSInfo
 import xiangshan.{HasXSParameter, XSCore, HasXSLog}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
@@ -102,7 +102,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
-    l2cache(i).node := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
+    l2cache(i).node := DataDontCareNode(a = true, b = true) := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
     l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
   }
 

@@ -94,6 +94,7 @@ class LoadQueue extends XSModule
 
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val deqPtrExtNext = Wire(new LqPtr)
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
@@ -310,8 +311,8 @@ class LoadQueue extends XSModule
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
   // generate lastCycleSelect mask 
-  val evenSelectMask = Mux(loadWbSelV(0), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
-  val oddSelectMask = Mux(loadWbSelV(1), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
+  val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
   // generate real select vec
   val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
   val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
@@ -347,7 +348,7 @@ class LoadQueue extends XSModule
   // writeback data to cdb
   (0 until LoadPipelineWidth).map(i => {
     // data select
-    dataModule.io.wb.raddr(i) := loadWbSel(i)
+    dataModule.io.wb.raddr(i) := loadWbSelGen(i)
     val rdata = dataModule.io.wb.rdata(i).data
     val seluop = uop(loadWbSel(i))
     val func = seluop.ctrl.fuOpType
@@ -379,12 +380,10 @@ class LoadQueue extends XSModule
     io.ldout(i).valid := loadWbSelV(i)
 
     when(io.ldout(i).fire()) {
-      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
-        dataModule.io.debug(loadWbSel(i)).paddr,
-        dataModule.io.debug(loadWbSel(i)).data,
         debug_mmio(loadWbSel(i))
       )
     }
@@ -567,7 +566,7 @@ class LoadQueue extends XSModule
     io.roqDeqPtr === uop(deqPtr).roqIdx &&
     !io.commits.isWalk
 
-  dataModule.io.uncache.raddr := deqPtr
+  dataModule.io.uncache.raddr := deqPtrExtNext.value
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
@@ -634,7 +633,8 @@ class LoadQueue extends XSModule
   }
 
   val commitCount = PopCount(loadCommit)
-  deqPtrExt := deqPtrExt + commitCount
+  deqPtrExtNext := deqPtrExt + commitCount
+  deqPtrExt := deqPtrExtNext
 
   val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
   val trueValidCounter = distanceBetween(enqPtrExt(0), deqPtrExt)
