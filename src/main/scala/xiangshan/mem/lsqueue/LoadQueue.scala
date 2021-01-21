@@ -201,73 +201,8 @@ class LoadQueue extends XSModule
         miss(loadWbIndex) := dcacheMissed && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
         // listening(loadWbIndex) := dcacheMissed
         pending(loadWbIndex) := io.loadIn(i).bits.mmio && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
-      }
     }
-
-  /**
-    * Cache miss request
-    *
-    * (1) writeback: miss
-    * (2) send to dcache: listing
-    * (3) dcache response: datavalid
-    * (4) writeback to ROB: writeback
-    */
-  // val inflightReqs = RegInit(VecInit(Seq.fill(cfg.nLoadMissEntries)(0.U.asTypeOf(new InflightBlockInfo))))
-  // val inflightReqFull = inflightReqs.map(req => req.valid).reduce(_&&_)
-  // val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
-
-  // val missRefillSelVec = VecInit(
-  //   (0 until LoadQueueSize).map{ i =>
-  //     val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(dataModule.io.rdata(i).paddr)).reduce(_||_)
-  //     allocated(i) && miss(i) && !inflight
-  //   })
-
-  // val missRefillSel = getFirstOne(missRefillSelVec, deqMask)
-  // val missRefillBlockAddr = get_block_addr(dataModule.io.rdata(missRefillSel).paddr)
-  // io.dcache.req.valid := missRefillSelVec.asUInt.orR
-  // io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
-  // io.dcache.req.bits.addr := missRefillBlockAddr
-  // io.dcache.req.bits.data := DontCare
-  // io.dcache.req.bits.mask := DontCare
-
-  // io.dcache.req.bits.meta.id       := DontCare
-  // io.dcache.req.bits.meta.vaddr    := DontCare // dataModule.io.rdata(missRefillSel).vaddr
-  // io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
-  // io.dcache.req.bits.meta.uop      := uop(missRefillSel)
-  // io.dcache.req.bits.meta.mmio     := false.B // dataModule.io.rdata(missRefillSel).mmio
-  // io.dcache.req.bits.meta.tlb_miss := false.B
-  // io.dcache.req.bits.meta.mask     := DontCare
-  // io.dcache.req.bits.meta.replay   := false.B
-
-  // assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
-
-  // when(io.dcache.req.fire()) {
-  //   miss(missRefillSel) := false.B
-    // listening(missRefillSel) := true.B
-
-    // mark this block as inflight
-  //   inflightReqs(reqBlockIndex).valid := true.B
-  //   inflightReqs(reqBlockIndex).block_addr := missRefillBlockAddr
-  //   assert(!inflightReqs(reqBlockIndex).valid)
-  // }
-
-  // when(io.dcache.resp.fire()) {
-  //   val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)).reduce(_||_)
-  //   assert(inflight)
-  //   for (i <- 0 until cfg.nLoadMissEntries) {
-  //     when (inflightReqs(i).valid && inflightReqs(i).block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)) {
-  //       inflightReqs(i).valid := false.B
-  //     }
-  //   }
-  // }
-
-
-  // when(io.dcache.req.fire()){
-  //   XSDebug("miss req: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x vaddr:0x%x\n",
-  //     io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx.asUInt, io.dcache.req.bits.meta.uop.lqIdx.asUInt,
-  //     io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr
-  //   )
-  // }
+  }
 
   when(io.dcache.valid) {
     XSDebug("miss resp: paddr:0x%x data %x\n", io.dcache.bits.addr, io.dcache.bits.data)
