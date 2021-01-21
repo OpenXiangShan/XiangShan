@@ -395,6 +395,17 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }).reduce(_|_)
   val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
 
+  // when mispredict branches writeback, stop commit in the next 2 cycles
+  val misPredWb = VecInit((0 until numWbPorts).map(i => 
+    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).valid
+  )).orR
+  val misPredBlockCounter = Reg(UInt(2.W))
+  misPredBlockCounter := Mux(misPredWb, 
+    "b11".U,
+    misPredBlockCounter >> 1.U
+  )
+  val misPredBlock = misPredBlockCounter(0)
+
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
@@ -404,7 +415,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i) && !misPredBlock
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {
