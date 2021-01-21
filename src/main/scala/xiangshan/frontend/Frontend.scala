@@ -2,13 +2,28 @@ package xiangshan.frontend
 import utils.XSInfo
 import chisel3._
 import chisel3.util._
+import chipsalliance.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.PipelineConnect
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
+import xiangshan.backend.fu.HasExceptionNO
+
+class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+
+  val instrUncache = LazyModule(new InstrUncache())
+
+  lazy val module = new FrontendImp(this)
+}
 
 
-class Frontend extends XSModule with HasL1plusCacheParameters {
+class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+  with HasL1plusCacheParameters 
+  with HasXSParameter
+  with HasExceptionNO
+  with HasXSLog
+{
   val io = IO(new Bundle() {
     val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
     val icacheMemGrant = Flipped(DecoupledIO(new L1plusCacheResp))
@@ -18,15 +33,12 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
     val backend = new FrontendToBackendIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
-    val mmio_acquire = DecoupledIO(new InsUncacheReq)
-    val mmio_grant  = Flipped(DecoupledIO(new InsUncacheResp))
-    val mmio_flush = Output(Bool())
   })
 
   val ifu = Module(new IFU)
   val ibuffer =  Module(new Ibuffer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
-  
+  val instrUncache = outer.instrUncache.module
 
   val needFlush = io.backend.redirect.valid
 
@@ -39,9 +51,6 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
   ifu.io.icacheMemGrant.valid := io.icacheMemGrant.valid && grantClientId === icacheMissQueueId.U
   ifu.io.icacheMemGrant.bits := io.icacheMemGrant.bits
   ifu.io.icacheMemGrant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
-  io.mmio_acquire <> ifu.io.mmio_acquire
-  io.mmio_flush   <> ifu.io.mmio_flush
-  ifu.io.mmio_grant <> io.mmio_grant
   l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
   l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
   l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
@@ -49,6 +58,11 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
     ifu.io.icacheMemGrant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
   ifu.io.fencei := io.fencei
+
+
+  instrUncache.io.req <> ifu.io.mmio_acquire
+  instrUncache.io.resp <> ifu.io.mmio_grant
+  instrUncache.io.flush <> ifu.io.mmio_flush
   // to tlb
   ifu.io.sfence := io.sfence
   ifu.io.tlbCsr := io.tlbCsr
