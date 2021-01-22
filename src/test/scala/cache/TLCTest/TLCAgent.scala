@@ -226,6 +226,10 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     oldMask | (inMask << (cnt * wordBytes))
   }
 
+  def maskOutOfWord(mask: BigInt, cnt: Int): BigInt = {
+    mask >> (cnt * wordBytes)
+  }
+
   def beatInBlock(addr: BigInt): Int = {
     ((addr & offsetMask) >> beatAddrBits).toInt
   }
