@@ -187,7 +187,6 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   def assignDontCares(out: ExuOutput) = {
-    out.brUpdate := DontCare
     out.fflags := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B

@@ -80,6 +80,5 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   }.elsewhen(jmp.io.out.valid){
     io.toInt.bits.redirectValid := jmp.redirectOutValid
     io.toInt.bits.redirect := jmp.redirectOut
-    io.toInt.bits.brUpdate := jmp.brUpdate
   }
 }

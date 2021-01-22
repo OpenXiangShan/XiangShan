@@ -18,6 +18,7 @@ class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
   val jumpPc = Output(UInt(VAddrBits.W))
+  val jalr_target = Output(UInt(VAddrBits.W))
   // int block only uses port 0~7
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
@@ -63,10 +64,10 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
                 redirect (send to frontend)
    */
   def selectOlderRedirect(x: Valid[Redirect], y: Valid[Redirect]): Valid[Redirect] = {
-    Mux(isAfter(x.bits, y.bits) && y.valid, y, x)
+    Mux(isAfter(x.bits.roqIdx, y.bits.roqIdx) && y.valid, y, x)
   }
   def selectOlderExuOut(x: Valid[ExuOutput], y: Valid[ExuOutput]): Valid[ExuOutput] = {
-    Mux(isAfter(x.bits.redirect, y.bits.redirect) && y.valid, y, x)
+    Mux(isAfter(x.bits.redirect.roqIdx, y.bits.redirect.roqIdx) && y.valid, y, x)
   }
   val jumpOut = io.exuMispredict.head
   val oldestAluOut = ParallelOperation(io.exuMispredict.tail, selectOlderExuOut)
@@ -128,8 +129,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   stage3CfiUpdate.hist := ftqRead.hist
   stage3CfiUpdate.predHist := ftqRead.predHist
   stage3CfiUpdate.specCnt := ftqRead.specCnt
-  stage3CfiUpdate.predTaken :=
-    ftqRead.cfiIndex.valid && s2_redirect_bits_reg.ftqOffset === ftqRead.cfiIndex.bits
+  stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
   stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
     if(i == 0) false.B else Cat(ftqRead.br_mask.take(i-1)).orR()
   })(s2_redirect_bits_reg.ftqOffset)
@@ -200,6 +200,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
   io.toIntBlock.jumpPc := GetPcByFtq(ftq.io.ftqRead(0).entry.ftqPC, jumpInst.cf.ftqOffset)
+  io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.jalr_target
 
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {

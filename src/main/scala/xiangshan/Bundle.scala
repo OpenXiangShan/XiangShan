@@ -178,6 +178,7 @@ class CtrlFlow extends XSBundle {
   val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
+  val pred_taken = Bool()
   val crossPageIPFFix = Bool()
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)

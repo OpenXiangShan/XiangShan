@@ -396,9 +396,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
-  val misPredWb = VecInit((0 until numWbPorts).map(i => 
+  val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
     io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).valid
-  )).orR
+  ))).orR()
   val misPredBlockCounter = Reg(UInt(2.W))
   misPredBlockCounter := Mux(misPredWb, 
     "b11".U,
@@ -760,7 +760,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
       wpc(i) := SignExt(uop.cf.pc, XLEN)
       trapVec(i) := io.commits.valid(i) && (state===s_idle) && uop.ctrl.isXSTrap
-      isRVC(i) := uop.cf.brUpdate.pd.isRVC
+      isRVC(i) := uop.cf.pd.isRVC
     }
 
     val scFailed = !diffTestDebugLrScValid(0) &&

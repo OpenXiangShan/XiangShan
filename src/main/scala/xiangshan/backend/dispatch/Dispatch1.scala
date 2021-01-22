@@ -48,7 +48,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val isInt    = VecInit(io.fromRename.map(req => FuType.isIntExu(req.bits.ctrl.fuType)))
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
-    !req.bits.cf.brUpdate.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
+    !req.bits.cf.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
   ))
   val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))

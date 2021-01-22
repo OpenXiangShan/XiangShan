@@ -12,7 +12,6 @@ import xiangshan.backend.decode.isa._
 trait HasRedirectOut { this: RawModule =>
   val redirectOutValid = IO(Output(Bool()))
   val redirectOut = IO(Output(new Redirect))
-  val brUpdate = IO(Output(new CfiUpdateInfo))
 }
 
 class Jump extends FunctionUnit with HasRedirectOut {
@@ -24,6 +23,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
     SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+  val jalr_target = io.in.bits.src(1)(VAddrBits - 1, 0)
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
   val isAuipc = JumpOpType.jumpOpisAuipc(func)
@@ -36,22 +36,22 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
   val valid = io.in.valid
 
-  val isRVC = uop.cf.brUpdate.pd.isRVC
+  val isRVC = uop.cf.pd.isRVC
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   redirectOutValid := valid
   redirectOut := DontCare
-//  redirectOut.pc := uop.cf.pc
   redirectOut.cfiUpdate.target := target
   redirectOut.level := RedirectLevel.flushAfter
-//  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
+  redirectOut.ftqIdx := uop.cf.ftqPtr
+  redirectOut.ftqOffset := uop.cf.ftqOffset
+  redirectOut.cfiUpdate.predTaken := true.B
+  redirectOut.cfiUpdate.taken := true.B
+  redirectOut.cfiUpdate.target := target
+  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target
 
-  brUpdate := DontCare //uop.cf.brUpdate
-//  brUpdate.pc := uop.cf.pc
-  brUpdate.target := target
-  brUpdate.taken := true.B
 
   // Output
   val res = Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
