@@ -331,7 +331,7 @@ class LoadQueue extends XSModule
   (0 until LoadPipelineWidth).map(i => {
     val canGo = io.ldout(i).fire() || !loadWbSelV(i)
     val valid = loadWbSelVGen(i)
-    loadWbSel(i) := RegEnable(loadWbSelGen(i), valid && canGo)
+    loadWbSel(i) := RegNext(loadWbSelGen(i))
     when(io.ldout(i).fire()){
       // Mark them as writebacked, so they will not be selected in the next cycle
       writebacked(loadWbSel(i)) := true.B
