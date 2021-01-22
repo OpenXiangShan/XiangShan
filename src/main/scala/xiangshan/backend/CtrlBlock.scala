@@ -194,6 +194,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   io.frontend.redirect_cfiUpdate := frontendRedirect
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
+  io.frontend.ftqEnqPtr := ftq.io.enqPtr
+  io.frontend.ftqLeftOne := ftq.io.leftOne
 
   decode.io.in <> io.frontend.cfVec
 

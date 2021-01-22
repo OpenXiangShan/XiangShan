@@ -383,6 +383,8 @@ class FrontendToBackendIO extends XSBundle {
   // from backend
   val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
   val commit_cfiUpdate = Flipped(ValidIO(new FtqEntry))
+  val ftqEnqPtr = Input(new FtqPtr)
+  val ftqLeftOne = Input(Bool())
 }
 
 class TlbCsrBundle extends XSBundle {
