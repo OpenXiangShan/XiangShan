@@ -640,7 +640,8 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       case ProbeAck => {
         val addr = c.address
         val state = getState(addr)
-        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr && p.b.get.source == c.source).head
+        //TODO: only one master for now, so no need to check source
+        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr).head
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
@@ -664,7 +665,8 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       case ProbeAckData => {
         val addr = c.address
         val state = getState(addr)
-        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr && p.b.get.source == c.source).head
+        //TODO: only one master for now, so no need to check source
+        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr).head//pair ProbeAck
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
