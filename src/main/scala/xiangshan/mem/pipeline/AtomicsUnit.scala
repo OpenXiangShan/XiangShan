@@ -25,6 +25,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
   val in = Reg(new ExuInput())
+  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
   // paddr after translation
   val paddr = Reg(UInt())
@@ -89,11 +90,11 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         "b10".U   -> (in.src1(1,0) === 0.U), //w
         "b11".U   -> (in.src1(2,0) === 0.U)  //d
       ))
-      in.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
-      in.uop.cf.exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
-      in.uop.cf.exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
-      in.uop.cf.exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
-      in.uop.cf.exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
+      exceptionVec(storeAddrMisaligned) := !addrAligned
+      exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
+      exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
+      exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
+      exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
       val exception = !addrAligned || 
         io.dtlb.resp.bits.excp.pf.st ||
         io.dtlb.resp.bits.excp.pf.ld ||
@@ -215,6 +216,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_finish) {
     io.out.valid := true.B
     io.out.bits.uop := in.uop
+    io.out.bits.uop.cf.exceptionVec := exceptionVec
     io.out.bits.uop.diffTestDebugLrScValid := is_lrsc_valid
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
