@@ -131,7 +131,7 @@ class IFU extends XSModule with HasIFUConst
   val if2_valid = RegInit(init = false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
   val if1_fire = (if1_valid &&  if2_allReady) && (icache.io.tlb.resp.valid || !if2_valid)
-  val if1_can_go = if1_fire || if2_flush
+  val if1_can_go = if1_fire || if3_flush
 
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
@@ -458,10 +458,18 @@ class IFU extends XSModule with HasIFUConst
     crossPageIPF := true.B // higher 16 bits page fault
   }
 
+  //RVC expand
+  val expandedInstrs = Wire(Vec(PredictWidth, UInt(32.W)))
+  for(i <- 0 until PredictWidth){
+      val expander = Module(new RVCExpander)
+      expander.io.in := if4_pd.instrs(i)
+      expandedInstrs(i) := expander.io.out.bits
+  }
+
   val fetchPacketValid = if4_valid && !io.redirect.valid
   val fetchPacketWire = Wire(new FetchPacket)
 
-  fetchPacketWire.instrs := if4_pd.instrs
+  fetchPacketWire.instrs := expandedInstrs
   fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
   fetchPacketWire.pdmask := if4_pd.mask
 

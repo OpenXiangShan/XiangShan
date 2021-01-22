@@ -101,7 +101,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
-    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).instrUncache.clientNode
+    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
     l2cache(i).node := DataDontCareNode(a = true, b = true) := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
     l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
   }
@@ -170,6 +170,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+      xs_core(i).module.io.l2ToPrefetcher <> l2cache(i).module.io
     }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)

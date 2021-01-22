@@ -220,7 +220,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
   )
 
   io.in.ready := state===s_idle
-  io.out.valid := state===s_finish && !kill
+  io.out.valid := state===s_finish
   io.out.bits.data := Mux(ctrlReg.isW,
     SignExt(res(31, 0), len),
     res

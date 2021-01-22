@@ -12,21 +12,24 @@ case class BOPParameters(
   scoreBits: Int,
   roundMax: Int,
   badScore: Int,
-  scores: Int = 52,
+  // TODO: Is 256-offset necessary, which will cross pages?
   offsetList: Seq[Int] = Seq(
       1,   2,   3,   4,   5,   6,   8,   9,  10,  12,
-     15,  16,  18,  20,  24,  25,  27,  30,  32,  36,
+     15,  16/*,  18,  20,  24,  25,  27,  30,  32,  36,
      40,  45,  48,  50,  54,  60,  64,  72,  75,  80,
      81,  90,  96, 100, 108, 120, 125, 128, 135, 144,
     150, 160, 162, 180, 192, 200, 216, 225, 240, 243,
-    250, 256
+    250, 256*/
   ),
-  blockBytes: Int
+  blockBytes: Int,
+  nEntries: Int
 ) {
+  def scores = offsetList.length
   def offsetWidth = log2Up(offsetList(scores - 1)) + 1
   def rrIdxBits = log2Up(rrTableEntries)
   def roundBits = log2Up(roundMax)
   def scoreMax = (1 << scoreBits) - 1
+  def totalWidth = log2Up(nEntries) // id's width
 }
 
 class ScoreTableEntry(p: BOPParameters) extends PrefetchBundle {
@@ -34,7 +37,7 @@ class ScoreTableEntry(p: BOPParameters) extends PrefetchBundle {
   val score = UInt(p.scoreBits.W)
 
   def apply(offset: UInt, score: UInt) = {
-    val entry = new ScoreTableEntry(p)
+    val entry = Wire(new ScoreTableEntry(p))
     entry.offset := offset
     entry.score := score
     entry
@@ -78,9 +81,51 @@ class TestOffsetBundle(p: BOPParameters) extends PrefetchBundle {
   override def cloneType: this.type = (new TestOffsetBundle(p)).asInstanceOf[this.type]
 }
 
+class BestOffsetPrefetchReq(p: BOPParameters) extends PrefetchReq {
+  val id = UInt(p.totalWidth.W)
+
+  override def toPrintable: Printable = {
+    p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)}"
+  }
+  override def cloneType: this.type = (new BestOffsetPrefetchReq(p)).asInstanceOf[this.type]
+}
+
+class BestOffsetPrefetchResp(p: BOPParameters) extends PrefetchResp {
+  val id = UInt(p.totalWidth.W)
+
+  override def toPrintable: Printable = {
+    p"id=0x${Hexadecimal(id)}"
+  }
+  override def cloneType: this.type = (new BestOffsetPrefetchResp(p)).asInstanceOf[this.type]
+}
+
+class BestOffsetPrefetchFinish(p: BOPParameters) extends PrefetchFinish {
+  val id = UInt(p.totalWidth.W)
+
+  override def toPrintable: Printable = {
+    p"id=0x${Hexadecimal(id)}"
+  }
+  override def cloneType: this.type = (new BestOffsetPrefetchFinish(p)).asInstanceOf[this.type]
+}
+
+class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
+  val train = Flipped(ValidIO(new PrefetchTrain))
+  val req = DecoupledIO(new BestOffsetPrefetchReq(p))
+  val resp = Flipped(DecoupledIO(new BestOffsetPrefetchResp(p)))
+  val finish = DecoupledIO(new BestOffsetPrefetchFinish(p))
+
+  override def toPrintable: Printable = {
+    p"train: v=${train.valid} ${train.bits} " +
+      p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits} " +
+      p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
+  }
+  override def cloneType: this.type = (new BestOffsetPrefetchIO(p)).asInstanceOf[this.type]
+}
+
 class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   val io = IO(new Bundle {
-    val w = Flipped(ValidIO(UInt(PAddrBits.W)))
+    val w = Flipped(DecoupledIO(UInt(PAddrBits.W)))
     val r = Flipped(new TestOffsetBundle(p))
   })
   def rrIdxBits = p.rrIdxBits
@@ -108,10 +153,10 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMWrapper("RR_Table", rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true))
+  val rrTable = Module(new SRAMWrapper("RR_Table", rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
 
   val wAddr = io.w.bits
-  rrTable.io.w.req.valid := io.w.valid
+  rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
   rrTable.io.w.req.bits.setIdx := idx(wAddr)
   rrTable.io.w.req.bits.data.valid := true.B
   rrTable.io.w.req.bits.data.tag := tag(wAddr)
@@ -122,32 +167,35 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  val rwConflict = io.w.valid && io.r.req.fire() && idx(wAddr) === idx(rAddr)
-  when (rwConflict) {
-    rrTable.io.r.req.valid := false.B
-  }
-  when (RegNext(rwConflict)) {
-    rData.valid := true.B
-    rData.tag := RegNext(tag(wAddr))
-  }
+  val rwConflict = io.w.fire() && io.r.req.fire() && idx(wAddr) === idx(rAddr)
+  // when (rwConflict) {
+  //   rrTable.io.r.req.valid := false.B
+  // }
+  // when (RegNext(rwConflict)) {
+  //   rData.valid := true.B
+  //   rData.tag := RegNext(tag(wAddr))
+  // }
 
+  io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(io.r.req.fire())
+  io.r.resp.valid := RegNext(rrTable.io.r.req.fire())
   io.r.resp.bits.testOffset := RegNext(io.r.req.bits.testOffset)
   io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
   io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))
 
+  assert(!RegNext(rwConflict), "single port SRAM should not read and write at the same time")
+
   // debug info
-  XSDebug(io.w.valid, p"io.write: v=${io.w.valid} addr=0x${Hexadecimal(io.w.bits)}\n")
+  XSDebug(io.w.fire(), p"io.write: v=${io.w.valid} addr=0x${Hexadecimal(io.w.bits)}\n")
   XSDebug(p"io.read: ${io.r}\n")
-  XSDebug(io.w.valid, p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
+  XSDebug(io.w.fire(), p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
   XSDebug(io.r.req.fire(), p"rAddr=0x${Hexadecimal(rAddr)} idx=${Hexadecimal(idx(rAddr))} rData=${rData}\n")
-  XSDebug(rwConflict, p"write and read conflict!\n")
 
 }
 
 class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   val io = IO(new Bundle {
+    val req = Flipped(DecoupledIO(UInt(PAddrBits.W))) // req addr from L1
     val prefetchOffset = Output(UInt(p.offsetWidth.W))
     val test = new TestOffsetBundle(p)
   })
@@ -158,33 +206,34 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   def roundBits = p.roundBits
   def roundMax = p.roundMax
   def scoreMax = p.scoreMax
+  def badScore = p.badScore
 
-  val prefetchOffset = RegInit(1.U(offsetWidth)) // best offset is 1, this is, a next-line prefetcher as initialization
+  val prefetchOffset = RegInit(2.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
   val st = RegInit(VecInit(offsetList.map(off => new ScoreTableEntry(p).apply(off.U, 0.U))))
   val ptr = RegInit(0.U(log2Up(scores).W))
   val round = RegInit(0.U(roundBits.W))
 
-  val bestOffset = RegInit(new ScoreTableEntry(p).apply(1.U, 0.U)) // the entry with the highest score while traversing
-  val testOffset = WireInit(0.U(offsetWidth.W))
+  val bestOffset = RegInit(new ScoreTableEntry(p).apply(2.U, 0.U)) // the entry with the highest score while traversing
+  val testOffset = WireInit(st(ptr).offset)
   def winner(e1: ScoreTableEntry, e2: ScoreTableEntry): ScoreTableEntry = {
-    val w = new ScoreTableEntry(p)
+    val w = Wire(new ScoreTableEntry(p))
     w := Mux(e1.score > e2.score, e1, e2)
     w
   }
 
-  val s_idle :: s_learn :: s_finish :: Nil = Enum(3)
+  val s_idle :: s_learn :: Nil = Enum(2)
   val state = RegInit(s_idle)
 
   // 1. At the start of a learning phase
   // All the scores are reset to 0.
+  // At the end of every learning phase, the prefetch offset is updated as the one with the highest score.
   when (state === s_idle) {
-    when (ptr =/= scores.U) {
-      st(ptr).score := 0.U
-      ptr := ptr + 1.U
-    }.otherwise {
-      ptr := 0.U
-      state := s_learn
-    }
+    st.foreach(_.score := 0.U)
+    ptr := 0.U
+    round := 0.U
+    bestOffset.score := badScore.U
+    prefetchOffset := bestOffset.offset
+    state := s_learn
   }
 
   // 2. During a learning phase
@@ -196,16 +245,18 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   // (1) one of the score equals SCOREMAX, or
   // (2) the number of rounds equals ROUNDMAX.
   when (state === s_learn) {
-    testOffset := st(ptr).offset
     when (io.test.req.fire()) {
       val roundFinish = ptr === (scores - 1).U
       ptr := Mux(roundFinish, 0.U, ptr + 1.U)
       round := Mux(roundFinish, round + 1.U, round)
+
+      XSDebug(p"test offset ${testOffset} req fire\n")
     }
 
     // (2) the number of rounds equals ROUNDMAX.
-    when (round === roundMax.U) {
-      state := s_finish
+    when (round >= roundMax.U) {
+      state := s_idle
+      XSDebug(p"round reaches roundMax(${roundMax.U})\n")
     }
 
     when (io.test.resp.fire() && io.test.resp.bits.hit) {
@@ -216,25 +267,148 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
       st(io.test.resp.bits.ptr).score := newScore
       bestOffset := winner(new ScoreTableEntry(p).apply(offset, newScore), bestOffset)
       // (1) one of the score equals SCOREMAX
-      when (newScore === scoreMax.U) {
-        state := s_finish
+      when (newScore >= scoreMax.U) {
+        state := s_idle
+        XSDebug(p"newScore reaches scoreMax(${scoreMax.U})\n")
       }
+
+      XSDebug(p"test offset ${offset} resp fire and hit. score ${oldScore} -> ${newScore}\n")
     }
   }
 
-  // 3. At the end of every learning phase, the prefetch offset is updated as the one with the highest score.
-  when (state === s_finish) {
-    prefetchOffset := bestOffset.offset
-    ptr := 0.U
-    round := 0.U
-    bestOffset.offset := 1.U
-    bestOffset.score := 0.U
-    state := s_idle
-  }
-
+  io.req.ready := true.B
   io.prefetchOffset := prefetchOffset
-  io.test.req.valid := state === s_learn && round =/= roundMax.U
-  io.test.req.bits.addr := DontCare // assign this outside the score table
+  io.test.req.valid := state === s_learn && io.req.fire()
+  io.test.req.bits.addr := io.req.bits
   io.test.req.bits.testOffset := testOffset
   io.test.req.bits.ptr := ptr
+  io.test.resp.ready := true.B
+
+  XSDebug(p"state=${state} prefetchOffset=${prefetchOffset} ptr=${ptr} round=${round} bestOffset=${bestOffset} testOffset=${testOffset}\n")
+  // score table
+  XSDebug(p"OffsetScoreTable(idx:offset:score) as follows:\n")
+  for (i <- 0 until scores) {
+    if (i % 8 == 0) { XSDebug(p"${i.U}:${st(i)}\t") }
+    else if (i % 8 == 7 || i == scores - 1) { XSDebug(false, true.B, p"${i.U}:${st(i)}\n") }
+    else { XSDebug(false, true.B, p"${i.U}:${st(i)}\t") }
+  }
+  XSDebug(io.req.fire(), p"receive req from L1. io.req.bits=0x${Hexadecimal(io.req.bits)}\n")
+}
+
+class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
+  val io = IO(new Bundle {
+    val id = Input(UInt(p.totalWidth.W))
+    val prefetchOffset = Input(UInt(p.offsetWidth.W))
+    val pft = new BestOffsetPrefetchIO(p)
+    val inflight = ValidIO(UInt(PAddrBits.W))
+    val writeRRTable = DecoupledIO(UInt(PAddrBits.W))
+  })
+
+  def blockBytes = p.blockBytes
+  def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
+
+  val s_idle :: s_req :: s_resp :: s_write_recent_req :: s_finish :: Nil = Enum(5)
+  val state = RegInit(s_idle)
+  val req = RegInit(0.U.asTypeOf(new PrefetchReq))
+  val baseAddr = RegInit(0.U(PAddrBits.W))
+
+  when (state === s_idle) {
+    when (io.pft.train.valid) {
+      state := s_req
+      req.addr := getBlockAddr(io.pft.train.bits.addr) + (io.prefetchOffset << log2Up(blockBytes))
+      req.write := io.pft.train.bits.write
+      baseAddr := getBlockAddr(io.pft.train.bits.addr)
+    }
+  }
+
+  when (state === s_req) {
+    when (io.pft.req.fire()) {
+      state := s_resp
+    }
+  }
+
+  when (state === s_resp) {
+    when (io.pft.resp.fire()) {
+      state := s_write_recent_req
+    }
+  }
+
+  when (state === s_write_recent_req) {
+    when (io.writeRRTable.fire()) {
+      state := s_finish
+    }
+  }
+
+  when (state === s_finish) {
+    when (io.pft.finish.fire()) {
+      state := s_idle
+    }
+  }
+
+  io.pft.req.valid := state === s_req
+  io.pft.req.bits.addr := req.addr
+  io.pft.req.bits.write := req.write
+  io.pft.req.bits.id := io.id
+  io.pft.resp.ready := state === s_resp
+  io.pft.finish.valid := state === s_finish
+  io.pft.finish.bits.id := io.id
+  io.inflight.valid := state =/= s_idle
+  io.inflight.bits := req.addr
+  io.writeRRTable.valid := state === s_write_recent_req
+  io.writeRRTable.bits := baseAddr // write this into recent request table
+
+  XSDebug(p"bopEntry ${io.id}: state=${state} prefetchOffset=${io.prefetchOffset} inflight=${io.inflight.valid} 0x${Hexadecimal(io.inflight.bits)} writeRRTable: ${io.writeRRTable.valid} 0x${Hexadecimal(io.writeRRTable.bits)} baseAddr=0x${Hexadecimal(baseAddr)} req: ${req}\n")
+  XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
+}
+
+class BestOffsetPrefetch(p: BOPParameters) extends PrefetchModule {
+  val io = IO(new BestOffsetPrefetchIO(p))
+
+  def nEntries = p.nEntries
+  def blockBytes = p.blockBytes
+  def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
+  val scoreTable = Module(new OffsetScoreTable(p))
+  val rrTable = Module(new RecentRequestTable(p))
+  val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq(p), nEntries))
+  val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish(p), nEntries))
+  val writeRRTableArb = Module(new Arbiter(UInt(PAddrBits.W), nEntries))
+
+  val entryReadyIdx = Wire(UInt(log2Up(nEntries).W))
+  val inflightMatchVec = Wire(Vec(nEntries, Bool()))
+
+  val bopEntries = (0 until nEntries).map { i =>
+    val bopEntry = Module(new BestOffsetPrefetchEntry(p))
+    
+    bopEntry.io.id := i.U
+    bopEntry.io.prefetchOffset := scoreTable.io.prefetchOffset
+
+    bopEntry.io.pft.train.valid := io.train.valid && i.U === entryReadyIdx && !inflightMatchVec.asUInt.orR
+    bopEntry.io.pft.train.bits := io.train.bits
+
+    reqArb.io.in(i) <> bopEntry.io.pft.req
+    bopEntry.io.pft.resp.valid := io.resp.valid && i.U === io.resp.bits.id
+    bopEntry.io.pft.resp.bits := io.resp.bits
+    finishArb.io.in(i) <> bopEntry.io.pft.finish
+
+    writeRRTableArb.io.in(i) <> bopEntry.io.writeRRTable
+
+    bopEntry
+  }
+
+  entryReadyIdx := PriorityEncoder(bopEntries.map { e => !e.io.inflight.valid })
+  (0 until nEntries).foreach(i =>
+    inflightMatchVec(i) := bopEntries(i).io.inflight.valid && bopEntries(i).io.inflight.bits === getBlockAddr(io.train.bits.addr)
+  )
+
+  io.req <> reqArb.io.out
+  io.resp.ready := VecInit(bopEntries.zipWithIndex.map { case (e, i) => i.U === io.resp.bits.id && e.io.pft.resp.ready }).asUInt.orR
+  io.finish <> finishArb.io.out
+  rrTable.io.w <> writeRRTableArb.io.out
+  rrTable.io.r <> scoreTable.io.test
+  scoreTable.io.req.valid := io.train.valid
+  scoreTable.io.req.bits := getBlockAddr(io.train.bits.addr)
+
+  XSDebug(p"io: ${io}\n")
+  XSDebug(p"entryReadyIdx=${entryReadyIdx} inflightMatchVec=${Binary(inflightMatchVec.asUInt)}\n")
+
 }
