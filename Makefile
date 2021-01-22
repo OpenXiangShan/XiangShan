@@ -27,7 +27,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	# mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	# $(MEM_GEN) $(@D)/$(@F).conf >> $@
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@

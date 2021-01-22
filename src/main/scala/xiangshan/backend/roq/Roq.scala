@@ -90,10 +90,11 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else possibleException(i).asUInt.orR || io.deq_flushPipe(i)))
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !commitBlocked(i)))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) /*&& !commitBlocked(i)*/))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
-  // when io.intrBitSetReg, only one instruction is allowed to commit
-  val commitCnt = Mux(io.intrBitSetReg, io.deq_v(0) && io.deq_w(0), normalCommitCnt)
+  // when io.intrBitSetReg or there're possible exceptions in these instructions, only one instruction is allowed to commit
+  val allowOnlyOne = VecInit(commitBlocked.drop(1)).asUInt.orR || io.intrBitSetReg
+  val commitCnt = Mux(allowOnlyOne, io.deq_v(0) && io.deq_w(0), normalCommitCnt)
 
   val resetDeqPtrVec = VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr)))
   val commitDeqPtrVec = VecInit(deqPtrVec.map(_ + commitCnt))
@@ -280,8 +281,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
-  io.enq.isEmpty   := isEmpty
-  io.enq.resp := enqPtrVec
+  io.enq.resp      := enqPtrVec
   val canEnqueue = VecInit(io.enq.req.map(_.valid && io.enq.canAccept))
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
@@ -296,9 +296,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       }
     }
   }
+  val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
+  io.enq.isEmpty   := RegNext(isEmpty && dispatchNum === 0.U)
 
   // debug info for enqueue (dispatch)
-  val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
   XSInfo(dispatchNum =/= 0.U, p"dispatched $dispatchNum insts\n")
 
@@ -398,13 +399,15 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
-  val commit_exception = exceptionDataRead.map(_.asUInt.orR)
-  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i) || commit_exception(i) || writebackDataRead(i).flushPipe))
+  val commit_exception = exceptionDataRead.zip(writebackDataRead.map(_.flushPipe)).map{ case (e, f) => e.asUInt.orR || f }
+  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
+  val allowOnlyOneCommit = VecInit(commit_exception.drop(1)).asUInt.orR || intrBitSetReg
+  // for instructions that may block others, we don't allow them to commit
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
+    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || commit_exception(0)
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {

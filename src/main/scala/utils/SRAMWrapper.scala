@@ -67,10 +67,11 @@ class SinglePortSRAM(set: Int, way: Int, width: Int) extends SRAMTemplate {
     val wmask = Input(UInt(way.W))
   })
   val mem = SyncReadMem(set, Vec(way, UInt(width.W)))
-  io.rdata := mem.read(io.addr, io.ren)
+  val addr = io.addr
   when(io.wen){
-    mem.write(io.addr, VecInit(Seq.fill(way)(io.wdata)), io.wmask.asBools())
+    mem.write(addr, VecInit(Seq.fill(way)(io.wdata)), io.wmask.asBools())
   }
+  io.rdata := mem.read(addr, io.ren && !io.wen)
 
   override def read(addr: UInt, ren: Bool): Vec[UInt] = {
     io.addr := addr
@@ -147,7 +148,7 @@ class SRAMWrapper[T <: Data]
   }
 
   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
-  val realRen = (if (singlePort) ren && !wen else ren)
+  val realRen = ren //(if (singlePort) ren && !wen else ren) do mutex inside inner sram
 
   val setIdx = Mux(resetState, resetSet,
     if(singlePort) Mux(io.w.req.valid, io.w.req.bits.setIdx, io.r.req.bits.setIdx)
