@@ -24,7 +24,7 @@ object Parameters {
   val simParameters = Parameters(envParameters = EnviromentParameters(FPGAPlatform = false)) // sim only, disable log
   val debugParameters = Parameters(envParameters = simParameters.envParameters.copy(EnableDebug = true)) // open log
 
-  val simDualCoreParameters = Parameters(socParameters = SoCParameters(NumCores = 2), envParameters = EnviromentParameters(FPGAPlatform = false))
+  val simDualCoreParameters = Parameters(socParameters = SoCParameters(NumCores = 2), envParameters = EnviromentParameters(FPGAPlatform = true, DualCoreDifftest = true))
   val debugDualCoreParameters = Parameters(socParameters = SoCParameters(NumCores = 2), envParameters = simParameters.envParameters.copy(EnableDebug = true))
 
   private var parameters = Parameters() // a default parameter, can be updated before use
