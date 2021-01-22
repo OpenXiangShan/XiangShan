@@ -206,4 +206,6 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   //       ibuf(i*8+7).inst
   //   )
   // }
+
+  XSPerf("utilization", validEntries)
 }

@@ -11,6 +11,7 @@ object XSLogLevel extends Enumeration {
   val ALL   = Value(0, "ALL  ")
   val DEBUG = Value("DEBUG")
   val INFO  = Value("INFO ")
+  val PERF  = Value("PERF ")
   val WARN  = Value("WARN ")
   val ERROR = Value("ERROR")
   val OFF   = Value("OFF  ")
@@ -24,7 +25,9 @@ object XSLog {
   {
     val logEnable = WireInit(false.B)
     val logTimestamp = WireInit(0.U(64.W))
-    if(Parameters.get.envParameters.EnableDebug){
+    val enableDebug = Parameters.get.envParameters.EnableDebug && debugLevel != XSLogLevel.PERF
+    val enablePerf = Parameters.get.envParameters.EnablePerfDebug && debugLevel == XSLogLevel.PERF
+    if (enableDebug || enablePerf) {
       ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
       when (cond && logEnable) {
@@ -98,3 +101,42 @@ object XSInfo extends LogHelper(XSLogLevel.INFO)
 object XSWarn extends LogHelper(XSLogLevel.WARN)
 
 object XSError extends LogHelper(XSLogLevel.ERROR)
+
+object XSPerf {
+  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
+    val reset = true
+    val print_per_cycle = false
+    val print_gap_bits = 15
+
+    val counter = RegInit(0.U(64.W))
+    val next_counter = WireInit(0.U(64.W))
+    val logTimestamp = WireInit(0.U(64.W))
+    val enableDebug = Parameters.get.envParameters.EnableDebug
+    val logEnable = WireInit(false.B)
+
+    if (enableDebug) {
+      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+
+      if(!print_per_cycle) {
+        ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+
+        next_counter := counter + perfCnt
+
+        when(logEnable && logTimestamp(print_gap_bits-1, 0) === 0.U) { // TODO: Need print when program exit?
+          if(reset) {
+            next_counter := perfCnt
+            XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $counter\n")
+          }else{
+            XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
+          }
+        }
+
+        counter := next_counter
+      }else{
+        when(logEnable) {
+          XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
+        }
+      }
+    }
+  }
+}

@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.XSInfo
+import utils._
 
 class RenameBypassInfo extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -77,6 +77,7 @@ class Rename extends XSModule {
     uop.src3State := DontCare
     uop.roqIdx := DontCare
     uop.diffTestDebugLrScValid := DontCare
+    uop.debugInfo := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
   })
