@@ -467,6 +467,19 @@ class ReservationStationData
     (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
   }
 
+  // NOTE: special case that bypass(fast) when enq for bypass's uop will arrive one cylce later
+  val lastFastUops = Reg(Vec(wakeupCnt, Valid(new MicroOp)))
+  for (i <- 0 until wakeupCnt) {
+    lastFastUops(i) := io.broadcastedUops(i)
+  }
+  def lastBypass(src: UInt, srcType: UInt, valid: Bool = true.B) : (Bool, Bool, UInt) = {
+    val hitVec = lastFastUops.map(port => wbHit(port.bits, src, srcType) && port.valid && valid)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+
+    val hit = ParallelOR(hitVec)
+    (hit, RegNext(hit), RegNext(ParallelMux(hitVec zip io.writeBackedData)))
+  }
+
   io.ctrl.srcUpdate.map(a => a.map(_ := false.B))
   for (i <- 0 until iqSize) {
     val srcSeq = Seq(uop(i).psrc1, uop(i).psrc2, uop(i).psrc3)
@@ -475,8 +488,8 @@ class ReservationStationData
       val (wakeupHit, wakeupData) = wakeup(srcSeq(j), srcTypeSeq(j))
       val (bypassHit, bypassHitReg, bypassData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wakeupHit || bypassHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-      when (wakeupHit) { /* data(i)(j) := wakeupData */dataWrite(i.U, j, wakeupData) }
-      when (bypassHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bypassData */dataWrite(i.U, j, bypassData) }
+      when (wakeupHit) { dataWrite(i.U, j, wakeupData) }
+      when (bypassHitReg && !(enqPtrReg===i.U && enqEnReg)) { dataWrite(i.U, j, bypassData) }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
@@ -504,13 +517,23 @@ class ReservationStationData
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
-  io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
-    val (bypassHit, bypassHitReg, bypassData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    when (bypassHitReg) { /* data(enqPtrReg)(i) := bypassData */dataWrite(enqPtrReg, i, bypassData) }
-    h := bypassHit
+  io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) => // h: port, i: 0~srcNum-1
+    val (bypassHit, bypassHitReg, bypassData)    = bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (wakeupHit, wakeupData)                  = wakeup(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (lastBypassHit, lastBypassHitReg, lastBypassDataReg) = lastBypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val wakeupHitReg = RegNext(wakeupHit)
+    val wakeupDataReg = RegNext(wakeupData)
+    when (bypassHitReg) { dataWrite(enqPtrReg, i, bypassData) }
+    when (wakeupHitReg) { dataWrite(enqPtrReg, i, wakeupDataReg) }
+    when (lastBypassHitReg) { dataWrite(enqPtrReg, i, lastBypassDataReg) }
+    h := bypassHit || wakeupHit || lastBypassHit
     // NOTE: enq bp is done here
     XSDebug(bypassHit, p"EnqbypassHit: (${i.U})\n")
+    XSDebug(lastBypassHit, p"EnqLbypassHit: (${i.U})\n")
+    XSDebug(wakeupHit, p"EnqwakeupHit: (${Binary(io.ctrl.srcUpdate(iqSize).asUInt())})\n")
     XSDebug(bypassHitReg, p"EnqbypassHitData: (${i.U}) data:${Hexadecimal(bypassData)}\n")
+    XSDebug(lastBypassHitReg, p"EnqLbypassHitData: (${i.U}) data:${Hexadecimal(lastBypassDataReg)}\n")
+    XSDebug(wakeupHitReg, p"EnqwakeupHitData: (${i.U}) data:${Hexadecimal(wakeupDataReg)}\n")
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }

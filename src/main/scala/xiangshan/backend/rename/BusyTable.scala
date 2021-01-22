@@ -30,7 +30,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   val tableAfterAlloc = tableAfterWb | allocMask
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
-    rdy := !tableAfterWb(raddr)
+    rdy := !table(raddr)
   }
 
   table := tableAfterAlloc
