@@ -200,7 +200,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
   io.toIntBlock.jumpPc := GetPcByFtq(ftq.io.ftqRead(0).entry.ftqPC, jumpInst.cf.ftqOffset)
-  io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.jalr_target
+  io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.target
 
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {

@@ -96,7 +96,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val cfiUpdate = wb.bits.redirect.cfiUpdate
     when(wb.bits.redirectValid){
       mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
-      when(!cfiIndex_vec(wbIdx).valid || cfiIndex_vec(wbIdx).bits > offset){
+      when(!cfiUpdate.taken && offset === cfiIndex_vec(wbIdx).bits){
+        cfiIndex_vec(wbIdx).valid := false.B
+      }
+      when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits){
         cfiIndex_vec(wbIdx).valid := true.B
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
@@ -132,7 +135,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.cfiIsCall := RegNext(cfiIsCall(headPtr.value))
   commitEntry.cfiIsRet := RegNext(cfiIsRet(headPtr.value))
   commitEntry.cfiIsRVC := RegNext(cfiIsRVC(headPtr.value))
-  commitEntry.jalr_target := RegNext(target_vec(headPtr.value))
+  commitEntry.target := RegNext(target_vec(headPtr.value))
 
   io.commit_ftqEntry.valid := RegNext(commitVec.asUInt().orR())
   io.commit_ftqEntry.bits := commitEntry
@@ -140,9 +143,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // read logic
   for((req, i) <- io.ftqRead.zipWithIndex){
     dataModule.io.raddr(1 + i) := req.ptr.value
-    val dataRead = WireInit(dataModule.io.rdata(1 + i))
-    dataRead.mispred := RegNext(mispredict_vec(req.ptr.value))
-    req.entry := dataRead
+    req.entry := dataModule.io.rdata(1 + i)
   }
 
   // redirect, reset ptr

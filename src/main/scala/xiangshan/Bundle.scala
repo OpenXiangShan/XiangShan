@@ -203,7 +203,7 @@ class FtqEntry extends XSBundle {
 
     // backend update
     val mispred = Vec(PredictWidth, Bool())
-    val jalr_target = UInt(VAddrBits.W)
+    val target = UInt(VAddrBits.W)
 }
 
 
