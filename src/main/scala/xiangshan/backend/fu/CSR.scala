@@ -237,7 +237,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mhartNo = hartId()
   val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), 0.U)
-  
+
   // mstatus Value Table
   // | sd   |
   // | pad1 |
