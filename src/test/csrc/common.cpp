@@ -21,5 +21,7 @@ extern "C" void xs_assert(long long line) {
 }
 
 void sig_handler(int signo) {
+  if (signal_num != 0) 
+    exit(0);
   signal_num = signo;
 }
