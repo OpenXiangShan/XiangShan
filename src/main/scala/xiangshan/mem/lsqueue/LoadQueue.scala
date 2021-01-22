@@ -237,7 +237,7 @@ class LoadQueue extends XSModule
   }
 
   val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W))) // index selected last cycle
-  val loadWbSelV = RegInit(VecInit(List.fill(LoadPipelineWidth)(false.B))) // index selected in last cycle is valid
+  val loadWbSelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && datavalid(i)
@@ -263,17 +263,11 @@ class LoadQueue extends XSModule
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
   
   (0 until LoadPipelineWidth).map(i => {
-    val canGo = io.ldout(i).fire() || !loadWbSelV(i)
-    val valid = loadWbSelVGen(i)
-    loadWbSel(i) := RegEnable(loadWbSelGen(i), valid && canGo)
+    loadWbSel(i) := RegNext(loadWbSelGen(i))
+    loadWbSelV(i) := RegNext(loadWbSelVGen(i), init = false.B)
     when(io.ldout(i).fire()){
       // Mark them as writebacked, so they will not be selected in the next cycle
       writebacked(loadWbSel(i)) := true.B
-      // update loadWbSelValidReg
-      loadWbSelV(i) := false.B
-    }
-    when(valid && canGo){
-      loadWbSelV(i) := true.B
     }
   })
 
