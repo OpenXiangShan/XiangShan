@@ -611,5 +611,12 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
         io.fetchPacket.bits.pd(i).isRet
       )
     }
+    val b = ftqEnqBuf
+    XSDebug("[FtqEnqBuf] v=%d r=%d pc=%x cfiIndex(%d)=%d cfiIsCall=%d cfiIsRet=%d cfiIsRVC=%d\n",
+      ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsRVC)
+    XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x predHist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
+      b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.predHist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
+    XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)  
   }
+
 }
