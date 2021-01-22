@@ -61,7 +61,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )))
 
@@ -79,7 +79,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = "L3"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )).node
 
