@@ -153,10 +153,10 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMWrapper("RR_Table", rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true))
+  val rrTable = Module(new SRAMWrapper("RR_Table", rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
 
   val wAddr = io.w.bits
-  rrTable.io.w.req.valid := io.w.fire()
+  rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
   rrTable.io.w.req.bits.setIdx := idx(wAddr)
   rrTable.io.w.req.bits.data.valid := true.B
   rrTable.io.w.req.bits.data.tag := tag(wAddr)
@@ -168,27 +168,28 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   rData := rrTable.io.r.resp.data(0)
 
   val rwConflict = io.w.fire() && io.r.req.fire() && idx(wAddr) === idx(rAddr)
-  when (rwConflict) {
-    rrTable.io.r.req.valid := false.B
-  }
-  when (RegNext(rwConflict)) {
-    rData.valid := true.B
-    rData.tag := RegNext(tag(wAddr))
-  }
+  // when (rwConflict) {
+  //   rrTable.io.r.req.valid := false.B
+  // }
+  // when (RegNext(rwConflict)) {
+  //   rData.valid := true.B
+  //   rData.tag := RegNext(tag(wAddr))
+  // }
 
-  io.w.ready := true.B
+  io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(io.r.req.fire())
+  io.r.resp.valid := RegNext(rrTable.io.r.req.fire())
   io.r.resp.bits.testOffset := RegNext(io.r.req.bits.testOffset)
   io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
   io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))
+
+  assert(!RegNext(rwConflict), "single port SRAM should not read and write at the same time")
 
   // debug info
   XSDebug(io.w.fire(), p"io.write: v=${io.w.valid} addr=0x${Hexadecimal(io.w.bits)}\n")
   XSDebug(p"io.read: ${io.r}\n")
   XSDebug(io.w.fire(), p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
   XSDebug(io.r.req.fire(), p"rAddr=0x${Hexadecimal(rAddr)} idx=${Hexadecimal(idx(rAddr))} rData=${rData}\n")
-  XSDebug(rwConflict, p"write and read conflict!\n")
 
 }
 
@@ -207,12 +208,12 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   def scoreMax = p.scoreMax
   def badScore = p.badScore
 
-  val prefetchOffset = RegInit(4.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
+  val prefetchOffset = RegInit(2.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
   val st = RegInit(VecInit(offsetList.map(off => new ScoreTableEntry(p).apply(off.U, 0.U))))
   val ptr = RegInit(0.U(log2Up(scores).W))
   val round = RegInit(0.U(roundBits.W))
 
-  val bestOffset = RegInit(new ScoreTableEntry(p).apply(4.U, 0.U)) // the entry with the highest score while traversing
+  val bestOffset = RegInit(new ScoreTableEntry(p).apply(2.U, 0.U)) // the entry with the highest score while traversing
   val testOffset = WireInit(st(ptr).offset)
   def winner(e1: ScoreTableEntry, e2: ScoreTableEntry): ScoreTableEntry = {
     val w = Wire(new ScoreTableEntry(p))
@@ -306,7 +307,7 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
   def blockBytes = p.blockBytes
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
 
-  val s_idle :: s_req :: s_resp :: s_finish :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_write_recent_req :: s_finish :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val req = RegInit(0.U.asTypeOf(new PrefetchReq))
   val baseAddr = RegInit(0.U(PAddrBits.W))
@@ -328,6 +329,12 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
 
   when (state === s_resp) {
     when (io.pft.resp.fire()) {
+      state := s_write_recent_req
+    }
+  }
+
+  when (state === s_write_recent_req) {
+    when (io.writeRRTable.fire()) {
       state := s_finish
     }
   }
@@ -347,7 +354,7 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
   io.pft.finish.bits.id := io.id
   io.inflight.valid := state =/= s_idle
   io.inflight.bits := req.addr
-  io.writeRRTable.valid := io.pft.resp.fire()
+  io.writeRRTable.valid := state === s_write_recent_req
   io.writeRRTable.bits := baseAddr // write this into recent request table
 
   XSDebug(p"bopEntry ${io.id}: state=${state} prefetchOffset=${io.prefetchOffset} inflight=${io.inflight.valid} 0x${Hexadecimal(io.inflight.bits)} writeRRTable: ${io.writeRRTable.valid} 0x${Hexadecimal(io.writeRRTable.bits)} baseAddr=0x${Hexadecimal(baseAddr)} req: ${req}\n")
