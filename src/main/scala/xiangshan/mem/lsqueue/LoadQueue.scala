@@ -364,7 +364,9 @@ class LoadQueue extends XSModule
     *   Besides, load instructions in LoadUnit_S1 and S2 are also checked.
     * Cycle 1: Redirect Generation
     *   There're three possible types of violations. Choose the oldest load.
-    *   Set io.redirect according to the detected violation.
+    *   Prepare redirect request according to the detected violation.
+    * Cycle 2: Redirect Fire
+    *   Fire redirect request (if valid)
     */
   io.load_s1 := DontCare
   def detectRollback(i: Int) = {
@@ -464,18 +466,29 @@ class LoadQueue extends XSModule
   val rollbackSelected = ParallelOperation(rollback, rollbackSel)
   val lastCycleRedirect = RegNext(io.brqRedirect)
 
+  // S2: select rollback and generate rollback request 
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
-  io.rollback.valid := rollbackSelected.valid &&
+  val rollbackGen = Wire(Valid(new Redirect))
+  val rollbackReg = Reg(Valid(new Redirect))
+  rollbackGen.valid := rollbackSelected.valid &&
     (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
     !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
 
-  io.rollback.bits.roqIdx := rollbackSelected.bits.roqIdx
-  io.rollback.bits.level := RedirectLevel.flush
-  io.rollback.bits.interrupt := DontCare
-  io.rollback.bits.pc := DontCare
-  io.rollback.bits.target := rollbackSelected.bits.cf.pc
-  io.rollback.bits.brTag := rollbackSelected.bits.brTag
+  rollbackGen.bits.roqIdx := rollbackSelected.bits.roqIdx
+  rollbackGen.bits.level := RedirectLevel.flush
+  rollbackGen.bits.interrupt := DontCare
+  rollbackGen.bits.pc := DontCare
+  rollbackGen.bits.target := rollbackSelected.bits.cf.pc
+  rollbackGen.bits.brTag := rollbackSelected.bits.brTag
+
+  rollbackReg := rollbackGen
+
+  // S3: fire rollback request
+  io.rollback := rollbackReg
+  io.rollback.valid := rollbackReg.valid && 
+    (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
+    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
 
   when(io.rollback.valid) {
     XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
