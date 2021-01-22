@@ -56,15 +56,20 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
     mulReq.size
   )
 
-  val arbiters = for(i <- mulReq.indices) yield {
-    val other = arbReq(i).getOrElse(Seq())
-    val arb = Module(new Arbiter(new ExuOutput, 1+other.size))
-    arb.io.in <> mulReq(i) +: other
+  for(i <- mulReq.indices) {
     val out = io.out(directConnect.size + i)
-    out.valid := arb.io.out.valid
-    out.bits := arb.io.out.bits
-    arb.io.out.ready := true.B
-    arb
+    val other = arbReq(i).getOrElse(Seq())
+    if(other.isEmpty){
+      out.valid := mulReq(i).valid
+      out.bits := mulReq(i).bits
+      mulReq(i).ready := true.B
+    } else {
+      val arb = Module(new Arbiter(new ExuOutput, 1+other.size))
+      arb.io.in <> mulReq(i) +: other
+      out.valid := arb.io.out.valid
+      out.bits := arb.io.out.bits
+      arb.io.out.ready := true.B
+    }
   }
 
   if(portUsed < numOut){
@@ -78,10 +83,11 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
   }
   for(i <- mulReq.indices){
     sb.append(s"[ ${cfgs(io.in.indexOf(mulReq(i))).name} ")
+    val useArb = arbReq(i).nonEmpty
     for(req <- arbReq(i).getOrElse(Nil)){
       sb.append(s"${cfgs(io.in.indexOf(req)).name} ")
     }
-    sb.append(s"] -> arb -> out #${directConnect.size + i}\n")
+    sb.append(s"] -> ${if(useArb) "arb ->" else ""} out #${directConnect.size + i}\n")
   }
   println(sb)
 

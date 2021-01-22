@@ -5,13 +5,14 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
+import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.backend.exu.Exu._
 
 class Dispatch2Fp extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort(XLEN + 1)))
-    val regRdy = Vec(NRFpReadPorts - exuParameters.StuCnt, Input(Bool()))
+    val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
+    val readState = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new BusyTableReadIO))
     val numExist = Input(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
     val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
@@ -51,13 +52,19 @@ class Dispatch2Fp extends XSModule {
   val fpDynamicMapped = fpDynamicIndex.map(i => indexVec(i))
   for (i <- fpStaticIndex.indices) {
     val index = WireInit(VecInit(fpStaticMapped(i) +: fpDynamicMapped))
-    io.readRf(3*i  ).addr := io.fromDq(index(fpReadPortSrc(i))).bits.psrc1
-    io.readRf(3*i+1).addr := io.fromDq(index(fpReadPortSrc(i))).bits.psrc2
-    io.readRf(3*i+2).addr := io.fromDq(index(fpReadPortSrc(i))).bits.psrc3
+    io.readRf(3*i  ) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc1
+    io.readRf(3*i+1) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc2
+    io.readRf(3*i+2) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc3
   }
   val readPortIndex = Wire(Vec(exuParameters.FpExuCnt, UInt(2.W)))
   fpStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
   fpDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := fpDynamicExuSrc(i)})
+
+  for (i <- 0 until dpParams.IntDqDeqWidth) {
+    io.readState(3*i  ).req := io.fromDq(i).bits.psrc1
+    io.readState(3*i+1).req := io.fromDq(i).bits.psrc2
+    io.readState(3*i+2).req := io.fromDq(i).bits.psrc3
+  }
 
   /**
     * Part 3: dispatch to reservation stations
@@ -74,12 +81,12 @@ class Dispatch2Fp extends XSModule {
     }
     enq.bits := io.fromDq(indexVec(i)).bits
     
-    val src1Ready = VecInit((0 until 4).map(i => io.regRdy(i * 3)))
-    val src2Ready = VecInit((0 until 4).map(i => io.regRdy(i * 3 + 1)))
-    val src3Ready = VecInit((0 until 4).map(i => io.regRdy(i * 3 + 2)))
-    enq.bits.src1State := src1Ready(readPortIndex(i))
-    enq.bits.src2State := src2Ready(readPortIndex(i))
-    enq.bits.src3State := src3Ready(readPortIndex(i))
+    val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 3).resp))
+    val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 3 + 1).resp))
+    val src3Ready = VecInit((0 until 4).map(i => io.readState(i * 3 + 2).resp))
+    enq.bits.src1State := src1Ready(indexVec(i))
+    enq.bits.src2State := src2Ready(indexVec(i))
+    enq.bits.src3State := src3Ready(indexVec(i))
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State}) " +
@@ -125,4 +132,7 @@ class Dispatch2Fp extends XSModule {
 //        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)}), " +
 //        p"(${readPortIndexReg(i)+2.U}, ${uopReg(i).psrc3}, ${Hexadecimal(io.enqIQData(i).src3)})\n")
 //  }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+
 }

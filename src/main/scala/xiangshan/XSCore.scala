@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache, MemoryOpConstants, MissReq}
+import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache, MemoryOpConstants, MissReq}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -90,7 +90,9 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
+  TlbSPEntrySize: Int = 4,
   TlbL2EntrySize: Int = 256, // or 512
+  TlbL2SPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
   NumPerfCounters: Int = 16,
@@ -166,7 +168,9 @@ trait HasXSParameter {
   val RefillSize = core.RefillSize
   val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
   val TlbEntrySize = core.TlbEntrySize
+  val TlbSPEntrySize = core.TlbSPEntrySize
   val TlbL2EntrySize = core.TlbL2EntrySize
+  val TlbL2SPEntrySize = core.TlbL2SPEntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
@@ -283,23 +287,24 @@ abstract class XSBundle extends Bundle
 case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = false,
+  EnablePerfDebug: Boolean = false
 )
 
-object AddressSpace extends HasXSParameter {
-  // (start, size)
-  // address out of MMIO will be considered as DRAM
-  def mmio = List(
-    (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
-    (0x40000000L, 0x40000000L)   // external devices
-  )
+// object AddressSpace extends HasXSParameter {
+//   // (start, size)
+//   // address out of MMIO will be considered as DRAM
+//   def mmio = List(
+//     (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
+//     (0x40000000L, 0x40000000L)   // external devices
+//   )
 
-  def isMMIO(addr: UInt): Bool = mmio.map(range => {
-    require(isPow2(range._2))
-    val bits = log2Up(range._2)
-    (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
-  }).reduce(_ || _)
-}
+//   def isMMIO(addr: UInt): Bool = mmio.map(range => {
+//     require(isPow2(range._2))
+//     val bits = log2Up(range._2)
+//     (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
+//   }).reduce(_ || _)
+// }
 
 
 
@@ -320,6 +325,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   // outer facing nodes
+  val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
@@ -345,6 +351,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
@@ -357,7 +364,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
   val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
-  val frontend = Module(new Frontend)
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
     fastWakeUpIn = fpBlockFastWakeUpInt,
@@ -376,6 +382,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     slowIntOut = fpBlockSlowWakeUpInt
   ))
 
+  val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module

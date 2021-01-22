@@ -16,7 +16,7 @@ import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
+  val readRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   val jumpPc = Output(UInt(VAddrBits.W))
   // int block only uses port 0~7
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
@@ -25,7 +25,7 @@ class CtrlToIntBlockIO extends XSBundle {
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
-  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
+  val readRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   // fp block uses port 0~11
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
@@ -131,10 +131,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.fpWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
-  intBusyTable.io.rfReadAddr <> dispatch.io.readIntRf.map(_.addr)
-  intBusyTable.io.pregRdy <> dispatch.io.intPregRdy
-  fpBusyTable.io.rfReadAddr <> dispatch.io.readFpRf.map(_.addr)
-  fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
+  intBusyTable.io.read <> dispatch.io.readIntState
+  fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect.valid := brq.io.redirectOut.valid || io.fromLsBlock.replay.valid
   roq.io.redirect.bits <> redirectArb
