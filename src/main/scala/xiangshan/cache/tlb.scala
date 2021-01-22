@@ -134,7 +134,6 @@ class TlbEntry(superpage: Boolean = false) extends TlbBundle {
   val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
   val data = new TlbEntryData
 
-
   def hit(vpn: UInt): Bool = {
     if (superpage) {
       val insideLevel = level.getOrElse(0.U)
@@ -246,6 +245,10 @@ class BlockTlbRequestIO() extends TlbBundle {
 class TlbPtwIO extends TlbBundle {
   val req = DecoupledIO(new PtwReq)
   val resp = Flipped(DecoupledIO(new PtwResp))
+
+  override def toPrintable: Printable = {
+    p"req:${req.valid} ${req.ready} ${req.bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
+  }
 }
 
 class TlbIO(Width: Int) extends TlbBundle {

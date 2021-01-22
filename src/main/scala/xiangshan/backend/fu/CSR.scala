@@ -805,7 +805,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
     // "ExitLoop3" -> (0x102e, "CntExitLoop3")
-    
+
     "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
     "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),
     "btbRight"    -> (0x1032, "perfCntbtbRight"),
