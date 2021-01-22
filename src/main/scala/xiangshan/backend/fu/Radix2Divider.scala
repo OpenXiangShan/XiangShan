@@ -85,6 +85,6 @@ class Radix2Divider(len: Int) extends AbstractDivider(len) {
   io.out.bits.data := Mux(ctrlReg.isW, SignExt(res(31,0),xlen), res)
   io.out.bits.uop := uopReg
 
-  io.out.valid := state === s_finish && !kill
+  io.out.valid := state === s_finish
   io.in.ready := state === s_idle
 }
