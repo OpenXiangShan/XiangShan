@@ -72,6 +72,11 @@ trait HasExceptionNO {
   )
   val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
   val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
+  val csrWbCount = (0 until 16).map(i => if (csrSet.contains(i)) 1 else 0)
+  val loadWbCount = (0 until 16).map(i => if (loadUnitSet.contains(i)) 1 else 0)
+  val storeWbCount = (0 until 16).map(i => if (storeUnitSet.contains(i)) 1 else 0)
+  val atomicsWbCount = (0 until 16).map(i => if (atomicsUnitSet.contains(i)) 1 else 0)
+  val writebackCount = (0 until 16).map(i => csrWbCount(i) + atomicsWbCount(i) + loadWbCount(i) + 2 * storeWbCount(i))
   def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] = {
     if (dontCareBits) {
       val new_vec = Wire(ExceptionVec())
@@ -486,7 +491,7 @@ class CSR extends FunctionUnit with HasCSRConst
                 (if (HasFPU) fcsrMapping else Nil)
 
   val addr = src2(11, 0)
-  val csri = src2(16, 12)
+  val csri = ZeroExt(src2(16, 12), XLEN)
   val rdata = Wire(UInt(XLEN.W))
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
@@ -497,14 +502,17 @@ class CSR extends FunctionUnit with HasCSRConst
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  csrio.isPerfCnt := (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  csrio.isPerfCnt := addrInPerfCnt
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
+  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted)
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
@@ -792,6 +800,11 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
     "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
     "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
+    "ICacheMMIO" -> (0x102a, "perfCntIcacheMMIOCnt"),
+    // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
+    // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
+    // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
+    // "ExitLoop3" -> (0x102e, "CntExitLoop3")
     
     "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
     "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),

@@ -33,7 +33,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   val tableAfterWb = table & (~wbMask).asUInt
   val tableAfterAlloc = tableAfterWb | allocMask
 
-  io.read.map(r => r.resp := !tableAfterWb(r.req))
+  io.read.map(r => r.resp := !table(r.req))
 
   table := tableAfterAlloc
 

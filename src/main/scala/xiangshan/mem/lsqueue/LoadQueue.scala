@@ -94,6 +94,7 @@ class LoadQueue extends XSModule
 
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val deqPtrExtNext = Wire(new LqPtr)
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
@@ -291,34 +292,50 @@ class LoadQueue extends XSModule
 
   // Stage 0
   // Generate writeback indexes
+
+  def getEvenBits(input: UInt): UInt = {
+    require(input.getWidth == LoadQueueSize)
+    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i)})).asUInt
+  }
+  def getOddBits(input: UInt): UInt = {
+    require(input.getWidth == LoadQueueSize)
+    VecInit((0 until LoadQueueSize/2).map(i => {input(2*i+1)})).asUInt
+  }
+
+  val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W))) // index selected last cycle
+  val loadWbSelV = RegInit(VecInit(List.fill(LoadPipelineWidth)(false.B))) // index selected in last cycle is valid
+
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && !writebacked(i) && datavalid(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
-  val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
-  val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
-  val evenDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i)})).asUInt
-  val oddDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i+1)})).asUInt
+  val evenDeqMask = getEvenBits(deqMask)
+  val oddDeqMask = getOddBits(deqMask)
+  // generate lastCycleSelect mask 
+  val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
+  val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  // generate real select vec
+  val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
+  val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
+
+  def toVec(a: UInt): Vec[Bool] = {
+    VecInit(a.asBools)
+  }
 
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
-  loadWbSelGen(0) := Cat(getFirstOne(loadEvenSelVec, evenDeqMask), 0.U(1.W))
+  loadWbSelGen(0) := Cat(getFirstOne(toVec(loadEvenSelVec), evenDeqMask), 0.U(1.W))
   loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
-  loadWbSelGen(1) := Cat(getFirstOne(loadOddSelVec, oddDeqMask), 1.U(1.W))
+  loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
-
-  val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
-  val loadWbSelV = RegInit(VecInit(List.fill(LoadPipelineWidth)(false.B)))
+  
   (0 until LoadPipelineWidth).map(i => {
     val canGo = io.ldout(i).fire() || !loadWbSelV(i)
     val valid = loadWbSelVGen(i)
-    // store selected index in pipeline reg
     loadWbSel(i) := RegEnable(loadWbSelGen(i), valid && canGo)
-    // Mark them as writebacked, so they will not be selected in the next cycle
-    when(valid && canGo){
-      writebacked(loadWbSelGen(i)) := true.B
-    }
-    // update loadWbSelValidReg
     when(io.ldout(i).fire()){
+      // Mark them as writebacked, so they will not be selected in the next cycle
+      writebacked(loadWbSel(i)) := true.B
+      // update loadWbSelValidReg
       loadWbSelV(i) := false.B
     }
     when(valid && canGo){
@@ -331,7 +348,7 @@ class LoadQueue extends XSModule
   // writeback data to cdb
   (0 until LoadPipelineWidth).map(i => {
     // data select
-    dataModule.io.wb.raddr(i) := loadWbSel(i)
+    dataModule.io.wb.raddr(i) := loadWbSelGen(i)
     val rdata = dataModule.io.wb.rdata(i).data
     val seluop = uop(loadWbSel(i))
     val func = seluop.ctrl.fuOpType
@@ -363,12 +380,10 @@ class LoadQueue extends XSModule
     io.ldout(i).valid := loadWbSelV(i)
 
     when(io.ldout(i).fire()) {
-      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
-        dataModule.io.debug(loadWbSel(i)).paddr,
-        dataModule.io.debug(loadWbSel(i)).data,
         debug_mmio(loadWbSel(i))
       )
     }
@@ -551,7 +566,7 @@ class LoadQueue extends XSModule
     io.roqDeqPtr === uop(deqPtr).roqIdx &&
     !io.commits.isWalk
 
-  dataModule.io.uncache.raddr := deqPtr
+  dataModule.io.uncache.raddr := deqPtrExtNext.value
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.uncache.rdata.paddr
@@ -618,7 +633,8 @@ class LoadQueue extends XSModule
   }
 
   val commitCount = PopCount(loadCommit)
-  deqPtrExt := deqPtrExt + commitCount
+  deqPtrExtNext := deqPtrExt + commitCount
+  deqPtrExt := deqPtrExtNext
 
   val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
   val trueValidCounter = distanceBetween(enqPtrExt(0), deqPtrExt)

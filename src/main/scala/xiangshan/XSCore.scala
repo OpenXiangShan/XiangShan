@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -315,6 +315,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   // outer facing nodes
+  val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
@@ -352,7 +353,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
   val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
-  val frontend = Module(new Frontend)
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
     fastWakeUpIn = fpBlockFastWakeUpInt,
@@ -371,6 +371,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     slowIntOut = fpBlockSlowWakeUpInt
   ))
 
+  val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
