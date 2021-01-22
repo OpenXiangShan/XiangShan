@@ -284,7 +284,6 @@ class LoadUnit extends XSModule with HasLoadHelper {
   intHitLoadOut.bits.data := load_s2.io.out.bits.data
   intHitLoadOut.bits.redirectValid := false.B
   intHitLoadOut.bits.redirect := DontCare
-  intHitLoadOut.bits.brUpdate := DontCare
   intHitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
   intHitLoadOut.bits.debug.isPerfCnt := false.B
   intHitLoadOut.bits.fflags := DontCare

@@ -23,8 +23,7 @@ class RAS extends BasePredictor
     class RASBranchInfo extends Meta
     {
         val rasSp = UInt(log2Up(RasSize).W)
-        val rasTopCtr = UInt(8.W)
-        val rasToqAddr = UInt(VAddrBits.W)
+        val rasTop = new RASEntry
     }
 
     class RASIO extends DefaultBasePredictorIO 
@@ -33,7 +32,7 @@ class RAS extends BasePredictor
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
         val isLastHalfRVI = Input(Bool())
-        val recover =  Flipped(ValidIO(new CfiUpdateInfo))
+        val redirect =  Flipped(ValidIO(new Redirect))
         val out = ValidIO(new RASResp)
         val meta = Output(new RASBranchInfo)
     }
@@ -190,12 +189,13 @@ class RAS extends BasePredictor
     spec_push := !spec_is_full && io.callIdx.valid && io.pc.valid
     spec_pop  := !spec_is_empty && io.is_ret && io.pc.valid
 
+    val commit_cfi = io.redirect.bits.cfiUpdate
     val commit = Module(new RASStack(RasSize))
     val commit_ras = commit.io
 
     val commit_push = WireInit(false.B)
     val commit_pop = WireInit(false.B)
-    val commit_new_addr = Mux(io.recover.bits.pd.isRVC && HasCExtension.B, io.recover.bits.pc + 2.U, io.recover.bits.pc + 4.U)
+    val commit_new_addr = Mux(commit_cfi.pd.isRVC && HasCExtension.B, commit_cfi.pc + 2.U, commit_cfi.pc + 4.U)
     commit_ras.push_valid := commit_push
     commit_ras.pop_valid  := commit_pop
     commit_ras.new_addr   := commit_new_addr
@@ -203,8 +203,12 @@ class RAS extends BasePredictor
     val commit_is_full = commit_ras.is_full
     val commit_top_addr = commit_ras.top_addr
 
-    commit_push := !commit_is_full  && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isCall
-    commit_pop  := !commit_is_empty && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isRet
+    val update_valid = io.update.valid
+    val update = io.update.bits
+    val update_call_valid = update_valid && update.cfiIsCall && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
+    val update_ret_valid  = update_valid && update.cfiIsRet && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
+    commit_push := !commit_is_full  && update_call_valid
+    commit_pop  := !commit_is_empty && update_ret_valid
 
 
     io.out.valid := !spec_is_empty
@@ -212,7 +216,7 @@ class RAS extends BasePredictor
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 
-    val copy_valid = io.recover.valid && (io.recover.bits.isMisPred || io.recover.bits.isReplay)
+    val copy_valid = io.redirect.valid
     val copy_next = RegNext(copy_valid)
     spec_ras.copy_valid := copy_next
     spec_ras.copy_in_mem := commit_ras.copy_out_mem
@@ -224,9 +228,8 @@ class RAS extends BasePredictor
     commit_ras.copy_in_top := DontCare
 
     //no need to pass the ras branchInfo
-    io.meta.rasSp := DontCare
-    io.meta.rasTopCtr := DontCare
-    io.meta.rasToqAddr := DontCare
+    io.meta.rasSp := spec.debugIO.sp
+    io.meta.rasTop := spec.debugIO.topRegister
 
     if (BPUDebug && debug) {
         val spec_debug = spec.debugIO

@@ -221,7 +221,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
-    io.out.bits.brUpdate := DontCare
     io.out.bits.debug.isMMIO := is_mmio
     when (io.out.fire()) {
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)

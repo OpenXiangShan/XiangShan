@@ -212,50 +212,49 @@ class MicroBTB extends BasePredictor
     //uBTB update 
     //backend should send fetch pc to update
     val u = io.update.bits
-    val update_br_pc  = u.pc
-    val update_br_idx = u.fetchIdx
-    val update_br_offset = (update_br_idx << instOffsetBits).asUInt()
-    val update_fetch_pc = update_br_pc - update_br_offset
-    val update_write_way = u.bpuMeta.ubtbWriteWay
-    val update_hits = u.bpuMeta.ubtbHits
-    val update_taken = u.taken
+    val update_packet_pc = packetAligned(u.ftqPC)
+    val update_pcs  = VecInit((0 until PredictWidth).map(i => update_packet_pc + (i << instOffsetBits).U))
+    val update_write_ways = VecInit(u.metas.map(_.ubtbWriteWay))
+    val update_hits = u.metas.map(_.ubtbHits)
+    val update_takens = u.takens
 
-    val update_bank = getBank(update_br_pc)
-    val update_base_bank = getBank(update_fetch_pc)
-    val update_tag = getTag(update_br_pc)
-    val update_target = Mux(u.pd.isBr, u.brTarget, u.target)
+    val update_bank = u.cfiIndex.bits
+    val update_tag = getTag(update_packet_pc)
+    val update_target = u.target
     val update_target_lower = update_target(lowerBitsSize-1+instOffsetBits, instOffsetBits)
-    val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
   
   
-    val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && (u.pd.brType === BrType.jal)
-    val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay //io.update.valid //&& update_is_BR_or_JAL
-    val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay//io.update.valid //&& update_is_BR_or_JAL
+    // only when taken should we update target
+    val entry_write_valid = io.update.valid && u.valids(u.cfiIndex.bits) && u.takens(u.cfiIndex.bits)
+    val meta_write_valids = 
+        VecInit((0 until PredictWidth).map(i => io.update.valid && u.valids(i) && (u.br_mask(i) || u.takens(i))))
 
     for (b <- 0 until PredictWidth) {
         datas(b).wen := do_reset || (entry_write_valid && b.U === update_bank)
-        datas(b).wWay := Mux(do_reset, reset_way, update_write_way)
+        datas(b).wWay := Mux(do_reset, reset_way, update_write_ways(u.cfiIndex.bits))
         datas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBEntry), update_target_lower.asTypeOf(new MicroBTBEntry))
     }
 
 
 
     //write the uBTBMeta
-    (0 until PredictWidth).map(i => metas(i).rWay := update_write_way)
-    val update_write_meta = Wire(new MicroBTBMeta)
-    update_write_meta.is_Br  := u.pd.brType === BrType.branch
-    update_write_meta.is_RVC := u.pd.isRVC
-    update_write_meta.valid  := true.B
-    update_write_meta.tag    := update_tag
-    update_write_meta.pred   := Mux(!update_hits,
-                                    Mux(update_taken,3.U,0.U),
-                                    satUpdate( metas(update_bank).rpred,2,update_taken)
-                                )
+    (0 until PredictWidth).map(i => metas(i).rWay := update_write_ways(i))
+    val update_write_metas = Wire(Vec(PredictWidth, new MicroBTBMeta))
+    for (i <- 0 until PredictWidth) {
+        update_write_metas(i).is_Br  := u.br_mask(i)
+        update_write_metas(i).is_RVC := u.rvc_mask(i)
+        update_write_metas(i).valid  := true.B
+        update_write_metas(i).tag    := update_tag
+        update_write_metas(i).pred   := Mux(!update_hits(i),
+                                        Mux(update_takens(i),3.U,0.U),
+                                        satUpdate( metas(i).rpred,2,update_takens(i))
+                                    )
+    }
 
     for (b <- 0 until PredictWidth) {
-        metas(b).wen := do_reset || (meta_write_valid && b.U === update_bank)
-        metas(b).wWay := Mux(do_reset, reset_way, update_write_way)
-        metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
+        metas(b).wen := do_reset || meta_write_valids(b)
+        metas(b).wWay := Mux(do_reset, reset_way, update_write_ways(b))
+        metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_metas(b))
     }
 
     if (BPUDebug && debug) {
@@ -264,21 +263,21 @@ class MicroBTB extends BasePredictor
         for(i <- 0 until PredictWidth) {
             XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
                                     i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
+            XSDebug(meta_write_valids(i),"uBTB update(%d): update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_tag:%x | update_lower 0x%x\n ",
+                        i.U, update_pcs(i),update_hits(i),update_write_ways(i),update_tag,update_target_lower(lowerBitsSize-1,0))
+            XSDebug(meta_write_valids(i), "uBTB update(%d): update_taken:%d | old_pred:%b | new_pred:%b\n",
+                i.U, update_takens(i), metas(i).rpred,
+                Mux(!update_hits(i),
+                        Mux(update_takens(i),3.U,0.U),
+                        satUpdate( metas(i).rpred,2,update_takens(i))
+                    ))
         }
 
-        XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | update_lower 0x%x\n "
-                    ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_target_lower(lowerBitsSize-1,0))
-        XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
-            update_taken, metas(update_bank).rpred,
-            Mux(!update_hits,
-                    Mux(update_taken,3.U,0.U),
-                    satUpdate( metas(update_bank).rpred,2,update_taken)
-                ))
 
     }
 
     if (extended_stat) {
-        val high_identical = update_target(VAddrBits-1, lowerBitsSize) =/= update_fetch_pc(VAddrBits-1, lowerBitsSize)
+        val high_identical = update_target(VAddrBits-1, lowerBitsSize) =/= update_packet_pc(VAddrBits-1, lowerBitsSize)
         XSDebug(io.update.valid, "extended_stat: identical %d\n", high_identical)
     }
    

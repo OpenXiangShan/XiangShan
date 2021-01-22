@@ -250,7 +250,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.bits.data := dataModuleRead(0).data // dataModuleRead.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
-  io.mmioStout.bits.brUpdate := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare

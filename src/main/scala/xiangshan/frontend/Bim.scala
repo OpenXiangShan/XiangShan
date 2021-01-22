@@ -62,8 +62,7 @@ class BIM extends BasePredictor with BimParams {
 
   val u = io.update.bits
 
-  val updateBank = bimAddr.getBank(u.pc)
-  val updateRow = bimAddr.getBankIdx(u.pc)
+  val updateRow = bimAddr.getBankIdx(u.ftqPC)
 
 
   val wrbypass_ctrs       = Reg(Vec(bypassEntries, Vec(BimBanks, UInt(2.W))))
@@ -76,40 +75,48 @@ class BIM extends BasePredictor with BimParams {
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.bpuMeta.bimCtr)
-  val newTaken = u.taken
-  val newCtr = satUpdate(oldCtr, 2, newTaken)
+  val oldCtrs = VecInit((0 until BimBanks).map(b => 
+                  Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(b),
+                    wrbypass_ctrs(wrbypass_hit_idx)(b), u.metas(b).bimCtr)))
+  
+  val newTakens = VecInit((0 until BimBanks).map(b => u.cfiIndex.valid && u.cfiIndex.bits === b.U))
+  val newCtrs = VecInit((0 until BimBanks).map(b => satUpdate(oldCtrs(b), 2, newTakens(b))))
   // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = io.update.valid && u.pd.isBr && !u.isReplay
+  val needToUpdate = VecInit((0 until PredictWidth).map(i => io.update.valid && u.br_mask(i) && u.valids(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
-  when (needToUpdate) {
-    when (wrbypass_hit) {
-      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
-      wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank) := true.B
-    } .otherwise {
-      wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := newCtr
-      (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
-      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
-      wrbypass_rows(wrbypass_enq_idx) := updateRow
-      wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
+  for (b <- 0 until BimBanks) {
+    when (needToUpdate(b)) {
+      when (wrbypass_hit) {
+        wrbypass_ctrs(wrbypass_hit_idx)(b) := newCtrs(b)
+        wrbypass_ctr_valids(wrbypass_hit_idx)(b) := true.B
+      } .otherwise {
+        wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
+        (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
+        wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
+        wrbypass_rows(wrbypass_enq_idx) := updateRow
+        wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
+      }
     }
   }
 
   for (b <- 0 until BimBanks) {
-    bim(b).io.w.req.valid := needToUpdate && b.U === updateBank || doing_reset
+    bim(b).io.w.req.valid := needToUpdate(b) || doing_reset
     bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
-    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
+    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtrs(b))
   }
 
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
-    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x", io.update.valid, u.pc, u.pnpc, u.target)
-    XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
-    XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.bpuMeta.bimCtr)}\n")
-    XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
+    XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", io.update.valid, u.ftqPC, u.valids.asUInt, u.target)
+    
+    XSDebug("[update] brMask=%b, taken=%b isMisPred=%b\n", u.br_mask.asUInt, newTakens.asUInt, u.mispred.asUInt)
+    for (i <- 0 until BimBanks) {
+      XSDebug(true.B, p"bimCtr(${i.U})=${Binary(u.metas(i).bimCtr)} oldCtr=${Binary(oldCtrs(i))} newCtr=${Binary(newCtrs(i))}\n")
+    }
+    XSDebug("needToUpdate=%b updateRow=%x\n", needToUpdate.asUInt, updateRow)
     XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
   }
   

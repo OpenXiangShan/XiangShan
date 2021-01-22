@@ -114,7 +114,6 @@ class StoreUnit_S2 extends XSModule {
   io.stout.bits.data := DontCare
   io.stout.bits.redirectValid := false.B
   io.stout.bits.redirect := DontCare
-  io.stout.bits.brUpdate := DontCare
   io.stout.bits.debug.isMMIO := io.in.bits.mmio
   io.stout.bits.debug.isPerfCnt := false.B
   io.stout.bits.fflags := DontCare

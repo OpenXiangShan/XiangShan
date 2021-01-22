@@ -128,10 +128,10 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   stage3CfiUpdate.rasEntry := ftqRead.rasTop
   stage3CfiUpdate.hist := ftqRead.hist
   stage3CfiUpdate.predHist := ftqRead.predHist
-  stage3CfiUpdate.specCnt := ftqRead.specCnt
+  stage3CfiUpdate.specCnt := ftqRead.specCnt(s2_redirect_bits_reg.ftqOffset)
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
   stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
-    if(i == 0) false.B else Cat(ftqRead.br_mask.take(i-1)).orR()
+    if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
   })(s2_redirect_bits_reg.ftqOffset)
   stage3CfiUpdate.target := target
   stage3CfiUpdate.taken := s2_redirect_bits_reg.cfiUpdate.taken

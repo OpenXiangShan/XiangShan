@@ -372,7 +372,6 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
-    io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
     io.ldout(i).bits.debug.isPerfCnt := false.B
     io.ldout(i).bits.fflags := DontCare
@@ -548,14 +547,15 @@ class LoadQueue extends XSModule
     !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
 
   io.rollback.bits.roqIdx := rollbackSelected.bits.roqIdx
+  io.rollback.bits.ftqIdx := rollbackSelected.bits.cf.ftqPtr
+  io.rollback.bits.ftqOffset := rollbackSelected.bits.cf.ftqOffset
   io.rollback.bits.level := RedirectLevel.flush
   io.rollback.bits.interrupt := DontCare
-  io.rollback.bits.pc := DontCare
-  io.rollback.bits.target := rollbackSelected.bits.cf.pc
-  io.rollback.bits.brTag := rollbackSelected.bits.brTag
+  io.rollback.bits.cfiUpdate := DontCare
+  io.rollback.bits.cfiUpdate.target := rollbackSelected.bits.cf.pc
 
   when(io.rollback.valid) {
-    XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
+    // XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.cfi, io.rollback.bits.roqIdx.asUInt)
   }
 
   /**

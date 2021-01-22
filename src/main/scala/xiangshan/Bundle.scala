@@ -26,12 +26,12 @@ class FetchPacket extends XSBundle {
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val bpuMeta = Vec(PredictWidth, new BpuMeta)
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
   val crossPageIPFFix = Bool()
-  val predTaken = Bool()
+  val pred_taken = UInt(PredictWidth.W)
+  val ftqPtr = new FtqPtr
 }
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -124,7 +124,6 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
-  val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
   val tageMeta = new TageMeta
   // for global history
@@ -193,17 +192,20 @@ class FtqEntry extends XSBundle {
     val predHist = new GlobalHistory
     val rasSp = UInt(log2Ceil(RasSize).W)
     val rasTop = new RASEntry()
+    val specCnt = Vec(PredictWidth, UInt(10.W))
     val metas = Vec(PredictWidth, new BpuMeta)
 
     val cfiIsCall, cfiIsRet, cfiIsRVC = Bool()
+    val rvc_mask = Vec(PredictWidth, Bool())
     val br_mask = Vec(PredictWidth, Bool())
     val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
-    val specCnt = Vec(PredictWidth, UInt(10.W))
     val valids = Vec(PredictWidth, Bool())
 
     // backend update
     val mispred = Vec(PredictWidth, Bool())
     val target = UInt(VAddrBits.W)
+
+    def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
 }
 
 

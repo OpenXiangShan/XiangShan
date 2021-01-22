@@ -15,7 +15,6 @@ class AluExeUnit extends Exu(aluExeUnitCfg)
 
   io.toInt.bits.redirectValid := alu.redirectOutValid
   io.toInt.bits.redirect := alu.redirectOut
-  io.toInt.bits.brUpdate := alu.brUpdate
 
   XSDebug(io.fromInt.valid || io.redirect.valid,
     p"fromInt(${io.fromInt.valid} ${io.fromInt.ready}) toInt(${io.toInt.valid} ${io.toInt.ready})" +

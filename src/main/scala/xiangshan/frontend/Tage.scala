@@ -62,7 +62,6 @@ class TageResp extends TageBundle {
 
 class TageUpdate extends TageBundle {
   val pc = UInt(VAddrBits.W)
-  val fetchIdx = UInt(log2Up(TageBanks).W)
   val hist = UInt(HistoryLength.W)
   // update tag and ctr
   val mask = Vec(TageBanks, Bool())
@@ -318,12 +317,12 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", if3_req_rhits.asUInt, if3_mask)
     XSDebug(RegNext(io.req.valid) && !if3_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
 
-    XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
-      u.pc, u.fetchIdx, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
+    XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
+      u.pc, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
     XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
       update_wdata(b).tag, update_wdata(b).ctr, update_idx)
-    XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
-      u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
+    XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, hist:%x, bank:%d, writing in u:%b\n",
+      u.pc, u.hist, ub, io.update.u(ub))
 
     val updateBank = PriorityEncoder(io.update.mask)
     XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank),
@@ -394,6 +393,7 @@ class Tage extends BaseTage {
       req.bits.pc := io.pc.bits
       req.bits.hist := io.hist
       req.bits.mask := io.inMask
+      if (!EnableSC) {t.io.update := DontCare}
       t
     }
   }
@@ -421,12 +421,12 @@ class Tage extends BaseTage {
   val debug_hist_s3 = RegEnable(debug_hist_s2, enable=s3_fire)
 
   val u = io.update.bits
-  val updateValid = io.update.valid && !io.update.bits.isReplay
-  val updateHist = u.bpuMeta.predHist.asUInt
+  val updateValids = u.valids.map(v => v && io.update.valid)
+  val updateHist = u.predHist.asUInt
 
-  val updateIsBr = u.pd.isBr
-  val updateMeta = u.bpuMeta.tageMeta
-  val updateMisPred = u.isMisPred && updateIsBr
+  val updateBrMask = u.br_mask
+  val updateMetas = VecInit(u.metas.map(_.tageMeta))
+  val updateMisPred = u.mispred
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
@@ -447,10 +447,10 @@ class Tage extends BaseTage {
   scUpdateTaken := DontCare
   scUpdateOldCtrs := DontCare
 
-  val updateSCMeta = u.bpuMeta.tageMeta.scMeta
-  val updateTageMisPred = updateMeta.taken =/= u.taken && updateIsBr
+  val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
+  val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i) && updateBrMask(i)))
 
-  val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
+  // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -544,9 +544,12 @@ class Tage extends BaseTage {
       }
     }
 
-    val isUpdateTaken = updateValid && updateBank === w.U &&
-      u.taken && updateIsBr
-    when (updateIsBr && updateValid && updateBank === w.U) {
+    val updateValid = updateValids(w)
+    val updateMeta = updateMetas(w)
+    val updateIsBr = updateBrMask(w)
+    val isUpdateTaken = updateValid && u.takens(w) && updateIsBr
+    val updateMisPred = updateTageMisPreds(w)
+    when (updateValid && updateIsBr) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -562,50 +565,49 @@ class Tage extends BaseTage {
         updateAlloc(provider)(w) := false.B
       }
     }
-  }
-
-  when (updateValid && updateTageMisPred) {
-    val idx = updateBank
-    val allocate = updateMeta.allocate
-    when (allocate.valid) {
-      updateMask(allocate.bits)(idx) := true.B
-      updateTaken(allocate.bits)(idx) := u.taken
-      updateAlloc(allocate.bits)(idx) := true.B
-      updateUMask(allocate.bits)(idx) := true.B
-      updateU(allocate.bits)(idx) := 0.U
-    }.otherwise {
-      val provider = updateMeta.provider
-      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
-      for (i <- 0 until TageNTables) {
-        when (decrMask(i)) {
-          updateUMask(i)(idx) := true.B
-          updateU(i)(idx) := 0.U
+    when (updateValid && updateMisPred) {
+      val allocate = updateMeta.allocate
+      when (allocate.valid) {
+        updateMask(allocate.bits)(w) := true.B
+        updateTaken(allocate.bits)(w) := isUpdateTaken
+        updateAlloc(allocate.bits)(w) := true.B
+        updateUMask(allocate.bits)(w) := true.B
+        updateU(allocate.bits)(w) := 0.U
+      }.otherwise {
+        val provider = updateMeta.provider
+        val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
+        for (i <- 0 until TageNTables) {
+          when (decrMask(i)) {
+            updateUMask(i)(w) := true.B
+            updateU(i)(w) := 0.U
+          }
         }
       }
     }
   }
 
-  if (EnableSC) {
-    when (updateValid && updateSCMeta.scUsed.asBool && updateIsBr) {
-      val scPred = updateSCMeta.scPred
-      val tageTaken = updateSCMeta.tageTaken
-      val sumAbs = updateSCMeta.sumAbs.asUInt
-      val scOldCtrs = updateSCMeta.ctrs
-      when (scPred =/= tageTaken && sumAbs < useThreshold - 2.U) {
-        val newThres = scThreshold.update(scPred =/= u.taken)
-        scThreshold := newThres
-        XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
-      }
-      when (scPred =/= u.taken || sumAbs < updateThreshold) {
-        scUpdateMask.foreach(t => t(updateBank) := true.B)
-        scUpdateTagePred := tageTaken
-        scUpdateTaken := u.taken
-        (scUpdateOldCtrs zip scOldCtrs).foreach{case (t, c) => t := c}
-        XSDebug(p"scUpdate: bank(${updateBank}), scPred(${scPred}), tageTaken(${tageTaken}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPred})\n")
-        XSDebug(p"update: sc: ${updateSCMeta}\n")
-      }
-    }
-  }
+
+  // if (EnableSC) {
+  //   when (updateValid && updateSCMeta.scUsed.asBool && updateIsBr) {
+  //     val scPred = updateSCMeta.scPred
+  //     val tageTaken = updateSCMeta.tageTaken
+  //     val sumAbs = updateSCMeta.sumAbs.asUInt
+  //     val scOldCtrs = updateSCMeta.ctrs
+  //     when (scPred =/= tageTaken && sumAbs < useThreshold - 2.U) {
+  //       val newThres = scThreshold.update(scPred =/= u.taken)
+  //       scThreshold := newThres
+  //       XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
+  //     }
+  //     when (scPred =/= u.taken || sumAbs < updateThreshold) {
+  //       scUpdateMask.foreach(t => t(updateBank) := true.B)
+  //       scUpdateTagePred := tageTaken
+  //       scUpdateTaken := u.taken
+  //       (scUpdateOldCtrs zip scOldCtrs).foreach{case (t, c) => t := c}
+  //       XSDebug(p"scUpdate: bank(${updateBank}), scPred(${scPred}), tageTaken(${tageTaken}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPred})\n")
+  //       XSDebug(p"update: sc: ${updateSCMeta}\n")
+  //     }
+  //   }
+  // }
 
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
@@ -616,28 +618,32 @@ class Tage extends BaseTage {
 
       tables(i).io.update.uMask(w) := updateUMask(i)(w)
       tables(i).io.update.u(w) := updateU(i)(w)
+      tables(i).io.update.pc := packetAligned(u.ftqPC) + (i << instOffsetBits).U
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := u.pc
     tables(i).io.update.hist := updateHist
-    tables(i).io.update.fetchIdx := u.bpuMeta.fetchIdx
   }
 
-  for (i <- 0 until SCNTables) {
-    scTables(i).io.update.mask := scUpdateMask(i)
-    scTables(i).io.update.tagePred := scUpdateTagePred
-    scTables(i).io.update.taken    := scUpdateTaken
-    scTables(i).io.update.oldCtr   := scUpdateOldCtrs(i)
-    scTables(i).io.update.pc := u.pc
-    scTables(i).io.update.hist := updateHist
-    scTables(i).io.update.fetchIdx := u.bpuMeta.fetchIdx
-  }
+  // for (i <- 0 until SCNTables) {
+  //   scTables(i).io.update.mask := scUpdateMask(i)
+  //   scTables(i).io.update.tagePred := scUpdateTagePred
+  //   scTables(i).io.update.taken    := scUpdateTaken
+  //   scTables(i).io.update.oldCtr   := scUpdateOldCtrs(i)
+  //   scTables(i).io.update.pc := u.pc
+  //   scTables(i).io.update.hist := updateHist
+  // }
 
 
 
   if (BPUDebug && debug) {
-    val m = updateMeta
-    val bri = u.bpuMeta
+    for (b <- 0 until TageBanks) {
+      val m = updateMetas(b)
+      val bri = u.metas(b)
+      XSDebug(updateValids(b), "update(%d): pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+        b.U, u.ftqPC, packetAligned(u.ftqPC)+(b << instOffsetBits).U, bri.debug_tage_cycle, updateHist, u.takens(b), u.mispred(b),
+        bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
+      )
+    }
     val if4_resps = RegEnable(if3_resps, s3_fire)
     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
     XSDebug(s3_fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", s3_fire, debug_pc_s2, debug_hist_s2)
@@ -646,10 +652,8 @@ class Tage extends BaseTage {
     for (i <- 0 until TageNTables) {
       XSDebug(RegNext(s3_fire), "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(if4_resps(i).map(_.valid)).asUInt, Cat(if4_resps(i).map(_.bits.ctr)), Cat(if4_resps(i).map(_.bits.u)))
     }
-    XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-      u.pc, u.pc - (bri.fetchIdx << instOffsetBits.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
-    XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
-    XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
+    // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
+    // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
   }
 }
 

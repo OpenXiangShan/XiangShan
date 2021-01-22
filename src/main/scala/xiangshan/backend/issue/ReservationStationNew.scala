@@ -71,7 +71,7 @@ class ReservationStationCtrl
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
-  val srcNum = max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
+  val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(srcNum >= 1 && srcNum <= 3)
   println(s"[RsCtrl]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 
@@ -323,7 +323,7 @@ class ReservationStationData
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
-  val srcNum = max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
+  val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(srcNum >= 1 && srcNum <= 3)
   println(s"[RsData]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 

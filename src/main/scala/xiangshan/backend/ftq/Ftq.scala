@@ -62,9 +62,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.enqPtr := tailPtr
 
   val dataModule = Module(new DataModuleTemplate(new FtqEntry, FtqSize, 4, 1, true))
-  dataModule.io.wen := io.enq.fire()
-  dataModule.io.waddr := tailPtr
-  dataModule.io.wdata := io.enq.bits
+  dataModule.io.wen(0) := io.enq.fire()
+  dataModule.io.waddr(0) := tailPtr.value
+  dataModule.io.wdata(0) := io.enq.bits
 
   /* TODO: wrap these sigs in DataModuleTemplate
       these fields need update when exu write back,
@@ -115,7 +115,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // commit
-  val commitVec = Wire(Vec(PredictWidth, Bool()))
+  val commitVec = WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
   for((c, v) <- io.roq_commits.zip(commitVec)){
     when(c.valid){
       commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := false.B
