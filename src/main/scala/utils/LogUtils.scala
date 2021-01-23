@@ -19,8 +19,7 @@ object XSLogLevel extends Enumeration {
 object XSLog {
   val MagicStr = "9527"
   def apply(debugLevel: XSLogLevel)
-           (prefix: Boolean, cond: Bool, pable: Printable)
-           (implicit name: String): Any =
+           (prefix: Boolean, cond: Bool, pable: Printable): Any =
   {
     val logEnable = WireInit(false.B)
     val logTimestamp = WireInit(0.U(64.W))
@@ -50,15 +49,15 @@ object XSLog {
 
 sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter {
 
-  def apply(cond: Bool, fmt: String, data: Bits*)(implicit name: String): Any =
+  def apply(cond: Bool, fmt: String, data: Bits*): Any =
     apply(cond, Printable.pack(fmt, data:_*))
-  def apply(cond: Bool, pable: Printable)(implicit name: String): Any = apply(true, cond, pable)
-  def apply(fmt: String, data: Bits*)(implicit name: String): Any =
+  def apply(cond: Bool, pable: Printable): Any = apply(true, cond, pable)
+  def apply(fmt: String, data: Bits*): Any =
     apply(Printable.pack(fmt, data:_*))
-  def apply(pable: Printable)(implicit name: String): Any = apply(true.B, pable)
-  def apply(prefix: Boolean, cond: Bool, fmt: String, data: Bits*)(implicit name: String): Any =
+  def apply(pable: Printable): Any = apply(true.B, pable)
+  def apply(prefix: Boolean, cond: Bool, fmt: String, data: Bits*): Any =
     apply(prefix, cond, Printable.pack(fmt, data:_*))
-  def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit name: String): Any =
+  def apply(prefix: Boolean, cond: Bool, pable: Printable): Any =
     XSLog(logLevel)(prefix, cond, pable)
 
   // trigger log or not
@@ -67,7 +66,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
     XSLog.displayLog
   }
 
-  def printPrefix()(implicit name: String): Unit = {
+  def printPrefix(): Unit = {
     val commonInfo = p"[$logLevel][time=${GTimer()}] ${XSLog.MagicStr}: "
     when (trigger) {
       printf(commonInfo)
@@ -75,7 +74,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   }
 
   // dump under with certain prefix
-  def exec(dump: () => Unit)(implicit name: String): Unit = {
+  def exec(dump: () => Unit): Unit = {
     when (trigger) {
       printPrefix
       dump
@@ -83,7 +82,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   }
 
   // dump under certain condition and with certain prefix
-  def exec(cond: Bool, dump: () => Unit)(implicit name: String): Unit = {
+  def exec(cond: Bool, dump: () => Unit): Unit = {
     when (trigger && cond) {
       printPrefix
       dump
