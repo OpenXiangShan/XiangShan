@@ -13,8 +13,6 @@ class Dispatch2Ls extends XSModule {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
     val readIntRf = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     val readFpRf = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
-    // val intRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    // val fpRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val readIntState = Vec(NRMemReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(exuParameters.StuCnt, Flipped(new BusyTableReadIO))
     val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(IssQueSize).W)))
@@ -51,20 +49,26 @@ class Dispatch2Ls extends XSModule {
   assert(exuParameters.LduCnt == 2)
   assert(exuParameters.StuCnt == 2)
   val readPort = Seq(0, 1, 2, 4)
+  val firstStorePsrc2 = PriorityMux(storeCanAccept, io.fromDq.map(_.bits.psrc2))
+  val secondStorePsrc2 = PriorityMux((1 until 4).map(i => Cat(storeCanAccept.take(i)).orR && storeCanAccept(i)), io.fromDq.drop(1).map(_.bits.psrc2))
   for (i <- 0 until exuParameters.LsExuCnt) {
     if (i < exuParameters.LduCnt) {
       io.readIntRf(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
-      io.readIntState(readPort(i)).req := io.fromDq(indexVec(i)).bits.psrc1
     }
     else {
       io.readFpRf(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc2
       io.readIntRf(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc1
       io.readIntRf(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc2
-      io.readFpState(i - exuParameters.LduCnt).req := io.fromDq(indexVec(i)).bits.psrc2
-      io.readIntState(readPort(i)  ).req := io.fromDq(indexVec(i)).bits.psrc1
-      io.readIntState(readPort(i)+1).req := io.fromDq(indexVec(i)).bits.psrc2
     }
   }
+  // src1 always needs srcState but only store's src2 needs srcState
+  for (i <- 0 until 4) {
+    io.readIntState(i).req := io.fromDq(i).bits.psrc1
+  }
+  io.readIntState(4).req := firstStorePsrc2
+  io.readIntState(5).req := secondStorePsrc2
+  io.readFpState(0).req := firstStorePsrc2
+  io.readFpState(1).req := secondStorePsrc2
 
   /**
     * Part 3: dispatch to reservation stations
@@ -80,13 +84,15 @@ class Dispatch2Ls extends XSModule {
       enq.valid := storeIndexGen.io.mapping(i - exuParameters.LduCnt).valid && storeReady
     }
     enq.bits := io.fromDq(indexVec(i)).bits
-    enq.bits.src1State := io.readIntState(readPort(i)).resp
+    enq.bits.src1State := io.readIntState(indexVec(i)).resp
     if (i < exuParameters.LduCnt) {
       enq.bits.src2State := DontCare
     }
     else {
       enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
-        io.readFpState(i - exuParameters.LduCnt).resp, io.readIntState(readPort(i) + 1).resp)
+        Mux(storePriority(i-2) === 0.U, io.readFpState(0).resp, io.readFpState(1).resp),
+        Mux(storePriority(i-2) === 0.U, io.readIntState(4).resp, io.readIntState(5).resp)
+      )
     }
     enq.bits.src3State := DontCare
 
