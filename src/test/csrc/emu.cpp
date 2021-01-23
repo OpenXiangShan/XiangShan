@@ -363,6 +363,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       max_instr -= diff.commit;
     }
 
+#ifdef DIFFTEST_STORE_COMMIT
     if (dut_ptr->io_difftest_storeCommit) {
       read_store_info(diff.store_addr, diff.store_data, diff.store_mask);
 
@@ -381,6 +382,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         }
       }
     }
+#endif
 
     uint32_t t = uptime();
     if (t - lasttime_poll > 100) {
