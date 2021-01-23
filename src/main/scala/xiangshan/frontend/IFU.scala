@@ -301,13 +301,22 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
       Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)).asSInt()
     )
   }
+  def br_offset(inst: UInt, rvc: Bool): SInt = {
+    Mux(rvc,
+      Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)).asSInt,
+      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()  
+    )
+  }
   val if4_instrs = if4_pd.instrs
   val if4_jals = if4_bp.jalMask
   val if4_jal_tgts = VecInit((0 until PredictWidth).map(i => (if4_pd.pc(i).asSInt + jal_offset(if4_instrs(i), if4_pd.pd(i).isRVC)).asUInt))
-
+  val if4_brs = if4_bp.brMask
+  val if4_br_tgts = VecInit((0 until PredictWidth).map(i => (if4_pd.pc(i).asSInt + br_offset(if4_instrs(i), if4_pd.pd(i).isRVC)).asUInt))
   (0 until PredictWidth).foreach {i =>
     when (if4_jals(i)) {
       if4_bp.targets(i) := if4_jal_tgts(i)
+    }.elsewhen (if4_brs(i)) {
+      if4_bp.targets(i) := if4_br_tgts(i)
     }
   }
 

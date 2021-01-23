@@ -285,8 +285,8 @@ class BPUStage3 extends BPUStage {
   // we should provide btb resp as well
   btbHits := btbResp.hits.asUInt | prevHalfTakenMask
 
-  // predict taken only if btb has a target, jal targets will be provided by IFU
-  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
+  // predict taken only if btb has a target, jal and br targets will be provided by IFU
+  takens := VecInit((0 until PredictWidth).map(i => jalrs(i) && btbHits(i) || (jals(i) || brTakens(i))))
 
 
   targets := inLatch.resp.btb.targets
@@ -315,8 +315,8 @@ class BPUStage3 extends BPUStage {
       io.out.brInfo.rasTop :=  ras.io.meta.rasTop
     }
     takens := VecInit((0 until PredictWidth).map(i => {
-      ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
-          jals(i) ||
+      (jalrs(i) && btbHits(i)) ||
+          jals(i) || brTakens(i) || 
           (ras.io.out.valid && rets(i)) ||
           (!ras.io.out.valid && rets(i) && btbHits(i))
       }
