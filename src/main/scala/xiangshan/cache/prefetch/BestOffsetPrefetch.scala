@@ -153,7 +153,7 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMWrapper("RR_Table", rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
+  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid

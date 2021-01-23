@@ -191,8 +191,7 @@ class ICacheMetaArray extends ICachArray
     val readResp = Output(Vec(nWays,UInt(tagBits.W)))
   }}
 
-  val metaArray = Module(new SRAMWrapper(
-    "Icache_Meta",
+  val metaArray = Module(new SRAMTemplate(
     UInt(metaEntryBits.W),
     set=nSets,
     way=nWays,
@@ -233,8 +232,7 @@ class ICacheDataArray extends ICachArray
   }}
 
   //dataEntryBits = 144
-  val dataArray = List.fill(nWays){List.fill(nBanks){Module(new SRAMWrapper(
-    "Icache_Data",
+  val dataArray = List.fill(nWays){List.fill(nBanks){Module(new SRAMTemplate(
     UInt(dataEntryBits.W),
     set=nSets,
     way = 1,
