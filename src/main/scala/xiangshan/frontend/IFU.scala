@@ -281,7 +281,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
-  if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq || !if4_valid) && GTimer() > 500.U
+  if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq && io.toFtq.ready || !if4_valid) && GTimer() > 500.U
   when (if4_flush) {
     if4_valid := false.B
   }.elsewhen (if3_fire && !if3_flush) {
