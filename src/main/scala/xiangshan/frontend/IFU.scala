@@ -417,7 +417,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.toFtq.bits  := ftqEnqBuf
   
   toFtqBuf := DontCare
-  toFtqBuf.ftqPC    := packetIdx(if4_pc)
+  toFtqBuf.ftqPC    := if4_pc
   toFtqBuf.hist     := final_gh
   toFtqBuf.predHist := if4_predHist.asTypeOf(new GlobalHistory)
   toFtqBuf.rasSp    := bpu.io.brInfo.rasSp
