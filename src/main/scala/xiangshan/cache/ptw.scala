@@ -12,17 +12,19 @@ import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMaster
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
-  val TlbL2LineSize = MemBandWidth/XLEN
   val TlbL2WayNum = 16
+  val TlbL2LineSize = MemBandWidth/XLEN
   val TlbL2LineNum  = TlbL2EntrySize/(TlbL2LineSize * TlbL2WayNum)
+  val PtwL2WayNum = 8
   val PtwL2LineSize = MemBandWidth/XLEN
-  val PtwL2LineNum  = PtwL2EntrySize/PtwL2LineSize
+  val PtwL2LineNum  = PtwL2EntrySize/(PtwL2LineSize * PtwL2WayNum)
   val PtwL1TagLen = PAddrBits - log2Up(XLEN/8)
   val PtwL2TagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val TlbL2TagLen = vpnLen - log2Up(TlbL2EntrySize)
 
 
-  def replacement = new RandomReplacement(TlbL2WayNum)
+  def tlbl2replace = new RandomReplacement(TlbL2WayNum)   //TODO: LRU
+  def ptwl2replace = new RandomReplacement(TlbL2WayNum)
 
   def genPtwL2Idx(addr: UInt) = {
     /* tagLen :: outSizeIdxLen :: insideIdxLen*/
@@ -346,6 +348,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl2 = Module(new SRAMTemplate(
     new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
     set = PtwL2LineNum,
+    way = PtwL2WayNum,
     singlePort = true
   )) // (total 256, one line is 4 => 64 lines)
   val l2v   = RegInit(0.U(PtwL2LineNum.W)) // valid
@@ -396,9 +399,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
     XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
 
-    assert(RegNext(!(hitVec.asUInt().orR && vidx || spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
+    assert(RegNext(!(hitVec.asUInt.orR && vidx || spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
 
-    (hitVec.asUInt().orR && vidx || spHit, Mux(spHit, spHitData, hitWayData.get(req.vpn)))
+    (hitVec.asUInt.orR && vidx || spHit, Mux(spHit, spHitData, hitWayData.get(req.vpn)))
   }
 
   /*
@@ -428,12 +431,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     assert(ptwl2.io.r.req.ready || !readRam)
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
-    val ramData = ptwl2.io.r.resp.data(0)
+    val ramDatas = ptwl2.io.r.resp.data
+    val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(idx, l2addr) })
+    val hitWayData = Mux1H(PriorityEncoderOH(hitVec), ramDatas)
 
     XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}\n")
-    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 RamData:${ramData}\n")
-    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 v:${vidx} hit:${ramData.hit(idx, l2addr)}\n")
-    (ramData.hit(idx, l2addr) && vidx, ramData.get(idx)._2) // TODO: optimize tag
+    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 RamData:${hitWayData}\n")
+    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 v:${vidx} hit:${hitWayData.hit(idx, l2addr)}\n")
+    (hitVec.asUInt.orR && vidx, hitWayData.get(idx)._2) // TODO: optimize tag
   }
 
   /* ptwl3
@@ -562,6 +567,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = genPtwL2Idx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
+      // replacement policy
+      val replacer = ptwl2replace
+      val victimWayOH = UIntToOH(replacer.way)
       //TODO: check why the old refillIdx is right
 
       assert(ptwl2.io.w.req.ready)
@@ -570,7 +578,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         valid = true.B,
         setIdx = refillIdx,
         data = ps,
-        waymask = -1.S.asUInt
+        waymask = victimWayOH
       )
       l2v := l2v | rfOH
       l2g := (l2g & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)
@@ -580,7 +588,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
       // replacement policy
-      val replacer = replacement
+      val replacer = tlbl2replace
       val victimWayOH = UIntToOH(replacer.way)
       //TODO: check why the old refillIdx is right
 
