@@ -433,6 +433,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   toFtqBuf.rasTop   := bpu.io.brInfo.rasTop
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
+  toFtqBuf.hasLastPrev := if4_pendingPrevHalfInstr
 
   // save it for update
   when (if4_pendingPrevHalfInstr) {
