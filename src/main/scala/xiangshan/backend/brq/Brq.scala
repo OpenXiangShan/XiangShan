@@ -337,6 +337,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken, // taken
     io.cfiInfo.bits.taken =/= ubtbAns.taken) // noTaken
 
+  val takenAndRight = ubtbAns.taken && ubtbRight
+  val takenButWrong = ubtbAns.taken && ubtbWrong
+
   // val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
   // val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
 
@@ -386,6 +389,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(rasWrong, "perfCntrasWrong", Perf)
     ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
     ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
+
+    ExcitingUtils.addSource(takenAndRight, "perfCntTakenAndRight", Perf)
+    ExcitingUtils.addSource(takenButWrong, "perfCntTakenButWrong", Perf)
   }
 
   val utilization = Mux(headPtr.flag === tailPtr.flag, tailPtr.value - headPtr.value, BrqSize.U + tailPtr.value - headPtr.value)

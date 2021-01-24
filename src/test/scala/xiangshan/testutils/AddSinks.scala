@@ -48,6 +48,8 @@ object AddSinks {
       "perfCntloopRight",
       "perfCntloopWrong",
       "perfCntLoopExit",
+      "perfCntTakenAndRight",
+      "perfCntTakenButWrong",
       // "CntFetchFromICache",
       // "CntFetchFromLoopBuffer",
       // "CntExitLoop1",
