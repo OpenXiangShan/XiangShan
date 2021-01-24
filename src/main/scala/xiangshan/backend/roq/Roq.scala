@@ -73,6 +73,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
     val intrBitSetReg = Input(Bool())
     val hasNoSpecExec = Input(Bool())
     val commitType = Input(CommitType())
+    val misPredBlock = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RoqPtr))
     val next_out = Vec(CommitWidth, Output(new RoqPtr))
@@ -90,7 +91,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else possibleException(i).asUInt.orR || io.deq_flushPipe(i)))
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !commitBlocked(i)))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !commitBlocked(i) && !io.misPredBlock))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg, only one instruction is allowed to commit
   val commitCnt = Mux(io.intrBitSetReg, io.deq_v(0) && io.deq_w(0), normalCommitCnt)
@@ -400,7 +401,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).valid
   ))).orR()
   val misPredBlockCounter = Reg(UInt(2.W))
-  misPredBlockCounter := Mux(misPredWb, 
+  misPredBlockCounter := Mux(misPredWb,
     "b11".U,
     misPredBlockCounter >> 1.U
   )
@@ -488,6 +489,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   deqPtrGenModule.io.commitType := deqDispatchData.commitType
+
+  deqPtrGenModule.io.misPredBlock := misPredBlock
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 

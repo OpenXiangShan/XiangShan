@@ -16,13 +16,13 @@ trait HasRedirectOut { this: RawModule =>
 
 class Jump extends FunctionUnit with HasRedirectOut {
 
-  val (src1, immMin, func, pc, uop) = (
+  val (src1, immMin, func, uop) = (
     io.in.bits.src(0),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
-    SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+  val pc = src1(VAddrBits - 1, 0)
   val jalr_target = io.in.bits.src(1)(VAddrBits - 1, 0)
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
@@ -40,7 +40,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
-  redirectOutValid := valid
+  redirectOutValid := valid && !isAuipc
   redirectOut := DontCare
   redirectOut.cfiUpdate.target := target
   redirectOut.level := RedirectLevel.flushAfter

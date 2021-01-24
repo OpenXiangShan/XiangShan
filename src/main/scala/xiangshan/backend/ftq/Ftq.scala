@@ -61,8 +61,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.enq.ready := validEntries < FtqSize.U
   io.enqPtr := tailPtr
 
+  val real_fire = io.enq.fire() && !io.redirect.valid && !io.frontendRedirect.valid
+
   val dataModule = Module(new DataModuleTemplate(new FtqEntry, FtqSize, 4, 1, true))
-  dataModule.io.wen(0) := io.enq.fire()
+  dataModule.io.wen(0) := real_fire
   dataModule.io.waddr(0) := tailPtr.value
   dataModule.io.wdata(0) := io.enq.bits
 
@@ -77,7 +79,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   val commitStateQueue = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
 
-  when(io.enq.fire()){
+  when(real_fire){
     val enqIdx = tailPtr.value
     commitStateQueue(enqIdx) := io.enq.bits.valids
     cfiIndex_vec(enqIdx) := io.enq.bits.cfiIndex
@@ -87,7 +89,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
   }
 
-  tailPtr := tailPtr + io.enq.fire()
+  tailPtr := tailPtr + real_fire
 
   // exu write back, update some info
   for((wb, i) <- io.exuWriteback.zipWithIndex){
@@ -155,13 +157,15 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
       assert(headPtr === io.redirect.bits.ftqIdx)
     }.otherwise{ // branch misprediction or load replay
       val isReplay = RedirectLevel.flushItself(io.redirect.bits.level)
-      tailPtr := io.redirect.bits.ftqIdx + 1.U
+      val next = io.redirect.bits.ftqIdx + 1.U
+      tailPtr := next
       val offset = io.redirect.bits.ftqOffset
       commitStateQueue(io.redirect.bits.ftqIdx.value).zipWithIndex.foreach({case(v, i) =>
         when(i.U > offset || (isReplay && i.U === offset)){ // replay will not commit
           v := false.B
         }
       })
+      commitStateQueue(next.value).foreach(_ := false.B)
     }
   }
 }
