@@ -259,7 +259,7 @@ class MicroBTB extends BasePredictor
         metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
     }
 
-    if (!env.FPGAPlatform && BPUDebug) {
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
       val ubtbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
       // ubtbAns.hit := io.pc.valid && read_hit_vec.asUInt.orR
 

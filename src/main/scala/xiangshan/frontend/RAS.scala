@@ -227,7 +227,7 @@ class RAS extends BasePredictor
     io.meta.rasTopCtr := DontCare
     io.meta.rasToqAddr := DontCare
 
-    if (!env.FPGAPlatform && BPUDebug) {
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
         val rasAns = Wire(new PredictorAnswer)
         rasAns.hit := io.out.valid
         rasAns.taken := DontCare

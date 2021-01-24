@@ -403,7 +403,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).meta
   }
 
-  if (!env.FPGAPlatform && BPUDebug) {
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
     ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
 
     val loopAns = Wire(Vec(PredictWidth, new PredictorAnswer))

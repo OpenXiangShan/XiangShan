@@ -306,60 +306,60 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  val predictor = io.cfiInfo.bits.bpuMeta.predictor
+  if(!env.FPGAPlatform && env.EnablePerfDebug) {
+    val predictor = io.cfiInfo.bits.bpuMeta.predictor
 
-  val cfiCountValid = io.cfiInfo.valid && !io.cfiInfo.bits.isReplay
+    val cfiCountValid = io.cfiInfo.valid && !io.cfiInfo.bits.isReplay
 
-  val ubtbAns = io.cfiInfo.bits.bpuMeta.ubtbAns
-  val btbAns = io.cfiInfo.bits.bpuMeta.btbAns
-  val tageAns = io.cfiInfo.bits.bpuMeta.tageAns
-  val rasAns = io.cfiInfo.bits.bpuMeta.rasAns
-  val loopAns = io.cfiInfo.bits.bpuMeta.loopAns
+    val ubtbAns = io.cfiInfo.bits.bpuMeta.ubtbAns
+    val btbAns = io.cfiInfo.bits.bpuMeta.btbAns
+    val tageAns = io.cfiInfo.bits.bpuMeta.tageAns
+    val rasAns = io.cfiInfo.bits.bpuMeta.rasAns
+    val loopAns = io.cfiInfo.bits.bpuMeta.loopAns
 
-  // Pipeline stage counter
-  val s1Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 0.U
-  val s1Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 0.U
+    // Pipeline stage counter
+    val s1Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 0.U
+    val s1Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 0.U
 
-  val s2Right  =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 1.U
-  val s2Wrong  =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 1.U
+    val s2Right  =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 1.U
+    val s2Wrong  =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 1.U
 
-  val s3Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 2.U
-  val s3Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 2.U
+    val s3Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 2.U
+    val s3Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 2.U
 
-  // Predictor counter
-  // val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
-  // val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
+    // Predictor counter
+    // val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
+    // val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
 
-  val ubtbRight = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
-    io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken, // taken
-    io.cfiInfo.bits.taken === ubtbAns.taken) // noTaken
-  val ubtbWrong = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
-    io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken, // taken
-    io.cfiInfo.bits.taken =/= ubtbAns.taken) // noTaken
+    val ubtbRight = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+      io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken, // taken
+      io.cfiInfo.bits.taken === ubtbAns.taken) // noTaken
+    val ubtbWrong = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+      io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken, // taken
+      io.cfiInfo.bits.taken =/= ubtbAns.taken) // noTaken
 
-  val takenAndRight = ubtbAns.taken && ubtbRight
-  val takenButWrong = ubtbAns.taken && ubtbWrong
+    val takenAndRight = ubtbAns.taken && ubtbRight
+    val takenButWrong = ubtbAns.taken && ubtbWrong
 
-  // val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
-  // val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
+    // val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
+    // val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
 
-  val btbRight = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
-    io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken, // taken
-    io.cfiInfo.bits.taken === btbAns.taken) // noTaken
-  val btbWrong = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
-    io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken, // taken
-    io.cfiInfo.bits.taken =/= btbAns.taken) // noTaken
+    val btbRight = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+      io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken, // taken
+      io.cfiInfo.bits.taken === btbAns.taken) // noTaken
+    val btbWrong = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+      io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken, // taken
+      io.cfiInfo.bits.taken =/= btbAns.taken) // noTaken
 
-  val tageRight = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken === tageAns.taken // DontCare jal
-  val tageWrong = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken =/= tageAns.taken // DontCare jal
+    val tageRight = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken === tageAns.taken // DontCare jal
+    val tageWrong = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken =/= tageAns.taken // DontCare jal
 
-  val rasRight = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
-  val rasWrong = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
+    val rasRight = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
+    val rasWrong = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
 
-  val loopRight = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken === loopAns.taken
-  val loopWrong = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken =/= loopAns.taken
+    val loopRight = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken === loopAns.taken
+    val loopWrong = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken =/= loopAns.taken
 
-  if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondBpRight", Perf)
     ExcitingUtils.addSource(mbpWrong, "perfCntCondBpWrong", Perf)
