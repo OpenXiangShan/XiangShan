@@ -301,7 +301,6 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   when (state === s_main_pipe_resp) {
     when (io.pipe_resp.fire()) {
-      grantack.valid := false.B
       state := s_mem_finish
     }
   }
