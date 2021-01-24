@@ -33,10 +33,10 @@ package object xiangshan {
     def jmp          = "b0000".U
     def i2f          = "b0001".U
     def csr          = "b0010".U
-    def alu          = "b0011".U
+    def alu          = "b0110".U
     def mul          = "b0100".U
     def div          = "b0101".U
-    def fence        = "b0110".U
+    def fence        = "b0011".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1001".U

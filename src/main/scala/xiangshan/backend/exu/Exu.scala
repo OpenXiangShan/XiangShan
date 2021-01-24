@@ -30,7 +30,7 @@ case class ExuParameters
 
   def NRFuType = 9
 
-  def FuOpWidth = 7
+  def FuOpWidth = 6
 }
 
 case class ExuConfig

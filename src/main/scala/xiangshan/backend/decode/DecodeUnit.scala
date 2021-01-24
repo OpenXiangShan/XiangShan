@@ -8,16 +8,12 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
-import freechips.rocketchip.rocket.{CSR,Causes}
 import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 
 import xiangshan._
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.decode.Instructions._
-import freechips.rocketchip.tile.RocketTile
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
