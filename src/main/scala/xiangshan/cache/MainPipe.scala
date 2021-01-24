@@ -503,6 +503,14 @@ class MainPipe extends DCacheModule
   io.amo_resp.valid    := s2_valid && s2_req.source === AMO_SOURCE.U
   io.amo_resp.bits     := resp
 
+  when (io.req.fire()) {
+    io.req.bits.dump()
+  }
+
+  when (io.miss_req.fire()) {
+    io.miss_req.bits.dump()
+  }
+
   when (io.miss_resp.fire()) {
     io.miss_resp.bits.dump()
   }
@@ -515,6 +523,13 @@ class MainPipe extends DCacheModule
     io.amo_resp.bits.dump()
   }
 
+  when (io.wb_req.fire()) {
+    io.wb_req.bits.dump()
+  }
+
+  when (io.lrsc_locked_block.valid) {
+    XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
+  }
 
   // -------
   // Debug logging functions

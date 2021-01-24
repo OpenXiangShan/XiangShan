@@ -49,6 +49,10 @@ class ProbeEntry extends DCacheModule {
     XSDebug("state: %d\n", state)
   }
 
+  when (state =/= s_invalid) {
+    XSDebug("ProbeEntry: state: %d block_addr: %x\n", state, io.block_addr.bits)
+  }
+
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
@@ -123,5 +127,19 @@ class ProbeQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     assert (!probe_conflict)
     // for now, we can only deal with ProbeBlock
     assert (io.mem_probe.bits.opcode === TLMessages.Probe)
+  }
+
+  // debug output
+  when (io.mem_probe.fire()) {
+    XSDebug("mem_probe: ")
+    io.mem_probe.bits.dump
+  }
+
+  when (io.pipe_req.fire()) {
+    io.pipe_req.bits.dump()
+  }
+
+  when (io.lrsc_locked_block.valid) {
+    XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   }
 }

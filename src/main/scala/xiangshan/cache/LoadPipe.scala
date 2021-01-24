@@ -168,7 +168,7 @@ class LoadPipe extends DCacheModule
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {
       when (valid) {
-        XSDebug("$pipeline_stage_name: ")
+        XSDebug(s"$pipeline_stage_name: ")
         req.dump()
       }
   }

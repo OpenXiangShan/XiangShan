@@ -148,7 +148,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val storeReplayUnit = Module(new StoreReplayQueue)
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
 
-  val mainPipe  = Module(new MainPipe)
+  val mainPipe   = Module(new MainPipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackUnit(edge))
@@ -270,6 +270,26 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> storeReplayUnit.io.pipe_req
   mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
   mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
+
+  when (missQueue.io.pipe_req.valid) {
+    XSDebug("missQueue ")
+    missQueue.io.pipe_req.bits.dump()
+  }
+
+  when (storeReplayUnit.io.pipe_req.valid) {
+    XSDebug("storeReplayUnit ")
+    storeReplayUnit.io.pipe_req.bits.dump()
+  }
+
+  when (atomicsReplayUnit.io.pipe_req.valid) {
+    XSDebug("atomicsReplayUnit ")
+    atomicsReplayUnit.io.pipe_req.bits.dump()
+  }
+
+  when (probeQueue.io.pipe_req.valid) {
+    XSDebug("probeQueue ")
+    probeQueue.io.pipe_req.bits.dump()
+  }
 
   mainPipe.io.req <> mainPipeReqArb.io.out
 
