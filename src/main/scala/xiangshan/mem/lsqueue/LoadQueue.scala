@@ -557,14 +557,7 @@ class LoadQueue extends XSModule
   io.uncache.req.bits.data := dataModule.io.uncache.rdata.data
   io.uncache.req.bits.mask := dataModule.io.uncache.rdata.mask
 
-  io.uncache.req.bits.meta.id       := DontCare
-  io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := dataModule.io.uncache.rdata.paddr
-  io.uncache.req.bits.meta.uop      := uop(deqPtr)
-  io.uncache.req.bits.meta.mmio     := true.B
-  io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := dataModule.io.uncache.rdata.mask
-  io.uncache.req.bits.meta.replay   := false.B
+  io.uncache.req.bits.id   := DontCare
 
   io.uncache.resp.ready := true.B
 

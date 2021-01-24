@@ -355,9 +355,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   io.dcache.req.bits.addr := getAddr(tagRead(prepareIdx))
   io.dcache.req.bits.data := bufferRead(prepareIdx).data
   io.dcache.req.bits.mask := bufferRead(prepareIdx).mask
-  io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
-  io.dcache.req.bits.meta := DontCare
-  io.dcache.req.bits.meta.id := prepareIdx
+  io.dcache.req.bits.cmd  := MemoryOpConstants.M_XWR
+  io.dcache.req.bits.id   := prepareIdx
   when(io.dcache.req.fire()){
     stateVec(prepareIdx) := s_inflight
   }
@@ -368,7 +367,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   )
 
   io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
-  val respId = io.dcache.resp.bits.meta.id
+  val respId = io.dcache.resp.bits.id
   when(io.dcache.resp.fire()){
     stateVec(respId) := s_invalid
     assert(stateVec(respId) === s_inflight)

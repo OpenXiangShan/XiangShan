@@ -20,12 +20,10 @@ case class DCacheParameters
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
     nMissEntries: Int = 1,
-    nLoadMissEntries: Int = 1,
-    nStoreMissEntries: Int = 1,
-    nMiscMissEntries: Int = 1,
+    nProbeEntries: Int = 1,
+    nReleaseEntries: Int = 1,
+    nStoreReplayEntries: Int = 1,
     nMMIOEntries: Int = 1,
-    nSDQ: Int = 17,
-    nRPQ: Int = 16,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 ) extends L1CacheParameters {
@@ -48,23 +46,12 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def nIOMSHRs = cacheParams.nMMIOs
   def maxUncachedInFlight = cacheParams.nMMIOs
 
-  def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
-  def loadMissQueueEntryIdWidth = log2Up(cfg.nLoadMissEntries)
-  def storeMissQueueEntryIdWidth = log2Up(cfg.nStoreMissEntries)
-  def miscMissQueueEntryIdWidth = log2Up(cfg.nMiscMissEntries)
-  def clientMissQueueEntryIdWidth = max(
-    max(loadMissQueueEntryIdWidth,
-      storeMissQueueEntryIdWidth),
-      miscMissQueueEntryIdWidth)
-
-  // clients: ldu 0, ldu1, stu, atomics
-  def nClientMissQueues = 4
-  def clientIdWidth = log2Up(nClientMissQueues)
-  def missQueueClientIdWidth = clientIdWidth + clientMissQueueEntryIdWidth
-  def clientIdMSB = missQueueClientIdWidth - 1
-  def clientIdLSB = clientMissQueueEntryIdWidth
-  def entryIdMSB = clientMissQueueEntryIdWidth - 1
-  def entryIdLSB = 0
+  def nSourceType = 3
+  def sourceTypeWidth = log2Up(nSourceType)
+  def LOAD_SOURCE = 0
+  def STORE_SOURCE = 1
+  def AMO_SOURCE = 2
+  // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
@@ -73,6 +60,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
   // this is a VIPT L1 cache
   require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
+  require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
 }
 
 abstract class DCacheModule extends L1CacheModule

@@ -44,14 +44,7 @@ class LoadUnit_S0 extends XSModule {
   io.dcacheReq.bits.data := DontCare
 
   // TODO: update cache meta
-  io.dcacheReq.bits.meta.id       := DontCare
-  io.dcacheReq.bits.meta.vaddr    := s0_vaddr
-  io.dcacheReq.bits.meta.paddr    := DontCare
-  io.dcacheReq.bits.meta.uop      := s0_uop
-  io.dcacheReq.bits.meta.mmio     := false.B
-  io.dcacheReq.bits.meta.tlb_miss := false.B
-  io.dcacheReq.bits.meta.mask     := s0_mask
-  io.dcacheReq.bits.meta.replay   := false.B
+  io.dcacheReq.bits.id   := DontCare
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b

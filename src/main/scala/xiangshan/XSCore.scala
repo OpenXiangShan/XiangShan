@@ -191,8 +191,9 @@ trait HasXSParameter {
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     nMissEntries = 16,
-    nLoadMissEntries = 8,
-    nStoreMissEntries = 8
+    nProbeEntries = 16,
+    nReleaseEntries = 16,
+    nStoreReplayEntries = 16
   )
 
   val LRSCCycles = 100

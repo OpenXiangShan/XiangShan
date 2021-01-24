@@ -57,7 +57,7 @@ class FakeSbuffer extends XSModule {
     dcache_req.bits.addr := block_addr(req.addr)
     dcache_req.bits.data := wdataVec.asUInt
     dcache_req.bits.mask := wmaskVec.asUInt
-    dcache_req.bits.meta := DontCare
+    dcache_req.bits.id   := DontCare
 
     when (dcache_req.fire()) {
       state := s_resp

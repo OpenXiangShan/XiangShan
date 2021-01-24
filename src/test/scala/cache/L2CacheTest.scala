@@ -136,21 +136,21 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     def sendStoreReq(addr: UInt, data: UInt): DCacheLineReq = {
       val req = Wire(new DCacheLineReq)
-      req.cmd := MemoryOpConstants.M_XWR
+      req.cmd  := MemoryOpConstants.M_XWR
       req.addr := addr
       req.data := data
       req.mask := Fill(req.mask.getWidth, true.B)
-      req.meta := DontCare
+      req.id   := DontCare
       req
     }
 
     def sendLoadReq(addr: UInt): DCacheWordReq = {
       val req = Wire(new DCacheWordReq)
-      req.cmd := MemoryOpConstants.M_XA_ADD
+      req.cmd  := MemoryOpConstants.M_XA_ADD
       req.addr := addr
       req.data := 0.U
       req.mask := Fill(req.mask.getWidth, true.B)
-      req.meta := DontCare
+      req.id   := DontCare
       req
     }
 

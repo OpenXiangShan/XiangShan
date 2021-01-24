@@ -157,10 +157,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
-    io.dcache.req.bits.meta.id       := DontCare
-    io.dcache.req.bits.meta.paddr    := paddr
-    io.dcache.req.bits.meta.tlb_miss := false.B
-    io.dcache.req.bits.meta.replay   := false.B
+    io.dcache.req.bits.id   := DontCare
 
     when(io.dcache.req.fire()){
       state := s_cache_resp
@@ -170,7 +167,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
-      is_lrsc_valid := io.dcache.resp.bits.meta.id
+      is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
         "b000".U -> rdata(63, 0),

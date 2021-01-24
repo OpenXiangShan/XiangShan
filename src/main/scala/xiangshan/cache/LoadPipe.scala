@@ -2,6 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tilelink.ClientMetadata
 
 import utils.XSDebug
 
@@ -24,9 +25,6 @@ class LoadPipe extends DCacheModule
   })
 
   // LSU requests
-  // replayed req should never be nacked
-  assert(!(io.lsu.req.valid && io.lsu.req.bits.meta.replay && io.nack))
-
   // it you got nacked, you can directly passdown
   val not_nacked_ready = io.meta_read.ready && io.data_read.ready
   val nacked_ready     = true.B
@@ -73,54 +71,35 @@ class LoadPipe extends DCacheModule
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
-  val s1_hit_meta = Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w)))
-  val s1_hit_state = s1_hit_meta.coh
 
-  // replacement policy
-  val replacer = cacheParams.replacement
-  val s1_repl_way_en = UIntToOH(replacer.way)
-  val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
-  when (io.miss_req.fire()) {
-    replacer.miss
-  }
+  val s1_fake_meta = Wire(new L1Metadata)
+  s1_fake_meta.tag := get_tag(s1_addr)
+  s1_fake_meta.coh := ClientMetadata.onReset
 
-  assert(!(s1_valid && s1_req.meta.replay && io.lsu.s1_kill),
-    "lsq tried to kill an replayed request!")
+  // when there are no tag match, we give it a Fake Meta
+  // this simplifies our logic in s2 stage
+  val s1_hit_meta  = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
+  val s1_hit_coh = s1_hit_meta.coh
 
   // stage 2
   val s2_req   = RegNext(s1_req)
   val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
+  val s2_addr = RegNext(s1_addr)
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
-  val s2_addr = RegNext(s1_addr)
+  // hit, miss, nack, permission checking
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = RegNext(s1_tag_match)
 
   val s2_hit_meta      = RegNext(s1_hit_meta)
-  val s2_hit_state     = RegNext(s1_hit_state)
-  val s2_has_permission = s2_hit_state.onAccess(s2_req.cmd)._1
-  val s2_new_hit_state  = s2_hit_state.onAccess(s2_req.cmd)._3
+  val s2_hit_coh     = RegNext(s1_hit_coh)
+  val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1
+  val s2_new_hit_coh    = s2_hit_coh.onAccess(s2_req.cmd)._3
 
-  val s2_repl_meta     = RegNext(s1_repl_meta)
-  val s2_repl_way_en   = RegNext(s1_repl_way_en)
+  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
 
-  val s2_old_meta      = Mux(s2_tag_match, s2_hit_meta, s2_repl_meta)
-  val s2_way_en        = Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
-
-
-  // we not only need permissions
-  // we also require that state does not change on hit
-  // thus we require new_hit_state === old_hit_state
-  //
-  // If state changes on hit,
-  // we should treat it as not hit, and let mshr deal with it,
-  // since we can not write meta data on the main pipeline.
-  // It's possible that we had permission but state changes on hit:
-  // eg: write to exclusive but clean block
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_state === s2_new_hit_state
-  // nacked or not
-  val s2_nack = Wire(Bool())
+  // generate data
   val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
   val data_resp = io.data_resp
   for (w <- 0 until nWays) {
@@ -138,15 +117,9 @@ class LoadPipe extends DCacheModule
   val s2_data_word =  s2_data_words(s2_word_idx)
   val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
   val s2_data_word_decoded = s2_decoded.corrected
-  // annotate out this assertion
-  // when TLB misses, s2_hit may still be true
-  // which may cause unnecessary assertion
-  // assert(!(s2_valid && s2_hit && !s2_nack && s2_decoded.uncorrectable))
-
 
   // when req got nacked, upper levels should replay this request
-
-  // the same set is busy
+  // nacked or not
   val s2_nack_hit    = RegNext(s1_nack)
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
@@ -154,7 +127,7 @@ class LoadPipe extends DCacheModule
   // For now, we use DuplicatedDataArray, so no bank conflicts
   val s2_nack_data   = false.B
 
-  s2_nack   := s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+  val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -163,19 +136,18 @@ class LoadPipe extends DCacheModule
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   // send load miss to miss queue
-  io.miss_req.valid          := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
-  io.miss_req.bits.cmd       := s2_req.cmd
-  io.miss_req.bits.addr      := get_block_addr(s2_addr)
-  io.miss_req.bits.tag_match := s2_tag_match
-  io.miss_req.bits.way_en    := s2_way_en
-  io.miss_req.bits.old_meta  := s2_old_meta
-  io.miss_req.bits.client_id := 0.U
+  io.miss_req.valid       := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
+  io.miss_req.bits        := DontCare
+  io.miss_req.bits.source := LOAD_SOURCE.U
+  io.miss_req.bits.cmd    := s2_req.cmd
+  io.miss_req.bits.addr   := get_block_addr(s2_addr)
+  io.miss_req.bits.coh    := s2_hit_coh
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid     := s2_valid
+  resp.bits      := DontCare
   resp.bits.data := s2_data_word_decoded
-  resp.bits.meta := s2_req.meta
   // on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
@@ -188,8 +160,7 @@ class LoadPipe extends DCacheModule
   assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
-    XSDebug(s"LoadPipe resp: data: %x id: %d replayed_req: %b miss: %b need_replay: %b\n",
-      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.replay)
+    resp.bits.dump()
   }
 
   // -------
@@ -197,8 +168,8 @@ class LoadPipe extends DCacheModule
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
     req: DCacheWordReq ) = {
       when (valid) {
-        XSDebug(s"$pipeline_stage_name cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
-          req.cmd, req.addr, req.data, req.mask, req.meta.id, req.meta.replay)
+        XSDebug("$pipeline_stage_name: ")
+        req.dump()
       }
   }
 
