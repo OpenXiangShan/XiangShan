@@ -27,15 +27,18 @@ object LqPtr extends HasXSParameter {
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
     val fpWen = uop.ctrl.fpWen
-    LookupTree(uop.ctrl.fuOpType, List(
-      LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, rdata, SignExt(rdata(31, 0), XLEN)),
-      LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
-      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
-      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
-    ))
+    Mux(fpWen,
+      rdata,
+      LookupTree(uop.ctrl.fuOpType, List(
+        LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
+        LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+        LSUOpType.lw   -> SignExt(rdata(31, 0), XLEN),
+        LSUOpType.ld   -> SignExt(rdata(63, 0), XLEN),
+        LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
+        LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
+        LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+      ))
+    )
   }
 
   def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {

@@ -173,28 +173,15 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
   )
 
-  // data merge
-  val rdata = VecInit((0 until XLEN / 8).map(j =>
-    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j)))).asUInt
-  val rdataSel = LookupTree(s2_paddr(2, 0), List(
-    "b000".U -> rdata(63, 0),
-    "b001".U -> rdata(63, 8),
-    "b010".U -> rdata(63, 16),
-    "b011".U -> rdata(63, 24),
-    "b100".U -> rdata(63, 32),
-    "b101".U -> rdata(63, 40),
-    "b110".U -> rdata(63, 48),
-    "b111".U -> rdata(63, 56)
-  ))
-  val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
-
-  // TODO: ECC check
 
   io.out.valid := io.in.valid && !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
-  io.out.bits.data := rdataPartialLoad
+  // data merge
+  io.out.bits.data := VecInit((0 until XLEN / 8).map(j =>
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))
+  )).asUInt
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
   io.out.bits.miss := s2_cache_miss && !fullForward && !s2_exception
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
@@ -227,7 +214,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.load_s2.pc := io.in.bits.uop.cf.pc // FIXME: remove it
 
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
-    s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
+    s2_uop.cf.pc, io.out.bits.data, io.dcacheResp.bits.data,
     io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
   )
 }
@@ -240,6 +227,20 @@ class LoadUnit_S3 extends XSModule with HasLoadHelper {
     val out = Decoupled(new LsPipelineBundle)
   })
   io.out <> io.in
+
+  val rdata = io.in.bits.data
+  val rdataSel = LookupTree(io.in.bits.paddr(2, 0), List(
+    "b000".U -> rdata(63, 0),
+    "b001".U -> rdata(63, 8),
+    "b010".U -> rdata(63, 16),
+    "b011".U -> rdata(63, 24),
+    "b100".U -> rdata(63, 32),
+    "b101".U -> rdata(63, 40),
+    "b110".U -> rdata(63, 48),
+    "b111".U -> rdata(63, 56)
+  ))
+  val rdataPartialLoad = rdataHelper(io.in.bits.uop, rdataSel)
+  io.out.bits.data := rdataPartialLoad
 }
 
 class LoadUnit extends XSModule with HasLoadHelper {
