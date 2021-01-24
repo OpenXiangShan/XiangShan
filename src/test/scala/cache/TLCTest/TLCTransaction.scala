@@ -333,7 +333,7 @@ class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
     a.get.param = growParam(nowPerm, targetPerm)
     acquireIssued = Some(true)
     grantPending = Some(true)
-    startTimer()
+    a.get.trans = Some(this)
     a.get
   }
 
@@ -343,7 +343,7 @@ class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
     a.get.param = growParam(nowPerm, targetPerm)
     acquireIssued = Some(true)
     grantPending = Some(true)
-    startTimer()
+    a.get.trans = Some(this)
     a.get
   }
 
@@ -386,7 +386,7 @@ class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
     d = Some(genD)
     grantIssued = Some(true)
     grantAckPending = Some(true)
-    startTimer()
+    d.get.trans = Some(this)
     d.get
   }
 
@@ -404,7 +404,7 @@ class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
     d = Some(genD)
     grantIssued = Some(true)
     grantAckPending = Some(true)
-    startTimer()
+    d.get.trans = Some(this)
     d.get
   }
 
@@ -443,7 +443,7 @@ class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
   def issueProbe(): TLCScalaB = {
     probeIssued = Some(true)
     probeAckPending = Some(true)
-    startTimer()
+    b.get.trans = Some(this)
     b.get
   }
 
@@ -522,7 +522,7 @@ class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
     c.get.source = sourceMapId
     releaseIssued = Some(true)
     releaseAckPending = Some(true)
-    startTimer()
+    c.get.trans = Some(this)
     c.get
   }
 
@@ -533,7 +533,7 @@ class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
     c.get.data = inData
     releaseIssued = Some(true)
     releaseAckPending = Some(true)
-    startTimer()
+    c.get.trans = Some(this)
     c.get
   }
 

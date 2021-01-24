@@ -132,7 +132,9 @@ class FireQueue[T <: TLCScalaMessage]() {
   def fireHead(): Unit = {
     beatCnt += 1
     if (beatCnt == headCnt) {
-      q.dequeue()
+      val m = q.dequeue()
+      if (m._1.trans.isDefined)
+        m._1.trans.get.startTimer()
       beatCnt = 0
       if (q.nonEmpty) {
         headCnt = q.head._2
