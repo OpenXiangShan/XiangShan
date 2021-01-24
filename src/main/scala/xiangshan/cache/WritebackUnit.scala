@@ -55,6 +55,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     used_set   := Mux(io.req.bits.voluntary, PriorityEncoderOH(~used), 0.U)
     // source 0 is reserved for ProbeAck[Data]
     source     := Mux(io.req.bits.voluntary, PriorityEncoder(~used) + 1.U, 0.U)
+    req_reg    := io.req.bits
   }
 
   // --------------------------------------------------------------------------------
