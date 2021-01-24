@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.DecodeStage
+import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -122,7 +122,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
 
   val ftqRead = io.stage2FtqRead.entry
   val pc = GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset)
-  val brTarget = pc + SignExt(s2_imm12_reg, XLEN)
+  val brTarget = pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
   val snpc = pc + Mux(s2_pd.isRVC, 2.U, 4.U)
   val isReplay = RedirectLevel.flushItself(s2_redirect_bits_reg.level)
   val target = Mux(isReplay,

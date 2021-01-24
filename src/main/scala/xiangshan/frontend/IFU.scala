@@ -438,19 +438,25 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   when (if4_pendingPrevHalfInstr) {
     toFtqBuf.metas(0) := if4_prevHalfInstr.bits.meta
   }
-  val cfiIsCall = if4_pd.pd(if4_bp.jmpIdx).isCall
-  val cfiIsRet  = if4_pd.pd(if4_bp.jmpIdx).isRet
-  val cfiIsRVC  = if4_pd.pd(if4_bp.jmpIdx).isRVC
+  val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
+  val if4_taken = WireInit(if4_bp.taken)
+  val if4_real_valids = if4_pd.mask &
+    (Fill(PredictWidth, !if4_taken) |
+      (Fill(PredictWidth, 1.U(1.W)) >> (~if4_jmpIdx)))
+
+  val cfiIsCall = if4_pd.pd(if4_jmpIdx).isCall
+  val cfiIsRet  = if4_pd.pd(if4_jmpIdx).isRet
+  val cfiIsRVC  = if4_pd.pd(if4_jmpIdx).isRVC
   toFtqBuf.cfiIsCall := cfiIsCall
   toFtqBuf.cfiIsRet  := cfiIsRet
   toFtqBuf.cfiIsRVC  := cfiIsRVC
-  toFtqBuf.cfiIndex.valid := if4_bp.taken
-  toFtqBuf.cfiIndex.bits  := Mux(cfiIsRVC, if4_bp.jmpIdx, if4_bp.jmpIdx - 1.U)
+  toFtqBuf.cfiIndex.valid := if4_taken
+  toFtqBuf.cfiIndex.bits  := Mux(cfiIsRVC, if4_jmpIdx, if4_jmpIdx - 1.U)
 
   toFtqBuf.br_mask   := if4_bp.brMask.asTypeOf(Vec(PredictWidth, Bool()))
   toFtqBuf.rvc_mask  := VecInit(if4_pd.pd.map(_.isRVC))
-  toFtqBuf.valids    := if4_pd.mask.asTypeOf(Vec(PredictWidth, Bool()))
-  toFtqBuf.target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
+  toFtqBuf.valids    := if4_real_valids.asTypeOf(Vec(PredictWidth, Bool()))
+  toFtqBuf.target := Mux(if4_taken, if4_target, if4_snpc)
 
 
 
@@ -520,7 +526,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 
 
   fetchPacketWire.instrs := if4_pd.instrs
-  fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  fetchPacketWire.mask := if4_real_valids
   fetchPacketWire.pdmask := if4_pd.mask
 
   fetchPacketWire.pc := if4_pd.pc
