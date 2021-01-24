@@ -104,8 +104,8 @@ class LoadQueue extends XSModule
   val isFull = enqPtr === deqPtr && !sameFlag
   val allowIn = !isFull
 
-  val loadCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.info(i).commitType === CommitType.LOAD)
-  val mcommitIdx = (0 until CommitWidth).map(i => io.commits.info(i).lqIdx.value)
+  val loadCommit = RegNext(VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.info(i).commitType === CommitType.LOAD)))
+  val mcommitIdx = RegNext(VecInit((0 until CommitWidth).map(i => io.commits.info(i).lqIdx.value)))
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)

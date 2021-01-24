@@ -275,10 +275,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (2) They will not be cancelled and can be sent to lower level.
     */
   for (i <- 0 until CommitWidth) {
-    val storeCommit = !io.commits.isWalk && io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE
+    val storeCommit = RegNext(!io.commits.isWalk && io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE)
+    val mcommitIdx = RegNext(io.commits.info(i).sqIdx.value)
     when (storeCommit) {
-      commited(io.commits.info(i).sqIdx.value) := true.B
-      XSDebug("store commit %d: idx %d\n", i.U, io.commits.info(i).sqIdx.value)
+      commited(mcommitIdx) := true.B
+      XSDebug("store commit %d: idx %d\n", i.U, mcommitIdx)
     }
   }
 
