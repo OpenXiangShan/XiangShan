@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.XSDebug
+import utils.{XSDebug, HasTLDump}
 import freechips.rocketchip.tilelink.{TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 
 class WritebackReq extends DCacheBundle {
@@ -18,7 +18,8 @@ class WritebackReq extends DCacheBundle {
   }
 }
 
-class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
+class WritebackUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump
+{
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
@@ -116,5 +117,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   // print req
   when (io.req.fire()) {
     io.req.bits.dump()
+  }
+
+  when (io.mem_release.fire()) {
+    io.mem_release.bits.dump
   }
 }
