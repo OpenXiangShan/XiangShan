@@ -78,15 +78,15 @@ class BTB extends BasePredictor with BTBParams{
 
   val data = List.fill(BtbWays) {
     List.fill(BtbBanks) {
-      Module(new SRAMWrapper("BTB_Data", new BtbDataEntry, set = nRows, shouldReset = true, holdRead = true))
+      Module(new SRAMTemplate(new BtbDataEntry, set = nRows, shouldReset = true, holdRead = true))
     }
   }
   val meta = List.fill(BtbWays) {
     List.fill(BtbBanks) {
-      Module(new SRAMWrapper("BTB_Meta", new BtbMetaEntry, set = nRows, shouldReset = true, holdRead = true))
+      Module(new SRAMTemplate(new BtbMetaEntry, set = nRows, shouldReset = true, holdRead = true))
     }
   }
-  val edata = Module(new SRAMWrapper("BTB_Edata", UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
+  val edata = Module(new SRAMTemplate(UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
 
   val if1_mask = io.inMask
   val if2_mask = RegEnable(if1_mask, io.pc.valid)
