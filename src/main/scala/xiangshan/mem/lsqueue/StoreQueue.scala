@@ -253,8 +253,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // (4) writeback to ROB (and other units): mark as writebacked
-  io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
-  io.mmioStout.bits.uop := uop(deqPtr)
+  val deqPtrNext = deqPtrExtNext(0).value
+  io.mmioStout.valid := RegNext(allocated(deqPtrNext) && datavalid(deqPtrNext) && !writebacked(deqPtrNext))
+  io.mmioStout.bits.uop := RegNext(uop(deqPtrNext))
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := dataModuleRead(0).data // dataModuleRead.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
@@ -264,7 +265,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
   when (io.mmioStout.fire()) {
-    writebacked(deqPtr) := true.B
+    // writebacked(deqPtr) := true.B
     allocated(deqPtr) := false.B
   }
 
