@@ -13,12 +13,16 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
   val TlbL2LineSize = MemBandWidth/XLEN
-  val TlbL2LineNum  = TlbL2EntrySize/TlbL2LineSize
+  val TlbL2WayNum = 16
+  val TlbL2LineNum  = TlbL2EntrySize/(TlbL2LineSize * TlbL2WayNum)
   val PtwL2LineSize = MemBandWidth/XLEN
   val PtwL2LineNum  = PtwL2EntrySize/PtwL2LineSize
   val PtwL1TagLen = PAddrBits - log2Up(XLEN/8)
   val PtwL2TagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val TlbL2TagLen = vpnLen - log2Up(TlbL2EntrySize)
+
+
+  def replacement = new RandomReplacement(TlbL2WayNum)
 
   def genPtwL2Idx(addr: UInt) = {
     /* tagLen :: outSizeIdxLen :: insideIdxLen*/
@@ -326,6 +330,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val tlbl2 = Module(new SRAMTemplate(
     new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
     set = TlbL2LineNum,
+    way = TlbL2WayNum,
     singlePort = true
   )) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
@@ -374,12 +379,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val vidx = RegEnable(tlbv(ridx), validOneCycle)
     tlbl2.io.r.req.valid := validOneCycle
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
-    val ramData = tlbl2.io.r.resp.data(0)
+    val ramDatas = tlbl2.io.r.resp.data
+    val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(req.vpn) })
+    val hitWayData = Mux1H(PriorityEncoderOH(hitVec), ramDatas)
 
     assert(tlbl2.io.r.req.ready || !tlbl2.io.r.req.valid)
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
-    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
-    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
+    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 hitWayData:${hitWayData}")
+    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${hitWayData.hit(req.vpn)} tlbPte:${hitWayData.get(req.vpn)}\n")
 
     val spHitVec = sp.zipWithIndex.map{ case (a,i) =>
       RegEnable(a.hit(req.vpn) && spv(i), validOneCycle)
@@ -389,9 +396,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
     XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
 
-    assert(RegNext(!(ramData.hit(req.vpn) && vidx && spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
+    assert(RegNext(!(hitVec.asUInt().orR && vidx || spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
 
-    (ramData.hit(req.vpn) && vidx || spHit, Mux(spHit, spHitData, ramData.get(req.vpn)))
+    (hitVec.asUInt().orR && vidx || spHit, Mux(spHit, spHitData, hitWayData.get(req.vpn)))
   }
 
   /*
@@ -572,6 +579,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     when (memPte.isLeaf() && (level===2.U)) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
+      // replacement policy
+      val replacer = replacement
+      val victimWayOH = UIntToOH(replacer.way)
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
@@ -580,7 +590,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         valid = true.B,
         setIdx = refillIdx,
         data = ts,
-        waymask = -1.S.asUInt
+        //waymask = -1.S.asUInt
+        waymask = victimWayOH
       )
       tlbv := tlbv | rfOH
       tlbg := (tlbg & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)

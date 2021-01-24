@@ -91,7 +91,7 @@ case class XSCoreParameters
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
-  TlbL2EntrySize: Int = 256, // or 512
+  TlbL2EntrySize: Int = 4096, // or 512
   TlbL2SPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
