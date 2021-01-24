@@ -68,6 +68,7 @@ class LoadQueue extends XSModule
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val load_s2 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = Flipped(ValidIO(new Refill))
@@ -373,6 +374,7 @@ class LoadQueue extends XSModule
     *   Fire redirect request (if valid)
     */
   io.load_s1 := DontCare
+  io.load_s2 := DontCare
   def detectRollback(i: Int) = {
     val startIndex = io.storeIn(i).bits.uop.lqIdx.value
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
@@ -419,19 +421,37 @@ class LoadQueue extends XSModule
     val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.load_s1.map(_.uop))))
     XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
-    val rollbackValidVec = Seq(lqViolation, wbViolation, l1Violation)
-    val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l1ViolationUop)
+    // check if rollback is needed for load in l2
+    val l2ViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
+      io.load_s2(j).valid && // L1 valid
+        isAfter(io.load_s2(j).uop.roqIdx, io.storeIn(i).bits.uop.roqIdx) &&
+        io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s2(j).paddr(PAddrBits - 1, 3) &&
+        (io.storeIn(i).bits.mask & io.load_s2(j).mask).orR
+    })))
+    val l2Violation = l2ViolationVec.asUInt().orR()
+    val l2ViolationUop = getOldestInTwo(l2ViolationVec, RegNext(VecInit(io.load_s2.map(_.uop))))
+    XSDebug(l2Violation, p"${Binary(Cat(l2ViolationVec))}, $l2ViolationUop\n")
 
-    val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
-    val oneAfterZero = mask(1)(0)
-    val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-      rollbackUopVec(0),
-      Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+    // select the oldest rollback from 4 candidates
+    // TODO: may need to put some of them in load_s3
+    val rollbackValidVec = Seq(lqViolation, wbViolation, l1Violation, l2Violation)
+    val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l1ViolationUop, l2ViolationUop)
+
+    val rollbackSel1 = lqViolation || wbViolation
+    val rollbackSel2 = l1Violation || l2Violation
+    val rollbackUopSel1 = getOldestInTwo(VecInit(lqViolation, wbViolation), VecInit(lqViolationUop, wbViolationUop))
+    val rollbackUopSel2 = getOldestInTwo(VecInit(l1Violation, l2Violation), VecInit(l1ViolationUop, l2ViolationUop))
+    val rollbackUop = getOldestInTwo(VecInit(rollbackSel1, rollbackSel2), VecInit(rollbackUopSel1, rollbackUopSel2))
 
     XSDebug(
       l1Violation,
-      "need rollback (l4 load) pc %x roqidx %d target %x\n",
+      "need rollback (l1 load) pc %x roqidx %d target %x\n",
       io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l1ViolationUop.roqIdx.asUInt
+    )
+    XSDebug(
+      l2Violation,
+      "need rollback (l2 load) pc %x roqidx %d target %x\n",
+      io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l2ViolationUop.roqIdx.asUInt
     )
     XSDebug(
       lqViolation,
