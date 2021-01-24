@@ -99,7 +99,6 @@ class LoadQueue extends XSModule
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val deqPtrExtNext = Wire(new LqPtr)
-  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value
@@ -601,17 +600,13 @@ class LoadQueue extends XSModule
   deqPtrExt := deqPtrExtNext
 
   val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
-  val trueValidCounter = distanceBetween(enqPtrExt(0), deqPtrExt)
-  validCounter := Mux(lastLastCycleRedirect,
-    trueValidCounter,
-    validCounter + enqNumber - commitCount
-  )
+  val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
   allowEnqueue := Mux(io.brqRedirect.valid,
     false.B,
     Mux(lastLastCycleRedirect,
-      trueValidCounter <= (LoadQueueSize - RenameWidth).U,
-      validCounter + enqNumber <= (LoadQueueSize - RenameWidth).U
+      validCount <= (LoadQueueSize - RenameWidth).U,
+      validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
     )
   )
 
