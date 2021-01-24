@@ -21,10 +21,10 @@ package object xiangshan {
   }
 
   object SrcState {
-    def busy    = "b00".U
-    def rdy     = "b01".U
-    def specRdy = "b10".U // speculative ready, for future use
-    def apply() = UInt(2.W)
+    def busy    = "b0".U
+    def rdy     = "b1".U
+    // def specRdy = "b10".U // speculative ready, for future use
+    def apply() = UInt(1.W)
   }
 
   object FuType extends HasXSParameter {
