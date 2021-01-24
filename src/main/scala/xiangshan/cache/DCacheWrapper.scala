@@ -265,7 +265,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val AtomicsMainPipeReqPort = 2
   val ProbeMainPipeReqPort = 3
 
-  val mainPipeReqArb = Module(new Arbiter(new MainPipeReq, MainPipeReqPortCount))
+  val mainPipeReqArb = Module(new RRArbiter(new MainPipeReq, MainPipeReqPortCount))
   mainPipeReqArb.io.in(MissMainPipeReqPort)    <> missQueue.io.pipe_req
   mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> storeReplayUnit.io.pipe_req
   mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
