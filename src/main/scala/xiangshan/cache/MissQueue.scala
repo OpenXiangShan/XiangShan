@@ -250,7 +250,10 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.mem_grant.ready := true.B
     when (io.mem_grant.fire()) {
       when (edge.hasData(io.mem_grant.bits)) {
-        refill_data(refill_count) := mergePutData(io.mem_grant.bits.data, new_data(refill_count), new_mask(refill_count))
+        for (i <- 0 until beatRows) {
+          val idx = (refill_count << log2Floor(beatRows)) + i.U
+          refill_data(idx) := mergePutData(io.mem_grant.bits.data, new_data(idx), new_mask(idx))
+        }
       } .otherwise {
         // when we only acquire perm, not data
         // use Store's data
