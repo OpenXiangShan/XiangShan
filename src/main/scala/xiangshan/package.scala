@@ -39,12 +39,12 @@ package object xiangshan {
     def fence        = "b0011".U
 
     def fmac         = "b1000".U
-    def fmisc        = "b1001".U
+    def fmisc        = "b1011".U
     def fDivSqrt     = "b1010".U
 
     def ldu          = "b1100".U
     def stu          = "b1101".U
-    def mou          = "b1110".U // for amo, lr, sc, fence
+    def mou          = "b1111".U // for amo, lr, sc, fence
 
     def apply() = UInt(log2Up(num).W)
 
@@ -52,8 +52,21 @@ package object xiangshan {
     def isJumpExu(fuType: UInt) = fuType === jmp
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
-    def isLoadExu(fuType: UInt) = fuType === ldu || fuType === mou
-    def isStoreExu(fuType: UInt) = fuType === stu
+    def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
+    def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
+    def isAMO(fuType: UInt) = isMemExu(fuType) && fuType(1)
+
+    def jmpCanAccept(fuType: UInt) = !fuType(2)
+    def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1)
+    def aluCanAccept(fuType: UInt) = fuType(2) && fuType(1)
+
+    def fmacCanAccept(fuType: UInt) = !fuType(1)
+    def fmiscCanAccept(fuType: UInt) = fuType(1)
+
+    def loadCanAccept(fuType: UInt) = !fuType(0)
+    def storeCanAccept(fuType: UInt) = fuType(0)
+
+    def storeIsAMO(fuType: UInt) = fuType(1)
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",

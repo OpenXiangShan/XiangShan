@@ -51,9 +51,10 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     !req.bits.cf.brUpdate.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
   ))
   val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
-  val isLs     = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
+  val isMem    = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
+  val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.ctrl.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStoreExu(req.bits.ctrl.fuType)))
-  val isAMO    = VecInit(io.fromRename.map(req => req.bits.ctrl.fuType === FuType.mou))
+  val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.ctrl.fuType)))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.ctrl.blockBackward))
   val isNoSpecExec    = VecInit(io.fromRename.map(_.bits.ctrl.noSpecExec))
 
@@ -69,7 +70,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i) && !isAMO(i), isStore(i) | isBranch(i))
+    updatedCommitType(i) := Cat(isLs(i), isStore(i) | isBranch(i))
     updatedPsrc1(i) := io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc1) {
@@ -145,9 +146,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     io.enqRoq.req(i).bits := updatedUop(i)
     XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
-    val shouldEnqLsq = isLs(i) && !isAMO(i)
-    io.enqLsq.needAlloc(i) := io.fromRename(i).valid && shouldEnqLsq
-    io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.enqLsq.needAlloc(i) := io.fromRename(i).valid && isLs(i)
+    io.enqLsq.req(i).valid := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
     io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)
     XSDebug(io.enqLsq.req(i).valid,
@@ -166,9 +166,9 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     io.toFpDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isFp(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
 
-    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isLs(i)
+    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i)
     io.toLsDq.req(i).bits   := updatedUop(i)
-    io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isLs(i) && thisCanActualOut(i) &&
+    io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isMem(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
