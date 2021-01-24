@@ -189,7 +189,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreIO.store.req.bits.addr.poke(storeReq.get.addr.U)
             coreIO.store.req.bits.data.poke(storeReq.get.data.U)
             coreIO.store.req.bits.mask.poke(storeReq.get.mask.U)
-            coreIO.store.req.bits.meta.id.poke(storeReq.get.id.U)
+            coreIO.store.req.bits.id.poke(storeReq.get.id.U)
           }
           coreIO.store.req.valid.poke(storePortReqValid.B)
           coreIO.store.resp.ready.poke(storePortRespReady.B)
@@ -204,7 +204,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreIO.atomics.req.bits.addr.poke(amoReq.get.addr.U)
             coreIO.atomics.req.bits.data.poke(amoReq.get.data.U)
             coreIO.atomics.req.bits.mask.poke(amoReq.get.mask.U)
-            coreIO.atomics.req.bits.meta.id.poke(amoReq.get.id.U)
+            coreIO.atomics.req.bits.id.poke(amoReq.get.id.U)
           }
           coreIO.atomics.req.valid.poke(amoPortReqValid.B)
           coreIO.atomics.resp.ready.poke(amoPortRespReady.B)
@@ -337,8 +337,8 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           if (storePortRespValid && storePortRespReady) {
             val storeM = new LitDCacheLineResp(
               data = peekBigInt(coreIO.store.resp.bits.data),
-              paddr = peekBigInt(coreIO.store.resp.bits.meta.paddr),
-              id = peekBigInt(coreIO.store.resp.bits.meta.id)
+              paddr = BigInt(0),
+              id = peekBigInt(coreIO.store.resp.bits.id)
             )
             coreAgent.fireStoreResp(storeM)
           }
@@ -353,7 +353,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               data = peekBigInt(coreIO.atomics.resp.bits.data),
               miss = false,
               replay = false,
-              id = peekBigInt(coreIO.atomics.resp.bits.meta.id)
+              id = peekBigInt(coreIO.atomics.resp.bits.id)
             )
             coreAgent.fireAMOResp(amoM)
           }
