@@ -508,10 +508,17 @@ class IFU extends XSModule with HasIFUConst
     // io.pc.valid && read_hit_vec.asUInt ubtb hit
     val ubtbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
     val btbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
-    val bimResp = WireInit(VecInit(Seq.fill(PredictWidth) {0.U(2.W)} ))
+    val bimResp = WireInit(VecInit(Seq.fill(PredictWidth) {false.B} ))
     val tageAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
     val rasAns = WireInit(0.U.asTypeOf(new PredictorAnswer))
     val loopAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+
+    ExcitingUtils.addSink(ubtbAns, "ubtbAns")
+    ExcitingUtils.addSink(btbAns, "btbAns")
+    ExcitingUtils.addSink(bimResp, "bimResp")
+    ExcitingUtils.addSink(tageAns, "tageAns")
+    ExcitingUtils.addSink(rasAns, "rasAns")
+    ExcitingUtils.addSink(loopAns, "loopAns")
 
     val ubtbAns_s3 = RegEnable(ubtbAns, if2_fire)
     val ubtbAns_s4 = RegEnable(ubtbAns_s3, if3_fire)
@@ -521,19 +528,12 @@ class IFU extends XSModule with HasIFUConst
     val bimResp_s3 = RegEnable(bimResp, if2_fire)
     val bimResp_s4 = RegEnable(bimResp_s3, if3_fire)
 
-    ExcitingUtils.addSink(ubtbAns, "ubtbAns")
-    ExcitingUtils.addSink(btbAns, "btbAns")
-    ExcitingUtils.addSink(bimResp, "bimResp")
-    ExcitingUtils.addSink(tageAns, "tageAns")
-    ExcitingUtils.addSink(rasAns, "rasAns")
-    ExcitingUtils.addSink(loopAns, "loopAns")
-
     fetchPacketWire.bpuMeta.zipWithIndex.foreach{ case(x,i) =>
       x.predictor := predictor
 
       x.ubtbAns := ubtbAns_s4(i)
       x.btbAns := btbAns_s4(i)
-      x.btbAns.taken := bimResp_s4(i)(1)
+      x.btbAns.taken := bimResp_s4(i)
       x.tageAns := tageAns(i)
       x.rasAns := rasAns // Is this right?
       x.loopAns := loopAns(i)
