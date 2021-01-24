@@ -1,3 +1,19 @@
+/**************************************************************************************
+* Copyright (c) 2020 Institute of Computing Technology, CAS
+* Copyright (c) 2020 University of Chinese Academy of Sciences
+*
+* NutShell is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*             http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR
+* FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package utils
 
 import chisel3._
@@ -85,14 +101,6 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 
-  // Debug(false) {
-  //   when (wen) {
-  //     printf("%d: SRAMTemplate: write %x to idx = %d\n", GTimer(), wdata.asUInt, setIdx)
-  //   }
-  //   when (RegNext(realRen)) {
-  //     printf("%d: SRAMTemplate: read %x at idx = %d\n", GTimer(), VecInit(rdata).asUInt, RegNext(io.r.req.bits.setIdx))
-  //   }
-  // }
 }
 
 class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,

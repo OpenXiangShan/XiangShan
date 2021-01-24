@@ -3,6 +3,7 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import utils._
+import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
@@ -132,5 +133,18 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
       p"isRet ${Binary(io.out.pd(i).isRet)}, " +
       p"isCall ${Binary(io.out.pd(i).isCall)}\n"
     )
+  }
+}
+
+class RVCExpander extends XSModule {
+  val io = IO(new Bundle {
+    val in = Input(UInt(32.W))
+    val out = Output(new ExpandedInstruction)
+  })
+
+  if (HasCExtension) {
+    io.out := new RVCDecoder(io.in, XLEN).decode
+  } else {
+    io.out := new RVCDecoder(io.in, XLEN).passthrough
   }
 }

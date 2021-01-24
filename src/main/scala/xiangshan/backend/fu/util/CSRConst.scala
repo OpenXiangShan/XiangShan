@@ -185,4 +185,9 @@ trait HasCSRConst {
     val lowestAccessPrivilegeLevel = addr(9,8)
     mode >= lowestAccessPrivilegeLevel && !(wen && readOnly)
   }
+
+  def perfcntPermissionCheck(addr: UInt, mode: UInt, mmask: UInt, smask: UInt): Bool = {
+    val index = UIntToOH(addr & 31.U)
+    Mux(mode === ModeM, true.B, Mux(mode === ModeS, (index & mmask) =/= 0.U, (index & mmask & smask) =/= 0.U))
+  }
 }

@@ -218,7 +218,7 @@ class IntegerBlock
   jmpExeUnit.fenceio <> io.fenceio
 
   // read int rf from ctrl block
-  intRf.io.readPorts <> io.fromCtrlBlock.readRf
+  intRf.io.readPorts.zipWithIndex.map{ case(r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(

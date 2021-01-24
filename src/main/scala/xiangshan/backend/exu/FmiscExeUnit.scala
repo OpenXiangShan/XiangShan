@@ -14,8 +14,8 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
   val toFpUnits = Seq(f2f, fdivSqrt)
   val toIntUnits = Seq(f2i)
 
-  assert(fpArb.io.in.length == toFpUnits.size)
-  assert(intArb.io.in.length == toIntUnits.size)
+  assert(toFpUnits.size == 1 || fpArb.io.in.length == toFpUnits.size)
+  assert(toIntUnits.size == 1 || intArb.io.in.length == toIntUnits.size)
 
   val input = io.fromFp
   val isRVF = input.bits.uop.ctrl.isRVF

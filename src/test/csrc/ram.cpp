@@ -4,6 +4,7 @@
 #include "ram.h"
 #include "compress.h"
 
+// #define TLB_UNITTEST
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
@@ -84,8 +85,8 @@ void addpageSv39() {
   //pdde[2] = ((0x80000000&0xc0000000) >> 2) | 0xf;
 
   for(int i = 0; i < PTENUM ;i++) {
-    pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0x1;
-    //pde[i] = (((0x8000000+i*2*1024*1024)&0xffe00000)>>2) | 0xf;
+    // pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0x1;
+    pde[i] = (((0x80000000+i*2*1024*1024)&0xffe00000)>>2) | 0xf;
   }
 
   for(int outidx = 0; outidx < PTENUM; outidx++ ) {
@@ -94,6 +95,7 @@ void addpageSv39() {
     }
   }
 
+  printf("try to add identical tlb page to ram\n");
   memcpy((char *)ram+(TOPSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM+PDEDEVNUM+PTEDEVNUM)),ptedev,PAGESIZE*PTEDEVNUM);
   memcpy((char *)ram+(TOPSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM+PDEDEVNUM)),pdedev,PAGESIZE*PDEDEVNUM);
   memcpy((char *)ram+(TOPSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM)),ptemmio, PAGESIZE*PTEMMIONUM);
@@ -116,6 +118,12 @@ void init_ram(const char *img) {
     printf("Cound not mmap 0x%lx bytes\n", EMU_RAM_SIZE);
     assert(0);
   }
+
+#ifdef TLB_UNITTEST
+  //new add
+  addpageSv39();
+  //new end
+#endif
 
   int ret;
   if (isGzFile(img)) {
@@ -142,12 +150,6 @@ void init_ram(const char *img) {
     assert(ret == 1);
     fclose(fp);
   }
-
-#ifdef TLB_UNITTEST
-  //new add
-  addpageSv39();
-  //new end
-#endif
 
 #ifdef WITH_DRAMSIM3
   #if !defined(DRAMSIM3_CONFIG) || !defined(DRAMSIM3_OUTDIR)

@@ -48,10 +48,11 @@ package object xiangshan {
 
     def apply() = UInt(log2Up(num).W)
 
-    def isIntExu(fuType: UInt) =  !fuType(3)
+    def isIntExu(fuType: UInt) = !fuType(3)
+    def isJumpExu(fuType: UInt) = fuType === jmp
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
-    def isLoadExu(fuType: UInt) = fuType === ldu || fuType===mou
+    def isLoadExu(fuType: UInt) = fuType === ldu || fuType === mou
     def isStoreExu(fuType: UInt) = fuType === stu
 
     val functionNameMap = Map(
@@ -107,5 +108,45 @@ package object xiangshan {
     def isUnconditional(level: UInt) = level(1)
     def flushItself(level: UInt) = level(0)
     def isException(level: UInt) = level(1) && level(0)
+  }
+
+  object ExceptionVec {
+    def apply() = Vec(16, Bool())
+  }
+
+  object PMAMode {
+    def R = "b1".U << 0 //readable
+    def W = "b1".U << 1 //writeable
+    def X = "b1".U << 2 //executable
+    def I = "b1".U << 3 //cacheable: icache
+    def D = "b1".U << 4 //cacheable: dcache
+    def S = "b1".U << 5 //enable speculative access
+    def A = "b1".U << 6 //enable atomic operation, A imply R & W
+    def C = "b1".U << 7 //if it is cacheable is configable
+    def Reserved = "b0".U
+
+    def apply() = UInt(7.W)
+
+    def read(mode: UInt) = mode(0)
+    def write(mode: UInt) = mode(1)
+    def execute(mode: UInt) = mode(2)
+    def icache(mode: UInt) = mode(3)
+    def dcache(mode: UInt) = mode(4)
+    def speculate(mode: UInt) = mode(5)
+    def atomic(mode: UInt) = mode(6)
+    def configable_cache(mode: UInt) = mode(7)
+
+    def strToMode(s: String) = {
+      var result = 0.U << 8
+      if (s.toUpperCase.indexOf("R") >= 0) result = result + R
+      if (s.toUpperCase.indexOf("W") >= 0) result = result + W
+      if (s.toUpperCase.indexOf("X") >= 0) result = result + X
+      if (s.toUpperCase.indexOf("I") >= 0) result = result + I
+      if (s.toUpperCase.indexOf("D") >= 0) result = result + D
+      if (s.toUpperCase.indexOf("S") >= 0) result = result + S
+      if (s.toUpperCase.indexOf("A") >= 0) result = result + A
+      if (s.toUpperCase.indexOf("C") >= 0) result = result + C
+      result
+    }
   }
 }

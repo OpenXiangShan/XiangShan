@@ -25,10 +25,13 @@ class Jump extends FunctionUnit with HasRedirectOut {
     io.in.bits.uop
   )
 
-  val offset = SignExt(Mux(JumpOpType.jumpOpIsJal(func),
-    ImmUnion.J.toImm32(immMin),
-    ImmUnion.I.toImm32(immMin)
-  ), XLEN)
+  val isJalr = JumpOpType.jumpOpisJalr(func)
+  val isAuipc = JumpOpType.jumpOpisAuipc(func)
+  val offset = SignExt(Mux1H(Seq(
+    isJalr -> ImmUnion.I.toImm32(immMin),
+    isAuipc -> ImmUnion.U.toImm32(immMin),
+    !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
+  )), XLEN)
 
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
   val valid = io.in.valid
@@ -53,7 +56,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   brUpdate.taken := true.B
 
   // Output
-  val res = snpc
+  val res = Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
 
   io.in.ready := io.out.ready
   io.out.valid := valid

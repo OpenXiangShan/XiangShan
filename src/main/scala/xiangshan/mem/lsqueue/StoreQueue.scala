@@ -43,6 +43,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
+    val sqempty = Output(Bool())
   })
 
   // data modules
@@ -52,8 +53,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   dataModule.io := DontCare
   val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
-  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
-  exceptionModule.io := DontCare
 
   // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
@@ -77,13 +76,21 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val headMask = UIntToMask(enqPtr, StoreQueueSize)
 
   // Read dataModule
-  // deqPtr and deqPtr+1 entry will be read from dataModule
+  // deqPtrExtNext and deqPtrExtNext+1 entry will be read from dataModule
+  // if !sbuffer.fire(), read the same ptr
+  // if sbuffer.fire(), read next
+  val deqPtrExtNext = WireInit(Mux(io.sbuffer(1).fire(),
+    VecInit(deqPtrExt.map(_ + 2.U)),
+    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
+      VecInit(deqPtrExt.map(_ + 1.U)),
+      deqPtrExt
+    )
+  ))
   val dataModuleRead = dataModule.io.rdata
   for (i <- 0 until StorePipelineWidth) {
-    dataModule.io.raddr(i) := deqPtrExt(i).value
+    dataModule.io.raddr(i) := deqPtrExtNext(i).value
   }
   vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.sqIdx.value
-  exceptionModule.io.raddr(0) := deqPtr // read exception
 
   /**
     * Enqueue at dispatch
@@ -123,14 +130,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.wen(i) := false.B
     vaddrModule.io.wen(i) := false.B
-    exceptionModule.io.wen(i) := false.B
-    when(io.storeIn(i).fire()) {
+    when (io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
-      val hasException = io.storeIn(i).bits.uop.cf.exceptionVec.asUInt.orR
-      val hasWritebacked = !io.storeIn(i).bits.mmio || hasException
-      datavalid(stWbIndex) := hasWritebacked
-      writebacked(stWbIndex) := hasWritebacked
-      pending(stWbIndex) := !hasWritebacked // valid mmio require
+      datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
+      writebacked(stWbIndex) := !io.storeIn(i).bits.mmio
+      pending(stWbIndex) := io.storeIn(i).bits.mmio
 
       val storeWbData = Wire(new SQDataEntry)
       storeWbData := DontCare
@@ -145,21 +149,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
       vaddrModule.io.wen(i) := true.B
 
-      exceptionModule.io.waddr(i) := stWbIndex
-      exceptionModule.io.wdata(i) := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
-      exceptionModule.io.wen(i) := true.B
-
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
-      XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x exc %x\n",
+      XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
         io.storeIn(i).bits.uop.cf.pc,
         io.storeIn(i).bits.vaddr,
         io.storeIn(i).bits.paddr,
         io.storeIn(i).bits.data,
-        io.storeIn(i).bits.mmio,
-        io.storeIn(i).bits.rollback,
-        io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+        io.storeIn(i).bits.mmio
         )
     }
   }
@@ -258,7 +256,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.cf.exceptionVec := exceptionModule.io.rdata(0).asBools
   io.mmioStout.bits.data := dataModuleRead(0).data // dataModuleRead.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
@@ -288,9 +285,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // Commited stores will not be cancelled and can be sent to lower level.
   // remove retired insts from sq, add retired store to sbuffer
   for (i <- 0 until StorePipelineWidth) {
+    // We use RegNext to prepare data for sbuffer
     val ptr = deqPtrExt(i).value
-    val ismmio = mmio(ptr)
-    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !ismmio
+    // if !sbuffer.fire(), read the same ptr
+    // if sbuffer.fire(), read next
+    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := dataModuleRead(i).paddr
     io.sbuffer(i).bits.data := dataModuleRead(i).data
@@ -299,7 +298,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := DontCare
     io.sbuffer(i).bits.meta.mmio     := false.B
-    io.sbuffer(i).bits.meta.mask     := dataModuleRead(i).mask
+    io.sbuffer(i).bits.meta.mask     := io.sbuffer(i).bits.mask
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
@@ -349,13 +348,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
 
-  deqPtrExt := Mux(io.sbuffer(1).fire(),
-    VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
-      VecInit(deqPtrExt.map(_ + 1.U)),
-      deqPtrExt
-    )
-  )
+  deqPtrExt := deqPtrExtNext
 
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
@@ -372,6 +365,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       validCounter + enqNumber <= (StoreQueueSize - RenameWidth).U
     )
   )
+
+  // io.sqempty will be used by sbuffer
+  // We delay it for 1 cycle for better timing
+  // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
+  // for 1 cycle will also promise that sq is empty in that cycle
+  io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)

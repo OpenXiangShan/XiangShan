@@ -5,6 +5,10 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.experimental.chiselName
+import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
+import firrtl.stage.RunFirrtlTransformAnnotation
+import firrtl.transforms.RenameModules
+import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
 import scala.util.matching.Regex
@@ -373,14 +377,13 @@ class FakeTage extends BaseTage {
 class Tage extends BaseTage {
 
   val tables = TableInfo.map {
-    case (nRows, histLen, tagLen) => {
+    case (nRows, histLen, tagLen) =>
       val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       t.io.req.valid := io.pc.valid
       t.io.req.bits.pc := io.pc.bits
       t.io.req.bits.hist := io.hist
       t.io.req.bits.mask := io.inMask
       t
-    }
   }
 
   val scTables = SCTableInfo.map {
@@ -657,5 +660,14 @@ class Tage extends BaseTage {
       u.pc, u.pc - (bri.fetchIdx << instOffsetBits.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
     XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
+  }
+}
+
+object TageTest extends App {
+  override def main(args: Array[String]): Unit = {
+    (new ChiselStage).execute(args, Seq(
+      ChiselGeneratorAnnotation(() => new Tage),
+      RunFirrtlTransformAnnotation(new RenameDesiredNames)
+    ))
   }
 }

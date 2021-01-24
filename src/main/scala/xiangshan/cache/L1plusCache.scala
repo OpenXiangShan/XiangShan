@@ -130,21 +130,33 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    for (r <- 0 until blockRows) {
-      val array = Module(new SRAMTemplate(Bits(encRowBits.W), set=nSets, way=1,
-        shouldReset=false, holdRead=false, singlePort=singlePort))
-      // data write
-      array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
-      array.io.w.req.bits.apply(
-        setIdx=waddr,
-        data=io.write.bits.data(r),
-        waymask=1.U)
+    val array = Module(new SRAMTemplate(Bits((blockRows * encRowBits).W), set=nSets, way=1,
+      shouldReset=false, holdRead=false, singlePort=singlePort))
+    // data write
+    array.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+    array.io.w.req.bits.apply(
+      setIdx=waddr,
+      data=io.write.bits.data.asUInt,
+      waymask=1.U)
 
-      // data read
-      array.io.r.req.valid := io.read.bits.way_en(w) && io.read.bits.rmask(r) && io.read.valid
-      array.io.r.req.bits.apply(setIdx=raddr)
-      io.resp(w)(r) := RegNext(array.io.r.resp.data(0))
+    // data read
+    array.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+    array.io.r.req.bits.apply(setIdx=raddr)
+    for (r <- 0 until blockRows) {
+      io.resp(w)(r) := RegNext(array.io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits))
     }
+  }
+
+  // since we use a RAM of block width
+  // we must do full read and write
+  when (io.write.valid) {
+    assert (io.write.bits.wmask.andR)
+  }
+
+  // since we use a RAM of block width
+  // we must do full read and write
+  when (io.read.valid) {
+    assert (io.read.bits.rmask.andR)
   }
 
   // debug output
@@ -230,7 +242,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
       cacheParams.tagCode.decode(rdata).corrected)
 
   for (i <- 0 until nWays) {
-    io.resp(i).valid := RegNext(valid_array(io.read.bits.idx)(i))
+    io.resp(i).valid := valid_array(RegNext(io.read.bits.idx))(i)
     io.resp(i).tag   := rtags(i)
   }
 
