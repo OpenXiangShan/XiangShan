@@ -163,7 +163,7 @@ class MainPipe extends DCacheModule
       assert (full_overwrite)
     }
     // AMO not yet finished
-    assert (s0_req.source === AMO_SOURCE.U)
+    assert (s0_req.source =/= AMO_SOURCE.U)
     OneHot.checkOneHot(Seq(s0_req.miss, s0_req.probe))
   }
 
