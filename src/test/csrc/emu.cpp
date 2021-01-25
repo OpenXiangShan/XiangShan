@@ -76,9 +76,13 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
 Emulator::Emulator(int argc, const char *argv[]):
   dut_ptr(new VXSSimSoC),
-  cycles(0), hascommit(0), trapCode(STATE_RUNNING)
+  cycles(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
+
+  for (int i = 0; i < NumCore; i++) {
+    hascommit[i] = 0;
+  }
 
   // srand
   srand(args.seed);
@@ -116,7 +120,9 @@ Emulator::Emulator(int argc, const char *argv[]):
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
     snapshot_load(args.snapshot_path);
     printf("model cycleCnt = %" PRIu64 "\n", dut_ptr->io_trap_cycleCnt);
-    hascommit = 1;
+    for (int i = 0; i < NumCore; i++) {
+      hascommit[i] = 1;
+    }
   }
 #endif
 
@@ -141,33 +147,64 @@ Emulator::~Emulator() {
 
 inline void Emulator::read_emu_regs(uint64_t *r) {
 #define macro(x) r[x] = dut_ptr->io_difftest_r_##x
-  macro(0); macro(1); macro(2); macro(3); macro(4); macro(5); macro(6); macro(7);
-  macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
-  macro(16); macro(17); macro(18); macro(19); macro(20); macro(21); macro(22); macro(23);
-  macro(24); macro(25); macro(26); macro(27); macro(28); macro(29); macro(30); macro(31);
-  macro(32); macro(33); macro(34); macro(35); macro(36); macro(37); macro(38); macro(39);
-  macro(40); macro(41); macro(42); macro(43); macro(44); macro(45); macro(46); macro(47);
-  macro(48); macro(49); macro(50); macro(51); macro(52); macro(53); macro(54); macro(55);
-  macro(56); macro(57); macro(58); macro(59); macro(60); macro(61); macro(62); macro(63);
-  r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest_thisPC;
-  r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest_mstatus;
-  r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest_sstatus;
-  r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest_mepc;
-  r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
-  r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
-  r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
-  r[DIFFTEST_SATP   ] = dut_ptr->io_difftest_satp;
-  r[DIFFTEST_MIP    ] = dut_ptr->io_difftest_mip;
-  r[DIFFTEST_MIE    ] = dut_ptr->io_difftest_mie;
-  r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest_mscratch;
-  r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
-  r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
-  r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
-  r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest_mtval;
-  r[DIFFTEST_STVAL]   = dut_ptr->io_difftest_stval;
-  r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest_mtvec;
-  r[DIFFTEST_STVEC]   = dut_ptr->io_difftest_stvec;
-  r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
+    macro(0); macro(1); macro(2); macro(3); macro(4); macro(5); macro(6); macro(7);
+    macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
+    macro(16); macro(17); macro(18); macro(19); macro(20); macro(21); macro(22); macro(23);
+    macro(24); macro(25); macro(26); macro(27); macro(28); macro(29); macro(30); macro(31);
+    macro(32); macro(33); macro(34); macro(35); macro(36); macro(37); macro(38); macro(39);
+    macro(40); macro(41); macro(42); macro(43); macro(44); macro(45); macro(46); macro(47);
+    macro(48); macro(49); macro(50); macro(51); macro(52); macro(53); macro(54); macro(55);
+    macro(56); macro(57); macro(58); macro(59); macro(60); macro(61); macro(62); macro(63);
+    r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest_thisPC;
+    r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest_mstatus;
+    r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest_sstatus;
+    r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest_mepc;
+    r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
+    r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
+    r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
+    r[DIFFTEST_SATP   ] = dut_ptr->io_difftest_satp;
+    r[DIFFTEST_MIP    ] = dut_ptr->io_difftest_mip;
+    r[DIFFTEST_MIE    ] = dut_ptr->io_difftest_mie;
+    r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest_mscratch;
+    r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
+    r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
+    r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
+    r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest_mtval;
+    r[DIFFTEST_STVAL]   = dut_ptr->io_difftest_stval;
+    r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest_mtvec;
+    r[DIFFTEST_STVEC]   = dut_ptr->io_difftest_stvec;
+    r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
+}
+
+inline void Emulator::read_emu_regs2(uint64_t *r) {
+#define macro2(x) r[x] = dut_ptr->io_difftest2_r_##x
+    macro2(0); macro2(1); macro2(2); macro2(3); macro2(4); macro2(5); macro2(6); macro2(7);
+    macro2(8); macro2(9); macro2(10); macro2(11); macro2(12); macro2(13); macro2(14); macro2(15);
+    macro2(16); macro2(17); macro2(18); macro2(19); macro2(20); macro2(21); macro2(22); macro2(23);
+    macro2(24); macro2(25); macro2(26); macro2(27); macro2(28); macro2(29); macro2(30); macro2(31);
+    macro2(32); macro2(33); macro2(34); macro2(35); macro2(36); macro2(37); macro2(38); macro2(39);
+    macro2(40); macro2(41); macro2(42); macro2(43); macro2(44); macro2(45); macro2(46); macro2(47);
+    macro2(48); macro2(49); macro2(50); macro2(51); macro2(52); macro2(53); macro2(54); macro2(55);
+    macro2(56); macro2(57); macro2(58); macro2(59); macro2(60); macro2(61); macro2(62); macro2(63);
+    r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest2_thisPC;
+    r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest2_mstatus;
+    r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest2_sstatus;
+    r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest2_mepc;
+    r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest2_sepc;
+    r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest2_mcause;
+    r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest2_scause;
+    r[DIFFTEST_SATP   ] = dut_ptr->io_difftest2_satp;
+    r[DIFFTEST_MIP    ] = dut_ptr->io_difftest2_mip;
+    r[DIFFTEST_MIE    ] = dut_ptr->io_difftest2_mie;
+    r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest2_mscratch;
+    r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest2_sscratch;
+    r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest2_mideleg;
+    r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest2_medeleg;
+    r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest2_mtval;
+    r[DIFFTEST_STVAL]   = dut_ptr->io_difftest2_stval;
+    r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest2_mtvec;
+    r[DIFFTEST_STVEC]   = dut_ptr->io_difftest2_stvec;
+    r[DIFFTEST_MODE]    = dut_ptr->io_difftest2_priviledgeMode;
 }
 
 inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
@@ -206,6 +243,42 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
 #endif
 }
 
+inline void Emulator::read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
+#define dut_ptr_wpc2(x)  wpc[x] = dut_ptr->io_difftest2_wpc_##x
+#define dut_ptr_wdata2(x) wdata[x] = dut_ptr->io_difftest2_wdata_##x
+#define dut_ptr_wdst2(x)  wdst[x] = dut_ptr->io_difftest2_wdst_##x
+#define dut_ptr_read_wb2(x) dut_ptr_wpc2(x); dut_ptr_wdata2(x); dut_ptr_wdst2(x);
+
+#if DIFFTEST_WIDTH >= 13 || DIFFTEST_WIDTH < 6
+#error "not supported difftest width"
+#endif
+
+  dut_ptr_read_wb2(0);
+  dut_ptr_read_wb2(1);
+  dut_ptr_read_wb2(2);
+  dut_ptr_read_wb2(3);
+  dut_ptr_read_wb2(4);
+  dut_ptr_read_wb2(5);
+#if DIFFTEST_WIDTH >= 7
+  dut_ptr_read_wb2(6);
+#endif
+#if DIFFTEST_WIDTH >= 8
+  dut_ptr_read_wb2(7);
+#endif
+#if DIFFTEST_WIDTH >= 9
+  dut_ptr_read_wb2(8);
+#endif
+#if DIFFTEST_WIDTH >= 10
+  dut_ptr_read_wb2(9);
+#endif
+#if DIFFTEST_WIDTH >= 11
+  dut_ptr_read_wb2(10);
+#endif
+#if DIFFTEST_WIDTH >= 12
+  dut_ptr_read_wb2(11);
+#endif
+}
+
 inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
 #define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
 #define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
@@ -213,6 +286,15 @@ inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t 
 #define dut_ptr_read_store(x) dut_ptr_saddr(x); dut_ptr_sdata(x); dut_ptr_smask(x);
   dut_ptr_read_store(0);
   dut_ptr_read_store(1);
+}
+
+inline void Emulator::read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
+#define dut_ptr_saddr2(x)  saddr[x] = dut_ptr->io_difftest2_storeAddr_##x
+#define dut_ptr_sdata2(x) sdata[x] = dut_ptr->io_difftest2_storeData_##x
+#define dut_ptr_smask2(x) smask[x] = dut_ptr->io_difftest2_storeMask_##x
+#define dut_ptr_read_store2(x) dut_ptr_saddr2(x); dut_ptr_sdata2(x); dut_ptr_smask2(x);
+  dut_ptr_read_store2(0);
+  dut_ptr_read_store2(1);
 }
 
 inline void Emulator::reset_ncycles(size_t cycles) {
@@ -271,6 +353,25 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
+inline void Emulator::load_diff_info(void* diff_ptr, int coreid) {
+#define load_info(x)  diff[0].x = dut_ptr->io_difftest_##x
+#define load_info2(x) diff[1].x = dut_ptr->io_difftest2_##x
+  DiffState* diff = (DiffState*)diff_ptr;
+  if (coreid == 0) {
+    load_info(commit);  load_info(thisINST);
+    load_info(skip);    load_info(isRVC);
+    load_info(wen);     load_info(intrNO);
+    load_info(cause);   load_info(priviledgeMode);
+    load_info(scFailed);
+  } else {
+    load_info2(commit);  load_info2(thisINST);
+    load_info2(skip);    load_info2(isRVC);
+    load_info2(wen);     load_info2(intrNO);
+    load_info2(cause);   load_info2(priviledgeMode);
+    load_info2(scFailed);
+  }
+}
+
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
@@ -312,7 +413,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       break;
     }
     if (assert_count > 0) {
-      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      difftest_display(dut_ptr->io_difftest_priviledgeMode, 0);
       eprintf("The simulation stopped. There might be some assertion failed.\n");
       trapCode = STATE_ABORT;
       break;
@@ -328,46 +429,46 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
     if (trapCode != STATE_RUNNING) break;
 
-    if ((lastcommit[0] - max_cycle > stuck_limit || lastcommit[1] - max_cycle > stuck_limit) && hascommit) {
-      eprintf("No instruction commits for %d cycles, maybe get stuck\n"
-          "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
-          stuck_limit, stuck_limit);
-      difftest_display(dut_ptr->io_difftest_priviledgeMode);
-      trapCode = STATE_ABORT;
+    for (int i = 0; i < NumCore; i++) {
+      if (lastcommit[i] - max_cycle > stuck_limit && hascommit[i]) {
+        eprintf("No instruction of core%d commits for %d cycles, maybe get stuck\n"
+            "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
+            i, stuck_limit, stuck_limit);
+        difftest_display(dut_ptr->io_difftest_priviledgeMode, i);
+        trapCode = STATE_ABORT;
+      }
     }
 
-    if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
-      hascommit = 1;
-      read_emu_regs(reg[0]);
-      void* get_img_start();
-      long get_img_size();
-      ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), 0);
-      ref_difftest_setregs(reg[0], 0);
-      printf("The first instruction has commited. Difftest enabled. \n");
+    for (int i = 0; i < NumCore; i++) {
+      int first_instr_commit = (i == 0) ? dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u :
+                                          dut_ptr->io_difftest2_commit && dut_ptr->io_difftest2_thisPC == 0x80000000u;
+      if (!hascommit[i] && first_instr_commit) {
+        hascommit[i] = 1;
+        if (i == 0) read_emu_regs(reg[i]); else read_emu_regs2(reg[i]);
+        void* get_img_start();
+        long get_img_size();
+        ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
+        ref_difftest_setregs(reg[i], i);
+        printf("The first instruction of core %d has commited. Difftest enabled. \n", i);
+      }
     }
 
     // difftest
 
     for (int i = 0; i < NumCore; i++) {
-      if (dut_ptr->io_difftest_commit && hascommit) {
-        read_emu_regs(reg[i]);
-        read_wb_info(wpc[i], wdata[i], wdst[i]);
-
-        diff[i].commit = dut_ptr->io_difftest_commit;
-        diff[i].this_inst = dut_ptr->io_difftest_thisINST;
-        diff[i].skip = dut_ptr->io_difftest_skip;
-        diff[i].isRVC = dut_ptr->io_difftest_isRVC;
-        diff[i].wen = dut_ptr->io_difftest_wen;
-        diff[i].intrNO = dut_ptr->io_difftest_intrNO;
-        diff[i].cause = dut_ptr->io_difftest_cause;
-        diff[i].priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
-
-        diff[i].sync.scFailed = dut_ptr->io_difftest_scFailed;
-
+      int core_nr_commit = (i == 0) ? dut_ptr->io_difftest_commit : dut_ptr->io_difftest2_commit;
+      if (core_nr_commit && hascommit[i]) {
         if (i == 0) {
-          if (difftest_step(&diff[i])) {
-            trapCode = STATE_ABORT;
-          }
+          read_emu_regs(reg[i]);
+          read_wb_info(wpc[i], wdata[i], wdst[i]);
+        } else {
+          read_emu_regs2(reg[i]);
+          read_wb_info2(wpc[i], wdata[i], wdst[i]);
+        }
+        load_diff_info(diff, i);
+
+        if (difftest_step(&diff[i], i)) {
+          trapCode = STATE_ABORT;
         }
         lastcommit[i] = max_cycle;
 
@@ -384,8 +485,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           auto addr = diff.store_addr[i];
           auto data = diff.store_data[i];
           auto mask = diff.store_mask[i];
-          if (difftest_store_step(&addr, &data, &mask)) {
-            difftest_display(dut_ptr->io_difftest_priviledgeMode);
+          if (difftest_store_step(&addr, &data, &mask, coreid)) {
+            difftest_display(dut_ptr->io_difftest_priviledgeMode, 0);  // TODO
             printf("Mismatch for store commits: \n");
             printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
             printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",

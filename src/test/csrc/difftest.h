@@ -40,10 +40,6 @@ enum {
   DIFFTEST_NR_REG
 };
 
-struct SyncChannel {
-  uint64_t scFailed; // sc inst commited, it failed beacuse lr_valid === 0
-};
-
 struct SyncState {
   uint64_t lrscValid;
   uint64_t lrscAddr;
@@ -53,7 +49,7 @@ struct DiffState {
   // Regs and mode for single step difftest
   int commit;
   uint64_t *reg_scala;
-  uint32_t this_inst;
+  uint32_t thisINST;
   int skip;
   int isRVC;
   uint64_t *wpc;
@@ -65,7 +61,7 @@ struct DiffState {
   int priviledgeMode;
 
   // Microarchitucural signal needed to sync status
-  struct SyncChannel sync;
+  uint64_t scFailed;  // sc inst commited, it failed beacuse lr_valid === 0
   // lrscValid needs to be synced as nemu does not know 
   // how many cycles were used to finish a lr/sc pair, 
   // this will lead to different sc results.
@@ -94,9 +90,9 @@ extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para, int coreid);
 extern int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);
 
 void init_difftest();
-int difftest_step(DiffState *s);
-int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
-void difftest_display(uint8_t mode);
+int difftest_step(DiffState *s, int coreid);
+int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);
+void difftest_display(uint8_t mode, int coreid);
 
 uint64_t get_nemu_this_pc();
 void set_nemu_this_pc(uint64_t pc);
