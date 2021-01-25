@@ -234,6 +234,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     mergeData.brUpdate.target := redirectTarget
     mergeData.brUpdate.brTarget := redirectTarget
     mergeData.brUpdate.taken := wb.brUpdate.taken
+    mergeData.brUpdate.bpuMeta.predictor:= wb.brUpdate.bpuMeta.predictor
     mergeData
   }
 
@@ -314,6 +315,20 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
+  val predictor = io.cfiInfo.bits.bpuMeta.predictor
+
+  val ubtbRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
+  val ubtbWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
+
+  val btbRight  = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
+  val btbWrong  =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
+
+  val tageRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
+  val tageWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
+
+  val loopRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
+  val loopWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
+
   if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondBpRight", Perf)
@@ -326,5 +341,28 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(mbpIWrong, "perfCntCondBpIWrong", Perf)
     ExcitingUtils.addSource(mbpRRight, "perfCntCondBpRRight", Perf)
     ExcitingUtils.addSource(mbpRWrong, "perfCntCondBpRWrong", Perf)
+
+    ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
+    ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
+    ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
+    ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
+    ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
+    ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
+    ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
+    ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
   }
+
+  val utilization = Mux(headPtr.flag === tailPtr.flag, tailPtr.value - headPtr.value, BrqSize.U + tailPtr.value - headPtr.value)
+  XSPerf("utilization", utilization)
+  XSPerf("mbpInstr", PopCount(mbpInstr))
+  XSPerf("mbpRight", PopCount(mbpRight))
+  XSPerf("mbpWrong", PopCount(mbpWrong))
+  XSPerf("mbpBRight", PopCount(mbpBRight))
+  XSPerf("mbpBWrong", PopCount(mbpBWrong))
+  XSPerf("mbpJRight", PopCount(mbpJRight))
+  XSPerf("mbpJWrong", PopCount(mbpJWrong))
+  XSPerf("mbpIRight", PopCount(mbpIRight))
+  XSPerf("mbpIWrong", PopCount(mbpIWrong))
+  XSPerf("mbpRRight", PopCount(mbpRRight))
+  XSPerf("mbpRWrong", PopCount(mbpRWrong))
 }

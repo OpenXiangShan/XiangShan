@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.ExcitingUtils._
 import xiangshan._
-import utils.{XSDebug, XSError, XSInfo}
+import utils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
@@ -198,4 +198,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     PopCount(io.toFpDq.req.map(_.valid && io.toFpDq.canAccept)) +
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
+
+  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
+  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
 }

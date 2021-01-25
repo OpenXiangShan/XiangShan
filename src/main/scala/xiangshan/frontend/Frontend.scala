@@ -2,13 +2,28 @@ package xiangshan.frontend
 import utils.XSInfo
 import chisel3._
 import chisel3.util._
+import chipsalliance.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.PipelineConnect
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
+import xiangshan.backend.fu.HasExceptionNO
+
+class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+
+  val instrUncache = LazyModule(new InstrUncache())
+
+  lazy val module = new FrontendImp(this)
+}
 
 
-class Frontend extends XSModule with HasL1plusCacheParameters {
+class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
+  with HasL1plusCacheParameters 
+  with HasXSParameter
+  with HasExceptionNO
+  with HasXSLog
+{
   val io = IO(new Bundle() {
     val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
     val icacheMemGrant = Flipped(DecoupledIO(new L1plusCacheResp))
@@ -23,7 +38,7 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
   val ifu = Module(new IFU)
   val ibuffer =  Module(new Ibuffer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
-  
+  val instrUncache = outer.instrUncache.module
 
   val needFlush = io.backend.redirect.valid
 
@@ -43,6 +58,11 @@ class Frontend extends XSModule with HasL1plusCacheParameters {
     ifu.io.icacheMemGrant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
   ifu.io.fencei := io.fencei
+
+
+  instrUncache.io.req <> ifu.io.mmio_acquire
+  instrUncache.io.resp <> ifu.io.mmio_grant
+  instrUncache.io.flush <> ifu.io.mmio_flush
   // to tlb
   ifu.io.sfence := io.sfence
   ifu.io.tlbCsr := io.tlbCsr

@@ -47,7 +47,7 @@ class FDivSqrt extends FPUSubModule {
 
   val src1 = unbox(io.in.bits.src(0), tag, None)
   val src2 = unbox(io.in.bits.src(1), tag, None)
-  divSqrt.io.inValid := io.in.fire()
+  divSqrt.io.inValid := io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)
   divSqrt.io.sqrtOp := fpCtrl.sqrt
   divSqrt.io.a := src1
   divSqrt.io.b := src2
@@ -74,7 +74,7 @@ class FDivSqrt extends FPUSubModule {
   val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
 
   io.in.ready := state===s_idle
-  io.out.valid := state===s_finish && !(killReg || kill)
+  io.out.valid := state===s_finish && !killReg
   io.out.bits.uop := uopReg
   io.out.bits.data := RegNext(data, divSqrtRawValid)
   fflags := RegNext(flags, divSqrtRawValid)

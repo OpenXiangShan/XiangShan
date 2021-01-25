@@ -300,22 +300,6 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
-class RVCExpander extends XSModule {
-  val io = IO(new Bundle {
-    val in = Input(UInt(32.W))
-    val out = Output(new ExpandedInstruction)
-    val rvc = Output(Bool())
-  })
-
-  if (HasCExtension) {
-    io.rvc := io.in(1,0) =/= 3.U
-    io.out := new RVCDecoder(io.in, XLEN).decode
-  } else {
-    io.rvc := false.B
-    io.out := new RVCDecoder(io.in, XLEN).passthrough
-  }
-}
-
 //object Imm32Gen {
 //  def apply(sel: UInt, inst: UInt) = {
 //    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
@@ -425,19 +409,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
   val cf_ctrl = Wire(new CfCtrl)
 
-  val exp = Module(new RVCExpander())
-  exp.io.in := io.enq.ctrl_flow.instr
   ctrl_flow := io.enq.ctrl_flow
-  when (exp.io.rvc) {
-    ctrl_flow.instr := exp.io.out.bits
-  }
-
-  // save rvc decode info
-  // TODO maybe rvc_info are useless?
-  val rvc_info = Wire(new ExpandedInstruction())
-  val is_rvc = Wire(Bool())
-  rvc_info := exp.io.out
-  is_rvc := exp.io.rvc
 
   var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table
 

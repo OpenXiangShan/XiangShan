@@ -51,7 +51,7 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
 
   // destorequeue read data
   (0 until numRead).map(i => {
-      io.rdata(i) := data(io.raddr(i))
+      io.rdata(i) := data(RegNext(io.raddr(i)))
   })
 
   // DataModuleTemplate should not be used when there're any write conflicts

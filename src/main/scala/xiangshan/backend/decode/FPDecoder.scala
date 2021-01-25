@@ -27,7 +27,7 @@ class FPDecoder extends XSModule{
     FCVT_S_WU-> List(N,s,s,Y,Y,Y,N,N,Y),
     FCVT_S_L -> List(N,s,s,Y,Y,Y,N,N,Y),
     FCVT_S_LU-> List(N,s,s,Y,Y,Y,N,N,Y),
-    FMV_X_W  -> List(N,s,X,N,N,N,N,N,N),
+    FMV_X_W  -> List(N,d,X,N,N,N,N,N,N),
     FCLASS_S -> List(N,s,X,N,N,N,N,N,N),
     FCVT_W_S -> List(N,s,X,N,Y,N,N,N,Y),
     FCVT_WU_S-> List(N,s,X,N,Y,N,N,N,Y),

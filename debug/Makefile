@@ -3,7 +3,7 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= 0
+E ?= -1
 V ?= OFF
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
