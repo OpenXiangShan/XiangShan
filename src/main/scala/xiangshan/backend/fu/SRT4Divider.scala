@@ -37,7 +37,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
 
   switch(state){
     is(s_idle){
-      when (io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)) {
+      when (io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)) {
         state := Mux(divZero, s_finish, s_lzd)
       }
     }
