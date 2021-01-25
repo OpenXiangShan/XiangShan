@@ -423,7 +423,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
-  cs.lsrc1 := Mux(ctrl_flow.instr === LUI || cs.src1Type === SrcType.pc, 0.U, ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc1 := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
   cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
   cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location
