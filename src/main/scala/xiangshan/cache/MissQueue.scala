@@ -201,13 +201,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   // --------------------------------------------
   // refill
+
+  // for full overwrite, we can use AcquirePerm to save memory bandwidth
+  val full_overwrite = req.source === STORE_SOURCE.U && req.store_mask.andR
   when (state === s_refill_req) {
 
     val grow_param = req.coh.onAccess(req.cmd)._2
-
-    // for full overwrite, we can use AcquirePerm to save memory bandwidth
-    val full_overwrite = req.source === STORE_SOURCE.U && req.store_mask.andR
-
     val acquireBlock = edge.AcquireBlock(
       fromSource      = io.id,
       toAddress       = req.addr,
@@ -250,11 +249,21 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.mem_grant.ready := true.B
     when (io.mem_grant.fire()) {
       when (edge.hasData(io.mem_grant.bits)) {
+        // GrantData
         for (i <- 0 until beatRows) {
           val idx = (refill_count << log2Floor(beatRows)) + i.U
           refill_data(idx) := mergePutData(io.mem_grant.bits.data, new_data(idx), new_mask(idx))
         }
       } .otherwise {
+        // Grant
+
+        // since we do not sync between MissQueue and WritebackQueue
+        // for a AcquireBlock BtoT, we can not protect our block from being replaced by another miss and written back by WritebackQueue
+        // so AcquireBlock BtoT, we need L2 to give us GrantData, not Grant.
+        // So that whether our block is replaced or not, we can always refill the block with valid data
+        // So, if we enters here
+        // we must be a AcquirePerm, not a AcquireBlock!!!
+        assert (full_overwrite)
         // when we only acquire perm, not data
         // use Store's data
         for (i <- 0 until blockRows) {
