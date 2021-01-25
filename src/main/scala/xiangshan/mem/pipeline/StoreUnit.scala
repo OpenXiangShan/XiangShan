@@ -104,6 +104,18 @@ class StoreUnit_S1 extends XSModule {
 class StoreUnit_S2 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+  })
+
+  io.in.ready := true.B
+  io.out.bits := io.in.bits
+  io.out.valid := io.in.valid
+
+}
+
+class StoreUnit_S3 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
 
@@ -134,6 +146,7 @@ class StoreUnit extends XSModule {
   val store_s0 = Module(new StoreUnit_S0)
   val store_s1 = Module(new StoreUnit_S1)
   val store_s2 = Module(new StoreUnit_S2)
+  val store_s3 = Module(new StoreUnit_S3)
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
@@ -146,7 +159,9 @@ class StoreUnit extends XSModule {
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
-  store_s2.io.stout <> io.stout
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+
+  store_s3.io.stout <> io.stout
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,

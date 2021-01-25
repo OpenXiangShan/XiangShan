@@ -61,7 +61,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )))
 
@@ -79,7 +79,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = "L3"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )).node
 
@@ -170,6 +170,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+      xs_core(i).module.io.l2ToPrefetcher <> l2cache(i).module.io
     }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)

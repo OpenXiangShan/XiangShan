@@ -40,11 +40,11 @@ class PrefetchTrain extends PrefetchBundle {
   }
 }
 
-class PrefetchIO extends PrefetchBundle {
-  val train = Flipped(ValidIO(new PrefetchTrain))
-  val req = DecoupledIO(new PrefetchReq)
-  val resp = Flipped(DecoupledIO(new PrefetchResp))
-}
+// class PrefetchIO extends PrefetchBundle {
+//   val train = Flipped(ValidIO(new PrefetchTrain))
+//   val req = DecoupledIO(new PrefetchReq)
+//   val resp = Flipped(DecoupledIO(new PrefetchResp))
+// }
 
 // class FakePrefetcher extends PrefetchModule {
 //   val io = IO(new PrefetchIO)
