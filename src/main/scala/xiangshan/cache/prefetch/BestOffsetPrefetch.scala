@@ -167,7 +167,7 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  val rwConflict = io.w.fire() && io.r.req.fire() && idx(wAddr) === idx(rAddr)
+  val rwConflict = io.w.fire() && io.r.req.fire()// && idx(wAddr) === idx(rAddr)
   // when (rwConflict) {
   //   rrTable.io.r.req.valid := false.B
   // }

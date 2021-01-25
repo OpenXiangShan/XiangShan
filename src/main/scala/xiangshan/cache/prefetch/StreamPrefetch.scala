@@ -312,38 +312,40 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
 
   // 1. streamBufs hit while l1i miss
   val hit = WireInit(false.B)
+  val hitVec = WireInit(VecInit(Seq.fill(streamCnt * streamSize)(false.B)))
   for (i <- 0 until streamCnt) {
     for (j <- 0 until streamSize) {
       when (io.train.valid && addrValids(i)(j) && getBlockAddr(io.train.bits.addr) === streamBufs(i).io.addrs(j).bits) {
-        hit := true.B
+        // hit := true.B
+        hitVec(i*streamSize+j) := true.B
         streamBufs(i).io.update.valid := true.B
         streamBufs(i).io.update.bits.hitIdx := j.U
         ages(i) := maxAge
       }
     }
   }
+  hit := ParallelOR(hitVec)
 
   // 2. streamBufs miss
+  val allocIdx = Wire(UInt(log2Up(streamCnt).W))
+  val ageCmp = Seq.fill(streamCnt)(Wire(new CompareBundle(ageWidth)))
+  (0 until streamCnt).foreach(i => ageCmp(i).bits := ages(i))
+  (0 until streamCnt).foreach(i => ageCmp(i).idx := i.U)
+  when ((~bufValids.asUInt).orR) {
+    allocIdx := PriorityMux(~bufValids.asUInt, VecInit(List.tabulate(streamCnt)(_.U)))
+  }.otherwise {
+    allocIdx := ParallelMin(ageCmp).idx
+  }
   when (!hit && io.train.valid) {
     (0 until streamCnt).foreach(i => ages(i) := Mux(ages(i) =/= 0.U, ages(i) - 1.U, 0.U))
 
     // realloc an invalid or the eldest stream buffer with new one
-    val idx = Wire(UInt(log2Up(streamCnt).W))
-    when ((~bufValids.asUInt).orR) {
-      idx := PriorityMux(~bufValids.asUInt, VecInit(List.tabulate(streamCnt)(_.U)))
-    }.otherwise {
-      val ageCmp = Seq.fill(streamCnt)(Wire(new CompareBundle(ageWidth)))
-      (0 until streamCnt).foreach(i => ageCmp(i).bits := ages(i))
-      (0 until streamCnt).foreach(i => ageCmp(i).idx := i.U)
-      idx := ParallelMin(ageCmp).idx
-    }
-
     for (i <- 0 until streamCnt) {
-      streamBufs(i).io.alloc.valid := idx === i.U
+      streamBufs(i).io.alloc.valid := allocIdx === i.U
       streamBufs(i).io.alloc.bits := DontCare
       streamBufs(i).io.alloc.bits.addr := io.train.bits.addr
       streamBufs(i).io.alloc.bits.write := io.train.bits.write
-      when (idx === i.U) { ages(i) := maxAge }
+      when (allocIdx === i.U) { ages(i) := maxAge }
     }
   }
 
