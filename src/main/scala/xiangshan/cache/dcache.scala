@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, RandomReplacement, XSDebug, SRAMWrapper}
+import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate}
 
 import scala.math.max
 
@@ -197,8 +197,7 @@ class DuplicatedDataArray extends AbstractDataArray
         io.resp(j)(w)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
 
         for (k <- 0 until rowWords) {
-          val array = Module(new SRAMWrapper(
-            "Dcache_Data",
+          val array = Module(new SRAMTemplate(
             Bits(encWordBits.W),
             set=nSets,
             way=1,
@@ -245,7 +244,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
 
-  val tag_array = Module(new SRAMWrapper("Dcache_Meta", UInt(encMetaBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
 
   // tag write

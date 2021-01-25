@@ -236,7 +236,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartNo = hartId()
   val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)  // another option: "h8000c0100".U
+  val mstatus = RegInit(UInt(XLEN.W), 0.U)
 
   // mstatus Value Table
   // | sd   |
@@ -502,14 +502,17 @@ class CSR extends FunctionUnit with HasCSRConst
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  csrio.isPerfCnt := (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
+  csrio.isPerfCnt := addrInPerfCnt
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
+  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted)
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)

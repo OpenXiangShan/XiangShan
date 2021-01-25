@@ -37,7 +37,9 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
 
   switch(state){
     is(s_idle){
-      when(io.in.fire()){ state := Mux(divZero, s_finish, s_lzd) }
+      when (io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)) {
+        state := Mux(divZero, s_finish, s_lzd)
+      }
     }
     is(s_lzd){ // leading zero detection
       state := s_normlize
@@ -220,7 +222,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
   )
 
   io.in.ready := state===s_idle
-  io.out.valid := state===s_finish && !kill
+  io.out.valid := state===s_finish
   io.out.bits.data := Mux(ctrlReg.isW,
     SignExt(res(31, 0), len),
     res

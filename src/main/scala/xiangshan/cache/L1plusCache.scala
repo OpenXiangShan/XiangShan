@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMWrapper}
+import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -130,21 +130,33 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    for (r <- 0 until blockRows) {
-      val array = Module(new SRAMWrapper("L1Plus_Data", Bits(encRowBits.W), set=nSets, way=1,
-        shouldReset=false, holdRead=false, singlePort=singlePort))
-      // data write
-      array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
-      array.io.w.req.bits.apply(
-        setIdx=waddr,
-        data=io.write.bits.data(r),
-        waymask=1.U)
+    val array = Module(new SRAMTemplate(Bits((blockRows * encRowBits).W), set=nSets, way=1,
+      shouldReset=false, holdRead=false, singlePort=singlePort))
+    // data write
+    array.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+    array.io.w.req.bits.apply(
+      setIdx=waddr,
+      data=io.write.bits.data.asUInt,
+      waymask=1.U)
 
-      // data read
-      array.io.r.req.valid := io.read.bits.way_en(w) && io.read.bits.rmask(r) && io.read.valid
-      array.io.r.req.bits.apply(setIdx=raddr)
-      io.resp(w)(r) := RegNext(array.io.r.resp.data(0))
+    // data read
+    array.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+    array.io.r.req.bits.apply(setIdx=raddr)
+    for (r <- 0 until blockRows) {
+      io.resp(w)(r) := RegNext(array.io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits))
     }
+  }
+
+  // since we use a RAM of block width
+  // we must do full read and write
+  when (io.write.valid) {
+    assert (io.write.bits.wmask.andR)
+  }
+
+  // since we use a RAM of block width
+  // we must do full read and write
+  when (io.read.valid) {
+    assert (io.read.bits.rmask.andR)
   }
 
   // debug output
@@ -197,7 +209,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
-  val tag_array = Module(new SRAMWrapper("L1Plus_Meta", UInt(encTagBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
@@ -230,7 +242,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
       cacheParams.tagCode.decode(rdata).corrected)
 
   for (i <- 0 until nWays) {
-    io.resp(i).valid := RegNext(valid_array(io.read.bits.idx)(i))
+    io.resp(i).valid := valid_array(RegNext(io.read.bits.idx))(i)
     io.resp(i).tag   := rtags(i)
   }
 
