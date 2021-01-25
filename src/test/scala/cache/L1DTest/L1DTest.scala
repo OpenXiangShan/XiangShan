@@ -9,7 +9,7 @@ import chiseltest.legacy.backends.verilator.VerilatorFlags
 import chiseltest._
 import firrtl.stage.RunFirrtlTransformAnnotation
 import chiseltest.ChiselScalatestTester
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, BufferParams}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
@@ -35,7 +35,8 @@ class L1DTestTop()(implicit p: Parameters) extends LazyModule {
   val dcache_outer = LazyModule(new DebugIdentityNode())
   val slave = LazyModule(new TLCSlaveMMIO())
 
-  slave.node := dcache_outer.node := dcache.clientNode
+  val c_buffer = TLBuffer(a = BufferParams.none, b = BufferParams.none, c = BufferParams.pipe, d = BufferParams.none, e = BufferParams.none)
+  slave.node := dcache_outer.node := c_buffer := dcache.clientNode
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
     val io = IO(new L1DTestTopIO())
