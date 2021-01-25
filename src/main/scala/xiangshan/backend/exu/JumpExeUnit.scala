@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
+import xiangshan.backend.roq.RoqExceptionInfo
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
@@ -14,8 +15,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val fflags = Flipped(ValidIO(UInt(5.W)))
     val dirty_fs = Input(Bool())
     val frm = Output(UInt(3.W))
-    val exception = Flipped(ValidIO(new MicroOp))
-    val isInterrupt = Input(Bool())
+    val exception = Flipped(ValidIO(new RoqExceptionInfo))
     val trapTarget = Output(UInt(VAddrBits.W))
     val interrupt = Output(Bool())
     val memExceptionVAddr = Input(UInt(VAddrBits.W))
@@ -51,7 +51,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.fpu.dirty_fs <> csrio.dirty_fs
   csr.csrio.fpu.frm <> csrio.frm
   csr.csrio.exception <> csrio.exception
-  csr.csrio.isInterrupt <> csrio.isInterrupt
   csr.csrio.trapTarget <> csrio.trapTarget
   csr.csrio.interrupt <> csrio.interrupt
   csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr

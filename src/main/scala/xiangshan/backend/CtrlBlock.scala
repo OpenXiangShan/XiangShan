@@ -11,7 +11,7 @@ import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr, RoqExceptionInfo}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -21,6 +21,7 @@ class CtrlToIntBlockIO extends XSBundle {
   // int block only uses port 0~7
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -29,12 +30,14 @@ class CtrlToFpBlockIO extends XSBundle {
   // fp block uses port 0~11
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
@@ -49,8 +52,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     val roqio = new Bundle {
       // to int block
       val toCSR = new RoqCSRIO
-      val exception = ValidIO(new MicroOp)
-      val isInterrupt = Output(Bool())
+      val exception = ValidIO(new RoqExceptionInfo)
       // to mem block
       val commits = new RoqCommitIO
       val roqDeqPtr = Output(new RoqPtr)
@@ -71,40 +73,41 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // When replay and mis-prediction have the same roqIdx,
   // mis-prediction should have higher priority, since mis-prediction flushes the load instruction.
   // Thus, only when mis-prediction roqIdx is after replay roqIdx, replay should be valid.
+  val redirect = Wire(Valid(new Redirect))
+  val flush = roq.io.flushOut.valid
   val brqIsAfterLsq = isAfter(brq.io.redirectOut.bits.roqIdx, io.fromLsBlock.replay.bits.roqIdx)
-  val redirectArb = Mux(io.fromLsBlock.replay.valid && (!brq.io.redirectOut.valid || brqIsAfterLsq),
+  redirect.bits := Mux(io.fromLsBlock.replay.valid && (!brq.io.redirectOut.valid || brqIsAfterLsq),
     io.fromLsBlock.replay.bits, brq.io.redirectOut.bits)
-  val redirectValid = roq.io.redirectOut.valid || brq.io.redirectOut.valid || io.fromLsBlock.replay.valid
-  val redirect = Mux(roq.io.redirectOut.valid, roq.io.redirectOut.bits, redirectArb)
+  redirect.valid := brq.io.redirectOut.valid || io.fromLsBlock.replay.valid
 
-  io.frontend.redirect.valid := RegNext(redirectValid)
-  io.frontend.redirect.bits := RegNext(Mux(roq.io.redirectOut.valid, roq.io.redirectOut.bits.target, redirectArb.target))
+  io.frontend.redirect.valid := RegNext(redirect.valid || roq.io.flushOut.valid)
+  io.frontend.redirect.bits := RegNext(Mux(roq.io.flushOut.valid, roq.io.flushOut.bits, redirect.bits.target))
   io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
   decode.io.in <> io.frontend.cfVec
   decode.io.enqBrq <> brq.io.enq
 
-  brq.io.redirect.valid <> redirectValid
-  brq.io.redirect.bits <> redirect
+  brq.io.redirect <> redirect
+  brq.io.flush <> flush
   brq.io.bcommit <> roq.io.bcommit
   brq.io.exuRedirectWb <> io.fromIntBlock.exuRedirect
   brq.io.pcReadReq.brqIdx := dispatch.io.enqIQCtrl(0).bits.brTag // jump
   io.toIntBlock.jumpPc := brq.io.pcReadReq.pc
 
   // pipeline between decode and dispatch
-  val lastCycleRedirect = RegNext(redirectValid)
+  val lastCycleRedirect = RegNext(redirect.valid || roq.io.flushOut.valid)
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid || lastCycleRedirect)
+    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirect.valid || flush || lastCycleRedirect)
   }
 
-  rename.io.redirect.valid <> redirectValid
-  rename.io.redirect.bits <> redirect
+  rename.io.redirect := redirect.valid
+  rename.io.flush := flush
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
 
-  dispatch.io.redirect.valid <> redirectValid
-  dispatch.io.redirect.bits <> redirect
+  dispatch.io.redirect <> redirect
+  dispatch.io.flush := flush
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.toLsBlock.enqLsq
   dispatch.io.readIntRf <> io.toIntBlock.readRf
@@ -120,7 +123,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 //  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
-  val flush = redirectValid && RedirectLevel.isUnconditional(redirect.level)
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
@@ -134,8 +136,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   intBusyTable.io.read <> dispatch.io.readIntState
   fpBusyTable.io.read <> dispatch.io.readFpState
 
-  roq.io.redirect.valid := brq.io.redirectOut.valid || io.fromLsBlock.replay.valid
-  roq.io.redirect.bits <> redirectArb
+  roq.io.redirect <> redirect
   roq.io.exeWbResults.take(roqWbSize-1).zip(
     io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
   ).foreach{
@@ -145,21 +146,19 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   roq.io.exeWbResults.last := brq.io.out
 
-  io.toIntBlock.redirect.valid := redirectValid
-  io.toIntBlock.redirect.bits := redirect
-  io.toFpBlock.redirect.valid := redirectValid
-  io.toFpBlock.redirect.bits := redirect
-  io.toLsBlock.redirect.valid := redirectValid
-  io.toLsBlock.redirect.bits := redirect
+  io.toIntBlock.redirect <> redirect
+  io.toIntBlock.flush <> flush
+  io.toFpBlock.redirect <> redirect
+  io.toFpBlock.flush <> flush
+  io.toLsBlock.redirect <> redirect
+  io.toLsBlock.flush <> flush
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
   dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
-  io.roqio.exception.valid := roq.io.redirectOut.valid && roq.io.redirectOut.bits.isException()
-  io.roqio.exception.bits := roq.io.exception
-  io.roqio.isInterrupt := roq.io.redirectOut.bits.interrupt
+  io.roqio.exception := roq.io.exception
   // roq to mem block
   io.roqio.roqDeqPtr := roq.io.roqDeqPtr
   io.roqio.commits := roq.io.commits

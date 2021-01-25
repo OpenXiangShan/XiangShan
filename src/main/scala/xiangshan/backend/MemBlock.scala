@@ -141,6 +141,7 @@ class MemBlockImp
 
     rsCtrl.io.data     <> rsData.io.ctrl
     rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.flush    <> io.fromCtrlBlock.flush // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl  <> io.fromCtrlBlock.enqIqCtrl(i)
 
@@ -151,6 +152,7 @@ class MemBlockImp
       rsData.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
     }
     rsData.io.redirect <> redirect
+    rsData.io.flush <> io.fromCtrlBlock.flush
 
     rsData.io.writeBackedData <> writeBackData
     for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
@@ -199,6 +201,7 @@ class MemBlockImp
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
+    loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
     loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.feedback
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
@@ -221,6 +224,7 @@ class MemBlockImp
     val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
+    stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.feedback
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
@@ -243,6 +247,7 @@ class MemBlockImp
   lsq.io.commits        <> io.lsqio.commits
   lsq.io.enq            <> io.fromCtrlBlock.enqLsq
   lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
+  lsq.io.flush          <> io.fromCtrlBlock.flush
   lsq.io.roqDeqPtr      <> io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
   lsq.io.dcache         <> dcache.io.lsu.lsq
@@ -296,6 +301,7 @@ class MemBlockImp
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
+  atomicsUnit.io.flush <> io.fromCtrlBlock.flush
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare

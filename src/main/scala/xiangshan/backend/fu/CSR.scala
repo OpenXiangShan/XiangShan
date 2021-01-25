@@ -7,7 +7,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.util._
-import utils.XSDebug
+import xiangshan.backend.roq.RoqExceptionInfo
 
 object hartId extends (() => Int) {
   var x = 0
@@ -133,8 +133,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // to FPU
     val fpu = Flipped(new FpuCsrIO)
     // from rob
-    val exception = Flipped(ValidIO(new MicroOp))
-    val isInterrupt = Input(Bool())
+    val exception = Flipped(ValidIO(new RoqExceptionInfo))
     // to ROB
     val trapTarget = Output(UInt(VAddrBits.W))
     val interrupt = Output(Bool())
@@ -674,31 +673,31 @@ class CSR extends FunctionUnit with HasCSRConst
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = csrio.exception.valid && csrio.isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.cf.pc, intrNO)
+  val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.uop.cf.pc, intrNO)
 
   // exceptions
-  val raiseException = csrio.exception.valid && !csrio.isInterrupt
-  val hasInstrPageFault = csrio.exception.bits.cf.exceptionVec(instrPageFault) && raiseException
-  val hasLoadPageFault = csrio.exception.bits.cf.exceptionVec(loadPageFault) && raiseException
-  val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && raiseException
-  val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
-  val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
-  val hasInstrAccessFault = csrio.exception.bits.cf.exceptionVec(instrAccessFault) && raiseException
-  val hasLoadAccessFault = csrio.exception.bits.cf.exceptionVec(loadAccessFault) && raiseException
-  val hasStoreAccessFault = csrio.exception.bits.cf.exceptionVec(storeAccessFault) && raiseException
+  val raiseException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
+  val hasInstrPageFault = csrio.exception.bits.uop.cf.exceptionVec(instrPageFault) && raiseException
+  val hasLoadPageFault = csrio.exception.bits.uop.cf.exceptionVec(loadPageFault) && raiseException
+  val hasStorePageFault = csrio.exception.bits.uop.cf.exceptionVec(storePageFault) && raiseException
+  val hasStoreAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(storeAddrMisaligned) && raiseException
+  val hasLoadAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(loadAddrMisaligned) && raiseException
+  val hasInstrAccessFault = csrio.exception.bits.uop.cf.exceptionVec(instrAccessFault) && raiseException
+  val hasLoadAccessFault = csrio.exception.bits.uop.cf.exceptionVec(loadAccessFault) && raiseException
+  val hasStoreAccessFault = csrio.exception.bits.uop.cf.exceptionVec(storeAccessFault) && raiseException
 
-  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec
+  val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionIntr = csrio.exception.valid
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+    csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    csrio.exception.bits.cf.pc,
+    csrio.exception.bits.uop.cf.pc,
     mstatus,
     mideleg,
     medeleg,
@@ -711,9 +710,9 @@ class CSR extends FunctionUnit with HasCSRConst
     val tval = Mux(
       hasInstrPageFault,
       Mux(
-        csrio.exception.bits.cf.crossPageIPFFix,
-        SignExt(csrio.exception.bits.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.cf.pc, XLEN)
+        csrio.exception.bits.uop.cf.crossPageIPFFix,
+        SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
+        SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
       ),
       memExceptionAddr
     )
@@ -740,7 +739,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
     when (delegS) {
       scause := causeNO
-      sepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
+      sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -748,7 +747,7 @@ class CSR extends FunctionUnit with HasCSRConst
       when (tvalWen) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
+      mepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B

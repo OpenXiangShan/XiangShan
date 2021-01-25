@@ -14,7 +14,8 @@ class RenameBypassInfo extends XSBundle {
 
 class Rename extends XSModule {
   val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
+    val redirect = Input(Bool())
+    val flush = Input(Bool())
     val roqCommits = Flipped(new RoqCommitIO)
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
@@ -47,8 +48,10 @@ class Rename extends XSModule {
 
   allPhyResource.map{ case (rat, freelist, _) =>
     rat.redirect := io.redirect
+    rat.flush := io.flush
     rat.walkWen := io.roqCommits.isWalk
     freelist.redirect := io.redirect
+    freelist.flush := io.flush
     freelist.walk.valid := io.roqCommits.isWalk
   }
 

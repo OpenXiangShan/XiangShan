@@ -16,6 +16,7 @@ class BypassQueue(number: Int) extends XSModule {
     val in  = Flipped(ValidIO(new MicroOp))
     val out = ValidIO(new MicroOp)
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
   })
   if (number < 0) {
     io.out.valid := false.B
@@ -29,11 +30,11 @@ class BypassQueue(number: Int) extends XSModule {
       val valid = Bool()
       val bits = new MicroOp
     })))
-    queue(0).valid := io.in.valid && !io.in.bits.roqIdx.needFlush(io.redirect)
+    queue(0).valid := io.in.valid && !io.in.bits.roqIdx.needFlush(io.redirect, io.flush)
     queue(0).bits  := io.in.bits
     (0 until (number-1)).map{i =>
       queue(i+1) := queue(i)
-      queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect)
+      queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect, io.flush)
     }
     io.out.valid := queue(number-1).valid
     io.out.bits := queue(number-1).bits
@@ -79,6 +80,7 @@ class ReservationStationCtrl
   val io = IO(new XSBundle {
     // flush
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
 
     // enq Ctrl sigs at dispatch-2, only use srcState
     val enqCtrl = Flipped(DecoupledIO(new MicroOp))
@@ -173,7 +175,7 @@ class ReservationStationCtrl
   val bubbleReg = RegNext(bubbleValid)
   val bubblePtrReg = RegNext(Mux(moveMask(bubblePtr), bubblePtr-1.U, bubblePtr))
   lastbubbleMask := ~Mux(bubbleReg, UIntToOH(bubblePtrReg), 0.U) & (if(feedback) ~(0.U(iqSize.W))
-                                                           else         Mux(RegNext(selectValid && io.redirect.valid), 0.U, ~(0.U(iqSize.W))))
+                                                           else         Mux(RegNext(selectValid && (io.redirect.valid || io.flush)), 0.U, ~(0.U(iqSize.W))))
 
   // deq
   val dequeue = if (feedback) bubbleReg
@@ -238,7 +240,7 @@ class ReservationStationCtrl
   // enq
   val isFull = tailPtr.flag
   // agreement with dispatch: don't fire when io.redirect.valid
-  val enqueue = io.enqCtrl.fire() && !io.redirect.valid
+  val enqueue = io.enqCtrl.fire() && !(io.redirect.valid || io.flush)
   val tailInc = tailPtr+1.U
   val tailDec = tailPtr-1.U
   tailPtr := Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
@@ -319,6 +321,7 @@ class ReservationStationData
   val io = IO(new XSBundle {
     // flush
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
 
     // send to exu
     val deq = DecoupledIO(new ExuInput)
@@ -537,7 +540,7 @@ class ReservationStationData
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }
-  io.ctrl.redirectVec   := uop.map(_.roqIdx.needFlush(io.redirect))
+  io.ctrl.redirectVec   := uop.map(_.roqIdx.needFlush(io.redirect, io.flush))
   redirectHit := io.ctrl.redirectVec(sel.bits)
 
   io.ctrl.feedback := DontCare
@@ -560,6 +563,7 @@ class ReservationStationData
       bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
       bpQueue.io.in.bits  := uop(sel.bits)
       bpQueue.io.redirect := io.redirect
+      bpQueue.io.flush := io.flush
       io.selectedUop.valid := bpQueue.io.out.valid
       io.selectedUop.bits  := bpQueue.io.out.bits
       io.selectedUop.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())

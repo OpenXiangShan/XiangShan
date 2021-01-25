@@ -18,12 +18,12 @@ class FDivSqrt extends FPUSubModule {
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
   val single = RegEnable(tag === S, io.in.fire())
   val rmReg = RegEnable(rm, io.in.fire())
-  val kill = uopReg.roqIdx.needFlush(io.redirectIn)
+  val kill = uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
   val killReg = RegInit(false.B)
 
   switch(state){
     is(s_idle){
-      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)){ state := s_div }
+      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)){ state := s_div }
     }
     is(s_div){
       when(divSqrtRawValid){

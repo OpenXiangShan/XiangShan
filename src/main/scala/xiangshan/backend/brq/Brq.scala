@@ -23,8 +23,8 @@ class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) with HasCircularQueuePtrHe
     isAfter(this, redirect.bits.brTag) || (redirect.bits.flushItself() && redirect.bits.brTag === this)
   }
 
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.bits.isUnconditional() || needBrFlush(redirect)
+  def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
+    flush || needBrFlush(redirect)
   }
 
   override def toPrintable: Printable = p"f:$flag v:$value"
@@ -53,6 +53,7 @@ class BrqPcRead extends XSBundle {
 
 class BrqIO extends XSBundle{
   val redirect = Input(ValidIO(new Redirect))
+  val flush = Input(Bool())
   // receive branch/jump calculated target
   val exuRedirectWb = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
   // from decode, branch insts enq
@@ -147,7 +148,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     */
   // note that redirect sent to IFU is delayed for one clock cycle
   // thus, brq should not allow enqueue in the next cycle after redirect
-  val lastCycleRedirect = RegNext(io.redirect.valid)
+  val lastCycleRedirect = RegNext(io.redirect.valid || io.flush)
   val validEntries = distanceBetween(tailPtr, headPtr)
   val enqBrTag = VecInit((0 until DecodeWidth).map(i => tailPtr + PopCount(io.enq.needAlloc.take(i))))
 
@@ -189,25 +190,23 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // when redirect is valid, we need to update the states and pointers
-  when (io.redirect.valid) {
-    // For unconditional redirect, flush all entries
-    when (io.redirect.bits.isUnconditional()) {
-      stateQueue.foreach(_ := s_idle)
-      headPtr := BrqPtr(false.B, 0.U)
-      tailPtr := BrqPtr(false.B, 0.U)
-      writebackPtr_next := BrqPtr(false.B, 0.U)
-    }.otherwise {
-      // conditional check: branch mis-prediction and memory dependence violation
-      stateQueue.zipWithIndex.foreach({ case(s, i) =>
-        val ptr = BrqPtr(ptrFlagVec(i), i.U)
-        when (ptr.needBrFlush(io.redirect)) {
-          s := s_idle
-        }
-      })
-      tailPtr := io.redirect.bits.brTag + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
-      when (io.redirect.bits.flushItself() && writebackPtr.needBrFlush(io.redirect)) {
-        writebackPtr_next := io.redirect.bits.brTag
+  // For unconditional redirect, flush all entries
+  when (io.flush) {
+    stateQueue.foreach(_ := s_idle)
+    headPtr := BrqPtr(false.B, 0.U)
+    tailPtr := BrqPtr(false.B, 0.U)
+    writebackPtr_next := BrqPtr(false.B, 0.U)
+  }.elsewhen (io.redirect.valid) {
+    // conditional check: branch mis-prediction and memory dependence violation
+    stateQueue.zipWithIndex.foreach({ case(s, i) =>
+      val ptr = BrqPtr(ptrFlagVec(i), i.U)
+      when (ptr.needBrFlush(io.redirect)) {
+        s := s_idle
       }
+    })
+    tailPtr := io.redirect.bits.brTag + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
+    when (io.redirect.bits.flushItself() && writebackPtr.needBrFlush(io.redirect)) {
+      writebackPtr_next := io.redirect.bits.brTag
     }
   }
 
@@ -267,7 +266,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.pcReadReq.pc := decodeData.io.rdata(2).cfiUpdateInfo.pc
 
   // Debug info
-  val debug_roq_redirect = io.redirect.valid && io.redirect.bits.isUnconditional()
+  val debug_roq_redirect = io.flush
   val debug_brq_redirect = io.redirectOut.valid
   val debug_normal_mode = !(debug_roq_redirect || debug_brq_redirect)
 

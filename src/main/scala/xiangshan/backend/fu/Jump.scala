@@ -33,7 +33,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
     !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
   )), XLEN)
 
-  val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
+  val redirectHit = uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
   val valid = io.in.valid
 
   val isRVC = uop.cf.brUpdate.pd.isRVC

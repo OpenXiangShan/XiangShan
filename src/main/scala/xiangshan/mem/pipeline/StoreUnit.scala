@@ -137,6 +137,7 @@ class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
     val lsq = ValidIO(new LsPipelineBundle)
@@ -151,15 +152,15 @@ class StoreUnit extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout
 

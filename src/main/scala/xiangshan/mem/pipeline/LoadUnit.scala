@@ -228,6 +228,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val ldout = Decoupled(new ExuOutput)
     val fpout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
@@ -243,7 +244,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s0.io.dtlbReq <> io.dtlb.req
   load_s0.io.dcacheReq <> io.dcache.req
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   load_s1.io.dtlbResp <> io.dtlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
@@ -251,7 +252,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   load_s2.io.tlbFeedback <> io.tlbFeedback
   load_s2.io.dcacheResp <> io.dcache.resp

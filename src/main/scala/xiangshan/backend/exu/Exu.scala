@@ -82,6 +82,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
     val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
   })
@@ -113,6 +114,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
+    fu.io.flushIn := io.flush
   }
 
 

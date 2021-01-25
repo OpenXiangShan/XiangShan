@@ -71,7 +71,7 @@ class Radix2Divider(len: Int) extends AbstractDivider(len) {
     }
   }
 
-  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
   when(kill){
     state := s_idle
   }

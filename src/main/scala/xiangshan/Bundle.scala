@@ -277,9 +277,9 @@ class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
   val brTag = new BrqPtr
 
-  def isUnconditional() = RedirectLevel.isUnconditional(level)
+  // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
-  def isException() = RedirectLevel.isException(level)
+  // def isException() = RedirectLevel.isException(level)
 }
 
 class Dp1ToDp2IO extends XSBundle {

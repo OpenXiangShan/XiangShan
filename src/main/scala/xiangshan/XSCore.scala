@@ -439,7 +439,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.isInterrupt <> ctrlBlock.io.roqio.isInterrupt
   integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
@@ -453,9 +452,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   memBlock.io.lsqio.commits <> ctrlBlock.io.roqio.commits
   memBlock.io.lsqio.roqDeqPtr <> ctrlBlock.io.roqio.roqDeqPtr
-  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
-  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)
+  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
+  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
+  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   ptw.io.tlb(0) <> memBlock.io.ptw
   ptw.io.tlb(1) <> frontend.io.ptw
