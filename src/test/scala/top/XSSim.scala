@@ -196,7 +196,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 }
 
 class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
-  println(axiSim)
+  println(s"axiSim:${axiSim}")
   val dut = LazyModule(new XSSimSoC(axiSim))
   val axiSimRam = {
     if (axiSim) LazyModule(new AXI4RAM(
