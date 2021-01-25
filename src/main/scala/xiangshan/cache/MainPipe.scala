@@ -108,7 +108,6 @@ class MainPipe extends DCacheModule
   // Pipeline
   // TODO: add full bypass for meta and data, bypass should be based on block address match
   val stall = Wire(Bool())
-  stall := DontCare
 
   // --------------------------------------------------------------------------------
   // stage 0
@@ -169,10 +168,10 @@ class MainPipe extends DCacheModule
 
   val meta_ready = io.meta_read.ready
   val data_ready = !need_data || io.data_read.ready
-  io.req.ready := meta_ready && data_ready && !set_conflict
+  io.req.ready := meta_ready && data_ready && !set_conflict && !stall
 
-  io.meta_read.valid := io.req.valid && !set_conflict
-  io.data_read.valid := io.req.valid && need_data && !set_conflict
+  io.meta_read.valid := io.req.valid && !set_conflict && !stall
+  io.data_read.valid := io.req.valid && need_data && !set_conflict && !stall
 
   // Tag read for new requests
   meta_read.idx    := get_idx(s0_req.addr)
@@ -212,7 +211,7 @@ class MainPipe extends DCacheModule
   // TODO: add stalling
 
   val s1_valid = RegInit(false.B)
-  val s1_fire  = s1_valid
+  val s1_fire  = s1_valid && !stall
   val s1_req = RegEnable(s0_req, s0_fire)
 
   val s1_store_wmask = RegEnable(store_wmask, s0_fire)
@@ -227,7 +226,12 @@ class MainPipe extends DCacheModule
 
   dump_pipeline_reqs("MainPipe s1", s1_valid, s1_req)
 
-  val meta_resp = io.meta_resp
+  val meta_resp_latched = Reg(Vec(nWays, new L1Metadata))
+  val meta_resp = Mux(RegNext(next = stall, init = false.B), meta_resp_latched, io.meta_resp)
+  when (stall) {
+    meta_resp_latched := meta_resp
+  }
+
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_req.addr))).asUInt
@@ -264,7 +268,7 @@ class MainPipe extends DCacheModule
   // check permissions
   // read out data, do write/amo stuff
   val s2_valid = RegInit(false.B)
-  val s2_fire  = s2_valid
+  val s2_fire  = s2_valid && !stall
   val s2_req = RegEnable(s1_req, s1_fire)
 
   val s2_store_wmask = RegEnable(s1_store_wmask, s1_fire)
@@ -350,7 +354,7 @@ class MainPipe extends DCacheModule
     Mux(probe_update_meta, probe_new_coh,
       Mux(store_update_meta || amo_update_meta, s2_new_hit_coh, ClientMetadata.onReset)))
 
-  io.meta_write.valid         := s2_valid && update_meta
+  io.meta_write.valid         := s2_fire && update_meta
   io.meta_write.bits.idx      := get_idx(s2_req.addr)
   io.meta_write.bits.data.coh := new_coh
   io.meta_write.bits.data.tag := get_tag(s2_req.addr)
@@ -384,7 +388,12 @@ class MainPipe extends DCacheModule
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val s2_data = Mux1H(s2_way_en, io.data_resp)
+  val s2_data_latched = Reg(Vec(blockRows, Bits(encRowBits.W)))
+  val s2_data = Mux(RegNext(next = stall, init = false.B), s2_data_latched, Mux1H(s2_way_en, io.data_resp))
+  when (stall) {
+    s2_data_latched := s2_data
+  }
+
   val s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
       val data = s2_data(r)(encWordBits * (w + 1) - 1, encWordBits * w)
@@ -432,7 +441,7 @@ class MainPipe extends DCacheModule
   }
 
   val data_write = io.data_write.bits
-  io.data_write.valid := s2_valid && need_write_data
+  io.data_write.valid := s2_fire && need_write_data
   data_write.rmask    := DontCare
   data_write.way_en   := s2_way_en
   data_write.addr     := s2_req.addr
@@ -467,12 +476,13 @@ class MainPipe extends DCacheModule
   wb_req.hasData   := writeback_data
   wb_req.data      := VecInit(s2_data_decoded.flatten).asUInt
 
-  assert(!(io.wb_req.valid && !io.wb_req.ready))
+  stall := io.wb_req.valid && !io.wb_req.ready
+  XSDebug("stall")
 
   // --------------------------------------------------------------------------------
   // send store/amo miss to miss queue
   val store_amo_miss = !s2_req.miss && !s2_req.probe && !s2_hit && (s2_req.source === STORE_SOURCE.U || s2_req.source === AMO_SOURCE.U)
-  io.miss_req.valid           := s2_valid && store_amo_miss
+  io.miss_req.valid           := s2_fire && store_amo_miss
   io.miss_req.bits.source     := s2_req.source
   io.miss_req.bits.cmd        := s2_req.cmd
   io.miss_req.bits.addr       := s2_req.addr
@@ -493,14 +503,14 @@ class MainPipe extends DCacheModule
   resp.miss := store_amo_miss
   resp.replay := io.miss_req.valid && !io.miss_req.ready
 
-  io.miss_resp.valid   := s2_valid && s2_req.miss
+  io.miss_resp.valid   := s2_fire && s2_req.miss
   io.miss_resp.bits    := resp
   io.miss_resp.bits.id := s2_req.miss_id
 
-  io.store_resp.valid  := s2_valid && s2_req.source === STORE_SOURCE.U
+  io.store_resp.valid  := s2_fire && s2_req.source === STORE_SOURCE.U
   io.store_resp.bits   := resp
 
-  io.amo_resp.valid    := s2_valid && s2_req.source === AMO_SOURCE.U
+  io.amo_resp.valid    := s2_fire && s2_req.source === AMO_SOURCE.U
   io.amo_resp.bits     := resp
 
   when (io.req.fire()) {
