@@ -70,7 +70,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i), isStore(i) | isBranch(i))
+    updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
     updatedPsrc1(i) := io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc1) {

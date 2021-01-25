@@ -54,7 +54,7 @@ package object xiangshan {
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
     def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
-    def isAMO(fuType: UInt) = isMemExu(fuType) && fuType(1)
+    def isAMO(fuType: UInt) = fuType(1)
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
     def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1)
