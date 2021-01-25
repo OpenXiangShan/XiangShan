@@ -119,14 +119,21 @@ class MainPipe extends DCacheModule
   val s0_fire = io.req.fire()
   val s0_req = io.req.bits
 
-  val word_full_overwrite = Wire(Vec(blockRows, Bits(rowWords.W)))
+  val word_mask = Wire(Vec(blockRows, Vec(rowWords, Bits(wordBytes.W))))
   for (i <- 0 until blockRows) {
-    word_full_overwrite(i) := VecInit((0 until rowWords) map { r =>
-      val rowMask = s0_req.store_mask((i + 1) * rowBytes - 1, i * rowBytes)
-      rowMask((r + 1) * wordBytes - 1, r * wordBytes).andR
-    }).asUInt
+    for (w <- 0 until rowWords) {
+      word_mask(i)(w) := s0_req.store_mask((i + 1) * rowBytes - 1, i * rowBytes)((w + 1) * wordBytes - 1, w * wordBytes)
+    }
+  }
+
+  val word_full_overwrite = Wire(Vec(blockRows, Bits(rowWords.W)))
+  val word_write = Wire(Vec(blockRows, Bits(rowWords.W)))
+  for (i <- 0 until blockRows) {
+    word_full_overwrite(i) := VecInit((0 until rowWords) map { w => word_mask(i)(w).andR }).asUInt
+    word_write(i) := VecInit((0 until rowWords) map { w => word_mask(i)(w).orR }).asUInt
   }
   val row_full_overwrite = VecInit(word_full_overwrite.map(w => w.andR)).asUInt
+  val row_write = VecInit(word_write.map(w => w.orR)).asUInt
   val full_overwrite = row_full_overwrite.andR
 
   // If req comes form MissQueue, it must be a full overwrite,
@@ -186,13 +193,13 @@ class MainPipe extends DCacheModule
   val amo_row  = s0_req.word_idx >> rowWordBits
   val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
 
-  val store_rmask = ~row_full_overwrite
+  val store_rmask = row_write & ~row_full_overwrite
   val amo_rmask   = UIntToOH(amo_row)
   val full_rmask  = ~0.U(blockRows.W)
   val none_rmask  = 0.U(blockRows.W)
 
   // generate wmask here and use it in stage 2
-  val store_wmask = word_full_overwrite
+  val store_wmask = word_write
   val amo_wmask   = WireInit(VecInit((0 until blockRows) map (i => 0.U(rowWords.W))))
   amo_wmask(amo_row) := VecInit((0 until rowWords) map (w => w.U === amo_word)).asUInt
   val full_wmask  = VecInit((0 until blockRows) map (i => ~0.U(rowWords.W)))
@@ -374,11 +381,12 @@ class MainPipe extends DCacheModule
   // so we can first generate store data and then merge with amo_data
 
   // generate write mask
+  // which word do we need to write
   val wmask = Mux(s2_req.miss, s2_full_wmask,
       Mux(s2_store_hit, s2_store_wmask,
       Mux(s2_amo_hit, s2_amo_wmask,
         s2_none_wmask)))
-  val need_write_data = VecInit(wmask.map(w => w.andR)).asUInt.andR
+  val need_write_data = VecInit(wmask.map(w => w.orR)).asUInt.orR
 
   // generate write data
   val store_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
