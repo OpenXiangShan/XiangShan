@@ -129,7 +129,8 @@ class StoreReplayQueue extends DCacheModule
   val alloc_idx = PriorityEncoder(primary_ready)
 
   val req = io.lsu.req
-  req.ready := allocate
+  val block_conflict = Wire(Bool())
+  req.ready := allocate && !block_conflict
 
   val entries = (0 until cfg.nStoreReplayEntries) map { i =>
     val entry = Module(new StoreReplayEntry)
@@ -137,7 +138,7 @@ class StoreReplayQueue extends DCacheModule
     entry.io.id := i.U
 
     // entry req
-    entry.io.lsu.req.valid := (i.U === alloc_idx) && allocate && req.valid
+    entry.io.lsu.req.valid := (i.U === alloc_idx) && allocate && req.valid && !block_conflict
     primary_ready(i)       := entry.io.lsu.req.ready
     entry.io.lsu.req.bits  := req.bits
 
@@ -156,10 +157,11 @@ class StoreReplayQueue extends DCacheModule
   io.lsu.resp  <> resp_arb.io.out
   io.pipe_req  <> pipe_req_arb.io.out
 
+  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.lsu.req.bits.addr)).asUInt.orR
+
   // sanity check
   when (io.lsu.req.valid) {
     assert(io.lsu.req.bits.cmd === M_XWR)
-    val block_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.lsu.req.bits.addr)).asUInt.orR
     assert (!block_conflict)
   }
 
