@@ -399,7 +399,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
     XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
 
-    assert(RegNext(!(hitVec.asUInt.orR && vidx || spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
+    assert(RegNext(!(hitVec.asUInt.orR && vidx && spHit && RegNext(validOneCycle))), "pages should not be normal page and super page as well")
 
     (hitVec.asUInt.orR && vidx || spHit, Mux(spHit, spHitData, hitWayData.get(req.vpn)))
   }
