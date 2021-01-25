@@ -252,7 +252,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
         // GrantData
         for (i <- 0 until beatRows) {
           val idx = (refill_count << log2Floor(beatRows)) + i.U
-          refill_data(idx) := mergePutData(io.mem_grant.bits.data, new_data(idx), new_mask(idx))
+          refill_data(idx) := mergePutData(io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i), new_data(idx), new_mask(idx))
         }
       } .otherwise {
         // Grant
