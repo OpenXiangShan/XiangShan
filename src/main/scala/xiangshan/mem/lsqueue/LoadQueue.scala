@@ -439,11 +439,13 @@ class LoadQueue extends XSModule
     val rollbackValidVec = Seq(lqViolation, wbViolation, l1Violation, l2Violation)
     val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l1ViolationUop, l2ViolationUop)
 
-    val rollbackSel1 = lqViolation || wbViolation
-    val rollbackSel2 = l1Violation || l2Violation
-    val rollbackUopSel1 = getOldestInTwo(VecInit(lqViolation, wbViolation), VecInit(lqViolationUop, wbViolationUop))
-    val rollbackUopSel2 = getOldestInTwo(VecInit(l1Violation, l2Violation), VecInit(l1ViolationUop, l2ViolationUop))
-    val rollbackUop = getOldestInTwo(VecInit(rollbackSel1, rollbackSel2), VecInit(rollbackUopSel1, rollbackUopSel2))
+    val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
+    val rollbackUop = Mux1H(Seq(
+      (mask(1)(0)  && mask(2)(0)  && mask(3)(0))  -> lqViolationUop,
+      (!mask(1)(0) && mask(2)(1)  && mask(3)(1))  -> wbViolationUop,
+      (!mask(2)(0) && !mask(2)(1) && mask(3)(2))  -> l1ViolationUop,
+      (!mask(3)(0) && !mask(3)(1) && !mask(3)(2)) -> l2ViolationUop,
+    ))
 
     XSDebug(
       l1Violation,
