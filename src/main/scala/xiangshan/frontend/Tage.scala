@@ -162,7 +162,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val hi_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
   val lo_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
-  val table = List.fill(TageBanks)(Module(new SRAMWrapper(s"TageTable_H${histLen}_T${tagLen}", new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
 
   val if3_hi_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   val if3_lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))

@@ -44,7 +44,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
 
   val table = List.fill(TageBanks) {
     List.fill(2) {
-      Module(new SRAMWrapper("SC_Table", SInt(ctrBits.W), set=nRows, shouldReset=false, holdRead=true, singlePort=false))
+      Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, shouldReset=false, holdRead=true, singlePort=false))
     }
   }
 
