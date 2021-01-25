@@ -46,6 +46,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val sqempty = Output(Bool())
   })
 
+  val difftestIO = IO(new Bundle() {
+    val storeCommit = Output(UInt(2.W))
+    val storeAddr   = Output(Vec(2, UInt(64.W)))
+    val storeData   = Output(Vec(2, UInt(64.W)))
+    val storeMask   = Output(Vec(2, UInt(8.W)))
+  })
+  difftestIO <> DontCare
+
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
@@ -309,16 +317,22 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     assert(io.sbuffer(0).fire())
   }
 
-  if (!env.FPGAPlatform) {
-    val storeCommit = PopCount(io.sbuffer.map(_.fire()))
-    val waddr = VecInit(io.sbuffer.map(req => SignExt(req.bits.addr, 64)))
-    val wdata = VecInit(io.sbuffer.map(req => req.bits.data & MaskExpand(req.bits.mask)))
-    val wmask = VecInit(io.sbuffer.map(_.bits.mask))
+  val storeCommit = PopCount(io.sbuffer.map(_.fire()))
+  val waddr = VecInit(io.sbuffer.map(req => SignExt(req.bits.addr, 64)))
+  val wdata = VecInit(io.sbuffer.map(req => req.bits.data & MaskExpand(req.bits.mask)))
+  val wmask = VecInit(io.sbuffer.map(_.bits.mask))
 
+  if (!env.FPGAPlatform) {
     ExcitingUtils.addSource(RegNext(storeCommit), "difftestStoreCommit", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(waddr), "difftestStoreAddr", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(wdata), "difftestStoreData", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(wmask), "difftestStoreMask", ExcitingUtils.Debug)
+  }
+  if (env.DualCoreDifftest) {
+    difftestIO.storeCommit := RegNext(storeCommit)
+    difftestIO.storeAddr   := RegNext(waddr)
+    difftestIO.storeData   := RegNext(wdata)
+    difftestIO.storeMask   := RegNext(wmask)
   }
 
   // Read vaddr for mem exception

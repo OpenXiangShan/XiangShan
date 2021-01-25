@@ -399,3 +399,55 @@ class SfenceBundle extends XSBundle {
     p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
   }
 }
+
+class DifftestBundle extends XSBundle {
+  val fromSbuffer = new Bundle() {
+    val sbufferResp = Output(Bool())
+    val sbufferAddr = Output(UInt(64.W))
+    val sbufferData = Output(Vec(64, UInt(8.W)))
+    val sbufferMask = Output(UInt(64.W))
+  }
+  val fromSQ = new Bundle() {
+    val storeCommit = Output(UInt(2.W))
+    val storeAddr   = Output(Vec(2, UInt(64.W)))
+    val storeData   = Output(Vec(2, UInt(64.W)))
+    val storeMask   = Output(Vec(2, UInt(8.W)))
+  }
+  val fromXSCore = new Bundle() {
+    val r = Output(Vec(64, UInt(XLEN.W)))
+  }
+  val fromCSR = new Bundle() {
+    val intrNO = Output(UInt(64.W))
+    val cause = Output(UInt(64.W))
+    val priviledgeMode = Output(UInt(2.W))
+    val mstatus = Output(UInt(64.W))
+    val sstatus = Output(UInt(64.W))
+    val mepc = Output(UInt(64.W))
+    val sepc = Output(UInt(64.W))
+    val mtval = Output(UInt(64.W))
+    val stval = Output(UInt(64.W))
+    val mtvec = Output(UInt(64.W))
+    val stvec = Output(UInt(64.W))
+    val mcause = Output(UInt(64.W))
+    val scause = Output(UInt(64.W))
+    val satp = Output(UInt(64.W))
+    val mip = Output(UInt(64.W))
+    val mie = Output(UInt(64.W))
+    val mscratch = Output(UInt(64.W))
+    val sscratch = Output(UInt(64.W))
+    val mideleg = Output(UInt(64.W))
+    val medeleg = Output(UInt(64.W))
+  }
+  val fromRoq = new Bundle() {
+    val commit = Output(UInt(32.W))
+    val thisPC = Output(UInt(XLEN.W))
+    val thisINST = Output(UInt(32.W))
+    val skip = Output(UInt(32.W))
+    val wen = Output(UInt(32.W))
+    val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+    val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+    val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+    val isRVC = Output(UInt(32.W))
+    val scFailed = Output(Bool())
+  }
+}
