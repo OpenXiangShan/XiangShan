@@ -42,8 +42,7 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
   val busy = remain.orR
 
-  val req_reg  = Reg(new WritebackReq)
-  val req = Mux(busy, req_reg, io.req.bits)
+  val req  = Reg(new WritebackReq)
 
   // assign default signals to output signals
   io.req.ready := false.B
@@ -65,7 +64,7 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   when (io.req.fire()) {
     assert (remain === 0.U)
     remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-    req_reg    := io.req.bits
+    req        := io.req.bits
     state      := s_release_req
   }
 
