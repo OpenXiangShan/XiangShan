@@ -106,7 +106,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     if (fuCfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if (fuCfg.srcCnt > 1) {
+    if (fuCfg.srcCnt > 1 || fuCfg == jmpCfg) { // jump is special for jalr target
       fu.io.in.bits.src(1) := src2
     }
     if (fuCfg.srcCnt > 2) {

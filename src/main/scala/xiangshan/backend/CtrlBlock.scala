@@ -121,7 +121,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg, init = false.B)
 
   val ftqRead = io.stage2FtqRead.entry
-  val pc = GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset)
+  val pc = GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset, ftqRead.hasLastPrev)
   val brTarget = pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
   val snpc = pc + Mux(s2_pd.isRVC, 2.U, 4.U)
   val isReplay = RedirectLevel.flushItself(s2_redirect_bits_reg.level)
@@ -216,7 +216,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))
   ftqOffsetReg := jumpInst.cf.ftqOffset
   ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
-  io.toIntBlock.jumpPc := GetPcByFtq(ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg)
+  io.toIntBlock.jumpPc := GetPcByFtq(
+    ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg, ftq.io.ftqRead(0).entry.hasLastPrev
+  )
   io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.target
 
   // pipeline between decode and dispatch

@@ -361,6 +361,8 @@ class ReservationStationData
   // Data
   // ------------------------
   val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, numRead = iqSize + 1, numWrite = iqSize)))
+  val pcMem = if(exuCfg == Exu.jumpExeUnitCfg)
+    Some(Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), iqSize, numRead = 1, numWrite = 1))) else None
   data.foreach(_.io <> DontCare)
   data.foreach(_.io.wen.foreach(_ := false.B))
 
@@ -421,6 +423,12 @@ class ReservationStationData
     XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
+  }
+
+  if(pcMem.nonEmpty){
+    pcMem.get.io.wen(0) := enqEnReg
+    pcMem.get.io.waddr(0) := enqPtrReg
+    pcMem.get.io.wdata(0) := io.jumpPc
   }
 
   when (enqEnReg) {
@@ -505,7 +513,12 @@ class ReservationStationData
   exuInput := DontCare
   exuInput.uop := uop(deq)
   exuInput.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-  val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
+  val deqAddr = Mux(sel.valid, sel.bits, deq)
+  if(pcMem.nonEmpty){
+    pcMem.get.io.raddr(0) := deqAddr
+    exuInput.uop.cf.pc := pcMem.get.io.rdata(0)
+  }
+  val regValues = List.tabulate(srcNum)(i => dataRead(deqAddr, i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   exuInput.src1 := regValues(0)
   if (srcNum > 1) exuInput.src2 := regValues(1)
