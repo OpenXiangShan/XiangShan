@@ -290,24 +290,24 @@ class MainPipe extends DCacheModule
 
   dump_pipeline_reqs("MainPipe s2", s2_valid, s2_req)
 
-  val s2_tag_match_way = RegNext(s1_tag_match_way)
-  val s2_tag_match     = RegNext(s1_tag_match)
+  val s2_tag_match_way  = RegEnable(s1_tag_match_way, s1_fire)
+  val s2_tag_match      = RegEnable(s1_tag_match, s1_fire)
 
-  val s2_hit_meta      = RegNext(s1_hit_meta)
-  val s2_hit_coh     = RegNext(s1_hit_coh)
+  val s2_hit_meta       = RegEnable(s1_hit_meta, s1_fire)
+  val s2_hit_coh        = RegEnable(s1_hit_coh, s1_fire)
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1
-  val s2_new_hit_coh  = s2_hit_coh.onAccess(s2_req.cmd)._3
+  val s2_new_hit_coh    = s2_hit_coh.onAccess(s2_req.cmd)._3
 
-  val s2_repl_meta     = RegNext(s1_repl_meta)
-  val s2_repl_coh    = RegNext(s1_repl_coh)
-  val s2_repl_way_en   = RegNext(s1_repl_way_en)
+  val s2_repl_meta     = RegEnable(s1_repl_meta, s1_fire)
+  val s2_repl_coh      = RegEnable(s1_repl_coh, s1_fire)
+  val s2_repl_way_en   = RegEnable(s1_repl_way_en, s1_fire)
 
   // only true miss request(not permission miss) need to do replacement
   // we use repl meta when we really need to a replacement
   val need_replacement = s2_req.miss && !s2_tag_match
   val s2_way_en        = Mux(need_replacement, s2_repl_way_en, s2_tag_match_way)
   val s2_meta          = Mux(need_replacement, s2_repl_meta,   s2_hit_meta)
-  val s2_coh         = Mux(need_replacement, s2_repl_coh,  s2_hit_coh)
+  val s2_coh           = Mux(need_replacement, s2_repl_coh,  s2_hit_coh)
 
   // --------------------------------------------------------------------------------
   // Permission checking
