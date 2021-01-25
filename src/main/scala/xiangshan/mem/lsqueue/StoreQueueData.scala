@@ -11,12 +11,52 @@ import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
 
+// Data module define
+// These data modules are like SyncDataModuleTemplate, but support cam-like ops
+class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters {
+  val io = IO(new Bundle {
+    val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
+    val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
+    val wen   = Input(Vec(numWrite, Bool()))
+    val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
+    val wdata = Input(Vec(numWrite, UInt((PAddrBits).W)))
+    val forwardMdata = Input(Vec(numForward, UInt((PAddrBits).W)))
+    val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool())))
+  })
+
+  val data = Reg(Vec(numEntries, UInt((PAddrBits).W)))
+
+  // read ports
+  for (i <- 0 until numRead) {
+    io.rdata(i) := data(RegNext(io.raddr(i)))
+  }
+
+  // below is the write ports (with priorities)
+  for (i <- 0 until numWrite) {
+    when (io.wen(i)) {
+      data(io.waddr(i)) := io.wdata(i)
+    }
+  }
+  
+  // content addressed match
+  for (i <- 0 until numForward) {
+    for (j <- 0 until numEntries) {
+      io.forwardMmask(i)(j) := io.forwardMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+    }
+  }
+
+  // DataModuleTemplate should not be used when there're any write conflicts
+  for (i <- 0 until numWrite) {
+    for (j <- i+1 until numWrite) {
+      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+    }
+  }
+}
+
 class SQDataEntry extends XSBundle {
-//   val vaddr = UInt(VAddrBits.W) // TODO: need opt
-  val paddr = UInt(PAddrBits.W)
+  // val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-//   val exception = UInt(16.W) // TODO: opt size
 }
 
 class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
@@ -29,13 +69,8 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
     val debug = Vec(size, Output(new SQDataEntry))
 
     val needForward = Input(Vec(numForward, Vec(2, UInt(size.W))))
-    val forward = Vec(numForward, Flipped(new LoadForwardQueryIO))
-
-    def forwardQuery(numForward: Int, paddr: UInt, needForward1: Data, needForward2: Data): Unit = {
-      this.needForward(numForward)(0) := needForward1
-      this.needForward(numForward)(1) := needForward2
-      this.forward(numForward).paddr := paddr
-    }
+    val forwardMask = Vec(numForward, Output(Vec(8, Bool())))
+    val forwardData = Vec(numForward, Output(Vec(8, UInt(8.W))))
   })
 
   io := DontCare
@@ -72,32 +107,7 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
   // entry with larger index should have higher priority since it's data is younger
 
   (0 until numForward).map(i => {
-    val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
-    val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-    val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
-    val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-
-    for (j <- 0 until size) {
-      val needCheck = io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      (0 until XLEN / 8).foreach(k => {
-        when (needCheck && data(j).mask(k)) {
-          when (io.needForward(i)(0)(j)) {
-            forwardMask1(k) := true.B
-            forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-          }
-          when (io.needForward(i)(1)(j)) {
-            forwardMask2(k) := true.B
-            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-          }
-          XSDebug(io.needForward(i)(0)(j) || io.needForward(i)(1)(j),
-            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
-            p"from ptr $j\n")
-        }
-      })
-    }
-
     // parallel fwd logic
-    val paddrMatch = Wire(Vec(size, Bool()))
     val matchResultVec = Wire(Vec(size * 2, new FwdEntry))
 
     def parallelFwd(xs: Seq[Data]): Data = {
@@ -113,13 +123,14 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
       })
     }
 
-    for (j <- 0 until size) {
-      paddrMatch(j) := io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-    }
+    // paddrMatch is now included in io.needForward
+    // for (j <- 0 until size) {
+    //   paddrMatch(j) := io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+    // }
 
     for (j <- 0 until size) {
-      val needCheck0 = RegNext(paddrMatch(j) && io.needForward(i)(0)(j))
-      val needCheck1 = RegNext(paddrMatch(j) && io.needForward(i)(1)(j))
+      val needCheck0 = RegNext(io.needForward(i)(0)(j))
+      val needCheck1 = RegNext(io.needForward(i)(1)(j))
       (0 until XLEN / 8).foreach(k => {
         matchResultVec(j).mask(k) := needCheck0 && data(j).mask(k)
         matchResultVec(j).data(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
@@ -130,8 +141,8 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
 
     val parallelFwdResult = parallelFwd(matchResultVec).asTypeOf(new FwdEntry)
 
-    io.forward(i).forwardMask := parallelFwdResult.mask
-    io.forward(i).forwardData := parallelFwdResult.data
+    io.forwardMask(i) := parallelFwdResult.mask
+    io.forwardData(i) := parallelFwdResult.data
 
   })
 
