@@ -79,8 +79,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
           b
       )
       val conflictWordMask = maskOutOfWord(conflictMask, wordInBlock(loadAddr))
-      val newMask = (loadT.req.get.mask | conflictWordMask) ^ conflictWordMask
-      insertMaskedWordRead(loadAddr, resp.data, newMask)
+      insertMaskedWordRead(loadAddr, resp.data, cleanMask(loadT.req.get.mask, conflictWordMask))
       outerLoad -= loadT
     }
     else if (resp.replay) {
@@ -117,8 +116,16 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
       val alignAddr = addrAlignBlock(loadAddr)
       if (alignAddr == respAddr) {
         q.pairLsqResp(resp)
+        val conflictMask = storeIdMap.foldLeft(BigInt(0))((b, kv) =>
+          if (kv._2.req.get.addr == alignAddr) {
+            b | kv._2.req.get.mask
+          }
+          else
+            b
+        )
+        val loadBlockMask = genWordMaskInBlock(loadAddr, q.req.get.mask)
         insertMaskedReadSnap(alignAddr, resp.data, insertVersionRead(loadAddr, 0),
-          genWordMaskInBlock(loadAddr, q.req.get.mask))
+          cleanMask(loadBlockMask, conflictMask))
         outerLoad -= q
         true
       }

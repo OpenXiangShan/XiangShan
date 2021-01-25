@@ -45,4 +45,8 @@ trait BigIntExtract {
     val mask8 = BigInt(prefix ++ tmp)
     ((old | mask8) ^ mask8) | (in & mask8)
   }
+
+  def cleanMask(old: BigInt, off: BigInt): BigInt = {
+    (old | off) ^ off
+  }
 }
