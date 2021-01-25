@@ -181,7 +181,7 @@ class LoadQueue extends XSModule
       val loadWbData = Wire(new LQDataEntry)
       loadWbData.paddr := io.loadIn(i).bits.paddr
       loadWbData.mask := io.loadIn(i).bits.mask
-      loadWbData.data := io.loadIn(i).bits.data // fwd data
+      loadWbData.data := io.loadIn(i).bits.forwardData.asUInt // fwd data
       loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
       dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
       dataModule.io.wb.wen(i) := true.B
