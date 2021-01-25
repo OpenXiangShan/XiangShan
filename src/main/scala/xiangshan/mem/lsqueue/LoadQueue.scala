@@ -66,6 +66,7 @@ class LoadQueue extends XSModule
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
@@ -174,7 +175,7 @@ class LoadQueue extends XSModule
         io.loadIn(i).bits.mmio
       )}
       val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
-      datavalid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+      datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) && !io.loadIn(i).bits.mmio
       writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
 
       val loadWbData = Wire(new LQDataEntry)
@@ -192,7 +193,7 @@ class LoadQueue extends XSModule
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
 
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-      miss(loadWbIndex) := dcacheMissed
+      miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
       uop(loadWbIndex).debugInfo.issueTime := io.loadIn(i).bits.uop.debugInfo.issueTime
     }

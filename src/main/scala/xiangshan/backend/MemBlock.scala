@@ -212,6 +212,7 @@ class MemBlockImp
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
+    lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
   }
 
   // StoreUnit
