@@ -477,7 +477,9 @@ class MainPipe extends DCacheModule
   wb_req.data      := VecInit(s2_data_decoded.flatten).asUInt
 
   stall := io.wb_req.valid && !io.wb_req.ready
-  XSDebug("stall")
+  when (stall) {
+    XSDebug("stall\n")
+  }
 
   // --------------------------------------------------------------------------------
   // send store/amo miss to miss queue
