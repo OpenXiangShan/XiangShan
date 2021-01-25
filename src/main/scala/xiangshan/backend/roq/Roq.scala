@@ -74,6 +74,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
     val hasNoSpecExec = Input(Bool())
     val commitType = Input(CommitType())
     val misPredBlock = Input(Bool())
+    val isReplaying = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RoqPtr))
     val next_out = Vec(CommitWidth, Output(new RoqPtr))
@@ -91,11 +92,11 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else possibleException(i).asUInt.orR || io.deq_flushPipe(i)))
-  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg or there're possible exceptions in these instructions, only one instruction is allowed to commit
   val allowOnlyOne = VecInit(commitBlocked.drop(1)).asUInt.orR || io.intrBitSetReg
-  val commitCnt = Mux(allowOnlyOne, io.deq_v(0) && io.deq_w(0), normalCommitCnt)
+  val commitCnt = Mux(allowOnlyOne, canCommit(0), normalCommitCnt)
 
   val resetDeqPtrVec = VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr)))
   val commitDeqPtrVec = VecInit(deqPtrVec.map(_ + commitCnt))
@@ -240,6 +241,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val walkPtr = walkPtrVec(0)
 
   val isEmpty = enqPtr === deqPtr
+  val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
   /**
     * states of Roq
@@ -419,7 +421,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || commit_exception(0)
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {
@@ -494,6 +496,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.commitType := deqDispatchData.commitType
 
   deqPtrGenModule.io.misPredBlock := misPredBlock
+  deqPtrGenModule.io.isReplaying := isReplaying
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 

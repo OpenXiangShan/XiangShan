@@ -72,18 +72,23 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
       y
     )
   }
-  def selectOlderExuOut(x: Valid[ExuOutput], y: Valid[ExuOutput]): Valid[ExuOutput] = {
-    Mux(x.valid,
+  def selectOlderExuOutWithFlag(x: Valid[ExuOutput], y: Valid[ExuOutput]): (Valid[ExuOutput], Bool) = {
+    val yIsOlder = Mux(x.valid,
       Mux(y.valid,
-        Mux(isAfter(x.bits.redirect.roqIdx, y.bits.redirect.roqIdx), y, x),
-        x
+        Mux(isAfter(x.bits.redirect.roqIdx, y.bits.redirect.roqIdx), true.B, false.B),
+        false.B
       ),
-      y
+      true.B
     )
+    val sel = Mux(yIsOlder, y, x)
+    (sel, yIsOlder)
+  }
+  def selectOlderExuOut(x: Valid[ExuOutput], y: Valid[ExuOutput]): Valid[ExuOutput] = {
+    selectOlderExuOutWithFlag(x, y)._1
   }
   val jumpOut = io.exuMispredict.head
   val oldestAluOut = ParallelOperation(io.exuMispredict.tail, selectOlderExuOut)
-  val oldestExuOut = selectOlderExuOut(oldestAluOut, jumpOut) // select between jump and alu
+  val (oldestExuOut, jumpIsOlder) = selectOlderExuOutWithFlag(oldestAluOut, jumpOut) // select between jump and alu
 
   val oldestMispredict = selectOlderRedirect(io.loadRelay, {
     val redirect = Wire(Valid(new Redirect))
@@ -92,7 +97,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     redirect
   })
 
-  val s1_isJump = RegNext(jumpOut.valid && !oldestAluOut.valid, init = false.B)
+  val s1_isJump = RegNext(jumpIsOlder, init = false.B)
   val s1_jumpTarget = RegEnable(jumpOut.bits.redirect.cfiUpdate.target, jumpOut.valid)
   val s1_imm12_reg = RegEnable(oldestExuOut.bits.uop.ctrl.imm(11, 0), oldestExuOut.valid)
   val s1_pd = RegEnable(oldestExuOut.bits.uop.cf.pd, oldestExuOut.valid)

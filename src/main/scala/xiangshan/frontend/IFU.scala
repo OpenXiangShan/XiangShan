@@ -541,6 +541,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
 
+  fetchPacketWire.pdmask := if4_pd.mask
   fetchPacketWire.pd := if4_pd.pd
   fetchPacketWire.ipf := if4_ipf
   fetchPacketWire.acf := if4_acf
