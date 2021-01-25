@@ -151,7 +151,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mainPipe   = Module(new MainPipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
-  val wb         = Module(new WritebackUnit(edge))
+  val wb         = Module(new WritebackQueue(edge))
 
 
   //----------------------------------------
@@ -244,7 +244,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
-  missQueue.io.req <> missReqArb.io.out
+  wb.io.miss_req.valid := missReqArb.io.out.valid
+  wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
+
+  block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
 
   // refill to load queue
   io.lsu.lsq <> missQueue.io.refill
@@ -282,9 +285,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-  val wb_queue = Module(new Queue(new WritebackReq, cfg.nReleaseEntries, flow = true))
-  wb_queue.io.enq <> mainPipe.io.wb_req
-  wb.io.req <> wb_queue.io.deq
+  wb.io.req <> mainPipe.io.wb_req
   bus.c     <> wb.io.mem_release
 
   // connect bus d 
@@ -318,4 +319,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   io.prefetch.valid := missQueue.io.req.fire()
   io.prefetch.bits := missQueue.io.req.bits
+
+  def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
+    sink.valid   := source.valid && !block_signal
+    source.ready := sink.ready   && !block_signal
+    sink.bits    := source.bits
+  }
 }
