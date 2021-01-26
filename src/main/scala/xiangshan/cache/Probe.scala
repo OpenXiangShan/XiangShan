@@ -86,7 +86,7 @@ class ProbeQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     val lrsc_locked_block = Input(Valid(UInt()))
   })
 
-  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries))
+  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nProbeEntries, Bool()))

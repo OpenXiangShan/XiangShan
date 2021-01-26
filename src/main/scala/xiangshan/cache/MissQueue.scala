@@ -343,8 +343,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
   })
 
-  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nMissEntries))
-  val refill_arb   = Module(new Arbiter(new Refill, cfg.nMissEntries))
+  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
+  val refill_arb   = Module(new RRArbiter(new Refill, cfg.nMissEntries))
 
   // dispatch req to MSHR
   val primary_ready  = Wire(Vec(cfg.nMissEntries, Bool()))
@@ -432,8 +432,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // one refill at a time
   OneHot.checkOneHot(refill_arb.io.in.map(r => r.valid))
 
-  TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
-  TLArbiter.lowestFromSeq(edge, io.mem_finish,  entries.map(_.io.mem_finish))
+  TLArbiter.robin(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
+  TLArbiter.robin(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
 
   io.pipe_req <> pipe_req_arb.io.out
 

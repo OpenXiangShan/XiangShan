@@ -120,8 +120,8 @@ class StoreReplayQueue extends DCacheModule
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
   })
 
-  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nStoreReplayEntries))
-  val resp_arb     = Module(new Arbiter(new DCacheLineResp, cfg.nStoreReplayEntries))
+  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nStoreReplayEntries))
+  val resp_arb     = Module(new RRArbiter(new DCacheLineResp, cfg.nStoreReplayEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nStoreReplayEntries, Bool()))
