@@ -2,7 +2,7 @@ package xiangshan.backend.ftq
 
 import chisel3._
 import chisel3.util._
-import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper}
+import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, XSDebug, XSPerf}
 import xiangshan._
 
 class FtqPtr extends CircularQueuePtr (FtqPtr.FtqSize) with HasCircularQueuePtrHelper
@@ -171,4 +171,12 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
       commitStateQueue(next.value).foreach(_ := false.B)
     }
   }
+
+  XSPerf("ftqEntries", validEntries)
+  XSPerf("ftqStallAcc", io.enq.valid && !io.enq.ready, acc = true)
+  XSPerf("mispredictRedirectAcc", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
+  XSPerf("replayRedirectAcc", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
+
+  XSDebug(io.commit_ftqEntry.valid, io.commit_ftqEntry.bits.toPrintable)
+  XSDebug(io.enq.fire(), io.enq.bits.toPrintable)
 }
