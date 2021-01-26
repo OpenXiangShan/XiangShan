@@ -108,16 +108,14 @@ object XSPerf {
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))
     val enableDebug = Parameters.get.envParameters.EnableDebug
-    val logEnable = WireInit(false.B)
     next_counter := counter + perfCnt
     counter := next_counter
 
     if (enableDebug) {
-      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
       val printCond =
         if(intervalBits == 0) true.B
-        else (logEnable && logTimestamp(intervalBits - 1, 0) === 0.U)
+        else (logTimestamp(intervalBits - 1, 0) === 0.U)
       when(printCond) { // TODO: Need print when program exit?
         if(acc) {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")

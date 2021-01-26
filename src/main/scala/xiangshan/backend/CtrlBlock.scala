@@ -97,6 +97,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     redirect
   })
 
+  XSDebug(oldestExuOut.valid, p"exuMispredict: ${Binary(Cat(io.exuMispredict.map(_.valid)))}\n")
+
   val s1_isJump = RegNext(jumpIsOlder, init = false.B)
   val s1_jumpTarget = RegEnable(jumpOut.bits.redirect.cfiUpdate.target, jumpOut.valid)
   val s1_imm12_reg = RegEnable(oldestExuOut.bits.uop.ctrl.imm(11, 0), oldestExuOut.valid)

@@ -177,6 +177,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("mispredictRedirectAcc", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
   XSPerf("replayRedirectAcc", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
 
-  XSDebug(io.commit_ftqEntry.valid, io.commit_ftqEntry.bits.toPrintable)
-  XSDebug(io.enq.fire(), io.enq.bits.toPrintable)
+  XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
+  XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
 }
