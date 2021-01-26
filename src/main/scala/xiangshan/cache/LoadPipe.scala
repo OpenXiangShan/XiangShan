@@ -106,7 +106,7 @@ class LoadPipe extends DCacheModule
 
   val s1_decoded = (0 until nWays) map (i => cacheParams.dataCode.decode(s1_words(i)))
   val s1_word_decoded = VecInit((0 until nWays) map (i => s1_decoded(i).corrected))
-  (0 until nWays) map (i => assert (!(s1_valid && s1_tag_match && i.U === get_row(s1_addr) && s1_decoded(i).uncorrectable)))
+  (0 until nWays) map (i => assert (!(s1_valid && s1_tag_match && (i.U === OHToUInt(s1_tag_match_way)) && s1_decoded(i).uncorrectable)))
 
   io.lsu.s1_data := s1_word_decoded
 
