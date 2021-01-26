@@ -306,8 +306,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && 
-          core_max_instr[0] > 0 && core_max_instr[1] > 0 && 
-          instr_left_last_cycle[0] >= core_max_instr[0] && instr_left_last_cycle[1] >= core_max_instr[1] )) {
+          core_max_instr[0] > 0 && 
+          instr_left_last_cycle[0] >= core_max_instr[0])) {
       trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
     }
@@ -328,7 +328,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
     if (trapCode != STATE_RUNNING) break;
 
-    if ((lastcommit[0] - max_cycle > stuck_limit || lastcommit[1] - max_cycle > stuck_limit) && hascommit) {
+    if (lastcommit[0] - max_cycle > stuck_limit && hascommit) {
       eprintf("No instruction commits for %d cycles, maybe get stuck\n"
           "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
           stuck_limit, stuck_limit);
