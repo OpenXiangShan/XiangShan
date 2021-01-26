@@ -578,13 +578,7 @@ class LoadQueue extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
-  allowEnqueue := Mux(io.brqRedirect.valid,
-    false.B,
-    Mux(lastLastCycleRedirect,
-      validCount <= (LoadQueueSize - RenameWidth).U,
-      validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
-    )
-  )
+  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
