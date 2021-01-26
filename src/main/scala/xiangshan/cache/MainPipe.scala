@@ -260,15 +260,28 @@ class MainPipe extends DCacheModule
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
   val s1_repl_coh = s1_repl_meta.coh
 
+  // only true miss request(not permission miss) need to do replacement
+  // we use repl meta when we really need to a replacement
+  val s1_need_replacement = s1_req.miss && !s1_tag_match
+  val s1_way_en        = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
+  val s1_meta          = Mux(s1_need_replacement, s1_repl_meta,   s1_hit_meta)
+  val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
+
   // for now, since we are using random replacement
   // we only need to update replacement states after every valid replacement decision
   // we only do replacement when we are true miss(not permission miss)
   when (s1_fire) {
-    when (s1_req.miss && !s1_tag_match) {
+    when (s1_need_replacement) {
       replacer.miss
     }
   }
 
+  // s1 data
+  val s1_data_resp_latched = Reg(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
+  val s1_data_resp = Mux(RegNext(next = stall, init = false.B), s1_data_resp_latched, io.data_resp)
+  when (stall) {
+    s1_data_resp_latched := s1_data_resp
+  }
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -304,10 +317,11 @@ class MainPipe extends DCacheModule
 
   // only true miss request(not permission miss) need to do replacement
   // we use repl meta when we really need to a replacement
-  val need_replacement = s2_req.miss && !s2_tag_match
-  val s2_way_en        = Mux(need_replacement, s2_repl_way_en, s2_tag_match_way)
-  val s2_meta          = Mux(need_replacement, s2_repl_meta,   s2_hit_meta)
-  val s2_coh           = Mux(need_replacement, s2_repl_coh,  s2_hit_coh)
+  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
+  val s2_way_en           = RegEnable(s1_way_en, s1_fire)
+  val s2_meta             = RegEnable(s1_meta, s1_fire)
+  val s2_coh              = RegEnable(s1_coh, s1_fire)
+  val s2_data_resp        = RegEnable(s1_data_resp, s1_fire)
 
   // --------------------------------------------------------------------------------
   // Permission checking
@@ -340,8 +354,8 @@ class MainPipe extends DCacheModule
   val s2_amo_hit   = s2_hit && !s2_req.miss && !s2_req.probe && s2_req.source === AMO_SOURCE.U
 
   when (s2_valid) {
-    XSDebug("MainPipe: s2 s2_tag_match: %b s2_has_permission: %b s2_hit: %b need_replacement: %b s2_way_en: %x s2_state: %d\n",
-      s2_tag_match, s2_has_permission, s2_hit, need_replacement, s2_way_en, s2_coh.state)
+    XSDebug("MainPipe: s2 s2_tag_match: %b s2_has_permission: %b s2_hit: %b s2_need_replacement: %b s2_way_en: %x s2_state: %d\n",
+      s2_tag_match, s2_has_permission, s2_hit, s2_need_replacement, s2_way_en, s2_coh.state)
   }
 
   // --------------------------------------------------------------------------------
@@ -396,11 +410,7 @@ class MainPipe extends DCacheModule
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val s2_data_latched = Reg(Vec(blockRows, Bits(encRowBits.W)))
-  val s2_data = Mux(RegNext(next = stall, init = false.B), s2_data_latched, Mux1H(s2_way_en, io.data_resp))
-  when (stall) {
-    s2_data_latched := s2_data
-  }
+  val s2_data = Mux1H(s2_way_en, s2_data_resp)
 
   val s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
@@ -463,7 +473,7 @@ class MainPipe extends DCacheModule
   // whether we need to write back a block
   // TODO: add support for ProbePerm
   // Now, we only deal with ProbeBlock
-  val miss_writeback  = need_replacement && s2_coh === ClientStates.Dirty
+  val miss_writeback  = s2_need_replacement && s2_coh === ClientStates.Dirty
   // even probe missed, we still need to use write back to send ProbeAck NtoN response
   // val probe_writeback = s2_req.probe && s2_tag_match && s2_coh.state =/= probe_new_coh.state
   val probe_writeback = s2_req.probe
