@@ -496,8 +496,9 @@ class ReservationStationData
         val fastHit = listenHit(fastUops(k).bits, srcSeq(j), srcTypeSeq(j)) && fastUops(k).valid
         val fastHitNoConflict = fastHit && !(enqPtr===i.U && enqEn)
         when (fastHitNoConflict) { io.ctrl.srcUpdate(i)(j) := true.B }
-        when (RegNext(fastHitNoConflict)) { data(j).listen.wen(i)(k) := true.B }
-        XSDebug(fastHit, p"FastHit: ${i.U} ${j.U} ${k.U} fastHit but enq conflict:${fastHit && (enqPtr===i.U && enqEn)}\n")
+        when (RegNext(fastHitNoConflict) && !(enqPtr===i.U && enqEn)) { data(j).listen.wen(i)(k) := true.B }
+        XSDebug(fastHit, p"FastHit: ${i.U} ${j.U} ${k.U}\n")
+        XSDebug(RegNext(fastHitNoConflict) && !(enqPtr===i.U && enqEn), p"FastHit: but enq confict: ${i.U} ${j.U} ${k.U}\n")
       }
       for (k <- 0 until extraListenPortsCnt) {
         val slowHit = listenHit(slowPort(k).bits.uop, srcSeq(j), srcTypeSeq(j)) && slowPort(k).valid
