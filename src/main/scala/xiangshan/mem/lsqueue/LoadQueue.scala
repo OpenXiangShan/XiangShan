@@ -9,7 +9,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
@@ -68,11 +68,10 @@ class LoadQueue extends XSModule
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(new RoqCommitIO)
+    val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(new RoqPtr)
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -99,16 +98,11 @@ class LoadQueue extends XSModule
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt.value
-  val sameFlag = enqPtrExt(0).flag === deqPtrExt.flag
-  val isEmpty = enqPtr === deqPtr && sameFlag
-  val isFull = enqPtr === deqPtr && !sameFlag
-  val allowIn = !isFull
-
-  val loadCommit = RegNext(VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.info(i).commitType === CommitType.LOAD)))
-  val mcommitIdx = RegNext(VecInit((0 until CommitWidth).map(i => io.commits.info(i).lqIdx.value)))
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
+
+  val commitCount = RegNext(io.roq.lcommit)
 
   /**
     * Enqueue at dispatch
@@ -322,9 +316,8 @@ class LoadQueue extends XSModule
     * When load commited, mark it as !allocated and move deqPtrExt forward.
     */
   (0 until CommitWidth).map(i => {
-    when(loadCommit(i)) {
-      allocated(mcommitIdx(i)) := false.B
-      XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
+    when(commitCount > i.U){
+      allocated(deqPtr+i.U) := false.B
     }
   })
 
@@ -499,11 +492,39 @@ class LoadQueue extends XSModule
   /**
     * Memory mapped IO / other uncached operations
     *
+    * States:
+    * (1) writeback from store units: mark as pending
+    * (2) when they reach ROB's head, they can be sent to uncache channel
+    * (3) response from uncache channel: mark as datavalid
+    * (4) writeback to ROB (and other units): mark as writebacked
+    * (5) ROB commits the instruction: same as normal instructions
     */
-  io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
-    io.commits.info(0).commitType === CommitType.LOAD &&
-    io.roqDeqPtr === uop(deqPtr).roqIdx &&
-    !io.commits.isWalk
+  //(2) when they reach ROB's head, they can be sent to uncache channel
+  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val uncacheState = RegInit(s_idle)
+  switch(uncacheState) {
+    is(s_idle) {
+      when(io.roq.pendingld && pending(deqPtr) && allocated(deqPtr)) {
+        uncacheState := s_req
+      }
+    }
+    is(s_req) {
+      when(io.uncache.req.fire()) {
+        uncacheState := s_resp
+      }
+    }
+    is(s_resp) {
+      when(io.uncache.resp.fire()) {
+        uncacheState := s_wait
+      }
+    }
+    is(s_wait) {
+      when(io.roq.commit) {
+        uncacheState := s_idle // ready for next mmio
+      }
+    }
+  }
+  io.uncache.req.valid := uncacheState === s_req
 
   dataModule.io.uncache.raddr := deqPtrExtNext.value
 
@@ -535,6 +556,7 @@ class LoadQueue extends XSModule
     )
   }
 
+  // (3) response from uncache channel: mark as datavalid
   dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
     datavalid(deqPtr) := true.B
@@ -571,7 +593,6 @@ class LoadQueue extends XSModule
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
 
-  val commitCount = PopCount(loadCommit)
   deqPtrExtNext := deqPtrExt + commitCount
   deqPtrExt := deqPtrExtNext
 
