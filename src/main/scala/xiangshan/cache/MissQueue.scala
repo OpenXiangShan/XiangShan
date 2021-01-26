@@ -281,7 +281,10 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     }
   }
 
-  io.refill.valid := RegNext(state === s_refill_resp && refill_done && should_refill_data)
+  // put should_refill_data out of RegNext
+  // so that when load miss are merged at refill_done
+  // we can still refill data back
+  io.refill.valid := RegNext(state === s_refill_resp && refill_done) && should_refill_data
   io.refill.bits.addr := req.addr
   io.refill.bits.data := refill_data.asUInt
 
