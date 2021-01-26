@@ -226,9 +226,11 @@ class FtqEntry extends XSBundle {
   def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
 
   override def toPrintable: Printable = {
-    p"ftqPC: $ftqPC valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
+    p"ftqPC: ${Hexadecimal(ftqPC)} hasLastPrec:$hasLastPrev " +
+      p"rasSp:$rasSp specCnt:$specCnt brmask:${Binary(Cat(br_mask))} rvcmask:${Binary(Cat(rvc_mask))} " +
+      p"valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
       p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isRvc:$cfiIsRVC " +
-      p"mispred:$mispred target:${Hexadecimal(target)}\n"
+      p"mispred:${Binary(Cat(mispred))} target:${Hexadecimal(target)}\n"
   }
 
 }
