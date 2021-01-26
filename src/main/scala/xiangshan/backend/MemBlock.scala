@@ -212,6 +212,7 @@ class MemBlockImp
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
+    lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
   }
 
   // StoreUnit
@@ -271,8 +272,8 @@ class MemBlockImp
 
   val atomic_rs0  = exuParameters.LduCnt + 0
   val atomic_rs1  = exuParameters.LduCnt + 1
-  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType === FuType.mou
-  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType === FuType.mou
+  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType)
+  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType)
 
   when (st0_atomics) {
     reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready
