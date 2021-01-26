@@ -87,7 +87,9 @@ class DCacheLoadIO extends DCacheWordIO
   val s1_kill  = Output(Bool())
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
-  val s1_paddr   = Output(UInt(PAddrBits.W))
+  val s1_paddr = Output(UInt(PAddrBits.W))
+  val s1_data  = Input(Vec(nWays, UInt(DataBits.W)))
+  val s2_hit_way = Input(UInt(nWays.W))
 }
 
 class DCacheLineIO extends DCacheBundle

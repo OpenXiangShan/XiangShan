@@ -108,6 +108,8 @@ class LoadPipe extends DCacheModule
   val s1_word_decoded = VecInit((0 until nWays) map (i => s1_decoded(i).corrected))
   (0 until nWays) map (i => assert (!(s1_valid && s1_tag_match && i.U === get_row(s1_addr) && s1_decoded(i).uncorrectable)))
 
+  io.lsu.s1_data := s1_word_decoded
+
   // --------------------------------------------------------------------------------
   // stage 2
   val s2_req   = RegNext(s1_req)
@@ -176,6 +178,8 @@ class LoadPipe extends DCacheModule
   when (resp.valid) {
     resp.bits.dump()
   }
+
+  io.lsu.s2_hit_way := s2_tag_match_way
 
   // -------
   // Debug logging functions
