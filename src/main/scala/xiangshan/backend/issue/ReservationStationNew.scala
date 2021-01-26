@@ -389,19 +389,21 @@ class ReservationStationData
   val slowPort = io.extraListenPorts
   val lastFastUops = RegNext(fastUops)
 
-  // Data
+  // Data : single read, multi write
   // ------------------------
   val data = (0 until srcNum).map{i =>
     val d = Module(new RSDataSingleSrc(XLEN + 1, iqSize, wakeupCnt + extraListenPortsCnt))
     d.suggestName(s"${this.name}_data${i}")
     d.io
   }
-  // init value
   data.map(src => src.listen.wen.map(a => a.map(b => b := false.B )))
   for (i <- 0 until wakeupCnt)           { data.map(_.listen.wdata(i) := fastData(i)) }
   for (i <- 0 until extraListenPortsCnt) { data.map(_.listen.wdata(i + wakeupCnt) := slowPort(i).bits.data) }
 
-  // Uop
+  // pdest : single write, multi read
+  val psrc = Reg(Vec(iqSize, Vec(srcNum, UInt(PhyRegIdxWidth.W))))
+
+  // other Uop : single read, single write (if fast wakeup, two read)
   // ------------------------
   val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, iqSize, 1))
   uopMem.io <> DontCare
@@ -436,6 +438,9 @@ class ReservationStationData
   val enqEnReg = RegNext(enqEn)
   when (enqEn) {
     uopWrite(enqPtr, enqUop)
+    psrc(enqPtr)(0) := enqUop.psrc1
+    if (srcNum > 1) { psrc(enqPtr)(1) := enqUop.psrc2 }
+    if (srcNum > 2) { psrc(enqPtr)(2) := enqUop.psrc3 }
     XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
@@ -484,7 +489,7 @@ class ReservationStationData
 
   io.ctrl.srcUpdate.map(a => a.map(_ := false.B))
   for (i <- 0 until iqSize) {
-    val srcSeq = Seq(uop(i).psrc1, uop(i).psrc2, uop(i).psrc3)
+    val srcSeq = psrc(i)
     val srcTypeSeq = Seq(uop(i).ctrl.src1Type, uop(i).ctrl.src2Type, uop(i).ctrl.src3Type)
     for (j <- 0 until srcNum) {
       for (k <- 0 until wakeupCnt) {
