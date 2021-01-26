@@ -102,6 +102,8 @@ Emulator::Emulator(int argc, const char *argv[]):
 
   init_difftest();
 
+  init_goldenmem();
+
 #if VM_TRACE == 1
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
@@ -297,6 +299,46 @@ inline void Emulator::read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t
   dut_ptr_read_store2(1);
 }
 
+inline void Emulator::read_sbuffer_info(uint8_t *sbufferData) {
+#define dut_ptr_data(x)  sbufferData[x] = dut_ptr->io_difftest_sbufferData_##x
+  dut_ptr_data(0);  dut_ptr_data(1);  dut_ptr_data(2);  dut_ptr_data(3);
+  dut_ptr_data(4);  dut_ptr_data(5);  dut_ptr_data(6);  dut_ptr_data(7);
+  dut_ptr_data(8);  dut_ptr_data(9);  dut_ptr_data(10); dut_ptr_data(11);
+  dut_ptr_data(12); dut_ptr_data(13); dut_ptr_data(14); dut_ptr_data(15);
+  dut_ptr_data(16); dut_ptr_data(17); dut_ptr_data(18); dut_ptr_data(19);
+  dut_ptr_data(20); dut_ptr_data(21); dut_ptr_data(22); dut_ptr_data(23);
+  dut_ptr_data(24); dut_ptr_data(25); dut_ptr_data(26); dut_ptr_data(27);
+  dut_ptr_data(28); dut_ptr_data(29); dut_ptr_data(30); dut_ptr_data(31);
+  dut_ptr_data(32); dut_ptr_data(33); dut_ptr_data(34); dut_ptr_data(35);
+  dut_ptr_data(36); dut_ptr_data(37); dut_ptr_data(38); dut_ptr_data(39);
+  dut_ptr_data(40); dut_ptr_data(41); dut_ptr_data(42); dut_ptr_data(43);
+  dut_ptr_data(44); dut_ptr_data(45); dut_ptr_data(46); dut_ptr_data(47);
+  dut_ptr_data(48); dut_ptr_data(49); dut_ptr_data(50); dut_ptr_data(51);
+  dut_ptr_data(52); dut_ptr_data(53); dut_ptr_data(54); dut_ptr_data(55);
+  dut_ptr_data(56); dut_ptr_data(57); dut_ptr_data(58); dut_ptr_data(59);
+  dut_ptr_data(60); dut_ptr_data(61); dut_ptr_data(62); dut_ptr_data(63);
+}
+
+inline void Emulator::read_sbuffer_info2(uint8_t *sbufferData) {
+#define dut_ptr_data2(x)  sbufferData[x] = dut_ptr->io_difftest2_sbufferData_##x
+  dut_ptr_data2(0);  dut_ptr_data2(1);  dut_ptr_data2(2);  dut_ptr_data2(3);
+  dut_ptr_data2(4);  dut_ptr_data2(5);  dut_ptr_data2(6);  dut_ptr_data2(7);
+  dut_ptr_data2(8);  dut_ptr_data2(9);  dut_ptr_data2(10); dut_ptr_data2(11);
+  dut_ptr_data2(12); dut_ptr_data2(13); dut_ptr_data2(14); dut_ptr_data2(15);
+  dut_ptr_data2(16); dut_ptr_data2(17); dut_ptr_data2(18); dut_ptr_data2(19);
+  dut_ptr_data2(20); dut_ptr_data2(21); dut_ptr_data2(22); dut_ptr_data2(23);
+  dut_ptr_data2(24); dut_ptr_data2(25); dut_ptr_data2(26); dut_ptr_data2(27);
+  dut_ptr_data2(28); dut_ptr_data2(29); dut_ptr_data2(30); dut_ptr_data2(31);
+  dut_ptr_data2(32); dut_ptr_data2(33); dut_ptr_data2(34); dut_ptr_data2(35);
+  dut_ptr_data2(36); dut_ptr_data2(37); dut_ptr_data2(38); dut_ptr_data2(39);
+  dut_ptr_data2(40); dut_ptr_data2(41); dut_ptr_data2(42); dut_ptr_data2(43);
+  dut_ptr_data2(44); dut_ptr_data2(45); dut_ptr_data2(46); dut_ptr_data2(47);
+  dut_ptr_data2(48); dut_ptr_data2(49); dut_ptr_data2(50); dut_ptr_data2(51);
+  dut_ptr_data2(52); dut_ptr_data2(53); dut_ptr_data2(54); dut_ptr_data2(55);
+  dut_ptr_data2(56); dut_ptr_data2(57); dut_ptr_data2(58); dut_ptr_data2(59);
+  dut_ptr_data2(60); dut_ptr_data2(61); dut_ptr_data2(62); dut_ptr_data2(63);
+}
+
 inline void Emulator::reset_ncycles(size_t cycles) {
   for(int i = 0; i < cycles; i++) {
     dut_ptr->reset = 1;
@@ -386,6 +428,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint64_t wdata[NumCore][DIFFTEST_WIDTH];
   uint64_t wpc[NumCore][DIFFTEST_WIDTH];
   uint64_t reg[NumCore][DIFFTEST_NR_REG];
+  uint8_t  sbufferData[64];
   DiffState diff[NumCore];
   for (int i = 0; i < NumCore; i++) {
     diff[i].reg_scala = reg[i];
@@ -497,6 +540,21 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         }
       }
 #endif
+    }
+
+    // Update Golden Memory info
+    assert(!(dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp));
+    if (dut_ptr->io_difftest_sbufferResp) {
+      read_sbuffer_info(sbufferData);
+      uint64_t sbufferAddr = dut_ptr->io_difftest_sbufferAddr;
+      uint64_t sbufferMask = dut_ptr->io_difftest_sbufferMask;
+      update_goldenmem(sbufferAddr, sbufferData, sbufferMask);
+    }
+    if (dut_ptr->io_difftest2_sbufferResp) {
+      read_sbuffer_info2(sbufferData);
+      uint64_t sbufferAddr = dut_ptr->io_difftest2_sbufferAddr;
+      uint64_t sbufferMask = dut_ptr->io_difftest2_sbufferMask;
+      update_goldenmem(sbufferAddr, sbufferData, sbufferMask);
     }
 
     uint32_t t = uptime();

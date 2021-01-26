@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include <goldenmem.h>
 
 #define DIFFTEST_WIDTH 6
 
