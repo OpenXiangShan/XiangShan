@@ -18,7 +18,7 @@ class StoreReplayEntry extends DCacheModule
     val block_addr  = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_pipe_req :: s_pipe_resp :: s_resp :: Nil = Enum(4)
+  val s_invalid :: s_pipe_req :: s_pipe_resp :: s_wait :: s_resp :: Nil = Enum(5)
   val state = RegInit(s_invalid)
 
   val req = Reg(new DCacheLineReq)
@@ -69,6 +69,9 @@ class StoreReplayEntry extends DCacheModule
     }
   }
 
+  val ReplayDelayCycles = 16
+  val delay_counter = Counter(ReplayDelayCycles)
+
   when (state === s_pipe_resp) {
     // when not miss
     // everything is OK, simply send response back to sbuffer
@@ -76,17 +79,22 @@ class StoreReplayEntry extends DCacheModule
     // wait for missQueue to handling miss and replaying our request
     // when miss and replay
     // req missed and fail to enter missQueue, manually replay it later
-    // TODO: add assertions:
-    // 1. add a replay delay counter?
-    // 2. when req gets into MissQueue, it should not miss any more
     when (io.pipe_resp.fire()) {
       when (io.pipe_resp.bits.miss) {
         when (io.pipe_resp.bits.replay) {
-          state := s_pipe_req
+          delay_counter.value := 0.U
+          state := s_wait
         }
       } .otherwise {
         state := s_resp
       }
+    }
+  }
+
+  when (state === s_wait) {
+    delay_counter.inc()
+    when (delay_counter.value === (ReplayDelayCycles - 1).U) {
+      state := s_pipe_req
     }
   }
 
