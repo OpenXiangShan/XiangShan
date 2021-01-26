@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.roq.RoqPtr
 
 class RenameBypassInfo extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -12,7 +13,7 @@ class RenameBypassInfo extends XSBundle {
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
 }
 
-class Rename extends XSModule {
+class Rename extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Flipped(new RoqCommitIO)
@@ -51,6 +52,7 @@ class Rename extends XSModule {
     freelist.redirect := io.redirect
     freelist.walk.valid := io.roqCommits.isWalk
   }
+  val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
 
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
@@ -63,6 +65,16 @@ class Rename extends XSModule {
   // walk has higher priority than allocation and thus we don't use isWalk here
   fpFreeList.req.doAlloc := intFreeList.req.canAlloc && io.out(0).ready
   intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
+
+  // speculatively assign the instruction with an roqIdx
+  val validCount = PopCount(io.in.map(_.valid))
+  val roqIdxHead = RegInit(0.U.asTypeOf(new RoqPtr))
+  val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.isUnconditional() && !io.redirect.bits.flushItself())
+  val roqIdxHeadNext = Mux(io.redirect.valid,
+    Mux(io.redirect.bits.isUnconditional(), 0.U.asTypeOf(new RoqPtr), io.redirect.bits.roqIdx),
+    Mux(lastCycleMisprediction, roqIdxHead + 1.U, Mux(canOut, roqIdxHead + validCount, roqIdxHead))
+  )
+  roqIdxHead := roqIdxHeadNext
 
   /**
     * Rename: allocate free physical register and update rename table
@@ -85,7 +97,6 @@ class Rename extends XSModule {
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
   val needIntDest = Wire(Vec(RenameWidth, Bool()))
   val hasValid = Cat(io.in.map(_.valid)).orR
-  val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -114,6 +125,8 @@ class Rename extends XSModule {
         0.U, fpFreeList.req.pdests(i)
       )
     )
+
+    uops(i).roqIdx := roqIdxHead + i.U
 
     io.out(i).valid := io.in(i).valid && intFreeList.req.canAlloc && fpFreeList.req.canAlloc && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)
