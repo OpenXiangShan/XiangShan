@@ -325,7 +325,7 @@ class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int) extends XSMo
 
   val value = Reg(Vec(numEntries, UInt(srcLen.W)))
 
-  val wMask = Mux(io.w.wen, UIntToOH(io.w.addr), 0.U(numEntries.W))
+  val wMask = Mux(io.w.wen, UIntToOH(io.w.addr)(numEntries-1, 0), 0.U(numEntries.W))
   val data = io.listen.wdata :+ io.w.wdata
   val wen = io.listen.wen.zip(wMask.asBools).map{ case (w, m) => w :+ m }
   for (i <- 0 until numEntries) {
@@ -496,9 +496,10 @@ class ReservationStationData
       }
       for (k <- 0 until extraListenPortsCnt) {
         val slowHit = listenHit(slowPort(k).bits.uop, srcSeq(j), srcTypeSeq(j)) && slowPort(k).valid
-        when (slowHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-        when (slowHit) { data(j).listen.wen(i)(k + wakeupCnt) := true.B }
-        XSDebug(slowHit, p"SlowHit: ${i.U} ${j.U} ${k.U}")
+        val slowHitNoConflict = slowHit && !(enqPtr===i.U && enqEn)
+        when (slowHitNoConflict) { io.ctrl.srcUpdate(i)(j) := true.B }
+        when (slowHitNoConflict) { data(j).listen.wen(i)(k + wakeupCnt) := true.B }
+        XSDebug(slowHit, p"SlowHit: ${i.U} ${j.U} ${k.U} fastHit but enq conflict:${slowHit && (enqPtr===i.U && enqEn)}")
       }
     }
   }
