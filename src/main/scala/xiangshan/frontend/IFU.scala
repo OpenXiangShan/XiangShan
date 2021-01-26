@@ -452,7 +452,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   toFtqBuf.cfiIsRet  := cfiIsRet
   toFtqBuf.cfiIsRVC  := cfiIsRVC
   toFtqBuf.cfiIndex.valid := if4_taken
-  toFtqBuf.cfiIndex.bits  := Mux(cfiIsRVC, if4_jmpIdx, if4_jmpIdx - 1.U)
+  toFtqBuf.cfiIndex.bits  := if4_jmpIdx
 
   toFtqBuf.br_mask   := if4_bp.brMask.asTypeOf(Vec(PredictWidth, Bool()))
   toFtqBuf.rvc_mask  := VecInit(if4_pd.pd.map(_.isRVC))
