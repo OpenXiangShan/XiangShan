@@ -298,6 +298,7 @@ class ReplayPregReq extends XSBundle {
 class DebugBundle extends XSBundle{
   val isMMIO = Bool()
   val isPerfCnt = Bool()
+  val paddr = UInt(PAddrBits.W)
 }
 
 class ExuInput extends XSBundle {

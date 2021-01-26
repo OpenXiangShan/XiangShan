@@ -738,6 +738,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val skip = Wire(Vec(CommitWidth, Bool()))
   val wen = Wire(Vec(CommitWidth, Bool()))
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+  val paddr = Wire(Vec(CommitWidth, UInt(PAddrBits.W)))
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
   val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
   val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
@@ -760,6 +761,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     }
     wen(i) := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
     wdata(i) := debug_exuData(idx)
+    paddr(i) := debug_exuDebug(idx).paddr
     wdst(i) := uop.ctrl.ldest
     diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
     wpc(i) := SignExt(uop.cf.pc, XLEN)
