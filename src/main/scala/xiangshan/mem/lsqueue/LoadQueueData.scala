@@ -116,8 +116,8 @@ class Data8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(8.W)))
     // masked write
-    val mwmask = Input(Vec(numEntries, Bool()))
-    val mwdata = Input(Vec(numEntries, UInt(8.W)))
+    val mwmask = Input(Vec(blockWords, Vec(numEntries, Bool())))
+    val mwdata = Input(Vec(blockWords, UInt(8.W)))
   })
 
   val data = Reg(Vec(numEntries, UInt(8.W)))
@@ -135,9 +135,11 @@ class Data8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule
   }
 
   // masked write
-  for (j <- 0 until numEntries) {
-    when (io.mwmask(j)) {
-      data(j) := io.mwdata(j)
+  for (i <- 0 until blockWords) {
+    for (j <- 0 until numEntries) {
+      when (io.mwmask(i)(j)) {
+        data(j) := io.mwdata(i)
+      }
     }
   }
 
@@ -211,14 +213,18 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
   val words = VecInit((0 until blockWords) map { i => io.refillData(DataBits * (i + 1) - 1, DataBits * i)})
   // select refill data according to wordIndex (paddr)
   for (i <- 0 until 8) {
-    for (j <- 0 until numEntries) {
-      data8(i).io.mwdata(j) := words(wordIndex(j))(8*(i+1)-1, 8*i)
+    for (j <- 0 until blockWords) {
+      data8(i).io.mwdata(j) := words(j)(8*(i+1)-1, 8*i)
     }
   }
+
   // gen refill wmask
-  for (i <- 0 until 8) {
-    for (j <- 0 until numEntries) {
-      data8(i).io.mwmask(j) := io.mwmask(j) && !fwdMask(j)(i)
+  for (j <- 0 until blockWords) {
+    for (k <- 0 until numEntries) {
+      val wordMatch = wordIndex(k) === j.U
+      for (i <- 0 until 8) {
+        data8(i).io.mwmask(j)(k) := wordMatch && io.mwmask(k) && !fwdMask(k)(i)
+      }
     }
   }
 
