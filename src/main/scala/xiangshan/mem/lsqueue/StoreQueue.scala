@@ -93,7 +93,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
   }
-  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.sqIdx.value
+  vaddrModule.io.raddr(0) := cmtPtr + commitCount
 
   /**
     * Enqueue at dispatch

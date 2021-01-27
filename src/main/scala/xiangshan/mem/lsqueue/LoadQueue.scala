@@ -567,7 +567,7 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.lqIdx.value
+  vaddrModule.io.raddr(0) := deqPtr + commitCount
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
