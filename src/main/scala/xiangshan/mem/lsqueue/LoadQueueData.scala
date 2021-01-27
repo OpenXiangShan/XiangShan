@@ -135,11 +135,12 @@ class Data8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule
   }
 
   // masked write
-  for (i <- 0 until blockWords) {
-    for (j <- 0 until numEntries) {
-      when (io.mwmask(i)(j)) {
-        data(j) := io.mwdata(i)
-      }
+  for (j <- 0 until numEntries) {
+    val wen = VecInit((0 until blockWords).map(i => io.mwmask(i)(j))).asUInt.orR
+    when (wen) {
+      data(j) := VecInit((0 until blockWords).map(i => {
+        Mux(io.mwmask(i)(j), io.mwdata(i), 0.U)
+      })).reduce(_ | _)
     }
   }
 
