@@ -450,8 +450,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && 
-          core_max_instr[0] > 0 && core_max_instr[1] > 0 && 
-          instr_left_last_cycle[0] >= core_max_instr[0] && instr_left_last_cycle[1] >= core_max_instr[1] )) {
+          core_max_instr[0] > 0 && 
+          instr_left_last_cycle[0] >= core_max_instr[0])) {
       trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
     }
@@ -477,7 +477,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         eprintf("No instruction of core%d commits for %d cycles, maybe get stuck\n"
             "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
             i, stuck_limit, stuck_limit);
-        difftest_display(dut_ptr->io_difftest_priviledgeMode, i);
+        int priviledgeMode = (i == 0) ? dut_ptr->io_difftest_priviledgeMode : dut_ptr->io_difftest2_priviledgeMode;
+        difftest_display(priviledgeMode, i);
         trapCode = STATE_ABORT;
       }
     }
@@ -521,21 +522,23 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
 
 #ifdef DIFFTEST_STORE_COMMIT
-      if (dut_ptr->io_difftest_storeCommit) {
-        read_store_info(diff.store_addr, diff.store_data, diff.store_mask);
+      for (int core = 0; core < NumCore; core++) {
+        if (dut_ptr->io_difftest_storeCommit) {
+          read_store_info(diff[core].store_addr, diff[core].store_data, diff[core].store_mask);
 
-        for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
-          auto addr = diff.store_addr[i];
-          auto data = diff.store_data[i];
-          auto mask = diff.store_mask[i];
-          if (difftest_store_step(&addr, &data, &mask, coreid)) {
-            difftest_display(dut_ptr->io_difftest_priviledgeMode, 0);  // TODO
-            printf("Mismatch for store commits: \n");
-            printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
-            printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
-              diff.store_addr[i], diff.store_data[i], diff.store_mask[i]);
-            trapCode = STATE_ABORT;
-            break;
+          for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
+            auto addr = diff[core].store_addr[i];
+            auto data = diff[core].store_data[i];
+            auto mask = diff[core].store_mask[i];
+            if (difftest_store_step(&addr, &data, &mask)) {
+              difftest_display(dut_ptr->io_difftest_priviledgeMode);
+              printf("Mismatch for store commits: \n");
+              printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
+              printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
+                diff[core].store_addr[i], diff[core].store_data[i], diff[core].store_mask[i]);
+              trapCode = STATE_ABORT;
+              break;
+            }
           }
         }
       }
