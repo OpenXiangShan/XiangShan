@@ -80,7 +80,7 @@ class LoadQueue extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
   val dataModule = Module(new LoadQueueData(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1, numWrite = LoadPipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
@@ -567,7 +567,7 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  vaddrModule.io.raddr(0) := deqPtr + commitCount
+  vaddrModule.io.raddr(0) := deqPtr + io.roq.lcommit
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
