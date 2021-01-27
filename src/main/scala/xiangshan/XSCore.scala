@@ -463,8 +463,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   floatBlock.io.frm <> integerBlock.io.csrio.frm
 
-  memBlock.io.lsqio.commits <> ctrlBlock.io.roqio.commits
-  memBlock.io.lsqio.roqDeqPtr <> ctrlBlock.io.roqio.roqDeqPtr
+  memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)
