@@ -451,3 +451,11 @@ class DifftestBundle extends XSBundle {
     val scFailed = Output(Bool())
   }
 }
+
+class TrapIO extends XSBundle {
+  val valid = Output(Bool())
+  val code = Output(UInt(3.W))
+  val pc = Output(UInt(VAddrBits.W))
+  val cycleCnt = Output(UInt(XLEN.W))
+  val instrCnt = Output(UInt(XLEN.W))
+}
