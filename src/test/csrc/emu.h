@@ -57,14 +57,14 @@ class Emulator {
   int trapCode;
 
   inline void read_emu_regs(uint64_t *r);
-  inline void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst);
+  inline void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu);
   inline void read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
   inline void read_sbuffer_info(uint8_t *sbufferData);
   inline void load_diff_info(void* diff, int coreid);
   
   // TODO: dirty methods
   inline void read_emu_regs2(uint64_t *r);
-  inline void read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst);
+  inline void read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu);
   inline void read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
   inline void read_sbuffer_info2(uint8_t *sbufferData);
 

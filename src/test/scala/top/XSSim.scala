@@ -58,6 +58,10 @@ class DiffTestIO extends XSBundle {
   val sbufferAddr = Output(UInt(64.W))
   val sbufferData = Output(Vec(64, UInt(8.W)))
   val sbufferMask = Output(UInt(64.W))
+
+  val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+  val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+  val lfu = Output(Vec(CommitWidth, UInt(4.W)))
 }
 
 class LogCtrlIO extends Bundle {
@@ -221,6 +225,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).sbufferAddr := soc.module.difftestIO(i).fromSbuffer.sbufferAddr
         difftest(i).sbufferData := soc.module.difftestIO(i).fromSbuffer.sbufferData
         difftest(i).sbufferMask := soc.module.difftestIO(i).fromSbuffer.sbufferMask
+
+        difftest(i).lpaddr := soc.module.difftestIO(i).fromRoq.lpaddr
+        difftest(i).ltype := soc.module.difftestIO(i).fromRoq.ltype
+        difftest(i).lfu := soc.module.difftestIO(i).fromRoq.lfu
       }
       io.difftest2 := difftest(1)
     }

@@ -209,11 +209,14 @@ inline void Emulator::read_emu_regs2(uint64_t *r) {
     r[DIFFTEST_MODE]    = dut_ptr->io_difftest2_priviledgeMode;
 }
 
-inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
+inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu) {
 #define dut_ptr_wpc(x)  wpc[x] = dut_ptr->io_difftest_wpc_##x
 #define dut_ptr_wdata(x) wdata[x] = dut_ptr->io_difftest_wdata_##x
 #define dut_ptr_wdst(x)  wdst[x] = dut_ptr->io_difftest_wdst_##x
-#define dut_ptr_read_wb(x) dut_ptr_wpc(x); dut_ptr_wdata(x); dut_ptr_wdst(x);
+#define dut_ptr_lpaddr(x)  lpaddr[x] = dut_ptr->io_difftest_lpaddr_##x
+#define dut_ptr_ltype(x)  ltype[x] = dut_ptr->io_difftest_ltype_##x
+#define dut_ptr_lfu(x)  lfu[x] = dut_ptr->io_difftest_lfu_##x
+#define dut_ptr_read_wb(x) dut_ptr_wpc(x); dut_ptr_wdata(x); dut_ptr_wdst(x); dut_ptr_lpaddr(x); dut_ptr_ltype(x); dut_ptr_lfu(x);
 
 #if DIFFTEST_WIDTH >= 13 || DIFFTEST_WIDTH < 6
 #error "not supported difftest width"
@@ -245,11 +248,14 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
 #endif
 }
 
-inline void Emulator::read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
+inline void Emulator::read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu) {
 #define dut_ptr_wpc2(x)  wpc[x] = dut_ptr->io_difftest2_wpc_##x
 #define dut_ptr_wdata2(x) wdata[x] = dut_ptr->io_difftest2_wdata_##x
 #define dut_ptr_wdst2(x)  wdst[x] = dut_ptr->io_difftest2_wdst_##x
-#define dut_ptr_read_wb2(x) dut_ptr_wpc2(x); dut_ptr_wdata2(x); dut_ptr_wdst2(x);
+#define dut_ptr_lpaddr2(x)  lpaddr[x] = dut_ptr->io_difftest2_lpaddr_##x
+#define dut_ptr_ltype2(x)  ltype[x] = dut_ptr->io_difftest2_ltype_##x
+#define dut_ptr_lfu2(x)  lfu[x] = dut_ptr->io_difftest2_lfu_##x
+#define dut_ptr_read_wb2(x) dut_ptr_wpc2(x); dut_ptr_wdata2(x); dut_ptr_wdst2(x); dut_ptr_lpaddr2(x); dut_ptr_ltype2(x); dut_ptr_lfu2(x);
 
 #if DIFFTEST_WIDTH >= 13 || DIFFTEST_WIDTH < 6
 #error "not supported difftest width"
@@ -429,12 +435,18 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint64_t wpc[NumCore][DIFFTEST_WIDTH];
   uint64_t reg[NumCore][DIFFTEST_NR_REG];
   uint8_t  sbufferData[64];
+  uint64_t lpaddr[NumCore][DIFFTEST_WIDTH];
+  uint32_t ltype[NumCore][DIFFTEST_WIDTH];
+  uint8_t  lfu[NumCore][DIFFTEST_WIDTH];
   DiffState diff[NumCore];
   for (int i = 0; i < NumCore; i++) {
     diff[i].reg_scala = reg[i];
     diff[i].wpc = wpc[i];
     diff[i].wdata = wdata[i];
     diff[i].wdst = wdst[i];
+    diff[i].lpaddr = lpaddr[i];
+    diff[i].ltype = ltype[i];
+    diff[i].lfu = lfu[i];
     lastcommit[i] = max_cycle;
     instr_left_last_cycle[i] = max_cycle;
     core_max_instr[i] = max_instr;
@@ -504,10 +516,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       if (core_nr_commit && hascommit[i]) {
         if (i == 0) {
           read_emu_regs(reg[i]);
-          read_wb_info(wpc[i], wdata[i], wdst[i]);
+          read_wb_info(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
         } else {
           read_emu_regs2(reg[i]);
-          read_wb_info2(wpc[i], wdata[i], wdst[i]);
+          read_wb_info2(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
         }
         load_diff_info(diff, i);
 

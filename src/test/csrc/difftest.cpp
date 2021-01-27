@@ -132,7 +132,6 @@ void difftest_display(uint8_t mode, int coreid) {
 }
 
 int difftest_step(DiffState *s, int coreid) {
-  // assert(!s->isRVC);
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   uint64_t this_pc = s->reg_scala[DIFFTEST_THIS_PC];
@@ -154,7 +153,7 @@ int difftest_step(DiffState *s, int coreid) {
   // }
 
   // sync lr/sc reg status
-  if(s->scFailed){
+  if (s->scFailed) {
     struct SyncState sync;
     sync.lrscValid = 0;
     sync.lrscAddr = 0;
@@ -168,36 +167,71 @@ int difftest_step(DiffState *s, int coreid) {
   }
   else {
     assert(s->commit > 0 && s->commit <= DIFFTEST_WIDTH);
-    for(int i = 0; i < s->commit; i++){
+    for (int i = 0; i < s->commit; i++) {
       pc_wb_queue[coreid][wb_pointer[coreid]] = s->wpc[i];
       wen_wb_queue[coreid][wb_pointer[coreid]] = selectBit(s->wen, i);
       wdst_wb_queue[coreid][wb_pointer[coreid]] = s->wdst[i];
       wdata_wb_queue[coreid][wb_pointer[coreid]] = s->wdata[i];
       wb_pointer[coreid] = (wb_pointer[coreid]+1) % DEBUG_WB_TRACE_SIZE;
-      if(selectBit(s->skip, i)){
+      if (selectBit(s->skip, i)) {
         // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-        // printf("SKIP %d\n", i);
         // to skip the checking of an instruction, just copy the reg state to reference design
         ref_difftest_getregs(&ref_r, coreid);
         ref_r[DIFFTEST_THIS_PC] += selectBit(s->isRVC, i) ? 2 : 4;
-        if(selectBit(s->wen, i)){
-          if(s->wdst[i] != 0){
+        if (selectBit(s->wen, i)) {
+          if (s->wdst[i] != 0) {
             ref_r[s->wdst[i]] = s->wdata[i];
           }
         }
         ref_difftest_setregs(ref_r, coreid);
-      }else{
+      } else {
         // single step exec
         // IPF, LPF, SPF
-        if(s->cause == 12 || s->cause == 13 || s->cause == 15){
+        if (s->cause == 12 || s->cause == 13 || s->cause == 15) {
           // printf("s->cause %ld\n", s->cause);
           struct DisambiguationState ds;
           ds.exceptionNo = s->cause;
           ds.mtval = s->reg_scala[DIFFTEST_MTVAL];
           ds.stval = s->reg_scala[DIFFTEST_STVAL];
           ref_disambiguate_exec(&ds, coreid);
-        }else{
+        } else {
           ref_difftest_exec(1, coreid);
+
+          if (s->lfu[i] == 0xC || s->lfu[i] == 0xF) {  // Load instruction
+            ref_difftest_getregs(&ref_r, coreid);
+            if (ref_r[s->wdst[i]] != s->wdata[i]) {
+              printf("[DIFF] This load instruction gets fucked!\n");
+              printf("[DIFF] ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
+              uint64_t golden;
+              int len = 0;
+              if (s->lfu[i] == 0xC) {
+                switch (s->ltype[i]) {
+                  case 0: len = 1; break;
+                  case 1: len = 2; break;
+                  case 2: len = 4; break;
+                  case 3: len = 8; break;
+                  default: panic("Unknown fuOpType: 0x%x", s->ltype[i]);
+                }
+              } else if (s->lfu[i] == 0xF) {
+                if (s->ltype[i] % 2 == 0) {
+                  len = 4;
+                } else if (s->ltype[i] % 2 == 1) {
+                  len = 8;
+                }
+              }
+              read_goldenmem(s->lpaddr[i], &golden, len);
+              printf("[DIFF] golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
+              if (golden == s->wdata[i]) {
+                // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
+                ref_difftest_memcpy_from_dut(s->lpaddr[i], &golden, len, coreid);
+                if (s->wdst[i] != 0) {
+                  ref_r[s->wdst[i]] = s->wdata[i];
+                  ref_difftest_setregs(ref_r, coreid);
+                }
+              }
+            }
+          }
+
         }
       }
     }

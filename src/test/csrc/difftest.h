@@ -56,6 +56,9 @@ struct DiffState {
   uint64_t *wpc;
   uint64_t *wdata;
   uint32_t *wdst;
+  uint64_t *lpaddr;
+  uint32_t *ltype;
+  uint8_t  *lfu;
   int wen;
   uint64_t intrNO;
   uint64_t cause; // for disambiguate_exec

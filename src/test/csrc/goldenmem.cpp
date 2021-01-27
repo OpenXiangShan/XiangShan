@@ -70,7 +70,7 @@ static inline void pmem_write(paddr_t addr, word_t data, int len) {
 
 inline word_t paddr_read(paddr_t addr, int len) {
   if (in_pmem(addr)) return pmem_read(addr, len);
-  else panic("read not in pmem!");
+  else panic("read not in pmem! addr: %lx", addr);
   return 0;
 }
 
