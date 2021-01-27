@@ -85,7 +85,7 @@ class StreamBufferAlloc(p: StreamPrefetchParameters) extends StreamPrefetchReq(p
 }
 
 
-class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
+class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule with HasTlbConst {
   val io = IO(new Bundle {
     val streamBufId = Input(UInt(log2Up(streamCnt).W))
     val addrs = Vec(p.streamSize, ValidIO(UInt(PAddrBits.W)))
@@ -102,6 +102,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   def blockBytes = p.blockBytes
   // def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U(addr.getWidth.W))
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(p.blockBytes)), 0.U(log2Up(p.blockBytes).W))
+  def getPageNum(addr: UInt) = addr(PAddrBits - 1, offLen)
 
   val baseReq = RegInit(0.U.asTypeOf(Valid(new PrefetchReq)))
   val nextReq = RegInit(0.U.asTypeOf(new PrefetchReq))
@@ -163,11 +164,17 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   }
 
   // enqueue
+  val nextAddrCrossPage = getPageNum(baseReq.bits.addr) =/= getPageNum(nextReq.addr)
   when (!full && baseReq.valid && !needRealloc) {
-    state(tail) := s_req
-    tail := tail + 1.U
-    buf(tail) := nextReq
-    nextReq.addr := nextReq.addr + blockBytes.U
+    when (!nextAddrCrossPage) {
+      state(tail) := s_req
+      tail := tail + 1.U
+      buf(tail) := nextReq
+      nextReq.addr := nextReq.addr + blockBytes.U
+      XSDebug(p"enqueue 0x${nextReq.addr}\n")
+    }.otherwise {
+      XSDebug(p"addr 0x${nextReq.addr} could not enqueue for crossing pages\n")
+    }
   }
 
   val reqs = Wire(Vec(streamSize, Decoupled(new StreamPrefetchReq(p))))
@@ -259,7 +266,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
       p"deqLater: ${deqLater(i)} deqValid: ${deqValid(i)}\n")
   }
   XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead} blockBytes: ${blockBytes.U}\n")
-  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq}\n")
+  XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq} crossPage: ${nextAddrCrossPage}\n")
   XSDebug(needRealloc, s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} needRealloc: ${needRealloc} reallocReq: ${reallocReq}\n")
   XSDebug(s"${p.cacheName} " + p"StreamBuf ${io.streamBufId} prefetchPrior: ")
   (0 until streamSize).foreach(i => XSDebug(false, true.B, p"${prefetchPrior(i)} "))
@@ -312,38 +319,40 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
 
   // 1. streamBufs hit while l1i miss
   val hit = WireInit(false.B)
+  val hitVec = WireInit(VecInit(Seq.fill(streamCnt * streamSize)(false.B)))
   for (i <- 0 until streamCnt) {
     for (j <- 0 until streamSize) {
       when (io.train.valid && addrValids(i)(j) && getBlockAddr(io.train.bits.addr) === streamBufs(i).io.addrs(j).bits) {
-        hit := true.B
+        // hit := true.B
+        hitVec(i*streamSize+j) := true.B
         streamBufs(i).io.update.valid := true.B
         streamBufs(i).io.update.bits.hitIdx := j.U
         ages(i) := maxAge
       }
     }
   }
+  hit := ParallelOR(hitVec)
 
   // 2. streamBufs miss
+  val allocIdx = Wire(UInt(log2Up(streamCnt).W))
+  val ageCmp = Seq.fill(streamCnt)(Wire(new CompareBundle(ageWidth)))
+  (0 until streamCnt).foreach(i => ageCmp(i).bits := ages(i))
+  (0 until streamCnt).foreach(i => ageCmp(i).idx := i.U)
+  when ((~bufValids.asUInt).orR) {
+    allocIdx := PriorityMux(~bufValids.asUInt, VecInit(List.tabulate(streamCnt)(_.U)))
+  }.otherwise {
+    allocIdx := ParallelMin(ageCmp).idx
+  }
   when (!hit && io.train.valid) {
     (0 until streamCnt).foreach(i => ages(i) := Mux(ages(i) =/= 0.U, ages(i) - 1.U, 0.U))
 
     // realloc an invalid or the eldest stream buffer with new one
-    val idx = Wire(UInt(log2Up(streamCnt).W))
-    when ((~bufValids.asUInt).orR) {
-      idx := PriorityMux(~bufValids.asUInt, VecInit(List.tabulate(streamCnt)(_.U)))
-    }.otherwise {
-      val ageCmp = Seq.fill(streamCnt)(Wire(new CompareBundle(ageWidth)))
-      (0 until streamCnt).foreach(i => ageCmp(i).bits := ages(i))
-      (0 until streamCnt).foreach(i => ageCmp(i).idx := i.U)
-      idx := ParallelMin(ageCmp).idx
-    }
-
     for (i <- 0 until streamCnt) {
-      streamBufs(i).io.alloc.valid := idx === i.U
+      streamBufs(i).io.alloc.valid := allocIdx === i.U
       streamBufs(i).io.alloc.bits := DontCare
       streamBufs(i).io.alloc.bits.addr := io.train.bits.addr
       streamBufs(i).io.alloc.bits.write := io.train.bits.write
-      when (idx === i.U) { ages(i) := maxAge }
+      when (allocIdx === i.U) { ages(i) := maxAge }
     }
   }
 
