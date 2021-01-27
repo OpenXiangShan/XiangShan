@@ -186,9 +186,6 @@ class MainPipe extends DCacheModule
   meta_read.tag    := DontCare
 
   // Data read for new requests
-  data_read.addr   := s0_req.addr
-  data_read.way_en := ~0.U(nWays.W)
-
   val rowWordBits = log2Floor(rowWords)
   val amo_row  = s0_req.word_idx >> rowWordBits
   val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
@@ -198,6 +195,10 @@ class MainPipe extends DCacheModule
   val full_rmask  = ~0.U(blockRows.W)
   val none_rmask  = 0.U(blockRows.W)
 
+  val rmask = Mux(store_need_data, store_rmask,
+    Mux(amo_need_data, amo_rmask,
+      Mux(probe_need_data || miss_need_data, full_rmask, none_rmask)))
+
   // generate wmask here and use it in stage 2
   val store_wmask = word_write
   val amo_wmask   = WireInit(VecInit((0 until blockRows) map (i => 0.U(rowWords.W))))
@@ -205,9 +206,10 @@ class MainPipe extends DCacheModule
   val full_wmask  = VecInit((0 until blockRows) map (i => ~0.U(rowWords.W)))
   val none_wmask  = VecInit((0 until blockRows) map (i => 0.U(rowWords.W)))
 
-  data_read.rmask  := Mux(store_need_data, store_rmask,
-    Mux(amo_need_data, amo_rmask,
-      Mux(probe_need_data || miss_need_data, full_rmask, none_rmask)))
+  data_read.addr   := s0_req.addr
+  data_read.way_en := ~0.U(nWays.W)
+
+  data_read.rmask  := rmask
 
   dump_pipeline_reqs("MainPipe s0", s0_valid, s0_req)
 
@@ -221,6 +223,7 @@ class MainPipe extends DCacheModule
   val s1_fire  = s1_valid && !stall
   val s1_req = RegEnable(s0_req, s0_fire)
 
+  val s1_rmask       = RegEnable(rmask, s0_fire)
   val s1_store_wmask = RegEnable(store_wmask, s0_fire)
   val s1_amo_wmask   = RegEnable(amo_wmask, s0_fire)
   val s1_full_wmask  = RegEnable(full_wmask, s0_fire)
@@ -291,6 +294,7 @@ class MainPipe extends DCacheModule
   val s2_fire  = s2_valid && !stall
   val s2_req = RegEnable(s1_req, s1_fire)
 
+  val s2_rmask       = RegEnable(s1_rmask, s1_fire)
   val s2_store_wmask = RegEnable(s1_store_wmask, s1_fire)
   val s2_amo_wmask   = RegEnable(s1_amo_wmask, s1_fire)
   val s2_full_wmask  = RegEnable(s1_full_wmask, s1_fire)
@@ -416,7 +420,7 @@ class MainPipe extends DCacheModule
     (0 until rowWords) map { w =>
       val data = s2_data(r)(encWordBits * (w + 1) - 1, encWordBits * w)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
+      assert(!(s2_valid && s2_hit && s2_rmask(r) && decoded.uncorrectable))
       decoded.corrected
     }
   }
