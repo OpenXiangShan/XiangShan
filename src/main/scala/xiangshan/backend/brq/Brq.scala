@@ -116,6 +116,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   io.redirectOut.valid := wbValid && wbIsMisPred
   io.redirectOut.bits := wbEntry.redirect
+  io.redirectOut.bits.level := RedirectLevel.flushAfter
   io.redirectOut.bits.brTag := BrqPtr(ptrFlagVec(writebackIdx), writebackIdx)
 
   io.out.valid := wbValid || wbIsAuipc
