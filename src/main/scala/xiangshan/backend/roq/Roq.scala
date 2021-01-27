@@ -362,8 +362,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   io.exception := debug_deqUop
   io.exception.ctrl.commitType := deqDispatchData.commitType
-  io.exception.lqIdx := deqDispatchData.lqIdx
-  io.exception.sqIdx := deqDispatchData.sqIdx
   io.exception.cf.pc := deqDispatchData.pc
   io.exception.cf.exceptionVec := deqExceptionVec
   io.exception.cf.crossPageIPFFix := deqDispatchData.crossPageIPFFix
@@ -636,8 +634,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     wdata.commitType := req.ctrl.commitType
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest
-    wdata.lqIdx := req.lqIdx
-    wdata.sqIdx := req.sqIdx
     wdata.pc := req.cf.pc
     wdata.crossPageIPFFix := req.cf.crossPageIPFFix
     // wdata.exceptionVec := req.cf.exceptionVec
