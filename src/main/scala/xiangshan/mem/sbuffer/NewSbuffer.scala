@@ -114,6 +114,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
       val empty = Output(Bool())
     } // sbuffer flush
   })
+  val difftestIO = IO(new Bundle() {
+    val sbufferResp = Output(Bool())
+    val sbufferAddr = Output(UInt(64.W))
+    val sbufferData = Output(Vec(64, UInt(8.W)))
+    val sbufferMask = Output(UInt(64.W))
+  })
+  difftestIO <> DontCare
 
   val buffer = Mem(StoreBufferSize, new SbufferLine)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
@@ -373,6 +380,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     stateVec(respId) := s_invalid
     assert(stateVec(respId) === s_inflight)
     XSDebug(p"recv cache resp: id=[$respId]\n")
+  }
+
+  if (env.DualCoreDifftest) {
+    difftestIO.sbufferResp := WireInit(io.dcache.resp.fire())
+    difftestIO.sbufferAddr := WireInit(getAddr(tagRead(respId)))
+    difftestIO.sbufferData := WireInit(bufferRead(respId).data.asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
+    difftestIO.sbufferMask := WireInit(bufferRead(respId).mask)
   }
 
   val needSpace = (io.in(0).fire && !canMerge(0)) +& (io.in(1).fire && !canMerge(1) && !sameTag)

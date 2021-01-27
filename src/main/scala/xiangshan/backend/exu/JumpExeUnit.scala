@@ -30,6 +30,31 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val fencei = Output(Bool())
     val sbuffer = new FenceToSbuffer
   })
+  val difftestIO = IO(new Bundle() {
+    val fromCSR = new Bundle() {
+      val intrNO = Output(UInt(64.W))
+      val cause = Output(UInt(64.W))
+      val priviledgeMode = Output(UInt(2.W))
+      val mstatus = Output(UInt(64.W))
+      val sstatus = Output(UInt(64.W))
+      val mepc = Output(UInt(64.W))
+      val sepc = Output(UInt(64.W))
+      val mtval = Output(UInt(64.W))
+      val stval = Output(UInt(64.W))
+      val mtvec = Output(UInt(64.W))
+      val stvec = Output(UInt(64.W))
+      val mcause = Output(UInt(64.W))
+      val scause = Output(UInt(64.W))
+      val satp = Output(UInt(64.W))
+      val mip = Output(UInt(64.W))
+      val mie = Output(UInt(64.W))
+      val mscratch = Output(UInt(64.W))
+      val sscratch = Output(UInt(64.W))
+      val mideleg = Output(UInt(64.W))
+      val medeleg = Output(UInt(64.W))
+    }
+  })
+  difftestIO <> DontCare
 
   val jmp = supportedFunctionUnits.collectFirst{
     case j: Jump => j
@@ -57,6 +82,10 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr
   csr.csrio.externalInterrupt <> csrio.externalInterrupt
   csr.csrio.tlb <> csrio.tlb
+
+  if (env.DualCoreDifftest) {
+    difftestIO.fromCSR <> csr.difftestIO
+  }
 
   fenceio.sfence <> fence.sfence
   fenceio.fencei <> fence.fencei

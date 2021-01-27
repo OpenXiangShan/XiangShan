@@ -145,6 +145,29 @@ class CSR extends FunctionUnit with HasCSRConst
     // TLB
     val tlb = Output(new TlbCsrBundle)
   })
+  val difftestIO = IO(new Bundle() {
+    val intrNO = Output(UInt(64.W))
+    val cause = Output(UInt(64.W))
+    val priviledgeMode = Output(UInt(2.W))
+    val mstatus = Output(UInt(64.W))
+    val sstatus = Output(UInt(64.W))
+    val mepc = Output(UInt(64.W))
+    val sepc = Output(UInt(64.W))
+    val mtval = Output(UInt(64.W))
+    val stval = Output(UInt(64.W))
+    val mtvec = Output(UInt(64.W))
+    val stvec = Output(UInt(64.W))
+    val mcause = Output(UInt(64.W))
+    val scause = Output(UInt(64.W))
+    val satp = Output(UInt(64.W))
+    val mip = Output(UInt(64.W))
+    val mie = Output(UInt(64.W))
+    val mscratch = Output(UInt(64.W))
+    val sscratch = Output(UInt(64.W))
+    val mideleg = Output(UInt(64.W))
+    val medeleg = Output(UInt(64.W))
+  })
+  difftestIO <> DontCare
 
   val cfIn = io.in.bits.uop.cf
   val cfOut = Wire(new CtrlFlow)
@@ -852,6 +875,8 @@ class CSR extends FunctionUnit with HasCSRConst
   }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
+  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+  
   if (!env.FPGAPlatform) {
 
     // display all perfcnt when nooptrap is executed
@@ -862,7 +887,6 @@ class CSR extends FunctionUnit with HasCSRConst
       }
     }
 
-    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
     ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
     ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
@@ -883,5 +907,28 @@ class CSR extends FunctionUnit with HasCSRConst
     ExcitingUtils.addSource(sscratch, "difftestSscratch", Debug)
     ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
     ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
+  }
+
+  if (env.DualCoreDifftest) {
+    difftestIO.intrNO := RegNext(difftestIntrNO)
+    difftestIO.cause := RegNext(causeNO)
+    difftestIO.priviledgeMode := priviledgeMode
+    difftestIO.mstatus := mstatus
+    difftestIO.sstatus := mstatus & sstatusRmask
+    difftestIO.mepc := mepc
+    difftestIO.sepc := sepc
+    difftestIO.mtval:= mtval
+    difftestIO.stval:= stval
+    difftestIO.mtvec := mtvec
+    difftestIO.stvec := stvec
+    difftestIO.mcause := mcause
+    difftestIO.scause := scause
+    difftestIO.satp := satp
+    difftestIO.mip := mipReg
+    difftestIO.mie := mie
+    difftestIO.mscratch := mscratch
+    difftestIO.sscratch := sscratch
+    difftestIO.mideleg := mideleg
+    difftestIO.medeleg := medeleg
   }
 }

@@ -22,6 +22,14 @@ import freechips.rocketchip.tile.HasFPUParameters
 import sifive.blocks.inclusivecache.PrefetcherIO
 import utils._
 
+object hartIdCore extends (() => Int) {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    x-1
+  }
+}
+
 case class XSCoreParameters
 (
   XLEN: Int = 64,
@@ -289,7 +297,8 @@ case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = false
+  EnablePerfDebug: Boolean = false,
+  DualCoreDifftest: Boolean = false
 )
 
 // object AddressSpace extends HasXSParameter {
@@ -350,6 +359,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
     val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
+  val difftestIO = IO(new DifftestBundle())
+  difftestIO <> DontCare
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
   AddressSpace.printMemmap()
@@ -480,6 +491,20 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
     val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
     ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
+  }
+
+  if (env.DualCoreDifftest) {
+    val id = hartIdCore()
+    difftestIO.fromSbuffer <> memBlock.difftestIO.fromSbuffer
+    difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
+    difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
+    difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
+
+    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+    ExcitingUtils.addSink(debugIntReg, s"DEBUG_INT_ARCH_REG$id", ExcitingUtils.Debug)
+    ExcitingUtils.addSink(debugFpReg, s"DEBUG_FP_ARCH_REG$id", ExcitingUtils.Debug)
+    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
+    difftestIO.fromXSCore.r := debugArchReg
   }
 
 }
