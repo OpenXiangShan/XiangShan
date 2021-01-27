@@ -41,6 +41,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -53,6 +54,15 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
   })
+  val difftestIO = IO(new Bundle() {
+    val fromSQ = new Bundle() {
+      val storeCommit = Output(UInt(2.W))
+      val storeAddr   = Output(Vec(2, UInt(64.W)))
+      val storeData   = Output(Vec(2, UInt(64.W)))
+      val storeMask   = Output(Vec(2, UInt(8.W)))
+    }
+  })
+  difftestIO <> DontCare
 
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
@@ -82,6 +92,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
+  loadQueue.io.loadDataForwarded <> io.loadDataForwarded
   loadQueue.io.ldout <> io.ldout
   loadQueue.io.commits <> io.commits
   loadQueue.io.rollback <> io.rollback
@@ -105,6 +116,10 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
 
   storeQueue.io.sqempty <> io.sqempty
+
+  if (env.DualCoreDifftest) {
+    difftestIO.fromSQ <> storeQueue.difftestIO
+  }
 
   io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 

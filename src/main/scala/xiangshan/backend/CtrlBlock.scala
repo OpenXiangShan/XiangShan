@@ -178,6 +178,22 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     }
   })
 
+  val difftestIO = IO(new Bundle() {
+    val fromRoq = new Bundle() {
+      val commit = Output(UInt(32.W))
+      val thisPC = Output(UInt(XLEN.W))
+      val thisINST = Output(UInt(32.W))
+      val skip = Output(UInt(32.W))
+      val wen = Output(UInt(32.W))
+      val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+      val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val isRVC = Output(UInt(32.W))
+      val scFailed = Output(Bool())
+    }
+  })
+  difftestIO <> DontCare
+
   val ftq = Module(new Ftq)
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
@@ -282,6 +298,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.toIntBlock.redirect <> backendRedirect
   io.toFpBlock.redirect <> backendRedirect
   io.toLsBlock.redirect <> backendRedirect
+
+  if (env.DualCoreDifftest) {
+    difftestIO.fromRoq <> roq.difftestIO
+  }
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
   dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
