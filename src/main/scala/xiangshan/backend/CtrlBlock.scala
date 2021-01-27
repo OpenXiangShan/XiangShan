@@ -11,7 +11,7 @@ import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -52,8 +52,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val exception = ValidIO(new MicroOp)
       val isInterrupt = Output(Bool())
       // to mem block
-      val commits = new RoqCommitIO
-      val roqDeqPtr = Output(new RoqPtr)
+      val lsq = new RoqLsqIO
     }
   })
 
@@ -181,6 +180,5 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.roqio.exception.bits := roq.io.exception
   io.roqio.isInterrupt := roq.io.redirectOut.bits.interrupt
   // roq to mem block
-  io.roqio.roqDeqPtr := roq.io.roqDeqPtr
-  io.roqio.commits := roq.io.commits
+  io.roqio.lsq <> roq.io.lsq
 }

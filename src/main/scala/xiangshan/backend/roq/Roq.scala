@@ -43,6 +43,14 @@ class RoqCSRIO extends XSBundle {
   }
 }
 
+class RoqLsqIO extends XSBundle {
+  val lcommit = Output(UInt(3.W))
+  val scommit = Output(UInt(3.W))
+  val pendingld = Output(Bool())
+  val pendingst = Output(Bool())
+  val commit = Output(Bool())
+}
+
 class RoqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
   val isEmpty = Output(Bool())
@@ -204,6 +212,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // exu + brq
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = new RoqCommitIO
+    val lsq = new RoqLsqIO
     val bcommit = Output(UInt(BrTagWidth.W))
     val roqDeqPtr = Output(new RoqPtr)
     val csr = new RoqCSRIO
@@ -367,8 +376,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   io.exception := debug_deqUop
   io.exception.ctrl.commitType := deqDispatchData.commitType
-  io.exception.lqIdx := deqDispatchData.lqIdx
-  io.exception.sqIdx := deqDispatchData.sqIdx
   io.exception.cf.pc := deqDispatchData.pc
   io.exception.cf.exceptionVec := deqExceptionVec
   io.exception.cf.crossPageIPFFix := deqDispatchData.crossPageIPFFix
@@ -456,12 +463,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
+  // sync fflags/dirty_fs to csr
   io.csr.fflags := fflags
   io.csr.dirty_fs := dirty_fs
+
   // commit branch to brq
   val cfiCommitVec = VecInit(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{case(v, t) => v && CommitType.isBranch(t)})
   io.bcommit := Mux(io.commits.isWalk, 0.U, PopCount(cfiCommitVec))
 
+  // commit load/store to lsq
+  val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.LOAD))
+  val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE))
+  io.lsq.lcommit := Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec))
+  io.lsq.scommit := Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec))
+  io.lsq.pendingld := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value)
+  io.lsq.pendingst := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value)
+  io.lsq.commit := !io.commits.isWalk && io.commits.valid(0)
 
   /**
     * state changes
@@ -631,8 +648,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     wdata.commitType := req.ctrl.commitType
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest
-    wdata.lqIdx := req.lqIdx
-    wdata.sqIdx := req.sqIdx
     wdata.pc := req.cf.pc
     wdata.crossPageIPFFix := req.cf.crossPageIPFFix
     // wdata.exceptionVec := req.cf.exceptionVec

@@ -338,8 +338,6 @@ class RoqCommitInfo extends XSBundle {
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
-  val lqIdx = new LqPtr
-  val sqIdx = new SqPtr
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)

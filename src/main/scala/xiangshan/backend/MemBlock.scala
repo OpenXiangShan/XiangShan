@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import xiangshan._
 import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqLsqIO}
 import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
@@ -77,8 +77,7 @@ class MemBlockImp
 
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
-      val commits = Flipped(new RoqCommitIO) // to lsq
-      val roqDeqPtr = Input(new RoqPtr) // to lsq
+      val roq = Flipped(new RoqLsqIO) // roq to lsq
     }
 
     val toDCachePrefetch = DecoupledIO(new MissReq)
@@ -260,10 +259,9 @@ class MemBlockImp
   }
 
   // Lsq
-  lsq.io.commits        <> io.lsqio.commits
+  lsq.io.roq            <> io.lsqio.roq
   lsq.io.enq            <> io.fromCtrlBlock.enqLsq
   lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
-  lsq.io.roqDeqPtr      <> io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
   lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
