@@ -7,6 +7,8 @@
 #include <verilated_vcd_c.h>	// Trace file format header
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
+#define DIFFTEST_STORE_COMMIT
+#define NumCore 1
 
 struct EmuArgs {
   uint32_t seed;
