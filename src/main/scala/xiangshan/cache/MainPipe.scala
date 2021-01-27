@@ -168,8 +168,6 @@ class MainPipe extends DCacheModule
     when (s0_req.miss) {
       assert (full_overwrite)
     }
-    // AMO not yet finished
-    assert (s0_req.source =/= AMO_SOURCE.U)
     OneHot.checkOneHot(Seq(s0_req.miss, s0_req.probe))
   }
 
@@ -387,6 +385,61 @@ class MainPipe extends DCacheModule
 
 
   // --------------------------------------------------------------------------------
+  // LR, SC and AMO
+  val debug_sc_fail_addr = RegInit(0.U)
+  val debug_sc_fail_cnt  = RegInit(0.U(8.W))
+
+  val lrsc_count = RegInit(0.U(log2Ceil(lrscCycles).W))
+  val lrsc_valid = lrsc_count > lrscBackoff.U
+  val lrsc_addr  = Reg(UInt())
+  val s2_lr = !s2_req.probe && s2_req.source === AMO_SOURCE.U && s2_req.cmd === M_XLR
+  val s2_sc = !s2_req.probe && s2_req.source === AMO_SOURCE.U && s2_req.cmd === M_XSC
+  val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
+  val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
+  val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
+
+  val s2_can_do_amo = (s2_req.miss && !s2_req.probe && s2_req.source === AMO_SOURCE.U) || s2_amo_hit
+  val s2_can_do_amo_write = s2_can_do_amo && isWrite(s2_req.cmd) && !s2_sc_fail
+  when (s2_valid && (s2_lr || s2_sc)) {
+    when (s2_can_do_amo && s2_lr) {
+      lrsc_count := (lrscCycles - 1).U
+      lrsc_addr := get_block_addr(s2_req.addr)
+    } .otherwise {
+      lrsc_count := 0.U
+    }
+  } .elsewhen (lrsc_count > 0.U) {
+    lrsc_count := lrsc_count - 1.U
+  }
+
+  io.lrsc_locked_block.valid := lrsc_valid
+  io.lrsc_locked_block.bits  := lrsc_addr
+
+  // when we release this block,
+  // we invalidate this reservation set
+  when (io.wb_req.fire()) {
+    when (io.wb_req.bits.addr === lrsc_addr) {
+      lrsc_count := 0.U
+    }
+  }
+
+  when (s2_valid) {
+    when (s2_req.addr === debug_sc_fail_addr) {
+      when (s2_sc_fail) {
+        debug_sc_fail_cnt := debug_sc_fail_cnt + 1.U
+      } .elsewhen (s2_sc) {
+        debug_sc_fail_cnt := 0.U
+      }
+    } .otherwise {
+      when (s2_sc_fail) {
+        debug_sc_fail_addr := s2_req.addr
+        debug_sc_fail_cnt  := 1.U
+      }
+    }
+  }
+  assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
+
+
+  // --------------------------------------------------------------------------------
   // Write to DataArray
   // Miss:
   //   1. not store and not amo, data: store_data mask: store_mask(full_mask)
@@ -402,7 +455,7 @@ class MainPipe extends DCacheModule
   // which word do we need to write
   val wmask = Mux(s2_req.miss, s2_full_wmask,
       Mux(s2_store_hit, s2_store_wmask,
-      Mux(s2_amo_hit, s2_amo_wmask,
+      Mux(s2_can_do_amo_write, s2_amo_wmask,
         s2_none_wmask)))
   val need_write_data = VecInit(wmask.map(w => w.orR)).asUInt.orR
 
@@ -416,6 +469,7 @@ class MainPipe extends DCacheModule
 
   val s2_data = Mux1H(s2_way_en, s2_data_resp)
 
+  // TODO: deal with ECC errors
   val s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
       val data = s2_data(r)(encWordBits * (w + 1) - 1, encWordBits * w)
@@ -425,32 +479,44 @@ class MainPipe extends DCacheModule
     }
   }
 
-  // TODO: deal with ECC errors
   for (i <- 0 until blockRows) {
     store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
       val old_data = s2_data_decoded(i)(w)
       val new_data = s2_req.store_data(rowBits * (i + 1) - 1, rowBits * i)(wordBits * (w + 1) - 1, wordBits * w)
-      val wmask = s2_req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w)
+      // for amo hit, we should use read out SRAM data
+      // do not merge with store data
+      val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W),
+        s2_req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w))
       val store_data = mergePutData(old_data, new_data, wmask)
       store_data
     })
   }
 
+  // AMO hits
+  val s2_amo_row = store_data_merged(get_row(s2_req.addr))
+  val s2_amo_words = VecInit((0 until rowWords) map (w => s2_amo_row(wordBits * (w + 1) - 1, wordBits * w)))
+  val s2_word_idx   = if (rowWords == 1) 0.U else s2_req.addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
+  val s2_data_word = s2_amo_words(s2_word_idx)
+
+  val amoalu   = Module(new AMOALU(wordBits))
+  amoalu.io.mask := s2_req.amo_mask
+  amoalu.io.cmd  := s2_req.cmd
+  amoalu.io.lhs  := s2_data_word
+  amoalu.io.rhs  := s2_req.amo_data
+
+  // merge amo write data
   val amo_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
   for (i <- 0 until blockRows) {
-    amo_data_merged(i) := store_data_merged(i)
-  }
-  // TODO: do amo calculation
-  // and merge amo data
-  /*
-  for (i <- 0 until blockRows) {
-    store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
-      val old_data = store_data_merged(i)(w)
-      val wmask = Mux(s2_req.source === AMO_SOURCE.U && (s2_req.miss || s2_hit) && s2_req.word_idx === i.U, s2_req.amo_mask, 0.U)
-      val store_data = mergePutData(old_data, new_data, wmask)
+    amo_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
+      val old_data = store_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
+      val new_data = amoalu.io.out
+      val wmask = Mux(s2_can_do_amo_write && i.U === get_row(s2_req.addr) && w.U === s2_word_idx,
+        ~0.U(wordBytes.W), 0.U(wordBytes.W))
+      val data = mergePutData(old_data, new_data, wmask)
+      data
     })
   }
-  */
+
 
   // ECC encode data
   val wdata_merged = Wire(Vec(blockRows, UInt(encRowBits.W)))
@@ -534,8 +600,14 @@ class MainPipe extends DCacheModule
   io.store_resp.valid  := s2_fire && s2_req.source === STORE_SOURCE.U
   io.store_resp.bits   := resp
 
-  io.amo_resp.valid    := s2_fire && s2_req.source === AMO_SOURCE.U
-  io.amo_resp.bits     := resp
+  io.amo_resp.valid     := s2_fire && s2_req.source === AMO_SOURCE.U
+  io.amo_resp.bits      := resp
+  io.amo_resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word)
+  // reuse this field to pass lr sc valid to commit
+  // nemu use this to see whether lr sc counter is still valid
+  io.amo_resp.bits.id   := lrsc_valid
+
+
 
   when (io.req.fire()) {
     io.req.bits.dump()

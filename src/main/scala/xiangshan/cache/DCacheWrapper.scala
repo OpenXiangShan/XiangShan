@@ -229,11 +229,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // atomics
   // atomics not finished yet
-  io.lsu.atomics := DontCare
-  atomicsReplayUnit.io := DontCare
-
-  // sanity check
-  val atomicsReq = io.lsu.atomics.req
+  io.lsu.atomics <> atomicsReplayUnit.io.lsu
 
   //----------------------------------------
   // miss queue

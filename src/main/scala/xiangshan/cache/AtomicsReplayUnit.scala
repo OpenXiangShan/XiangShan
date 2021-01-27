@@ -18,7 +18,7 @@ class AtomicsReplayEntry extends DCacheModule
   val s_invalid :: s_pipe_req :: s_pipe_resp :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_invalid)
 
-  val req = Reg(new DCacheLineReq)
+  val req = Reg(new DCacheWordReq)
 
   // assign default values to output signals
   io.lsu.req.ready     := state === s_invalid
@@ -67,6 +67,7 @@ class AtomicsReplayEntry extends DCacheModule
   }
 
   val resp_data = Reg(UInt())
+  val resp_id   = Reg(UInt())
   when (state === s_pipe_resp) {
     // when not miss
     // everything is OK, simply send response back to sbuffer
@@ -84,6 +85,7 @@ class AtomicsReplayEntry extends DCacheModule
         }
       } .otherwise {
         resp_data := io.pipe_resp.bits.data
+        resp_id   := io.pipe_resp.bits.id
         state := s_resp
       }
     }
@@ -94,7 +96,7 @@ class AtomicsReplayEntry extends DCacheModule
     io.lsu.resp.valid := true.B
     io.lsu.resp.bits  := DontCare
     io.lsu.resp.bits.data := resp_data
-    io.lsu.resp.bits.id   := req.id
+    io.lsu.resp.bits.id   := resp_id
 
     when (io.lsu.resp.fire()) {
       state := s_invalid
