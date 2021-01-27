@@ -209,6 +209,20 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val csr = new RoqCSRIO
   })
 
+  val difftestIO = IO(new Bundle() {
+    val commit = Output(UInt(32.W))
+    val thisPC = Output(UInt(XLEN.W))
+    val thisINST = Output(UInt(32.W))
+    val skip = Output(UInt(32.W))
+    val wen = Output(UInt(32.W))
+    val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+    val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+    val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+    val isRVC = Output(UInt(32.W))
+    val scFailed = Output(Bool())
+  })
+  difftestIO <> DontCare
+
   // instvalid field
   // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val valid = Mem(RoqSize, Bool())
@@ -718,55 +732,55 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   instrCnt := instrCnt + retireCounter
   io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
 
-  if(!env.FPGAPlatform) {
+  //difftest signals
+  val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
 
-    //difftest signals
-    val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
-
-    val skip = Wire(Vec(CommitWidth, Bool()))
-    val wen = Wire(Vec(CommitWidth, Bool()))
-    val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
-    val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
-    val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
-    val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
-    val trapVec = Wire(Vec(CommitWidth, Bool()))
-    val isRVC = Wire(Vec(CommitWidth, Bool()))
-    for(i <- 0 until CommitWidth){
-      // io.commits(i).valid
-      val idx = deqPtrVec(i).value
-      val uop = debug_microOp(idx)
-      val DifftestSkipSC = false
-      if(!DifftestSkipSC){
-        skip(i) := (debug_exuDebug(idx).isMMIO || debug_exuDebug(idx).isPerfCnt) && io.commits.valid(i)
-      }else{
-        skip(i) := (
-            debug_exuDebug(idx).isMMIO ||
-            debug_exuDebug(idx).isPerfCnt ||
-            uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
-            uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
-          ) && io.commits.valid(i)
-      }
-      wen(i) := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
-      wdata(i) := debug_exuData(idx)
-      wdst(i) := uop.ctrl.ldest
-      diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
-      wpc(i) := SignExt(uop.cf.pc, XLEN)
-      trapVec(i) := io.commits.valid(i) && (state===s_idle) && uop.ctrl.isXSTrap
-      isRVC(i) := uop.cf.brUpdate.pd.isRVC
+  val skip = Wire(Vec(CommitWidth, Bool()))
+  val wen = Wire(Vec(CommitWidth, Bool()))
+  val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+  val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
+  val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
+  val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+  val trapVec = Wire(Vec(CommitWidth, Bool()))
+  val isRVC = Wire(Vec(CommitWidth, Bool()))
+  for(i <- 0 until CommitWidth) {
+    // io.commits(i).valid
+    val idx = deqPtrVec(i).value
+    val uop = debug_microOp(idx)
+    val DifftestSkipSC = false
+    if(!DifftestSkipSC){
+      skip(i) := (debug_exuDebug(idx).isMMIO || debug_exuDebug(idx).isPerfCnt) && io.commits.valid(i)
+    }else{
+      skip(i) := (
+          debug_exuDebug(idx).isMMIO ||
+          debug_exuDebug(idx).isPerfCnt ||
+          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
+          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
+        ) && io.commits.valid(i)
     }
+    wen(i) := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
+    wdata(i) := debug_exuData(idx)
+    wdst(i) := uop.ctrl.ldest
+    diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
+    wpc(i) := SignExt(uop.cf.pc, XLEN)
+    trapVec(i) := io.commits.valid(i) && (state===s_idle) && uop.ctrl.isXSTrap
+    isRVC(i) := uop.cf.brUpdate.pd.isRVC
+  }
+  val retireCounterFix = Mux(io.redirectOut.valid, 1.U, retireCounter)
+  val retirePCFix = SignExt(Mux(io.redirectOut.valid, debug_deqUop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
+  val retireInstFix = Mux(io.redirectOut.valid, debug_deqUop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
 
-    val scFailed = !diffTestDebugLrScValid(0) &&
-      debug_deqUop.ctrl.fuType === FuType.mou &&
-      (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
+  val scFailed = !diffTestDebugLrScValid(0) &&
+    debug_deqUop.ctrl.fuType === FuType.mou &&
+    (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
+
+  if (!env.FPGAPlatform) {
 
     val difftestIntrNO = WireInit(0.U(XLEN.W))
     val difftestCause = WireInit(0.U(XLEN.W))
     ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
     ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
     XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
-    val retireCounterFix = Mux(io.redirectOut.valid, 1.U, retireCounter)
-    val retirePCFix = SignExt(Mux(io.redirectOut.valid, debug_deqUop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
-    val retireInstFix = Mux(io.redirectOut.valid, debug_deqUop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
 
     ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
@@ -794,5 +808,18 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(EnableBPU){
       ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
     }
+  }
+
+  if (env.DualCoreDifftest) {
+    difftestIO.commit := RegNext(retireCounterFix)
+    difftestIO.thisPC := RegNext(retirePCFix)
+    difftestIO.thisINST := RegNext(retireInstFix)
+    difftestIO.skip := RegNext(skip.asUInt)
+    difftestIO.wen := RegNext(wen.asUInt)
+    difftestIO.wdata := RegNext(wdata)
+    difftestIO.wdst := RegNext(wdst)
+    difftestIO.wpc := RegNext(wpc)
+    difftestIO.isRVC := RegNext(isRVC.asUInt)
+    difftestIO.scFailed := RegNext(scFailed)
   }
 }

@@ -263,6 +263,10 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
 
+  // use s2_hit_way to select data received in s1
+  load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
+  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
+
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")

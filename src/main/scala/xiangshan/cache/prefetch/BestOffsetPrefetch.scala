@@ -167,7 +167,7 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  val rwConflict = io.w.fire() && io.r.req.fire() && idx(wAddr) === idx(rAddr)
+  val rwConflict = io.w.fire() && io.r.req.fire()// && idx(wAddr) === idx(rAddr)
   // when (rwConflict) {
   //   rrTable.io.r.req.valid := false.B
   // }
@@ -295,7 +295,7 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   XSDebug(io.req.fire(), p"receive req from L1. io.req.bits=0x${Hexadecimal(io.req.bits)}\n")
 }
 
-class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
+class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule with HasTlbConst {
   val io = IO(new Bundle {
     val id = Input(UInt(p.totalWidth.W))
     val prefetchOffset = Input(UInt(p.offsetWidth.W))
@@ -305,19 +305,27 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
   })
 
   def blockBytes = p.blockBytes
-  def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
+  def getBlock(addr: UInt) = addr(PAddrBits - 1, log2Up(blockBytes))
+  def getBlockAddr(addr: UInt) = Cat(getBlock(addr), 0.U(log2Up(blockBytes).W))
+  def getPageNum(addr: UInt) = addr(PAddrBits - 1, offLen)
 
   val s_idle :: s_req :: s_resp :: s_write_recent_req :: s_finish :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val req = RegInit(0.U.asTypeOf(new PrefetchReq))
   val baseAddr = RegInit(0.U(PAddrBits.W))
+  val baseBlock = getBlock(io.pft.train.bits.addr)
+  val nextBlock = baseBlock + io.prefetchOffset
+  val nextAddr = Cat(nextBlock, 0.U(log2Up(blockBytes).W))
+  val crossPage = getPageNum(nextAddr) =/= getPageNum(io.pft.train.bits.addr)
 
   when (state === s_idle) {
     when (io.pft.train.valid) {
-      state := s_req
-      req.addr := getBlockAddr(io.pft.train.bits.addr) + (io.prefetchOffset << log2Up(blockBytes))
+      // state := s_req
+      state := Mux(crossPage, s_idle, s_req)
+      req.addr := nextAddr
       req.write := io.pft.train.bits.write
       baseAddr := getBlockAddr(io.pft.train.bits.addr)
+      XSDebug(crossPage, p"prefetch addr 0x${nextAddr} cross page, ignore this!\n")
     }
   }
 
@@ -357,7 +365,7 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule {
   io.writeRRTable.valid := state === s_write_recent_req
   io.writeRRTable.bits := baseAddr // write this into recent request table
 
-  XSDebug(p"bopEntry ${io.id}: state=${state} prefetchOffset=${io.prefetchOffset} inflight=${io.inflight.valid} 0x${Hexadecimal(io.inflight.bits)} writeRRTable: ${io.writeRRTable.valid} 0x${Hexadecimal(io.writeRRTable.bits)} baseAddr=0x${Hexadecimal(baseAddr)} req: ${req}\n")
+  XSDebug(p"bopEntry ${io.id}: state=${state} prefetchOffset=${io.prefetchOffset} inflight=${io.inflight.valid} 0x${Hexadecimal(io.inflight.bits)} writeRRTable: ${io.writeRRTable.valid} 0x${Hexadecimal(io.writeRRTable.bits)} baseAddr=0x${Hexadecimal(baseAddr)} nextAddr=0x${Hexadecimal(nextAddr)} crossPage=${crossPage} req: ${req}\n")
   XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
 }
 
