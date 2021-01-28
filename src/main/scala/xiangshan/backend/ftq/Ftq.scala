@@ -122,7 +122,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val lastIsMispredict = RegNext(
     io.redirect.valid && io.redirect.bits.level === RedirectLevel.flushAfter, init = false.B
   )
-  when(io.frontendRedirect.valid && !lastIsMispredict) {
+  when(io.frontendRedirect.valid && lastIsMispredict) {
     target_vec(io.frontendRedirect.bits.ftqIdx.value) := io.frontendRedirect.bits.cfiUpdate.target
   }
 
