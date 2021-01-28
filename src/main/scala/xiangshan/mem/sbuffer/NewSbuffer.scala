@@ -195,14 +195,24 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   // firstInsert: the first invalid entry
   // if first entry canMerge or second entry has the same tag with the first entry , secondInsert equal the first invalid entry, otherwise, the second invalid entry
   val invalidMask = stateRead.map(s => s === s_invalid)
-  val firstInsertMask = PriorityEncoderOH(invalidMask)
-  val secondInsertMask = Wire(Vec(StoreBufferSize, Bool()))
-  for (i <- 0 until StoreBufferSize){
-    secondInsertMask(i) := Mux(canMerge(0) || sameTag, firstInsertMask(i), invalidMask(i) - firstInsertMask(i))
+  val evenInvalidMask = GetEvenBits(VecInit(invalidMask).asUInt)
+  val oddInvalidMask = GetOddBits(VecInit(invalidMask).asUInt)
+
+  val (evenRawInsertIdx, evenCanInsert) = PriorityEncoderWithFlag(evenInvalidMask)
+  val (oddRawInsertIdx, oddCanInsert) = PriorityEncoderWithFlag(oddInvalidMask)
+  val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W))
+  val oddInsertIdx = Cat(oddRawInsertIdx, 1.U(1.W))
+
+  val enbufferSelReg = RegInit(false.B)
+  when(io.in(0).valid) {
+    enbufferSelReg := ~enbufferSelReg
   }
 
-  val (firstInsertIdx, firstCanInsert) = PriorityEncoderWithFlag(invalidMask)
-  val (secondInsertIdx, secondCanInsert) = PriorityEncoderWithFlag(secondInsertMask)
+  val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)
+  val secondInsertIdx = Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
+
+  val firstCanInsert = Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
+  val secondCanInsert = Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
 
   io.in(0).ready := firstCanInsert || canMerge(0)
   io.in(1).ready := (secondCanInsert || canMerge(1)) && !sameWord && io.in(0).ready
