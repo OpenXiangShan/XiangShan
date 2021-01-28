@@ -81,18 +81,18 @@ class RAS extends BasePredictor
         })
 
         val stack = Mem(RasSize, new RASEntry)
-        val sp = RegInit(1.U((log2Up(rasSize) + 1).W))
+        val sp = RegInit(0.U(log2Up(rasSize).W))
         val top = RegInit(0.U.asTypeOf(new RASEntry))
-        val topPtr = RegInit(0.U((log2Up(rasSize) + 1).W))
+        val topPtr = RegInit(0.U(log2Up(rasSize).W))
         
-        def full(sp: UInt = sp) = sp === 0.U
-        def empty(sp: UInt = sp) = sp === (RasSize - 1).U
-        val is_empty = empty()
+        def full(sp: UInt = sp) = sp === (RasSize - 1).U
+        def empty(sp: UInt = sp) = sp === 0.U
         val is_full  = full()
+        val is_empty = empty()
         val alloc_new = io.spec_new_addr =/= top.retAddr
         val recover_alloc_new = io.recover_new_addr =/= io.recover_top.retAddr
 
-
+        // TODO: fix overflow and underflow bugs
         def update(recover: Bool)(do_push: Bool, do_pop: Bool, do_alloc_new: Bool,
             do_sp: UInt, do_top_ptr: UInt, do_new_addr: UInt,
             do_top: RASEntry) = {
@@ -114,8 +114,8 @@ class RAS extends BasePredictor
                     }
                 }.elsewhen (do_pop) {
                     when (do_top.ctr === 1.U) {
-                        sp     := Mux(empty(do_sp), do_sp,       do_sp - 1.U)
-                        topPtr := Mux(empty(do_sp), do_sp - 1.U, do_sp - 2.U)
+                        sp     := Mux(empty(do_sp), 0.U, do_sp - 1.U)
+                        topPtr := Mux(empty(do_sp), 0.U, do_top_ptr - 1.U)
                         top := stack.read(do_top_ptr - 1.U)
                     }.otherwise {
                         when (recover) {
