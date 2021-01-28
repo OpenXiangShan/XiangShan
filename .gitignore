@@ -349,3 +349,5 @@ mill.rdiB
 stale_outputs_checked
 
 *.snapshot
+__pycache__
+
