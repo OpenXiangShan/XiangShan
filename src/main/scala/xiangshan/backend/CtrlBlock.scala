@@ -196,6 +196,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   difftestIO <> DontCare
 
   val ftq = Module(new Ftq)
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
+
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
@@ -323,6 +326,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   if (env.DualCoreDifftest) {
     difftestIO.fromRoq <> roq.difftestIO
+    trapIO <> roq.trapIO
   }
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
