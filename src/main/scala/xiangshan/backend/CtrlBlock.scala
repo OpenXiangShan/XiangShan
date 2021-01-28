@@ -45,6 +45,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
+    val flush = Input(Bool())
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
@@ -109,7 +110,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s1_redirect_valid_reg = RegInit(false.B)
 
   // stage1 -> stage2
-  when(oldestMispredict.valid && !oldestMispredict.bits.roqIdx.needFlush(io.stage2Redirect, false.B)){
+  when(oldestMispredict.valid && !oldestMispredict.bits.roqIdx.needFlush(io.stage2Redirect, io.flush)){
     s1_redirect_bits_reg := oldestMispredict.bits
     s1_redirect_valid_reg := true.B
   }.otherwise({
@@ -127,7 +128,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s2_imm12_reg = RegEnable(s1_imm12_reg, s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, s1_redirect_valid_reg)
   val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, enable = s1_redirect_valid_reg)
-  val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg, init = false.B)
+  val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
 
   val ftqRead = io.stage2FtqRead.entry
   val pc = GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset, ftqRead.hasLastPrev)
@@ -215,6 +216,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     x.bits := y.bits
   })
   redirectGen.io.loadRelay := io.fromLsBlock.replay
+  redirectGen.io.flush := flush
 
   ftq.io.enq <> io.frontend.fetchInfo
   for(i <- 0 until CommitWidth){
@@ -227,9 +229,24 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   ftq.io.exuWriteback <> io.fromIntBlock.exuRedirect
 
   ftq.io.ftqRead(1) <> redirectGen.io.stage2FtqRead
-  ftq.io.ftqRead(2) <> DontCare // TODO: read exception pc form here
+  ftq.io.ftqRead(2).ptr := roq.io.flushOut.bits.ftqIdx
+  val flushPC = GetPcByFtq(
+    ftq.io.ftqRead(2).entry.ftqPC,
+    RegEnable(roq.io.flushOut.bits.ftqOffset, roq.io.flushOut.valid),
+    ftq.io.ftqRead(2).entry.hasLastPrev
+  )
 
-  io.frontend.redirect_cfiUpdate := frontendRedirect
+  val flushRedirect = Wire(Valid(new Redirect))
+  flushRedirect.valid := RegNext(flush)
+  flushRedirect.bits := DontCare
+  flushRedirect.bits.ftqIdx := RegEnable(roq.io.flushOut.bits.ftqIdx, flush)
+  flushRedirect.bits.interrupt := true.B
+  flushRedirect.bits.cfiUpdate.target := Mux(RegEnable(roq.io.flushOut.bits.isException, flush),
+    RegEnable(io.roqio.toCSR.trapTarget, flush),
+    flushPC + 4.U
+  )
+
+  io.frontend.redirect_cfiUpdate := Mux(flushRedirect.valid, flushRedirect, frontendRedirect)
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
   io.frontend.ftqEnqPtr := ftq.io.enqPtr
   io.frontend.ftqLeftOne := ftq.io.leftOne
@@ -314,6 +331,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
   io.roqio.exception := roq.io.exception
+  io.roqio.exception.bits.uop.cf.pc := flushPC
   // roq to mem block
   io.roqio.lsq <> roq.io.lsq
 }
