@@ -6,7 +6,7 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
+import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.Regfile
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
@@ -124,66 +124,60 @@ class IntegerBlock
     val readIntRf = cfg.readIntRf
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(_.io.toInt.bits.data)
-    val writeBackData = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
-    val wakeupCnt = writeBackData.length
+    val fastDatas = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
+    val wakeupCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(_.io.toInt)
-    val extraListenPorts = inBlockListenPorts ++ io.wakeUpIn.slow
-    val extraListenPortsCnt = extraListenPorts.length
+    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow
+    val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
 
-    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
+    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    // val rs = Module(new ReservationStationNew(
-    //   cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback
-    // ))
-    val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
-    val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
 
-    rsCtrl.io.data <> rsData.io.ctrl
-    rsCtrl.io.redirect <> redirect // TODO: remove it
-    rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
-    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rs.io.redirect <> redirect
+    rs.io.numExist <> io.toCtrlBlock.numExist(i)
+    rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
 
-    rsData.io.srcRegValue := DontCare
+    rs.io.srcRegValue := DontCare
     val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
     val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
-    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg == Exu.jumpExeUnitCfg) rsData.io.jumpPc := io.fromCtrlBlock.jumpPc
-    rsData.io.redirect <> redirect
+    rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    if (cfg.intSrcCnt > 1) rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    if (cfg == Exu.jumpExeUnitCfg) rs.io.jumpPc := io.fromCtrlBlock.jumpPc
+    rs.io.redirect <> redirect
 
-    rsData.io.writeBackedData <> writeBackData
-    for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
+    rs.io.fastDatas <> fastDatas
+    for ((x, y) <- rs.io.slowPorts.zip(slowPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
     }
 
     exeUnits(i).io.redirect <> redirect
-    exeUnits(i).io.fromInt <> rsData.io.deq
-    rsData.io.feedback := DontCare
+    exeUnits(i).io.fromInt <> rs.io.deq
+    rs.io.feedback := DontCare
 
-    rsCtrl.suggestName(s"rsc_${cfg.name}")
-    rsData.suggestName(s"rsd_${cfg.name}")
+    rs.suggestName(s"rs_${cfg.name}")
 
-    rsData
+    rs
   })
 
   for(rs <- reservationStations){
     val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeIntRf
     ).map(x => {
-      val raw = WireInit(x.io.selectedUop)
-      raw.valid := x.io.selectedUop.valid && raw.bits.ctrl.rfWen
+      val raw = WireInit(x.io.fastUopOut)
+      raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.rfWen
       raw
     })
-    rs.io.broadcastedUops <> inBlockUops ++ io.wakeUpIn.fastUops
+    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops
   }
 
   io.wakeUpFpOut.fastUops <> reservationStations.filter(
     rs => fpFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop).map(fpValid)
+  ).map(_.io.fastUopOut).map(fpValid)
 
   io.wakeUpFpOut.fast <> exeUnits.filter(
     x => fpFastFilter(x.config)
@@ -195,7 +189,7 @@ class IntegerBlock
 
   io.wakeUpIntOut.fastUops <> reservationStations.filter(
     rs => intFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop).map(intValid)
+  ).map(_.io.fastUopOut).map(intValid)
 
   io.wakeUpIntOut.fast <> exeUnits.filter(
     x => intFastFilter(x.config)

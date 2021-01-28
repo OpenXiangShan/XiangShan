@@ -95,7 +95,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def lastHalfRVIIdx = (PredictWidth-1).U
   // should not be used if not lastHalfRVITaken
   def lastHalfRVITarget = targets(PredictWidth-1)
-  
+
   def realTakens  = takens  & lastHalfRVIClearMask
   def realBrMask  = brMask  & lastHalfRVIClearMask
   def realJalMask = jalMask & lastHalfRVIClearMask
@@ -229,7 +229,7 @@ class CtrlSignals extends XSBundle {
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
     val signals =
-      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen, 
+      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen,
           isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
     signals zip decoder map { case(s, d) => s := d }
     commitType := DontCare
@@ -359,6 +359,8 @@ class TlbFeedback extends XSBundle {
   val hit = Bool()
 }
 
+class RSFeedback extends TlbFeedback
+
 class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
@@ -382,7 +384,7 @@ class TlbCsrBundle extends XSBundle {
   }
 
   override def toPrintable: Printable = {
-    p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " + 
+    p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
     p"Priv mxr:${priv.mxr} sum:${priv.sum} imode:${priv.imode} dmode:${priv.dmode}"
   }
 }
