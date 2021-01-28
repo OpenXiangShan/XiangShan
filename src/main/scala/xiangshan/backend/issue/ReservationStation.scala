@@ -422,7 +422,7 @@ class ReservationStationCtrl
     Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, 1))
   }
 
-  uop.io.raddr(0) := RegNext(io.sel.bits)
+  uop.io.raddr(0) := (if (fastWakeup) RegNext(io.sel.bits) else io.sel.bits)
   io.out.valid    := RegNext(io.sel.valid && ~redirectHit)
   io.out.bits     := uop.io.rdata(0)
   uop.io.wen(0)   := io.in.valid
@@ -478,7 +478,7 @@ class ReservationStationCtrl
   psrc.zip(enqSrcSeq).map{ case (p,s) => p.w.bits.data := s }
 
   // TODO: later, only store will need psrcType
-  val psrcType = Reg(Vec(srcNum, Vec(iqSize, Bool()))) // fp: true | other: false
+  val psrcType = Reg(Vec(srcNum, Vec(iqSize, Bool()))) // fp: false | other: true
   (0 until srcNum).foreach{ i =>
     when (enqEn) {
       psrcType(i)(enqPtr) := enqSrcTypeSeq(i) =/= SrcType.fp
@@ -493,8 +493,8 @@ class ReservationStationCtrl
 
   def listenHitEntry(src: Int, port: Int, addr: Int, uop: MicroOp): Bool = {
     entryListenHit(src)(port)(addr) &&
-    ((!psrcType(src)(addr) && uop.ctrl.rfWen && !srcIsZero(src)(addr)) ||
-     (psrcType(src)(addr)  && uop.ctrl.fpWen))
+    ((psrcType(src)(addr) && uop.ctrl.rfWen && !srcIsZero(src)(addr)) ||
+     (!psrcType(src)(addr)  && uop.ctrl.fpWen))
   }
 
   for (j <- 0 until srcNum) {
