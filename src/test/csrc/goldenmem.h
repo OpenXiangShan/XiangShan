@@ -27,7 +27,7 @@ typedef uint64_t word_t;
 // #define PMEM_SIZE (256 * 1024 * 1024UL) 
 
 void init_goldenmem();
-void update_goldenmem(paddr_t addr, void *data, uint64_t mask);
+void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len);
 void read_goldenmem(paddr_t addr, void *data, uint64_t len);
 
 /* convert the guest physical address in the guest program to host virtual address in NEMU */

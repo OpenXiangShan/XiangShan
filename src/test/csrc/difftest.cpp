@@ -199,9 +199,9 @@ int difftest_step(DiffState *s, int coreid) {
 
           if (s->lfu[i] == 0xC || s->lfu[i] == 0xF) {  // Load instruction
             ref_difftest_getregs(&ref_r, coreid);
-            if (ref_r[s->wdst[i]] != s->wdata[i]) {
-              printf("[DIFF] This load instruction gets fucked!\n");
-              printf("[DIFF] ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
+            if (ref_r[s->wdst[i]] != s->wdata[i] && selectBit(s->wen, i) != 0) {
+              printf("---[DIFF Core%d] This load instruction gets fucked!\n", coreid);
+              printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
               uint64_t golden;
               int len = 0;
               if (s->lfu[i] == 0xC) {
@@ -220,7 +220,7 @@ int difftest_step(DiffState *s, int coreid) {
                 }
               }
               read_goldenmem(s->lpaddr[i], &golden, len);
-              printf("[DIFF] golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
+              printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
               if (golden == s->wdata[i]) {
                 // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
                 ref_difftest_memcpy_from_dut(s->lpaddr[i], &golden, len, coreid);

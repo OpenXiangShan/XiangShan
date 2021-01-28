@@ -14,9 +14,9 @@ void init_goldenmem() {
   }
 }
 
-void update_goldenmem(paddr_t addr, void *data, uint64_t mask) {
+void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len) {
   uint8_t *dataArray = (uint8_t*)data;
-  for (int i = 0; i < 64; i++) {
+  for (int i = 0; i < len; i++) {
 		if (((mask >> i) & 1) != 0) {
 			paddr_write(addr + i, dataArray[i], 1);
 		}

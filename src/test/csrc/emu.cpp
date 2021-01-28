@@ -563,13 +563,26 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       read_sbuffer_info(sbufferData);
       uint64_t sbufferAddr = dut_ptr->io_difftest_sbufferAddr;
       uint64_t sbufferMask = dut_ptr->io_difftest_sbufferMask;
-      update_goldenmem(sbufferAddr, sbufferData, sbufferMask);
+      update_goldenmem(sbufferAddr, sbufferData, sbufferMask, 64);
     }
     if (dut_ptr->io_difftest2_sbufferResp) {
       read_sbuffer_info2(sbufferData);
       uint64_t sbufferAddr = dut_ptr->io_difftest2_sbufferAddr;
       uint64_t sbufferMask = dut_ptr->io_difftest2_sbufferMask;
-      update_goldenmem(sbufferAddr, sbufferData, sbufferMask);
+      update_goldenmem(sbufferAddr, sbufferData, sbufferMask, 64);
+    }
+
+    if (dut_ptr->io_difftest_atomicResp) {
+      uint64_t* atomicData = &dut_ptr->io_difftest_atomicData;
+      uint64_t atomicAddr = dut_ptr->io_difftest_atomicAddr;
+      uint64_t atomicMask = dut_ptr->io_difftest_atomicMask;
+      update_goldenmem(atomicAddr, atomicData, atomicMask, 8);
+    }
+    if (dut_ptr->io_difftest2_atomicResp) {
+      uint64_t* atomicData = &dut_ptr->io_difftest2_atomicData;
+      uint64_t atomicAddr = dut_ptr->io_difftest2_atomicAddr;
+      uint64_t atomicMask = dut_ptr->io_difftest2_atomicMask;
+      update_goldenmem(atomicAddr, atomicData, atomicMask, 8);
     }
 
     uint32_t t = uptime();
