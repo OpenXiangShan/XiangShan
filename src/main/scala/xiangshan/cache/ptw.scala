@@ -119,6 +119,7 @@ class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
   val tag  = UInt(tagLen.W)
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
+  // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
   def tagClip(addr: UInt) = {
     require(addr.getWidth==PAddrBits)
@@ -199,6 +200,7 @@ class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   val ppns    = Vec(num, UInt(ppnLen.W))
   val perms    = Vec(num, new PtePermBundle)
   val vs      = Vec(num, Bool())
+  // println(s"L2TlbEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} perms:${num}*${(new PtePermBundle).asUInt.getWidth} vs:${num}*1")
 
   def tagClip(vpn: UInt) = { // full vpn => tagLen
     vpn(vpn.getWidth-1, vpn.getWidth-tagLen)

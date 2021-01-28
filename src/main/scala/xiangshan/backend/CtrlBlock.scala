@@ -11,7 +11,7 @@ import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -52,10 +52,28 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val exception = ValidIO(new MicroOp)
       val isInterrupt = Output(Bool())
       // to mem block
-      val commits = new RoqCommitIO
-      val roqDeqPtr = Output(new RoqPtr)
+      val lsq = new RoqLsqIO
     }
   })
+
+  val difftestIO = IO(new Bundle() {
+    val fromRoq = new Bundle() {
+      val commit = Output(UInt(32.W))
+      val thisPC = Output(UInt(XLEN.W))
+      val thisINST = Output(UInt(32.W))
+      val skip = Output(UInt(32.W))
+      val wen = Output(UInt(32.W))
+      val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+      val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val isRVC = Output(UInt(32.W))
+      val scFailed = Output(Bool())
+    }
+  })
+  difftestIO <> DontCare
+
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -145,6 +163,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   roq.io.exeWbResults.last := brq.io.out
 
+  if (env.DualCoreDifftest) {
+    difftestIO.fromRoq <> roq.difftestIO
+    trapIO <> roq.trapIO
+  }
+
   io.toIntBlock.redirect.valid := redirectValid
   io.toIntBlock.redirect.bits := redirect
   io.toFpBlock.redirect.valid := redirectValid
@@ -161,6 +184,5 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.roqio.exception.bits := roq.io.exception
   io.roqio.isInterrupt := roq.io.redirectOut.bits.interrupt
   // roq to mem block
-  io.roqio.roqDeqPtr := roq.io.roqDeqPtr
-  io.roqio.commits := roq.io.commits
+  io.roqio.lsq <> roq.io.lsq
 }

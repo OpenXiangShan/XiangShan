@@ -145,6 +145,29 @@ class CSR extends FunctionUnit with HasCSRConst
     // TLB
     val tlb = Output(new TlbCsrBundle)
   })
+  val difftestIO = IO(new Bundle() {
+    val intrNO = Output(UInt(64.W))
+    val cause = Output(UInt(64.W))
+    val priviledgeMode = Output(UInt(2.W))
+    val mstatus = Output(UInt(64.W))
+    val sstatus = Output(UInt(64.W))
+    val mepc = Output(UInt(64.W))
+    val sepc = Output(UInt(64.W))
+    val mtval = Output(UInt(64.W))
+    val stval = Output(UInt(64.W))
+    val mtvec = Output(UInt(64.W))
+    val stvec = Output(UInt(64.W))
+    val mcause = Output(UInt(64.W))
+    val scause = Output(UInt(64.W))
+    val satp = Output(UInt(64.W))
+    val mip = Output(UInt(64.W))
+    val mie = Output(UInt(64.W))
+    val mscratch = Output(UInt(64.W))
+    val sscratch = Output(UInt(64.W))
+    val mideleg = Output(UInt(64.W))
+    val medeleg = Output(UInt(64.W))
+  })
+  difftestIO <> DontCare
 
   val cfIn = io.in.bits.uop.cf
   val cfOut = Wire(new CtrlFlow)
@@ -812,24 +835,34 @@ class CSR extends FunctionUnit with HasCSRConst
     "btbWrong"    -> (0x1033, "perfCntbtbWrong"),
     "tageRight"   -> (0x1034, "perfCnttageRight"),
     "tageWrong"   -> (0x1035, "perfCnttageWrong"),
-    "loopRight"   -> (0x1036, "perfCntloopRight"),
-    "loopWrong"   -> (0x1037, "perfCntloopWrong")
+    "rasRight"    -> (0x1036, "perfCntrasRight"),
+    "rasWrong"    -> (0x1037, "perfCntrasWrong"),
+    "loopRight"   -> (0x1038, "perfCntloopRight"),
+    "loopWrong"   -> (0x1039, "perfCntloopWrong"),
+    "s1Right"     -> (0x103a, "perfCntS1Right"),
+    "s1Wrong"     -> (0x103b, "perfCntS1Wrong"),
+    "s2Right"     -> (0x103c, "perfCntS2Right"),
+    "s2Wrong"     -> (0x103d, "perfCntS2Wrong"),
+    "s3Right"     -> (0x103e, "perfCntS3Right"),
+    "s3Wrong"     -> (0x103f, "perfCntS3Wrong"),
+    "takenAndRight" -> (0x1040, "perfCntTakenAndRight"),
+    "takenButWrong" -> (0x1041, "perfCntTakenButWrong"),
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
-    (0 until dcacheParameters.nMissEntries).map(i =>
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    (0 until dcacheParameters.nMissEntries).map(i => 
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x1042 + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 
@@ -845,13 +878,15 @@ class CSR extends FunctionUnit with HasCSRConst
       //   }
       // }
   }
-
+  
   val xstrap = WireInit(false.B)
   if (!env.FPGAPlatform && EnableBPU) {
     ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
   }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
+  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+  
   if (!env.FPGAPlatform) {
 
     // display all perfcnt when nooptrap is executed
@@ -862,7 +897,6 @@ class CSR extends FunctionUnit with HasCSRConst
       }
     }
 
-    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
     ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
     ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
@@ -883,5 +917,28 @@ class CSR extends FunctionUnit with HasCSRConst
     ExcitingUtils.addSource(sscratch, "difftestSscratch", Debug)
     ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
     ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
+  }
+
+  if (env.DualCoreDifftest) {
+    difftestIO.intrNO := RegNext(difftestIntrNO)
+    difftestIO.cause := RegNext(causeNO)
+    difftestIO.priviledgeMode := priviledgeMode
+    difftestIO.mstatus := mstatus
+    difftestIO.sstatus := mstatus & sstatusRmask
+    difftestIO.mepc := mepc
+    difftestIO.sepc := sepc
+    difftestIO.mtval:= mtval
+    difftestIO.stval:= stval
+    difftestIO.mtvec := mtvec
+    difftestIO.stvec := stvec
+    difftestIO.mcause := mcause
+    difftestIO.scause := scause
+    difftestIO.satp := satp
+    difftestIO.mip := mipReg
+    difftestIO.mie := mie
+    difftestIO.mscratch := mscratch
+    difftestIO.sscratch := sscratch
+    difftestIO.mideleg := mideleg
+    difftestIO.medeleg := medeleg
   }
 }
