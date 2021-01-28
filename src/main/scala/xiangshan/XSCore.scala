@@ -187,6 +187,7 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
+    replacer = Some("setlru"),
     nMissEntries = 2
   )
 
