@@ -127,7 +127,6 @@ class CSR extends FunctionUnit with HasCSRConst
 {
   val csrio = IO(new Bundle {
     // output (for func === CSROpType.jmp)
-    val redirectOut = ValidIO(UInt(VAddrBits.W))
     val perf = new PerfCounterIO
     val isPerfCnt = Output(Bool())
     // to FPU
@@ -135,6 +134,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // from rob
     val exception = Flipped(ValidIO(new RoqExceptionInfo))
     // to ROB
+    val isXRet = Output(Bool())
     val trapTarget = Output(UInt(VAddrBits.W))
     val interrupt = Output(Bool())
     // from LSQ
@@ -613,10 +613,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  csrio.redirectOut.valid := valid && func === CSROpType.jmp && !isEcall
-  csrio.redirectOut.bits := retTarget
-  flushPipe := resetSatp
-  XSDebug(csrio.redirectOut.valid, "redirect to %x, pc=%x\n", csrio.redirectOut.bits, cfIn.pc)
+  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall)
 
   retTarget := DontCare
   // val illegalEret = TODO
@@ -657,11 +654,6 @@ class CSR extends FunctionUnit with HasCSRConst
     mstatus := mstatusNew.asUInt
     retTarget := uepc(VAddrBits-1, 0)
   }
-
-  XSDebug(csrio.redirectOut.valid,
-    "Rediret %x isSret:%d retTarget:%x sepc:%x cfInpc:%x valid:%d\n",
-    csrio.redirectOut.bits, isSret, retTarget, sepc, cfIn.pc, valid
-  )
 
   io.in.ready := true.B
   io.out.valid := valid
@@ -752,9 +744,14 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
-  val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
+  val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  csrio.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  val isXRet = func === CSROpType.jmp && !isEcall
+  csrio.isXRet := RegNext(isXRet)
+  csrio.trapTarget := RegNext(Mux(csrio.isXRet,
+    retTarget,
+    Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  ))
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -781,11 +778,6 @@ class CSR extends FunctionUnit with HasCSRConst
     mstatus := mstatusNew.asUInt
   }
 
-  XSDebug(raiseExceptionIntr && delegS,
-    "Red(%d, %x) raiseExcepIntr:%d isSret:%d sepc:%x delegs:%d deleg:%x\n",
-    csrio.redirectOut.valid, csrio.redirectOut.bits, raiseExceptionIntr,
-    isSret, sepc, delegS, deleg
-  )
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
 
 

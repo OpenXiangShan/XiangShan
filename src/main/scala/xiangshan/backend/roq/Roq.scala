@@ -36,6 +36,7 @@ object RoqPtr extends HasXSParameter {
 class RoqCSRIO extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
+  val isXRet = Input(Bool())
 
   val fflags = Output(Valid(UInt(5.W)))
   val dirty_fs = Output(Bool())
@@ -213,7 +214,6 @@ class RoqExceptionInfo extends XSBundle {
 class RoqFlushInfo extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isException = Bool()
 }
 
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
@@ -385,7 +385,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val isFlushPipe = writebacked(deqPtr.value) && deqWritebackData.flushPipe
 
   io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
-  io.flushOut.bits.isException := intrEnable || exceptionEnable
   io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
   io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
 
