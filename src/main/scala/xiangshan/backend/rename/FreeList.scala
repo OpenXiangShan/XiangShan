@@ -33,7 +33,8 @@ object FreeListPtr extends HasFreeListConsts {
 
 class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrHelper{
   val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
+    val redirect = Input(Bool())
+    val flush = Input(Bool())
 
     val req = new Bundle {
       // need to alloc (not actually do the allocation)
@@ -99,16 +100,15 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
-  headPtr := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
+  headPtr := Mux(io.flush,
     FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
     Mux(io.walk.valid,
       headPtr - io.walk.bits,
-      Mux(io.redirect.valid, headPtr, headPtrNext))
+      Mux(io.redirect, headPtr, headPtrNext))
   )
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
-  XSDebug(io.redirect.valid, p"redirect\n")
 
   val enableFreelistCheck = false
   if (enableFreelistCheck) {

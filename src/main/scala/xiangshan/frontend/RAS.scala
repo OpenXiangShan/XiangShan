@@ -116,7 +116,7 @@ class RAS extends BasePredictor
                     when (do_top.ctr === 1.U) {
                         sp     := Mux(empty(do_sp), do_sp,       do_sp - 1.U)
                         topPtr := Mux(empty(do_sp), do_sp - 1.U, do_sp - 2.U)
-                        top := stack.read(do_top_ptr)
+                        top := stack.read(do_top_ptr - 1.U)
                     }.otherwise {
                         when (recover) {
                             sp := do_sp

@@ -595,7 +595,6 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     XSDebug("[IF2] v=%d r=%d fire=%d cango=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_can_go, if2_redirect, if2_flush, if2_pc, if2_snpc)
     XSDebug("[IF3] v=%d r=%d fire=%d cango=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_can_go, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
-    XSDebug("[predictor] predictor_s3=%d, predictor_s4=%d, predictor=%d\n", predictor_s3, predictor_s4, predictor)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", icache.io.req.valid, icache.io.req.ready, icache.io.req.bits.addr)
     XSDebug("[IF1][ghr] hist=%b\n", if1_gh.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", if1_gh.asUInt)

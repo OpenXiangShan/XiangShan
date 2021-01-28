@@ -8,16 +8,12 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
-import freechips.rocketchip.rocket.{CSR,Causes}
 import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 
 import xiangshan._
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.decode.Instructions._
-import freechips.rocketchip.tile.RocketTile
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -422,7 +418,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
-  cs.lsrc1 := Mux(ctrl_flow.instr === LUI || cs.src1Type === SrcType.pc, 0.U, ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc1 := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
   cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
   cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location

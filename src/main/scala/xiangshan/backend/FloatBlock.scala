@@ -37,6 +37,7 @@ class FloatBlock
   })
 
   val redirect = io.fromCtrlBlock.redirect
+  val flush = io.fromCtrlBlock.flush
 
   val fpRf = Module(new Regfile(
     numReadPorts = NRFpReadPorts,
@@ -86,6 +87,7 @@ class FloatBlock
 
     rsCtrl.io.data <> rsData.io.ctrl
     rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.flush <> flush // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
@@ -98,6 +100,7 @@ class FloatBlock
     rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
     if (cfg.fpSrcCnt > 2) rsData.io.srcRegValue(2) := src3Value(readPortIndex(i))
     rsData.io.redirect <> redirect
+    rsData.io.flush <> flush
 
     rsData.io.writeBackedData <> writeBackData
     for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
@@ -106,6 +109,7 @@ class FloatBlock
     }
 
     exeUnits(i).io.redirect <> redirect
+    exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromFp <> rsData.io.deq
     rsData.io.feedback := DontCare
 
