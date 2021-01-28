@@ -11,7 +11,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.ftq.{Ftq, FtqRead, GetPcByFtq}
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr, RoqExceptionInfo}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -22,6 +22,7 @@ class CtrlToIntBlockIO extends XSBundle {
   // int block only uses port 0~7
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -30,19 +31,20 @@ class CtrlToFpBlockIO extends XSBundle {
   // fp block uses port 0~11
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
+  val flush = Output(Bool())
 }
 
 class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    val roqRedirect = Flipped(ValidIO(new Redirect))
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
@@ -107,7 +109,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s1_redirect_valid_reg = RegInit(false.B)
 
   // stage1 -> stage2
-  when(oldestMispredict.valid && !oldestMispredict.bits.roqIdx.needFlush(io.stage2Redirect)){
+  when(oldestMispredict.valid && !oldestMispredict.bits.roqIdx.needFlush(io.stage2Redirect, false.B)){
     s1_redirect_bits_reg := oldestMispredict.bits
     s1_redirect_valid_reg := true.B
   }.otherwise({
@@ -170,11 +172,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     val roqio = new Bundle {
       // to int block
       val toCSR = new RoqCSRIO
-      val exception = ValidIO(new MicroOp)
-      val isInterrupt = Output(Bool())
+      val exception = ValidIO(new RoqExceptionInfo)
       // to mem block
-      val commits = new RoqCommitIO
-      val roqDeqPtr = Output(new RoqPtr)
+      val lsq = new RoqLsqIO
     }
   })
 
@@ -208,13 +208,13 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   val backendRedirect = redirectGen.io.stage2Redirect
   val frontendRedirect = redirectGen.io.stage3Redirect
+  val flush = roq.io.flushOut.valid
 
   redirectGen.io.exuMispredict.zip(io.fromIntBlock.exuRedirect).map({case (x, y) =>
     x.valid := y.valid && y.bits.redirect.cfiUpdate.isMisPred
     x.bits := y.bits
   })
   redirectGen.io.loadRelay := io.fromLsBlock.replay
-  redirectGen.io.roqRedirect := roq.io.redirectOut
 
   ftq.io.enq <> io.frontend.fetchInfo
   for(i <- 0 until CommitWidth){
@@ -222,6 +222,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     ftq.io.roq_commits(i).bits := roq.io.commits.info(i)
   }
   ftq.io.redirect <> backendRedirect
+  ftq.io.flush := flush
   ftq.io.frontendRedirect <> frontendRedirect
   ftq.io.exuWriteback <> io.fromIntBlock.exuRedirect
 
@@ -251,11 +252,13 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
 
   rename.io.redirect <> backendRedirect
+  rename.io.flush := flush
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
 
   dispatch.io.redirect <> backendRedirect
+  dispatch.io.flush := flush
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.toLsBlock.enqLsq
   dispatch.io.readIntRf <> io.toIntBlock.readRf
@@ -271,7 +274,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 //  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
-  val flush = backendRedirect.valid && RedirectLevel.isUnconditional(backendRedirect.bits.level)
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
@@ -296,8 +298,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
+  io.toIntBlock.flush <> flush
   io.toFpBlock.redirect <> backendRedirect
+  io.toFpBlock.flush <> flush
   io.toLsBlock.redirect <> backendRedirect
+  io.toLsBlock.flush <> flush
 
   if (env.DualCoreDifftest) {
     difftestIO.fromRoq <> roq.difftestIO
@@ -308,10 +313,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
-  io.roqio.exception.valid := roq.io.redirectOut.valid && roq.io.redirectOut.bits.isException()
-  io.roqio.exception.bits := roq.io.exception
-  io.roqio.isInterrupt := roq.io.redirectOut.bits.interrupt
+  io.roqio.exception := roq.io.exception
   // roq to mem block
-  io.roqio.roqDeqPtr := roq.io.roqDeqPtr
-  io.roqio.commits := roq.io.commits
+  io.roqio.lsq <> roq.io.lsq
 }

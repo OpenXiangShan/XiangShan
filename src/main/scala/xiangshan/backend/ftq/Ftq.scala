@@ -5,7 +5,7 @@ import chisel3.util._
 import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, XSDebug, XSPerf}
 import xiangshan._
 
-class FtqPtr extends CircularQueuePtr (FtqPtr.FtqSize) with HasCircularQueuePtrHelper
+class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
 
 object FtqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): FtqPtr = {
@@ -47,6 +47,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val commit_ftqEntry = ValidIO(new FtqEntry)
     // redirect, reset enq ptr
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     // update mispredict target
     val frontendRedirect = Flipped(ValidIO(new Redirect))
     // exu write back, update info
@@ -81,11 +82,11 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
 
   val s_invalid :: s_valid :: s_commited :: Nil = Enum(3)
-  val commitStateQueue = RegInit(VecInit(Seq.fill(FtqSize){
+  val commitStateQueue = RegInit(VecInit(Seq.fill(FtqSize) {
     VecInit(Seq.fill(PredictWidth)(s_invalid))
   }))
 
-  when(real_fire){
+  when(real_fire) {
     val enqIdx = tailPtr.value
     commitStateQueue(enqIdx) := VecInit(io.enq.bits.valids.map(v => Mux(v, s_valid, s_invalid)))
     cfiIndex_vec(enqIdx) := io.enq.bits.cfiIndex
@@ -98,16 +99,16 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   tailPtr := tailPtr + real_fire
 
   // exu write back, update some info
-  for((wb, i) <- io.exuWriteback.zipWithIndex){
+  for ((wb, i) <- io.exuWriteback.zipWithIndex) {
     val wbIdx = wb.bits.redirect.ftqIdx.value
     val offset = wb.bits.redirect.ftqOffset
     val cfiUpdate = wb.bits.redirect.cfiUpdate
-    when(wb.bits.redirectValid){
+    when(wb.bits.redirectValid) {
       mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
-      when(!cfiUpdate.taken && offset === cfiIndex_vec(wbIdx).bits){
+      when(!cfiUpdate.taken && offset === cfiIndex_vec(wbIdx).bits) {
         cfiIndex_vec(wbIdx).valid := false.B
       }
-      when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits){
+      when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
         cfiIndex_vec(wbIdx).valid := true.B
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
@@ -121,19 +122,19 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val lastIsMispredict = RegNext(
     io.redirect.valid && io.redirect.bits.level === RedirectLevel.flushAfter, init = false.B
   )
-  when(io.frontendRedirect.valid && !lastIsMispredict){
+  when(io.frontendRedirect.valid && !lastIsMispredict) {
     target_vec(io.frontendRedirect.bits.ftqIdx.value) := io.frontendRedirect.bits.cfiUpdate.target
   }
 
   // commit
-  for(c <- io.roq_commits){
-    when(c.valid){
+  for (c <- io.roq_commits) {
+    when(c.valid) {
       commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := s_commited
     }
   }
 
   val headClear = Cat(commitStateQueue(headPtr.value).map(s => s === s_invalid)).andR()
-  when(headClear && headPtr =/= tailPtr){
+  when(headClear && headPtr =/= tailPtr) {
     headPtr := headPtr + 1.U
   }
 
@@ -141,7 +142,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val commitEntry = WireInit(dataModule.io.rdata(0))
   val commit_valids = VecInit(commitStateQueue(headPtr.value).map(s => s === s_commited))
   // set state to invalid next cycle
-  commitStateQueue(headPtr.value).zip(commit_valids).foreach({case (s, v) => when(v){ s := s_invalid }})
+  commitStateQueue(headPtr.value).zip(commit_valids).foreach({ case (s, v) => when(v) {
+    s := s_invalid
+  }
+  })
   commitEntry.valids := RegNext(commit_valids)
   commitEntry.mispred := RegNext(mispredict_vec(headPtr.value))
   commitEntry.cfiIndex := RegNext(cfiIndex_vec(headPtr.value))
@@ -154,30 +158,28 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.commit_ftqEntry.bits := commitEntry
 
   // read logic
-  for((req, i) <- io.ftqRead.zipWithIndex){
+  for ((req, i) <- io.ftqRead.zipWithIndex) {
     dataModule.io.raddr(1 + i) := req.ptr.value
     req.entry := dataModule.io.rdata(1 + i)
   }
 
   // redirect, reset ptr
-  when(io.redirect.valid){
-    when(io.redirect.bits.isUnconditional()){ // flush pipe / exception
-      // clear ftq
-      tailPtr := headPtr
-      commitStateQueue(headPtr.value).foreach(_ := s_invalid)
-      assert(headPtr === io.redirect.bits.ftqIdx)
-    }.otherwise{ // branch misprediction or load replay
-      val isReplay = RedirectLevel.flushItself(io.redirect.bits.level)
-      val next = io.redirect.bits.ftqIdx + 1.U
-      tailPtr := next
-      val offset = io.redirect.bits.ftqOffset
-      commitStateQueue(io.redirect.bits.ftqIdx.value).zipWithIndex.foreach({case(s, i) =>
-        when(i.U > offset || (isReplay && i.U === offset)){ // replay will not commit
-          s := s_invalid
-        }
-      })
-      commitStateQueue(next.value).foreach(_ := s_invalid)
-    }
+  when(io.flush) { // flush pipe / exception
+    // clear ftq
+    tailPtr := headPtr
+    commitStateQueue(headPtr.value).foreach(_ := s_invalid)
+    assert(headPtr === io.redirect.bits.ftqIdx)
+  }.elsewhen(io.redirect.valid) { // branch misprediction or load replay
+    val isReplay = RedirectLevel.flushItself(io.redirect.bits.level)
+    val next = io.redirect.bits.ftqIdx + 1.U
+    tailPtr := next
+    val offset = io.redirect.bits.ftqOffset
+    commitStateQueue(io.redirect.bits.ftqIdx.value).zipWithIndex.foreach({ case (s, i) =>
+      when(i.U > offset || (isReplay && i.U === offset)) { // replay will not commit
+        s := s_invalid
+      }
+    })
+    commitStateQueue(next.value).foreach(_ := s_invalid)
   }
 
   XSPerf("ftqEntries", validEntries)

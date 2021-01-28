@@ -9,7 +9,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
@@ -63,17 +63,17 @@ class LoadQueue extends XSModule
 {
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
-    val brqRedirect = Input(Valid(new Redirect))
+    val brqRedirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(new RoqCommitIO)
+    val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(new RoqPtr)
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -99,16 +99,11 @@ class LoadQueue extends XSModule
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt.value
-  val sameFlag = enqPtrExt(0).flag === deqPtrExt.flag
-  val isEmpty = enqPtr === deqPtr && sameFlag
-  val isFull = enqPtr === deqPtr && !sameFlag
-  val allowIn = !isFull
-
-  val loadCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.info(i).commitType === CommitType.LOAD)
-  val mcommitIdx = (0 until CommitWidth).map(i => io.commits.info(i).lqIdx.value)
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
+
+  val commitCount = RegNext(io.roq.lcommit)
 
   /**
     * Enqueue at dispatch
@@ -121,7 +116,7 @@ class LoadQueue extends XSModule
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush)) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -321,9 +316,8 @@ class LoadQueue extends XSModule
     * When load commited, mark it as !allocated and move deqPtrExt forward.
     */
   (0 until CommitWidth).map(i => {
-    when(loadCommit(i)) {
-      allocated(mcommitIdx(i)) := false.B
-      XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
+    when(commitCount > i.U){
+      allocated(deqPtr+i.U) := false.B
     }
   })
 
@@ -466,6 +460,7 @@ class LoadQueue extends XSModule
 
   val rollbackSelected = ParallelOperation(rollback, rollbackSel)
   val lastCycleRedirect = RegNext(io.brqRedirect)
+  val lastCycleFlush = RegNext(io.flush)
 
   // S2: select rollback and generate rollback request 
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
@@ -474,7 +469,7 @@ class LoadQueue extends XSModule
   val rollbackReg = Reg(Valid(new Redirect))
   rollbackGen.valid := rollbackSelected.valid &&
     (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
+    !lastCycleFlush
 
   rollbackGen.bits.roqIdx := rollbackSelected.bits.roqIdx
   rollbackGen.bits.ftqIdx := rollbackSelected.bits.cf.ftqPtr
@@ -490,7 +485,7 @@ class LoadQueue extends XSModule
   io.rollback := rollbackReg
   io.rollback.valid := rollbackReg.valid && 
     (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
+    !lastCycleFlush
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.cfi, io.rollback.bits.roqIdx.asUInt)
@@ -499,11 +494,39 @@ class LoadQueue extends XSModule
   /**
     * Memory mapped IO / other uncached operations
     *
+    * States:
+    * (1) writeback from store units: mark as pending
+    * (2) when they reach ROB's head, they can be sent to uncache channel
+    * (3) response from uncache channel: mark as datavalid
+    * (4) writeback to ROB (and other units): mark as writebacked
+    * (5) ROB commits the instruction: same as normal instructions
     */
-  io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
-    io.commits.info(0).commitType === CommitType.LOAD &&
-    io.roqDeqPtr === uop(deqPtr).roqIdx &&
-    !io.commits.isWalk
+  //(2) when they reach ROB's head, they can be sent to uncache channel
+  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val uncacheState = RegInit(s_idle)
+  switch(uncacheState) {
+    is(s_idle) {
+      when(io.roq.pendingld && pending(deqPtr) && allocated(deqPtr)) {
+        uncacheState := s_req
+      }
+    }
+    is(s_req) {
+      when(io.uncache.req.fire()) {
+        uncacheState := s_resp
+      }
+    }
+    is(s_resp) {
+      when(io.uncache.resp.fire()) {
+        uncacheState := s_wait
+      }
+    }
+    is(s_wait) {
+      when(io.roq.commit) {
+        uncacheState := s_idle // ready for next mmio
+      }
+    }
+  }
+  io.uncache.req.valid := uncacheState === s_req
 
   dataModule.io.uncache.raddr := deqPtrExtNext.value
 
@@ -535,6 +558,7 @@ class LoadQueue extends XSModule
     )
   }
 
+  // (3) response from uncache channel: mark as datavalid
   dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
     datavalid(deqPtr) := true.B
@@ -545,14 +569,14 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.lqIdx.value
+  vaddrModule.io.raddr(0) := deqPtr + commitCount
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
   val needCancel = Wire(Vec(LoadQueueSize, Bool()))
   for (i <- 0 until LoadQueueSize) {
-    needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i)
+    needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect, io.flush) && allocated(i)
     when (needCancel(i)) {
         allocated(i) := false.B
     }
@@ -563,19 +587,17 @@ class LoadQueue extends XSModule
     */
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect.valid) {
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
+  when (lastCycleRedirect.valid || lastCycleFlush) {
     // we recover the pointers in the next cycle after redirect
     enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
   }.otherwise {
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
 
-  val commitCount = PopCount(loadCommit)
   deqPtrExtNext := deqPtrExt + commitCount
   deqPtrExt := deqPtrExtNext
 
-  val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U

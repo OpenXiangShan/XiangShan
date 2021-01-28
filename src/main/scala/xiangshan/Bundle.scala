@@ -136,6 +136,12 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
+class PredictorAnswer extends XSBundle {
+  val hit = Bool()
+  val taken = Bool()
+  val target = UInt(VAddrBits.W)
+}
+
 class BpuMeta extends XSBundle with HasBPUParameter {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
@@ -149,6 +155,12 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
   val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
+
+  val ubtbAns = new PredictorAnswer
+  val btbAns = new PredictorAnswer
+  val tageAns = new PredictorAnswer
+  val rasAns = new PredictorAnswer
+  val loopAns = new PredictorAnswer
 
   // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
   //   this.histPtr := histPtr
@@ -321,11 +333,10 @@ class Redirect extends XSBundle {
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
 
-  def isUnconditional() = RedirectLevel.isUnconditional(level)
 
+  // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
-
-  def isException() = RedirectLevel.isException(level)
+  // def isException() = RedirectLevel.isException(level)
 }
 
 class Dp1ToDp2IO extends XSBundle {
@@ -383,8 +394,6 @@ class RoqCommitInfo extends XSBundle {
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
-  val lqIdx = new LqPtr
-  val sqIdx = new SqPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 

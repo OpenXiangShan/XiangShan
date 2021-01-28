@@ -17,7 +17,17 @@ class StoreUnit_S0 extends XSModule {
   })
 
   // send req to dtlb
-  val saddr = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
+  val saddr_old = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
+  val imm12 = WireInit(io.in.bits.uop.ctrl.imm(11,0))
+  val saddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
+  val saddr_hi = Mux(imm12(11), 
+    Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
+    Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
+  )
+  val saddr = Cat(saddr_hi, saddr_lo(11,0))
+  when(io.in.fire() && saddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
+    printf("saddr %x saddr_old %x\n", saddr, saddr_old(VAddrBits-1,0))
+  }
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
@@ -136,6 +146,7 @@ class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
     val lsq = ValidIO(new LsPipelineBundle)
@@ -150,15 +161,15 @@ class StoreUnit extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout
 

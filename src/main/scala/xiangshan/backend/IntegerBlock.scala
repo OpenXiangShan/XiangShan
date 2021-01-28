@@ -8,6 +8,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
+import xiangshan.backend.roq.RoqExceptionInfo
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -75,8 +76,7 @@ class IntegerBlock
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
-      val exception = Flipped(ValidIO(new MicroOp)) // from roq
-      val isInterrupt = Input(Bool()) // from roq
+      val exception = Flipped(ValidIO(new RoqExceptionInfo))
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
       val interrupt = Output(Bool()) // to roq
       val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
@@ -119,6 +119,7 @@ class IntegerBlock
   difftestIO <> DontCare
 
   val redirect = io.fromCtrlBlock.redirect
+  val flush = io.fromCtrlBlock.flush
 
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
@@ -168,6 +169,7 @@ class IntegerBlock
 
     rsCtrl.io.data <> rsData.io.ctrl
     rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.flush <> flush // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
@@ -181,6 +183,7 @@ class IntegerBlock
       rsData.io.jalr_target := io.fromCtrlBlock.jalr_target
     }
     rsData.io.redirect <> redirect
+    rsData.io.flush <> flush
 
     rsData.io.writeBackedData <> writeBackData
     for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
@@ -189,6 +192,7 @@ class IntegerBlock
     }
 
     exeUnits(i).io.redirect <> redirect
+    exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromInt <> rsData.io.deq
     rsData.io.feedback := DontCare
 
