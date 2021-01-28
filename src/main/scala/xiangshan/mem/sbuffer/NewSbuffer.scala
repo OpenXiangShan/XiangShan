@@ -215,10 +215,15 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 
   val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)
-  val secondInsertIdx = Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
-
+  val secondInsertIdx = Mux(sameTag, 
+    firstInsertIdx,
+    Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
+  )
   val firstCanInsert = Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
-  val secondCanInsert = Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
+  val secondCanInsert = Mux(sameTag,
+    firstCanInsert,
+    Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
+  )
 
   io.in(0).ready := firstCanInsert || canMerge(0)
   io.in(1).ready := (secondCanInsert || canMerge(1)) && !sameWord && io.in(0).ready
