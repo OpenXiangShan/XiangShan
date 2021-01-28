@@ -8,10 +8,16 @@ import xiangshan.cache._
 
 trait HasSbufferCst extends HasXSParameter {
 
-  def s_invalid = 0.U(2.W)
-  def s_valid = 1.U(2.W)
-  def s_prepare = 2.U(2.W)
-  def s_inflight = 3.U(2.W)
+  // use 1h to speedup selection
+  def s_invalid  = (1<<0).U(4.W)
+  def s_valid    = (1<<1).U(4.W)
+  def s_prepare  = (1<<2).U(4.W)
+  def s_inflight = (1<<3).U(4.W)
+
+  def isInvalid(i: UInt): Bool = i(0).asBool
+  def isValid(i: UInt): Bool = i(1).asBool
+  def isPrepare(i: UInt): Bool = i(2).asBool
+  def isInflight(i: UInt): Bool = i(3).asBool
 
   val evictCycle = 1 << 20
   require(isPow2(evictCycle))
@@ -172,7 +178,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val lru = Module(new ChooseReplace(StoreBufferSize))
   val evictionIdx = lru.io.way
 
-  lru.io.mask := stateRead.map(_ === s_valid)
+  lru.io.mask := stateRead.map(isValid(_))
 
   val tags = io.in.map(in => getTag(in.bits.addr))
   val sameTag = tags(0) === tags(1)
@@ -188,13 +194,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   for(i <- 0 until StorePipelineWidth){
     mergeMask(i) := widthMap(j =>
-      Mux(tags(i) === tagRead(j) && stateRead(j) === s_valid, true.B, false.B))
+      Mux(tags(i) === tagRead(j) && isValid(stateRead(j)), true.B, false.B))
   }
 
   // insert confition
   // firstInsert: the first invalid entry
   // if first entry canMerge or second entry has the same tag with the first entry , secondInsert equal the first invalid entry, otherwise, the second invalid entry
-  val invalidMask = stateRead.map(s => s === s_invalid)
+  val invalidMask = stateRead.map(s => isInvalid(s))
   val evenInvalidMask = GetEvenBits(VecInit(invalidMask).asUInt)
   val oddInvalidMask = GetOddBits(VecInit(invalidMask).asUInt)
 
@@ -298,7 +304,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   // ---------------------- Send Dcache Req ---------------------
 
   val do_eviction = Wire(Bool())
-  val empty = Cat(stateVec.map(s => s===s_invalid)).andR() && !Cat(io.in.map(_.valid)).orR()
+  val empty = Cat(stateVec.map(s => isInvalid(s))).andR() && !Cat(io.in.map(_.valid)).orR()
 
   do_eviction := validCount >= 12.U
 
@@ -331,7 +337,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val tag = tagRead(idx)
     !Cat(widthMap(i => {
       // stateVec(idx) itself must not be s_inflight*
-      (stateRead(i) === s_inflight || stateRead(i) === s_prepare) &&
+      (isInflight(stateRead(i)) || isPrepare(stateRead(i))) &&
         tag === tagRead(i)
     })).orR()
   }
@@ -350,14 +356,14 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //  evictionEntry.bits := evictionIdx
 
   val prepareValid = ((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer)) &&
-                      stateVec(evictionIdx)===s_valid &&
+                      isValid(stateVec(evictionIdx)) &&
                       noSameBlockInflight(evictionIdx)
 
   when(prepareValid){
     stateVec(evictionIdx) := s_prepare
   }
 
-  val prepareMask = stateVec.map(s => s === s_prepare)
+  val prepareMask = stateVec.map(s => isPrepare(s))
   val (prepareIdx, prepareEn) = PriorityEncoderWithFlag(prepareMask)
 
   val dcacheReqValid = RegInit(false.B)
@@ -404,7 +410,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   // every cycle cohCount+=1
   // if cohCount(countBits-1)==1,evict
   for(i <- 0 until StoreBufferSize){
-    when(stateVec(i) === s_valid){
+    when(isValid(stateVec(i))){
       when(cohCount(i)(countBits-1)){
         assert(stateVec(i) === s_valid)
         stateUpdate(i) := s_prepare
@@ -417,9 +423,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   for ((forward, i) <- io.forward.zipWithIndex) {
     val tag_matches = widthMap(i => tagRead(i) === getTag(forward.paddr))
-    val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i) === s_valid)
+    val valid_tag_matches = widthMap(i => tag_matches(i) && isValid(stateVec(i)))
     val inflight_tag_matches = widthMap(i =>
-      tag_matches(i) && (stateVec(i) === s_inflight || stateVec(i) === s_prepare)
+      tag_matches(i) && (isInflight(stateVec(i)) || isPrepare(stateVec(i)))
     )
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
