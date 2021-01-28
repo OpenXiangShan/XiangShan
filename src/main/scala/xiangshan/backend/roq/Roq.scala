@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 
 object roqDebugId extends Function0[Integer] {
@@ -209,11 +210,17 @@ class RoqExceptionInfo extends XSBundle {
   val isInterrupt = Bool()
 }
 
+class RoqFlushInfo extends XSBundle {
+  val ftqIdx = new FtqPtr
+  val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isException = Bool()
+}
+
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
     val enq = new RoqEnqIO
-    val flushOut = ValidIO(UInt(VAddrBits.W))
+    val flushOut = ValidIO(new RoqFlushInfo)
     val exception = ValidIO(new RoqExceptionInfo)
     // exu + brq
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
@@ -378,19 +385,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val isFlushPipe = writebacked(deqPtr.value) && deqWritebackData.flushPipe
 
   io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
-  io.flushOut.bits := Mux(intrEnable || exceptionEnable, io.csr.trapTarget, deqDispatchData.pc + 4.U)
+  io.flushOut.bits.isException := intrEnable || exceptionEnable
+  io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
+  io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
 
-  io.exception.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable)
-  io.exception.bits.uop := debug_deqUop
-  io.exception.bits.uop.ctrl.commitType := deqDispatchData.commitType
-  io.exception.bits.uop.cf.pc := deqDispatchData.pc
-  io.exception.bits.uop.cf.exceptionVec := deqExceptionVec
-  io.exception.bits.uop.cf.crossPageIPFFix := deqDispatchData.crossPageIPFFix
-  io.exception.bits.isInterrupt := intrEnable
+  val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable)
+  io.exception.valid := RegNext(exceptionHappen)
+  io.exception.bits.uop := RegEnable(debug_deqUop, exceptionHappen)
+  io.exception.bits.uop.ctrl.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
+  io.exception.bits.uop.cf.pc := DontCare // we get pc at ftq, so roq don't save pc
+  io.exception.bits.uop.cf.exceptionVec := RegEnable(deqExceptionVec, exceptionHappen)
+  io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(deqDispatchData.crossPageIPFFix, exceptionHappen)
+  io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.uop.cf.pc)} intr $intrEnable " +
-    p"excp $exceptionEnable flushPipe $isFlushPipe target 0x${Hexadecimal(io.flushOut.bits)} " +
+    p"excp $exceptionEnable flushPipe $isFlushPipe " +
     p"Trap_target 0x${Hexadecimal(io.csr.trapTarget)} exceptionVec ${Binary(deqExceptionVec.asUInt)}\n")
 
 
