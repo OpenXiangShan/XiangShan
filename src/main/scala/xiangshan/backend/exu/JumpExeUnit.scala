@@ -17,6 +17,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val frm = Output(UInt(3.W))
     val exception = Flipped(ValidIO(new RoqExceptionInfo))
     val trapTarget = Output(UInt(VAddrBits.W))
+    val isXRet = Output(Bool())
     val interrupt = Output(Bool())
     val memExceptionVAddr = Input(UInt(VAddrBits.W))
     val externalInterrupt = new ExternalInterruptIO
@@ -77,6 +78,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.fpu.frm <> csrio.frm
   csr.csrio.exception <> csrio.exception
   csr.csrio.trapTarget <> csrio.trapTarget
+  csr.csrio.isXRet <> csrio.isXRet
   csr.csrio.interrupt <> csrio.interrupt
   csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr
   csr.csrio.externalInterrupt <> csrio.externalInterrupt
@@ -97,16 +99,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
 
   val isDouble = !uop.ctrl.isRVF
 
-  when(csr.io.out.valid){
-    io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid
-    io.toInt.bits.redirect.level := RedirectLevel.flushAfter
-    io.toInt.bits.redirect.interrupt := DontCare
-    io.toInt.bits.redirect.roqIdx := uop.roqIdx
-    io.toInt.bits.redirect.cfiUpdate.target := csr.csrio.redirectOut.bits
-    io.toInt.bits.redirect.cfiUpdate.pc := uop.cf.pc
-    io.toInt.bits.debug.isPerfCnt := csr.csrio.isPerfCnt
-  }.elsewhen(jmp.io.out.valid){
-    io.toInt.bits.redirectValid := jmp.redirectOutValid
-    io.toInt.bits.redirect := jmp.redirectOut
-  }
+
+  io.toInt.bits.redirectValid := jmp.redirectOutValid
+  io.toInt.bits.redirect := jmp.redirectOut
 }

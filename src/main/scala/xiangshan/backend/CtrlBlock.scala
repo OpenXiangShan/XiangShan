@@ -241,9 +241,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   flushRedirect.bits := DontCare
   flushRedirect.bits.ftqIdx := RegEnable(roq.io.flushOut.bits.ftqIdx, flush)
   flushRedirect.bits.interrupt := true.B
-  flushRedirect.bits.cfiUpdate.target := Mux(RegEnable(roq.io.flushOut.bits.isException, flush),
-    RegEnable(io.roqio.toCSR.trapTarget, flush),
-    flushPC + 4.U
+  flushRedirect.bits.cfiUpdate.target := Mux(io.roqio.toCSR.isXRet || roq.io.exception.valid,
+    io.roqio.toCSR.trapTarget,
+    flushPC + 4.U // flush pipe
   )
 
   io.frontend.redirect_cfiUpdate := Mux(flushRedirect.valid, flushRedirect, frontendRedirect)

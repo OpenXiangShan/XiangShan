@@ -78,6 +78,7 @@ class IntegerBlock
       val frm = Output(UInt(3.W)) // to float
       val exception = Flipped(ValidIO(new RoqExceptionInfo))
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
+      val isXRet = Output(Bool())
       val interrupt = Output(Bool()) // to roq
       val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
       val externalInterrupt = new ExternalInterruptIO  // from outside
