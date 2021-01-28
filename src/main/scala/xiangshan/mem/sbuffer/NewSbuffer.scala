@@ -150,7 +150,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   // sbuffer entry count
   val invalidCount = RegInit(StoreBufferSize.U((log2Up(StoreBufferSize) + 1).W))
   val validCount = RegInit(0.U((log2Up(StoreBufferSize) + 1).W))
-  val full = invalidCount === 0.U
+  val full = invalidCount === 0.U // full = TODO: validCount(log2Up(StoreBufferSize))
 
   val bufferRead  = VecInit((0 until StoreBufferSize).map(i => buffer(i)))
   val stateRead   = VecInit((0 until StoreBufferSize).map(i => stateVec(i)))
@@ -244,7 +244,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     when(canMerge(0)){
       mergeWordReq(io.in(0).bits, mergeIdx(0), firstWord)
       XSDebug(p"merge req 0 to line [${mergeIdx(0)}]\n")
-    }.elsewhen(firstCanInsert){
+    }.otherwise{
       wordReqToBufLine(io.in(0).bits, tags(0), firstInsertIdx, firstWord, true.B)
       XSDebug(p"insert req 0 to line[$firstInsertIdx]\n")
     }
@@ -255,7 +255,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     when(canMerge(1)){
       mergeWordReq(io.in(1).bits, mergeIdx(1), secondWord)
       XSDebug(p"merge req 1 to line [${mergeIdx(1)}]\n")
-    }.elsewhen(secondCanInsert){
+    }.otherwise{
       wordReqToBufLine(io.in(1).bits, tags(1), secondInsertIdx, secondWord, !sameTag)
       XSDebug(p"insert req 1 to line[$secondInsertIdx]\n")
     }
@@ -350,18 +350,24 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val prepareMask = stateVec.map(s => s === s_prepare)
   val (prepareIdx, prepareEn) = PriorityEncoderWithFlag(prepareMask)
 
-
-  io.dcache.req.valid := prepareEn
-
-  io.dcache.req.bits.addr := getAddr(tagRead(prepareIdx))
-  io.dcache.req.bits.data := bufferRead(prepareIdx).data
-  io.dcache.req.bits.mask := bufferRead(prepareIdx).mask
-  io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
-  io.dcache.req.bits.meta := DontCare
-  io.dcache.req.bits.meta.id := prepareIdx
+  val dcacheReqValid = RegInit(false.B)
+  val dcacheCandidate = Reg(new DCacheLineReq)
   when(io.dcache.req.fire()){
-    stateVec(prepareIdx) := s_inflight
+    dcacheReqValid := false.B
   }
+  when(prepareEn && (!dcacheReqValid || io.dcache.req.fire())) {
+    dcacheCandidate.addr := getAddr(tagRead(prepareIdx))
+    dcacheCandidate.data := bufferRead(prepareIdx).data
+    dcacheCandidate.mask := bufferRead(prepareIdx).mask
+    dcacheCandidate.cmd := MemoryOpConstants.M_XWR
+    dcacheCandidate.meta := DontCare
+    dcacheCandidate.meta.id := prepareIdx
+    stateVec(prepareIdx) := s_inflight
+    dcacheReqValid := true.B
+  }
+
+  io.dcache.req.valid := dcacheReqValid
+  io.dcache.req.bits := dcacheCandidate
 //  evictionEntry.ready := io.dcache.req.ready
 
   XSDebug(io.dcache.req.fire(),
