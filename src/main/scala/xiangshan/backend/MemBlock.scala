@@ -96,6 +96,12 @@ class MemBlockImp
       val storeData   = Output(Vec(2, UInt(64.W)))
       val storeMask   = Output(Vec(2, UInt(8.W)))
     }
+    val fromAtomic = new Bundle() {
+      val atomicResp = Output(Bool())
+      val atomicAddr = Output(UInt(64.W))
+      val atomicData = Output(UInt(64.W))
+      val atomicMask = Output(UInt(8.W))
+    }
   })
   difftestIO <> DontCare
 
@@ -213,6 +219,7 @@ class MemBlockImp
   if (env.DualCoreDifftest) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
     difftestIO.fromSQ <> lsq.difftestIO.fromSQ
+    difftestIO.fromAtomic <> atomicsUnit.difftestIO
   }
 
   // LoadUnit

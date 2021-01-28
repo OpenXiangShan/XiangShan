@@ -62,6 +62,11 @@ class DiffTestIO extends XSBundle {
   val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
   val ltype = Output(Vec(CommitWidth, UInt(32.W)))
   val lfu = Output(Vec(CommitWidth, UInt(4.W)))
+
+  val atomicResp = Output(Bool())
+  val atomicAddr = Output(UInt(64.W))
+  val atomicData = Output(UInt(64.W))
+  val atomicMask = Output(UInt(8.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -229,6 +234,11 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).lpaddr := soc.module.difftestIO(i).fromRoq.lpaddr
         difftest(i).ltype := soc.module.difftestIO(i).fromRoq.ltype
         difftest(i).lfu := soc.module.difftestIO(i).fromRoq.lfu
+
+        difftest(i).atomicResp := soc.module.difftestIO(i).fromAtomic.atomicResp
+        difftest(i).atomicAddr := soc.module.difftestIO(i).fromAtomic.atomicAddr
+        difftest(i).atomicData := soc.module.difftestIO(i).fromAtomic.atomicData
+        difftest(i).atomicMask := soc.module.difftestIO(i).fromAtomic.atomicMask
       }
       io.difftest2 := difftest(1)
     }

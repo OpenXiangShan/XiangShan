@@ -454,4 +454,10 @@ class DifftestBundle extends XSBundle {
     val isRVC = Output(UInt(32.W))
     val scFailed = Output(Bool())
   }
+  val fromAtomic = new Bundle() {
+    val atomicResp = Output(Bool())
+    val atomicAddr = Output(UInt(64.W))
+    val atomicData = Output(UInt(64.W))
+    val atomicMask = Output(UInt(8.W))
+  }
 }

@@ -19,6 +19,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
 
+  val difftestIO = IO(new Bundle() {
+    val atomicResp = Output(Bool())
+    val atomicAddr = Output(UInt(64.W))
+    val atomicData = Output(UInt(64.W))
+    val atomicMask = Output(UInt(8.W))
+  })
+  difftestIO <> DontCare
+
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
@@ -33,6 +41,11 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // dcache response data
   val resp_data = Reg(UInt())
   val is_lrsc_valid = Reg(Bool())
+
+  // Difftest signals
+  val paddr_reg = Reg(UInt(64.W))
+  val data_reg = Reg(UInt(64.W))
+  val mask_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
   io.exceptionAddr.bits  := in.src1
@@ -164,6 +177,9 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
     when(io.dcache.req.fire()){
       state := s_cache_resp
+      paddr_reg := io.dcache.req.bits.addr
+      data_reg := io.dcache.req.bits.data
+      mask_reg := io.dcache.req.bits.mask
     }
   }
 
@@ -232,5 +248,12 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   when(io.redirect.valid){
     atom_override_xtval := false.B
+  }
+
+  if (env.DualCoreDifftest) {
+    difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
+    difftestIO.atomicAddr := WireInit(paddr_reg)
+    difftestIO.atomicData := WireInit(data_reg)
+    difftestIO.atomicMask := WireInit(mask_reg)
   }
 }

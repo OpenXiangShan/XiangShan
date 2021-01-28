@@ -498,6 +498,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
     difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
     difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
+    difftestIO.fromAtomic <> memBlock.difftestIO.fromAtomic
 
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
     ExcitingUtils.addSink(debugIntReg, s"DEBUG_INT_ARCH_REG$id", ExcitingUtils.Debug)
