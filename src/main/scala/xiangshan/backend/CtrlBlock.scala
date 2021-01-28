@@ -11,7 +11,7 @@ import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr, RoqExceptionInfo}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr, RoqExceptionInfo}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -54,10 +54,25 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val toCSR = new RoqCSRIO
       val exception = ValidIO(new RoqExceptionInfo)
       // to mem block
-      val commits = new RoqCommitIO
-      val roqDeqPtr = Output(new RoqPtr)
+      val lsq = new RoqLsqIO
     }
   })
+
+  val difftestIO = IO(new Bundle() {
+    val fromRoq = new Bundle() {
+      val commit = Output(UInt(32.W))
+      val thisPC = Output(UInt(XLEN.W))
+      val thisINST = Output(UInt(32.W))
+      val skip = Output(UInt(32.W))
+      val wen = Output(UInt(32.W))
+      val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+      val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+      val isRVC = Output(UInt(32.W))
+      val scFailed = Output(Bool())
+    }
+  })
+  difftestIO <> DontCare
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -100,7 +115,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirect.valid || flush || lastCycleRedirect)
   }
 
-  rename.io.redirect := redirect.valid
+  rename.io.redirect <> redirect
   rename.io.flush := flush
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
@@ -146,6 +161,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   roq.io.exeWbResults.last := brq.io.out
 
+  if (env.DualCoreDifftest) {
+    difftestIO.fromRoq <> roq.difftestIO
+  }
+
   io.toIntBlock.redirect <> redirect
   io.toIntBlock.flush <> flush
   io.toFpBlock.redirect <> redirect
@@ -160,6 +179,5 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.roqio.toCSR <> roq.io.csr
   io.roqio.exception := roq.io.exception
   // roq to mem block
-  io.roqio.roqDeqPtr := roq.io.roqDeqPtr
-  io.roqio.commits := roq.io.commits
+  io.roqio.lsq <> roq.io.lsq
 }

@@ -12,6 +12,7 @@ import xiangshan.backend.LSUOpType
 class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
+  val loadDataForwarded = Output(Bool())
   val forward = new LoadForwardQueryIO
 }
 
@@ -26,8 +27,18 @@ class LoadUnit_S0 extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  val s0_vaddr = io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN)
-  val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
+  val s0_vaddr_old = io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN)
+  val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
+  val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
+  val s0_vaddr_hi = Mux(imm12(11), 
+    Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
+    Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
+  )
+  val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
+  when(io.in.fire() && s0_vaddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
+    printf("s0_vaddr %x s0_vaddr_old %x\n", s0_vaddr, s0_vaddr_old(VAddrBits-1,0))
+  }
+  val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
@@ -141,6 +152,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
+    val dataForwarded = Output(Bool())
   })
 
   val s2_uop = io.in.bits.uop
@@ -194,9 +206,16 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
-  io.out.bits.miss := s2_cache_miss && !fullForward && !s2_exception
+  io.out.bits.miss := s2_cache_miss && !s2_exception
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   io.out.bits.mmio := s2_mmio
+
+  // For timing reasons, we can not let
+  // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
+  // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
+  // and dcache query is no longer needed.
+  // Such inst will be writebacked from load queue.
+  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -260,6 +279,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
+  load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

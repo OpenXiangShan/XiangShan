@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import chisel3.experimental.chiselName
+import chisel3.ExcitingUtils._
 
 import scala.math.min
 
@@ -256,6 +257,19 @@ class MicroBTB extends BasePredictor
         metas(b).wen := do_reset || (meta_write_valid && b.U === update_bank)
         metas(b).wWay := Mux(do_reset, reset_way, update_write_way)
         metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
+    }
+
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      val ubtbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+      // ubtbAns.hit := io.pc.valid && read_hit_vec.asUInt.orR
+
+      ubtbAns.zipWithIndex.foreach{ case(x,i) =>
+          x.hit := io.out.hits(i)
+          x.taken := io.out.takens(i)
+          x.target := io.out.targets(i)
+      }
+
+      ExcitingUtils.addSource(ubtbAns, "ubtbAns")
     }
 
     if (BPUDebug && debug) {
