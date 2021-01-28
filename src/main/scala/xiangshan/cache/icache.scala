@@ -16,6 +16,7 @@ case class ICacheParameters(
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
+    replacer: Option[String] = Some("random"),
     nSDQ: Int = 17,
     nRPQ: Int = 16,
     nMissEntries: Int = 1,
@@ -25,7 +26,7 @@ case class ICacheParameters(
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
-  def replacement = new RandomReplacement(nWays)
+  def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
 }
 
 trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst with HasInstrMMIOConst {
@@ -341,7 +342,9 @@ class ICache extends ICacheModule
   val refillInvalidWaymask = PriorityMask(invalidVec)
 
   val replacer = cacheParams.replacement
-  val victimWayMask = UIntToOH(replacer.way)
+  val victimWayMask = UIntToOH(replacer.way(s2_idx))
+
+  when(s2_hit) {replacer.access(s2_idx, OHToUInt(hitVec))}
 
 
   //deal with icache exception
