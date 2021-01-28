@@ -206,6 +206,18 @@ class BTB extends BasePredictor with BTBParams{
   edata.io.w.req.bits.setIdx := updateRow
   edata.io.w.req.bits.data := u.target
 
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val btbAns = Wire(Vec(PredictWidth, new PredictorAnswer))
+
+    btbAns.zipWithIndex.foreach{ case(x,i) =>
+      x.hit := io.resp.hits(i)
+      x.taken := DontCare
+      x.target := io.resp.targets(i)
+    }
+
+    ExcitingUtils.addSource(btbAns, "btbAns")
+  }
+
 
   if (BPUDebug && debug) {
     val debug_verbose = true

@@ -104,6 +104,14 @@ class BIM extends BasePredictor with BimParams {
     bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
   }
 
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val bimResp = Wire(Vec(PredictWidth, Bool()))
+    for(i <- 0 until PredictWidth) {
+      bimResp(i) := io.resp.ctrs(i)(1)
+    }
+    ExcitingUtils.addSource(bimResp, "bimResp")
+  }
+
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
     XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x", io.update.valid, u.pc, u.pnpc, u.target)
