@@ -187,6 +187,7 @@ class MainPipe extends DCacheModule
   val rowWordBits = log2Floor(rowWords)
   val amo_row  = s0_req.word_idx >> rowWordBits
   val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
+  val amo_word_addr = s0_req.addr + (s0_req.word_idx << wordOffBits)
 
   val store_rmask = row_write & ~row_full_overwrite
   val amo_rmask   = UIntToOH(amo_row)
@@ -226,6 +227,10 @@ class MainPipe extends DCacheModule
   val s1_amo_wmask   = RegEnable(amo_wmask, s0_fire)
   val s1_full_wmask  = RegEnable(full_wmask, s0_fire)
   val s1_none_wmask  = RegEnable(none_wmask, s0_fire)
+
+  val s1_amo_row       = RegEnable(amo_row, s0_fire)
+  val s1_amo_word      = RegEnable(amo_word, s0_fire)
+  val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
 
   s1_s0_set_conflict := s1_valid && get_idx(s1_req.addr) === get_idx(s0_req.addr)
 
@@ -297,6 +302,11 @@ class MainPipe extends DCacheModule
   val s2_amo_wmask   = RegEnable(s1_amo_wmask, s1_fire)
   val s2_full_wmask  = RegEnable(s1_full_wmask, s1_fire)
   val s2_none_wmask  = RegEnable(s1_none_wmask, s1_fire)
+
+  val s2_amo_row       = RegEnable(s1_amo_row, s1_fire)
+  val s2_amo_word      = RegEnable(s1_amo_word, s1_fire)
+  val s2_amo_word_addr = RegEnable(s1_amo_word_addr, s1_fire)
+
 
   s2_s0_set_conflict := s2_valid && get_idx(s2_req.addr) === get_idx(s0_req.addr)
 
@@ -493,10 +503,9 @@ class MainPipe extends DCacheModule
   }
 
   // AMO hits
-  val s2_amo_row = store_data_merged(get_row(s2_req.addr))
-  val s2_amo_words = VecInit((0 until rowWords) map (w => s2_amo_row(wordBits * (w + 1) - 1, wordBits * w)))
-  val s2_word_idx   = if (rowWords == 1) 0.U else s2_req.addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
-  val s2_data_word = s2_amo_words(s2_word_idx)
+  val s2_amo_row_data  = store_data_merged(s2_amo_row)
+  val s2_amo_word_data = VecInit((0 until rowWords) map (w => s2_amo_row_data(wordBits * (w + 1) - 1, wordBits * w)))
+  val s2_data_word = s2_amo_word_data(s2_amo_word)
 
   val amoalu   = Module(new AMOALU(wordBits))
   amoalu.io.mask := s2_req.amo_mask
@@ -510,7 +519,7 @@ class MainPipe extends DCacheModule
     amo_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
       val old_data = store_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
       val new_data = amoalu.io.out
-      val wmask = Mux(s2_can_do_amo_write && i.U === get_row(s2_req.addr) && w.U === s2_word_idx,
+      val wmask = Mux(s2_can_do_amo_write && i.U === s2_amo_row && w.U === s2_amo_word,
         ~0.U(wordBytes.W), 0.U(wordBytes.W))
       val data = mergePutData(old_data, new_data, wmask)
       data
