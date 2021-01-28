@@ -21,10 +21,12 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL1TagLen = PAddrBits - log2Up(XLEN/8)
   val PtwL2TagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val TlbL2TagLen = vpnLen - log2Up(TlbL2EntrySize)
+  val tlbl2Replacer = Some("setplru")
+  val ptwl2Replacer = Some("random")
 
 
-  def tlbl2replace = new RandomReplacement(TlbL2WayNum)   //TODO: LRU
-  def ptwl2replace = new RandomReplacement(TlbL2WayNum)
+  def tlbl2replace = ReplacementPolicy.fromString(tlbl2Replacer,TlbL2WayNum,TlbL2LineNum)
+  def ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
 
   def genPtwL2Idx(addr: UInt) = {
     /* tagLen :: outSizeIdxLen :: insideIdxLen*/
@@ -381,12 +383,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val (tlbHit, tlbHitData) = {
 
     val ridx = genTlbL2Idx(req.vpn)
+    val ridxReg = RegNext(ridx)
     val vidx = RegEnable(tlbv(ridx), validOneCycle)
     tlbl2.io.r.req.valid := validOneCycle
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = tlbl2.io.r.resp.data
     val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(req.vpn) })
     val hitWayData = Mux1H(PriorityEncoderOH(hitVec), ramDatas)
+
+    when(hitVec.asUInt.orR && vidx) {tlbl2replace.access(ridxReg.asUInt,OHToUInt(hitVec))}
+
 
     assert(tlbl2.io.r.req.ready || !tlbl2.io.r.req.valid)
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
@@ -427,6 +433,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val (l2Hit, l2HitPPN) = {
     val readRam = (!tlbHit && l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
     val ridx = genPtwL2Idx(l2addr)
+    val ridxReg = RegNext(ridx)
     val idx  = RegEnable(l2addr(log2Up(PtwL2LineSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
 
@@ -436,6 +443,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val ramDatas = ptwl2.io.r.resp.data
     val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(idx, l2addr) })
     val hitWayData = Mux1H(PriorityEncoderOH(hitVec), ramDatas)
+
+    when(hitVec.asUInt.orR && vidx) {ptwl2replace.access(ridxReg.asUInt,OHToUInt(hitVec))}
 
     XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 RamData:${hitWayData}\n")
@@ -570,8 +579,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       val refillIdx = genPtwL2Idx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
       // replacement policy
-      val replacer = ptwl2replace
-      val victimWayOH = UIntToOH(replacer.way)
+      val victimWayOH = UIntToOH(ptwl2replace.way(refillIdx))
       //TODO: check why the old refillIdx is right
 
       assert(ptwl2.io.w.req.ready)
@@ -590,8 +598,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
       // replacement policy
-      val replacer = tlbl2replace
-      val victimWayOH = UIntToOH(replacer.way)
+      val victimWayOH = UIntToOH(tlbl2replace.way(refillIdx))
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
