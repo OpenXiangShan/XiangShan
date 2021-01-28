@@ -65,7 +65,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.enq.ready := validEntries < FtqSize.U
   io.enqPtr := tailPtr
 
-  val real_fire = io.enq.fire() && !io.redirect.valid && !io.frontendRedirect.valid
+  val real_fire = io.enq.fire() && !io.redirect.valid && !io.frontendRedirect.valid && !io.flush
 
   val dataModule = Module(new DataModuleTemplate(new FtqEntry, FtqSize, 4, 1, true))
   dataModule.io.wen(0) := real_fire
