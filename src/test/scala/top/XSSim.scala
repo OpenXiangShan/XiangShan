@@ -130,6 +130,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     }
 
     val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
+    val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
     
     if (!env.FPGAPlatform) {
       ExcitingUtils.addSink(difftest(0).commit, "difftestCommit", Debug)
@@ -214,11 +215,11 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).sbufferAddr := soc.module.difftestIO(i).fromSbuffer.sbufferAddr
         difftest(i).sbufferData := soc.module.difftestIO(i).fromSbuffer.sbufferData
         difftest(i).sbufferMask := soc.module.difftestIO(i).fromSbuffer.sbufferMask
-      }
       
+        trap(i) <> soc.module.trapIO(i)
+      }      
     }
-
-    val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
+    
     if (!env.FPGAPlatform) {
       ExcitingUtils.addSink(trap(0).valid, "trapValid")
       ExcitingUtils.addSink(trap(0).code, "trapCode")
