@@ -21,7 +21,7 @@ class IntToFP extends FPUSubModule {
 
   switch(state){
     is(s_idle){
-      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)){
+      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)){
         state := s_cvt
       }
     }
@@ -34,7 +34,7 @@ class IntToFP extends FPUSubModule {
       }
     }
   }
-  when(state =/= s_idle && uopReg.roqIdx.needFlush(io.redirectIn)){
+  when(state =/= s_idle && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)){
     state := s_idle
   }
 

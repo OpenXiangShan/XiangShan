@@ -24,6 +24,7 @@ class Dispatch extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val renameBypass = Input(new RenameBypassInfo)
@@ -57,7 +58,7 @@ class Dispatch extends XSModule {
 
   // pipeline between rename and dispatch
   // accepts all at once
-  val redirectValid = io.redirect.valid// && !io.redirect.bits.isReplay
+  val redirectValid = io.redirect.valid || io.flush
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }
@@ -75,8 +76,11 @@ class Dispatch extends XSModule {
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
+  intDq.io.flush <> io.flush
   fpDq.io.redirect <> io.redirect
+  fpDq.io.flush <> io.flush
   lsDq.io.redirect <> io.redirect
+  lsDq.io.flush <> io.flush
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)

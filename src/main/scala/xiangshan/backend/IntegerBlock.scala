@@ -8,6 +8,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
+import xiangshan.backend.roq.RoqExceptionInfo
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -75,9 +76,9 @@ class IntegerBlock
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
-      val exception = Flipped(ValidIO(new MicroOp)) // from roq
-      val isInterrupt = Input(Bool()) // from roq
+      val exception = Flipped(ValidIO(new RoqExceptionInfo))
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
+      val isXRet = Output(Bool())
       val interrupt = Output(Bool()) // to roq
       val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
       val externalInterrupt = new ExternalInterruptIO  // from outside
@@ -119,6 +120,7 @@ class IntegerBlock
   difftestIO <> DontCare
 
   val redirect = io.fromCtrlBlock.redirect
+  val flush = io.fromCtrlBlock.flush
 
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
@@ -168,6 +170,7 @@ class IntegerBlock
 
     rsCtrl.io.data <> rsData.io.ctrl
     rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.flush <> flush // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
@@ -176,8 +179,12 @@ class IntegerBlock
     val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
     rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
     if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg == Exu.jumpExeUnitCfg) rsData.io.jumpPc := io.fromCtrlBlock.jumpPc
+    if (cfg == Exu.jumpExeUnitCfg) {
+      rsData.io.jumpPc := io.fromCtrlBlock.jumpPc
+      rsData.io.jalr_target := io.fromCtrlBlock.jalr_target
+    }
     rsData.io.redirect <> redirect
+    rsData.io.flush <> flush
 
     rsData.io.writeBackedData <> writeBackData
     for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
@@ -186,6 +193,7 @@ class IntegerBlock
     }
 
     exeUnits(i).io.redirect <> redirect
+    exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromInt <> rsData.io.deq
     rsData.io.feedback := DontCare
 

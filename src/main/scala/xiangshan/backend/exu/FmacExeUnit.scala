@@ -19,6 +19,7 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg)
   fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
 
   fma.io.redirectIn := io.redirect
+  fma.io.flushIn := io.flush
   fma.io.out.ready := io.toFp.ready
 
   io.toFp.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
