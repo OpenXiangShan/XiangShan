@@ -14,7 +14,7 @@ import scala.util.Random
 trait TestConst {
     val nWays = 4
     val nSets = 64
-    val maxTag = 12
+    val maxTag = 15
     val tagBits = log2Ceil(maxTag)  // 0-15
 }
 
@@ -39,7 +39,7 @@ class RepTestTop extends Module
     val fakeCache = RegInit(VecInit( (0 until nWays).map{ w => w.U(tagBits.W) } ))
 
     val req = io.req
-    val replacer = ReplacementPolicy.fromString("random",nWays)
+    val replacer = ReplacementPolicy.fromString("plru",nWays)
 
     val hitVec = VecInit(fakeCache.map{w =>  req.valid && (req.bits.tag === w) }).asUInt
     val hit = hitVec.orR
@@ -75,9 +75,10 @@ class ReplaceTest extends AnyFlatSpec
             val randomGen = scala.util.Random
             var hitCounter = 0
             var missCounter = 0
+            var tag = 0
 
             for(i <- 0 until testnumber){
-                val tag = randomGen.nextInt(maxTag + 1) 
+                if(i%5 == 0){ tag = randomGen.nextInt(maxTag + 1)  }
                 c.io.req.valid.poke(true.B)
                 c.io.req.bits.tag.poke(tag.U)
                 if(c.io.resp.bits.hit.peek().litToBoolean){ hitCounter = hitCounter + 1}
