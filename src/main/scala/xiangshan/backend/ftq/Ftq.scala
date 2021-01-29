@@ -259,6 +259,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
       ftq_2r_sram.io.raddr(1) := req.ptr.value
       ftq_2r_sram.io.ren(1) := true.B
       req.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
+      req.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
       req.entry.hist := ftq_2r_sram.io.rdata(1).hist
       req.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
       req.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
