@@ -375,14 +375,15 @@ class ReservationStationCtrl
     val feedback = Flipped(ValidIO(new RSFeedback))
   })
 
+  val selValid = io.sel.valid
   val enqPtr = io.in.bits.addr
   val enqPtrReg = RegNext(enqPtr)
   val enqEn  = io.in.valid
   val enqEnReg = RegNext(enqEn)
   val enqUop = io.in.bits.uop
-  val enqUopReg = RegEnable(enqUop, io.sel.valid)
+  val enqUopReg = RegEnable(enqUop, selValid)
   val selPtr = io.sel.bits
-  val deqPtr = RegEnable(selPtr, io.sel.valid)
+  val selPtrReg = RegEnable(selPtr, selValid)
   val data = io.listen
   data.map(a => a.map(b => b.map(_ := false.B)))
 
@@ -402,7 +403,13 @@ class ReservationStationCtrl
   )
   io.enqSrcReady := enqSrcReady
   val srcUpdate = Wire(Vec(iqSize, Vec(srcNum, Bool())))
-  srcUpdate.map(a => a.map(b => b := false.B))
+  val srcUpdateListen = Wire(Vec(iqSize, Vec(srcNum, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
+  srcUpdateListen.map(a => a.map(b => b.map(c => c := false.B )))
+  for (i <- 0 until iqSize) {
+    for (j <- 0 until srcNum) {
+      srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j)).orR
+    }
+  }
 
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, Bool())))
   io.readyVec := srcQueue.map(Cat(_).andR)
@@ -416,18 +423,26 @@ class ReservationStationCtrl
   }
 
   val redirectHit = io.redirectVec(selPtr)
-  val uop = if (fastWakeup) {
-    Module(new AsyncDataModuleTemplate(new MicroOp, iqSize, 2, 1))
-  } else {
-    Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, 1))
-  }
+  val uop = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, 1))
 
-  uop.io.raddr(0) := (if (fastWakeup) RegNext(io.sel.bits) else io.sel.bits)
-  io.out.valid    := RegNext(io.sel.valid && ~redirectHit)
+  uop.io.raddr(0) := selPtr
+  io.out.valid    := RegNext(selValid && ~redirectHit)
   io.out.bits     := uop.io.rdata(0)
-  uop.io.wen(0)   := io.in.valid
-  uop.io.waddr(0) := io.in.bits.addr
-  uop.io.wdata(0) := io.in.bits.uop
+  uop.io.wen(0)   := enqEn
+  uop.io.waddr(0) := enqPtr
+  uop.io.wdata(0) := enqUop
+
+  class fastSendUop extends XSBundle {
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val rfWen = Bool()
+    val fpWen = Bool()
+    def apply(uop: MicroOp) = {
+      this.pdest := uop.pdest
+      this.rfWen := uop.ctrl.rfWen
+      this.fpWen := uop.ctrl.fpWen
+      this
+    }
+  }
 
   val roqIdx = Reg(Vec(IssQueSize, new RoqPtr))
   when (enqEn) {
@@ -436,6 +451,7 @@ class ReservationStationCtrl
   io.redirectVec.zip(roqIdx).map{ case (red, roq) =>
     red := roq.needFlush(io.redirect)
   }
+  io.out.bits.roqIdx := roqIdx(selPtrReg)
 
   io.feedbackVec := DontCare
   if (feedback) {
@@ -447,20 +463,35 @@ class ReservationStationCtrl
 
   io.fastUopOut := DontCare
   if (fastWakeup) {
-    uop.io.raddr(1) := io.sel.bits
+    val asynUop = Module(new AsyncDataModuleTemplate(new fastSendUop, iqSize, 1, 1))
+    asynUop.io.wen(0) := enqEn
+    asynUop.io.waddr(0) := enqPtr
+    asynUop.io.wdata(0) := (Wire(new fastSendUop)).apply(enqUop)
+    asynUop.io.raddr(0) := selPtr
+    val fastSentUop = Wire(new MicroOp)
+    fastSentUop := DontCare
+    fastSentUop.pdest := asynUop.io.rdata(0).pdest
+    fastSentUop.ctrl.rfWen := asynUop.io.rdata(0).rfWen
+    fastSentUop.ctrl.fpWen := asynUop.io.rdata(0).fpWen
+
     if (fixedDelay == 0) {
-      io.fastUopOut.valid := io.sel.valid
-      io.fastUopOut.bits  := uop.io.rdata(1)
+      io.fastUopOut.valid := selValid
+      io.fastUopOut.bits  := fastSentUop
       io.fastUopOut.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     } else {
       val bpQueue = Module(new BypassQueue(fixedDelay))
-      bpQueue.io.in.valid := io.sel.valid // FIXME: error when function is blocked => fu should not be blocked
-      bpQueue.io.in.bits  := uop.io.rdata(1)
+      bpQueue.io.in.valid := selValid
+      bpQueue.io.in.bits  := fastSentUop
       bpQueue.io.redirect := io.redirect
       io.fastUopOut.valid := bpQueue.io.out.valid
       io.fastUopOut.bits  := bpQueue.io.out.bits
       io.fastUopOut.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     }
+
+    val fastSentUopReg = RegNext(asynUop.io.rdata(0))
+    io.out.bits.pdest := fastSentUopReg.pdest
+    io.out.bits.ctrl.rfWen := fastSentUopReg.rfWen
+    io.out.bits.ctrl.fpWen := fastSentUopReg.fpWen
   }
 
   val psrc = (0 until srcNum).map(i => Module(new SingleSrcCAM(UInt(PhyRegIdxWidth.W), iqSize, fastPortsCnt + slowPortsCnt, true)).io)
@@ -502,13 +533,13 @@ class ReservationStationCtrl
       for (k <- 0 until fastPortsCnt) {
         val fastHit = listenHitEntry(j, k, i, fastUops(k).bits) && fastUops(k).valid
         val fastHitNoConflict = fastHit && !(enqPtr===i.U && enqEn)
-        when (fastHitNoConflict) { srcUpdate(i)(j) := true.B }
+        when (fastHitNoConflict) { srcUpdate(i)(j)(k) := true.B }
         when (RegNext(fastHitNoConflict) && !(enqPtr===i.U && enqEn)) { data(j)(i)(k) := true.B }
       }
       for (k <- 0 until slowPortsCnt) {
         val slowHit = listenHitEntry(j, k + fastPortsCnt, i, slowUops(k).bits) && slowUops(k).valid
         val slowHitNoConflict = slowHit && !(enqPtr===i.U && enqEn)
-        when (slowHitNoConflict) { srcUpdate(i)(j) := true.B }
+        when (slowHitNoConflict) { srcUpdate(i)(j)(k+fastPortsCnt) := true.B }
         when (slowHitNoConflict) { data(j)(i)(k + fastPortsCnt) := true.B }
       }
     }
@@ -519,14 +550,14 @@ class ReservationStationCtrl
     for (k <- 0 until fastPortsCnt) {
       val fastHit = listenHitEnq(fastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && fastUops(k).valid
       val lastFastHit = listenHitEnq(lastFastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && lastFastUops(k).valid
-      when (fastHit || lastFastHit) { srcUpdate(enqPtr)(j) := true.B }
+      when (fastHit || lastFastHit) { srcUpdate(enqPtr)(j)(k) := true.B }
       when (lastFastHit)            { data(j)(enqPtr)(k) := true.B }
       when (RegNext(fastHit))       { data(j)(enqPtrReg)(k) := true.B }
     }
     for (k <- 0 until slowPortsCnt) {
       val slowHit = listenHitEnq(slowUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && slowUops(k).valid
       when (slowHit) {
-        srcUpdate(enqPtr)(j) := true.B
+        srcUpdate(enqPtr)(j)(k+fastPortsCnt) := true.B
         data(j)(enqPtr)(k + fastPortsCnt) := true.B
       }
     }
