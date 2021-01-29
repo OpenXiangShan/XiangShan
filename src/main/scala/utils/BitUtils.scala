@@ -116,3 +116,16 @@ object GenMask {
 object UIntToMask {
   def apply(ptr: UInt, length: Integer) = UIntToOH(ptr)(length - 1, 0) - 1.U
 }
+
+object GetEvenBits {
+  def apply(input: UInt): UInt = {
+    VecInit((0 until input.getWidth/2).map(i => {input(2*i)})).asUInt
+  }
+}
+
+
+object GetOddBits {
+  def apply(input: UInt): UInt = {
+    VecInit((0 until input.getWidth/2).map(i => {input(2*i+1)})).asUInt
+  }
+}

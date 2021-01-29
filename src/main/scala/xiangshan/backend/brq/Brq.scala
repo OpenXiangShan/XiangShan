@@ -116,6 +116,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   io.redirectOut.valid := wbValid && wbIsMisPred
   io.redirectOut.bits := wbEntry.redirect
+  io.redirectOut.bits.level := RedirectLevel.flushAfter
   io.redirectOut.bits.brTag := BrqPtr(ptrFlagVec(writebackIdx), writebackIdx)
 
   io.out.valid := wbValid || wbIsAuipc
@@ -315,21 +316,60 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  val predictor = io.cfiInfo.bits.bpuMeta.predictor
+  if(!env.FPGAPlatform && env.EnablePerfDebug) {
+    val predictor = io.cfiInfo.bits.bpuMeta.predictor
 
-  val ubtbRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
-  val ubtbWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
+    val cfiCountValid = io.cfiInfo.valid && !io.cfiInfo.bits.isReplay
 
-  val btbRight  = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
-  val btbWrong  =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
+    val ubtbAns = io.cfiInfo.bits.bpuMeta.ubtbAns
+    val btbAns = io.cfiInfo.bits.bpuMeta.btbAns
+    val tageAns = io.cfiInfo.bits.bpuMeta.tageAns
+    val rasAns = io.cfiInfo.bits.bpuMeta.rasAns
+    val loopAns = io.cfiInfo.bits.bpuMeta.loopAns
 
-  val tageRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
-  val tageWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
+    // Pipeline stage counter
+    val s1Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 0.U
+    val s1Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 0.U
 
-  val loopRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
-  val loopWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
+    val s2Right  =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 1.U
+    val s2Wrong  =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 1.U
 
-  if(!env.FPGAPlatform){
+    val s3Right =  cfiCountValid && !io.cfiInfo.bits.isMisPred && predictor === 2.U
+    val s3Wrong =  cfiCountValid && io.cfiInfo.bits.isMisPred && predictor === 2.U
+
+    // Predictor counter
+    // val ubtbRight = cfiCountValid && ubtbAns.hit && io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken
+    // val ubtbWrong = cfiCountValid && ubtbAns.hit && (io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken)
+
+    val ubtbRight = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+      io.cfiInfo.bits.target === ubtbAns.target && io.cfiInfo.bits.taken === ubtbAns.taken, // taken
+      io.cfiInfo.bits.taken === ubtbAns.taken) // noTaken
+    val ubtbWrong = cfiCountValid && ubtbAns.hit && Mux(ubtbAns.taken, 
+      io.cfiInfo.bits.target =/= ubtbAns.target || io.cfiInfo.bits.taken =/= ubtbAns.taken, // taken
+      io.cfiInfo.bits.taken =/= ubtbAns.taken) // noTaken
+
+    val takenAndRight = ubtbAns.taken && ubtbRight
+    val takenButWrong = ubtbAns.taken && ubtbWrong
+
+    // val btbRight = cfiCountValid && btbAns.hit && io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken
+    // val btbWrong = cfiCountValid && btbAns.hit && (io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken)
+
+    val btbRight = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+      io.cfiInfo.bits.target === btbAns.target && io.cfiInfo.bits.taken === btbAns.taken, // taken
+      io.cfiInfo.bits.taken === btbAns.taken) // noTaken
+    val btbWrong = cfiCountValid && btbAns.hit && Mux(btbAns.taken, 
+      io.cfiInfo.bits.target =/= btbAns.target || io.cfiInfo.bits.taken =/= btbAns.taken, // taken
+      io.cfiInfo.bits.taken =/= btbAns.taken) // noTaken
+
+    val tageRight = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken === tageAns.taken // DontCare jal
+    val tageWrong = cfiCountValid && io.cfiInfo.bits.pd.brType =/= "b10".U && io.cfiInfo.bits.taken =/= tageAns.taken // DontCare jal
+
+    val rasRight = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target === rasAns.target
+    val rasWrong = cfiCountValid && io.cfiInfo.bits.pd.isRet && rasAns.hit && io.cfiInfo.bits.target =/= rasAns.target
+
+    val loopRight = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken === loopAns.taken
+    val loopWrong = cfiCountValid && loopAns.hit && io.cfiInfo.bits.taken =/= loopAns.taken
+
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondBpRight", Perf)
     ExcitingUtils.addSource(mbpWrong, "perfCntCondBpWrong", Perf)
@@ -342,14 +382,26 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(mbpRRight, "perfCntCondBpRRight", Perf)
     ExcitingUtils.addSource(mbpRWrong, "perfCntCondBpRWrong", Perf)
 
+    ExcitingUtils.addSource(s1Right, "perfCntS1Right", Perf)
+    ExcitingUtils.addSource(s1Wrong, "perfCntS1Wrong", Perf)
+    ExcitingUtils.addSource(s2Right, "perfCntS2Right", Perf)
+    ExcitingUtils.addSource(s2Wrong, "perfCntS2Wrong", Perf)
+    ExcitingUtils.addSource(s3Right, "perfCntS3Right", Perf)
+    ExcitingUtils.addSource(s3Wrong, "perfCntS3Wrong", Perf)
+    
     ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
     ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
     ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
     ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
     ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
     ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
+    ExcitingUtils.addSource(rasRight, "perfCntrasRight", Perf)
+    ExcitingUtils.addSource(rasWrong, "perfCntrasWrong", Perf)
     ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
     ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
+
+    ExcitingUtils.addSource(takenAndRight, "perfCntTakenAndRight", Perf)
+    ExcitingUtils.addSource(takenButWrong, "perfCntTakenButWrong", Perf)
   }
 
   val utilization = Mux(headPtr.flag === tailPtr.flag, tailPtr.value - headPtr.value, BrqSize.U + tailPtr.value - headPtr.value)
