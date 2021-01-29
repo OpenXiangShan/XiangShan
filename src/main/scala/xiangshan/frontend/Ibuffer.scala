@@ -31,7 +31,6 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   class IBufEntry extends XSBundle {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
-    val pnpc = UInt(VAddrBits.W)
     val pd = new PreDecodeInfo
     val ipf = Bool()
     val acf = Bool()
@@ -94,7 +93,6 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       when(io.in.bits.mask(i)) {
         inWire.inst := io.in.bits.instrs(i)
         inWire.pc := io.in.bits.pc(i)
-        inWire.pnpc := io.in.bits.pnpc(i)
         inWire.pd := io.in.bits.pd(i)
         inWire.ipf := io.in.bits.ipf
         inWire.acf := io.in.bits.acf

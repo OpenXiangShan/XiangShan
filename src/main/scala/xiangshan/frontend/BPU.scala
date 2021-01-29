@@ -246,8 +246,6 @@ class BPUStage3 extends BPUStage {
   class S3IO extends XSBundle {
 
     val predecode = Input(new Predecode)
-    val realMask = Input(UInt(PredictWidth.W))
-    val prevHalf = Flipped(ValidIO(new PrevHalfInstr))
     val redirect =  Flipped(ValidIO(new Redirect))
   }
   val s3IO = IO(new S3IO)
@@ -259,7 +257,6 @@ class BPUStage3 extends BPUStage {
 
   val loopResp = io.in.resp.loop.exit
 
-  // realMask is in it
   val pdMask     = s3IO.predecode.mask
   val pdLastHalf = s3IO.predecode.lastHalf
   val pds        = s3IO.predecode.pd
@@ -280,11 +277,9 @@ class BPUStage3 extends BPUStage {
   
   val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
   val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
-  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken && HasCExtension.B
-  val prevHalfTakenMask = prevHalfTaken.asUInt
-  val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
+  val brTakens = ((brs & brPred) & ~loopRes)
   // we should provide btb resp as well
-  btbHits := btbResp.hits.asUInt | prevHalfTakenMask
+  btbHits := btbResp.hits.asUInt
 
   // predict taken only if btb has a target, jal and br targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => jalrs(i) && btbHits(i) || (jals(i) || brTakens(i))))
@@ -331,19 +326,6 @@ class BPUStage3 extends BPUStage {
   }
 
 
-  // we should provide the prediction for the first half RVI of the end of a fetch packet
-  // branch taken information would be lost in the prediction of the next packet,
-  // so we preserve this information here
-  when (hasHalfRVI && btbResp.isBrs(PredictWidth-1) && btbHits(PredictWidth-1) && HasCExtension.B) {
-    takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
-  }
-
-  // targets would be lost as well, since it is from btb
-  // unless it is a ret, which target is from ras
-  when (prevHalfTaken && !rets(0) && HasCExtension.B) {
-    targets(0) := s3IO.prevHalf.bits.target
-  }
-
   // Wrap tage resp and tage meta in
   // This is ugly
   io.out.resp.tage <> io.in.resp.tage
@@ -362,7 +344,7 @@ class BPUStage3 extends BPUStage {
     }
     XSDebug(p"brs:${Binary(brs)} jals:${Binary(jals)} jalrs:${Binary(jalrs)} calls:${Binary(calls)} rets:${Binary(rets)} rvcs:${Binary(RVCs)}\n")
     XSDebug(p"callIdx:${callIdx} retIdx:${retIdx}\n")
-    XSDebug(p"brPred:${Binary(brPred)} loopRes:${Binary(loopRes)} prevHalfTaken:${prevHalfTaken} brTakens:${Binary(brTakens)}\n")
+    XSDebug(p"brPred:${Binary(brPred)} loopRes:${Binary(loopRes)} brTakens:${Binary(brTakens)}\n")
   }
 
   if (EnbaleCFIPredLog) {
@@ -405,8 +387,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     val out = Vec(3, Output(new BranchPrediction))
     // from if4
     val predecode = Input(new Predecode)
-    val realMask = Input(UInt(PredictWidth.W))
-    val prevHalf = Flipped(ValidIO(new PrevHalfInstr))
     // to if4, some bpu info used for updating
     val brInfo = Output(new BrInfo)
   })
@@ -559,10 +539,6 @@ class BPU extends BaseBPU {
   }
 
   s3.s3IO.predecode <> io.predecode
-
-  s3.s3IO.realMask := io.realMask
-
-  s3.s3IO.prevHalf := io.prevHalf
 
   s3.s3IO.redirect <> io.redirect
 

@@ -25,7 +25,6 @@ class FetchPacket extends XSBundle {
   val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -81,59 +80,32 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val jalMask = UInt(PredictWidth.W)
   val targets = Vec(PredictWidth, UInt(VAddrBits.W))
 
-  // marks the last 2 bytes of this fetch packet
-  // val endsAtTheEndOfFirstBank = Bool()
-  // val endsAtTheEndOfLastBank = Bool()
-
   // half RVI could only start at the end of a packet
   val hasHalfRVI = Bool()
 
-
-  // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(hasHalfRVI.asUInt, 0.U((PredictWidth - 1).W))
-
-  def lastHalfRVIClearMask = ~lastHalfRVIMask
-
-  // is taken from half RVI
-  def lastHalfRVITaken = takens(PredictWidth - 1) && hasHalfRVI
-
-  def lastHalfRVIIdx = (PredictWidth - 1).U
-
-  // should not be used if not lastHalfRVITaken
-  def lastHalfRVITarget = targets(PredictWidth - 1)
-
-  def realTakens = takens & lastHalfRVIClearMask
-
-  def realBrMask = brMask & lastHalfRVIClearMask
-
-  def realJalMask = jalMask & lastHalfRVIClearMask
-
-  def brNotTakens = (~takens & realBrMask)
+  def brNotTakens = (~takens & brMask)
 
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
     (if (i == 0) false.B else ParallelORR(brNotTakens(i - 1, 0)))))
-
-  // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
 
   // if not taken before the half RVI inst
   def saveHalfRVI = hasHalfRVI && !(ParallelORR(takens(PredictWidth - 2, 0)))
 
   // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = ParallelPriorityEncoder(realTakens)
+  def jmpIdx = ParallelPriorityEncoder(takens)
 
   // only used when taken
   def target = {
     val generator = new PriorityMuxGenerator[UInt]
-    generator.register(realTakens.asBools, targets, List.fill(PredictWidth)(None))
+    generator.register(takens.asBools, targets, List.fill(PredictWidth)(None))
     generator()
   }
 
-  def taken = ParallelORR(realTakens)
+  def taken = ParallelORR(takens)
 
-  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
+  def takenOnBr = taken && ParallelPriorityMux(takens, brMask.asBools)
 
-  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
+  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(takens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
 class PredictorAnswer extends XSBundle {
