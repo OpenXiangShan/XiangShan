@@ -454,7 +454,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
   val commit_exception = exceptionDataRead.zip(writebackDataRead.map(_.flushPipe)).map{ case (e, f) => e.asUInt.orR || f }
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
-  val allowOnlyOneCommit = VecInit(commit_exception.drop(1)).asUInt.orR || intrBitSetReg
+  val allowOnlyOneCommit = VecInit(commit_exception).asUInt.orR || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
