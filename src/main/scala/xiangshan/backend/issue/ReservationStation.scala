@@ -486,7 +486,6 @@ class ReservationStationCtrl
     if (fixedDelay == 0) {
       io.fastUopOut.valid := selValid
       io.fastUopOut.bits  := fastSentUop
-      io.fastUopOut.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     } else {
       val bpQueue = Module(new BypassQueue(fixedDelay))
       bpQueue.io.in.valid := selValid
@@ -494,7 +493,6 @@ class ReservationStationCtrl
       bpQueue.io.redirect := io.redirect
       io.fastUopOut.valid := bpQueue.io.out.valid
       io.fastUopOut.bits  := bpQueue.io.out.bits
-      io.fastUopOut.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     }
 
     val fastSentUopReg = RegNext(fastAsynUop)
