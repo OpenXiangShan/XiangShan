@@ -438,8 +438,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
+  // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
-    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).valid
+    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).bits.redirectValid
   ))).orR()
   val misPredBlockCounter = Reg(UInt(2.W))
   misPredBlockCounter := Mux(misPredWb,
