@@ -99,6 +99,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     cfiIsRet(enqIdx) := io.enq.bits.cfiIsRet
     cfiIsRVC(enqIdx) := io.enq.bits.cfiIsRVC
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
+    target_vec(enqIdx) := io.enq.bits.target
   }
 
   tailPtr := tailPtr + real_fire
