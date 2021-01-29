@@ -64,17 +64,17 @@ class SingleSrcCAM[T <: Data](val gen: T, val set: Int, val readWidth: Int, rfZe
   })
 
   val wordType = UInt(gen.getWidth.W)
-  val array = Reg(Vec(set, wordType))
+  val value = Reg(Vec(set, wordType))
 
   io.r.resp.zipWithIndex.map{ case (a,i) =>
-    a := array.map( src => io.r.req(i).asUInt === src)
+    a := value.map( src => io.r.req(i).asUInt === src)
   }
 
   // Note: general reg file don't wakeup zero
-  if (rfZero) { io.zero.zip(array).map{ case(z, a) => z := a===0.U }}
+  if (rfZero) { io.zero.zip(value).map{ case(z, a) => z := a===0.U }}
 
   when (io.w.valid) {
-    array(io.w.bits.addr) := io.w.bits.data
+    value(io.w.bits.addr) := io.w.bits.data
   }
 }
 
@@ -137,8 +137,8 @@ class ReservationStation
   }
 
   data.io.in.valid := ctrl.io.in.valid
-  data.io.in.addr := ctrl.io.in.bits.addr
-  data.io.in.uop := ctrl.io.in.bits.uop // NOTE: use for imm-pc src value mux
+  data.io.in.addr := select.io.enq.bits
+  data.io.in.uop := io.fromDispatch.bits // NOTE: use for imm-pc src value mux
   data.io.in.enqSrcReady := ctrl.io.enqSrcReady
   data.io.srcRegValue := io.srcRegValue
   if(exuCfg == Exu.jumpExeUnitCfg) {
@@ -475,7 +475,7 @@ class ReservationStationCtrl
   psrc.map(_.w.valid := enqEn)
   val enqSrcSeqChecked = enqSrcSeq.zip(enqSrcTypeSeq).map{ case (s, t) =>
     Mux(t === SrcType.fp || t === SrcType.reg, s, 0.U)} // NOTE: if pc/imm -> 0.U and reg (means don't hit)
-  psrc.zip(enqSrcSeq).map{ case (p,s) => p.w.bits.data := s }
+  psrc.zip(enqSrcSeqChecked).map{ case (p,s) => p.w.bits.data := s }
 
   // TODO: later, only store will need psrcType
   val psrcType = Reg(Vec(srcNum, Vec(iqSize, Bool()))) // fp: false | other: true
