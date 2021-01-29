@@ -2,8 +2,9 @@ package xiangshan.backend.ftq
 
 import chisel3._
 import chisel3.util._
-import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, XSDebug, XSPerf}
+import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, XSDebug, XSPerf}
 import xiangshan._
+import xiangshan.frontend.{GlobalHistory, RASEntry}
 
 class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
 
@@ -31,6 +32,49 @@ object GetPcByFtq extends HasXSParameter {
   }
 }
 
+
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
+
+  val io = IO(new Bundle() {
+    val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
+    val ren = Input(Vec(numRead, Bool()))
+    val rdata = Output(Vec(numRead, gen))
+    val waddr = Input(UInt(log2Up(FtqSize).W))
+    val wen = Input(Bool())
+    val wdata = Input(gen)
+  })
+
+  for(i <- 0 until numRead){
+    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    sram.io.r.req.valid := io.ren(i)
+    sram.io.r.req.bits.setIdx := io.raddr(i)
+    io.rdata(i) := sram.io.r.resp.data(0)
+    sram.io.w.req.valid := io.wen
+    sram.io.w.req.bits.setIdx := io.waddr
+    sram.io.w.req.bits.data := io.wdata
+  }
+
+}
+
+class Ftq_4R_SRAMEntry extends XSBundle {
+  val ftqPC = UInt(VAddrBits.W)
+  val hasLastPrev = Bool()
+}
+
+// redirect and commit need read these infos
+class Ftq_2R_SRAMEntry extends XSBundle {
+  val rasSp = UInt(log2Ceil(RasSize).W)
+  val rasEntry = new RASEntry
+  val hist = new GlobalHistory
+  val predHist = new GlobalHistory
+  val specCnt = Vec(PredictWidth, UInt(10.W))
+  val br_mask = Vec(PredictWidth, Bool())
+}
+
+class Ftq_1R_Commit_SRAMEntry extends XSBundle {
+  val metas = Vec(PredictWidth, new BpuMeta)
+  val rvc_mask = Vec(PredictWidth, Bool())
+}
 
 class FtqRead extends Bundle {
   val ptr = Output(new FtqPtr)
@@ -72,16 +116,32 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
 
-  val dataModule = Module(new DataModuleTemplate(new FtqEntry, FtqSize, 4, 1, true))
-  dataModule.io.wen(0) := real_fire
-  dataModule.io.waddr(0) := tailPtr.value
-  dataModule.io.wdata(0) := io.enq.bits
+  val ftq_4r_sram = Module(new FtqNRSRAM(new Ftq_4R_SRAMEntry, 4))
+  ftq_4r_sram.io.wen := real_fire
+  ftq_4r_sram.io.waddr := tailPtr.value
+  ftq_4r_sram.io.wdata.ftqPC := io.enq.bits.ftqPC
+  ftq_4r_sram.io.wdata.hasLastPrev := io.enq.bits.hasLastPrev
+  val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
+  ftq_2r_sram.io.wen := real_fire
+  ftq_2r_sram.io.waddr := tailPtr.value
+  ftq_2r_sram.io.wdata.rasSp := io.enq.bits.rasSp
+  ftq_2r_sram.io.wdata.rasEntry := io.enq.bits.rasTop
+  ftq_2r_sram.io.wdata.hist := io.enq.bits.hist
+  ftq_2r_sram.io.wdata.predHist := io.enq.bits.predHist
+  ftq_2r_sram.io.wdata.specCnt := io.enq.bits.specCnt
+  ftq_2r_sram.io.wdata.br_mask := io.enq.bits.br_mask
+  val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
+  pred_target_sram.io.wen := real_fire
+  pred_target_sram.io.waddr := tailPtr.value
+  pred_target_sram.io.wdata := io.enq.bits.target
+  val ftq_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_Commit_SRAMEntry, 1))
+  ftq_1r_sram.io.wen := real_fire
+  ftq_1r_sram.io.waddr := tailPtr.value
+  ftq_1r_sram.io.wdata.metas := io.enq.bits.metas
+  ftq_1r_sram.io.wdata.rvc_mask := io.enq.bits.rvc_mask
 
-  /* TODO: wrap these sigs in DataModuleTemplate
-      these fields need update when exu write back,
-      so split them out
-  */
-  val target_vec = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
+  // multi-write
+  val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Up(PredictWidth).W))))
   val cfiIsCall, cfiIsRet, cfiIsRVC = Reg(Vec(FtqSize, Bool()))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
@@ -99,7 +159,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     cfiIsRet(enqIdx) := io.enq.bits.cfiIsRet
     cfiIsRVC(enqIdx) := io.enq.bits.cfiIsRVC
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
-    target_vec(enqIdx) := io.enq.bits.target
+    update_target(enqIdx) := io.enq.bits.target
   }
 
   tailPtr := tailPtr + real_fire
@@ -129,7 +189,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     io.redirect.valid && io.redirect.bits.level === RedirectLevel.flushAfter, init = false.B
   )
   when(io.frontendRedirect.valid && lastIsMispredict) {
-    target_vec(io.frontendRedirect.bits.ftqIdx.value) := io.frontendRedirect.bits.cfiUpdate.target
+    update_target(io.frontendRedirect.bits.ftqIdx.value) := io.frontendRedirect.bits.cfiUpdate.target
   }
 
   // commit
@@ -144,29 +204,66 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     headPtr := headPtr + 1.U
   }
 
-  dataModule.io.raddr(0) := headPtr.value
-  val commitEntry = WireInit(dataModule.io.rdata(0))
+  ftq_4r_sram.io.raddr(0) := headPtr.value
+  ftq_4r_sram.io.ren(0) := true.B
+  ftq_2r_sram.io.raddr(0) := headPtr.value
+  ftq_2r_sram.io.ren(0) := true.B
+  ftq_1r_sram.io.raddr(0) := headPtr.value
+  ftq_1r_sram.io.ren(0) := true.B
+
+  val commitEntry = Wire(new FtqEntry)
   val commit_valids = VecInit(commitStateQueue(headPtr.value).map(s => s === s_commited))
   // set state to invalid next cycle
   commitStateQueue(headPtr.value).zip(commit_valids).foreach({ case (s, v) => when(v) {
     s := s_invalid
   }
   })
+  // from 4r sram
+  commitEntry.ftqPC := ftq_4r_sram.io.rdata(0).ftqPC
+  commitEntry.hasLastPrev := ftq_4r_sram.io.rdata(0).hasLastPrev
+  // from 2r sram
+  commitEntry.rasSp := ftq_2r_sram.io.rdata(0).rasSp
+  commitEntry.rasTop := ftq_2r_sram.io.rdata(0).rasEntry
+  commitEntry.hist := ftq_2r_sram.io.rdata(0).hist
+  commitEntry.predHist := ftq_2r_sram.io.rdata(0).predHist
+  commitEntry.specCnt := ftq_2r_sram.io.rdata(0).specCnt
+  commitEntry.br_mask := ftq_2r_sram.io.rdata(0).br_mask
+  // from 1r sram
+  commitEntry.metas := ftq_1r_sram.io.rdata(0).metas
+  commitEntry.rvc_mask := ftq_1r_sram.io.rdata(0).rvc_mask
+  // from regs
   commitEntry.valids := RegNext(commit_valids)
   commitEntry.mispred := RegNext(mispredict_vec(headPtr.value))
   commitEntry.cfiIndex := RegNext(cfiIndex_vec(headPtr.value))
   commitEntry.cfiIsCall := RegNext(cfiIsCall(headPtr.value))
   commitEntry.cfiIsRet := RegNext(cfiIsRet(headPtr.value))
   commitEntry.cfiIsRVC := RegNext(cfiIsRVC(headPtr.value))
-  commitEntry.target := RegNext(target_vec(headPtr.value))
+  commitEntry.target := RegNext(update_target(headPtr.value))
 
   io.commit_ftqEntry.valid := RegNext(Cat(commit_valids).orR()) //TODO: do we need this?
   io.commit_ftqEntry.bits := commitEntry
 
   // read logic
   for ((req, i) <- io.ftqRead.zipWithIndex) {
-    dataModule.io.raddr(1 + i) := req.ptr.value
-    req.entry := dataModule.io.rdata(1 + i)
+    req.entry := DontCare
+    ftq_4r_sram.io.raddr(1 + i) := req.ptr.value
+    ftq_4r_sram.io.ren(1 + i) := true.B
+    req.entry.ftqPC := ftq_4r_sram.io.rdata(1 + i).ftqPC
+    req.entry.hasLastPrev := ftq_4r_sram.io.rdata(1 + i).hasLastPrev
+    if(i == 0){ // jump, read npc
+      pred_target_sram.io.raddr(0) := req.ptr.value
+      pred_target_sram.io.ren(0) := true.B
+      req.entry.target := pred_target_sram.io.rdata(0)
+    }
+    if(i == 1){ // mispredict, read more info
+      ftq_2r_sram.io.raddr(1) := req.ptr.value
+      ftq_2r_sram.io.ren(1) := true.B
+      req.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
+      req.entry.hist := ftq_2r_sram.io.rdata(1).hist
+      req.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
+      req.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
+      req.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
+    }
   }
 
   // redirect, reset ptr
