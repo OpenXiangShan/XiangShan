@@ -263,14 +263,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.uncache.req.bits.data := dataModule.io.rdata(0).data
   io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
-  io.uncache.req.bits.meta.id       := DontCare
-  io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := paddrModule.io.rdata(0)
-  io.uncache.req.bits.meta.uop      := uop(deqPtr)
-  io.uncache.req.bits.meta.mmio     := true.B
-  io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(0).mask
-  io.uncache.req.bits.meta.replay   := false.B
+  io.uncache.req.bits.id   := DontCare
 
   when(io.uncache.req.fire()){
     pending(deqPtr) := false.B
@@ -330,11 +323,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.addr := paddrModule.io.rdata(i)
     io.sbuffer(i).bits.data := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask := dataModule.io.rdata(i).mask
-    io.sbuffer(i).bits.meta          := DontCare
-    io.sbuffer(i).bits.meta.tlb_miss := false.B
-    io.sbuffer(i).bits.meta.uop      := DontCare
-    io.sbuffer(i).bits.meta.mmio     := false.B
-    io.sbuffer(i).bits.meta.mask     := io.sbuffer(i).bits.mask
+    io.sbuffer(i).bits.id   := DontCare
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B

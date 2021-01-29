@@ -17,8 +17,8 @@ class ExceptionAddrIO extends XSBundle {
 }
 
 class FwdEntry extends XSBundle {
-  val mask = Vec(8, Bool())
-  val data = Vec(8, UInt(8.W))
+  val valid = Bool()
+  val data = UInt(8.W)
 }
 
 // inflight miss block reqs
