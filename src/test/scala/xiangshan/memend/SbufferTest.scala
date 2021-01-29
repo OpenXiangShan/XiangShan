@@ -30,7 +30,7 @@ class SbufferWapper extends XSModule {
   // fake dcache
   sbuffer.io.dcache.req.ready := true.B
   sbuffer.io.dcache.resp.valid := RegNext(RegNext(RegNext(RegNext(sbuffer.io.dcache.req.valid))))
-  sbuffer.io.dcache.resp.bits.meta.id := RegNext(RegNext(RegNext(RegNext(sbuffer.io.dcache.req.bits.meta.id))))
+  sbuffer.io.dcache.resp.bits.id := RegNext(RegNext(RegNext(RegNext(sbuffer.io.dcache.req.bits.id))))
 }
 
 class SbufferTest extends AnyFlatSpec

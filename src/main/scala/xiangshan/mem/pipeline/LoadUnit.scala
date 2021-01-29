@@ -55,14 +55,7 @@ class LoadUnit_S0 extends XSModule {
   io.dcacheReq.bits.data := DontCare
 
   // TODO: update cache meta
-  io.dcacheReq.bits.meta.id       := DontCare
-  io.dcacheReq.bits.meta.vaddr    := s0_vaddr
-  io.dcacheReq.bits.meta.paddr    := DontCare
-  io.dcacheReq.bits.meta.uop      := s0_uop
-  io.dcacheReq.bits.meta.mmio     := false.B
-  io.dcacheReq.bits.meta.tlb_miss := false.B
-  io.dcacheReq.bits.meta.mask     := s0_mask
-  io.dcacheReq.bits.meta.replay   := false.B
+  io.dcacheReq.bits.id   := DontCare
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
@@ -280,6 +273,10 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
+
+  // use s2_hit_way to select data received in s1
+  load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
+  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

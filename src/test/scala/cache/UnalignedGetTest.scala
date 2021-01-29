@@ -257,18 +257,11 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
 
     def sendFlushReq(addr: UInt): DCacheWordReq = {
       val req = Wire(new DCacheWordReq)
-      req.cmd := MemoryOpConstants.M_XWR
+      req.cmd  := MemoryOpConstants.M_XWR
       req.addr := FLUSH64_ADDR.U
       req.data := addr
       req.mask := FULL_MASK_64
-      req.meta.id := 0.U
-      req.meta.vaddr := FLUSH64_ADDR.U
-      req.meta.paddr := FLUSH64_ADDR.U
-      req.meta.uop := DontCare
-      req.meta.mmio := true.B
-      req.meta.tlb_miss := false.B
-      req.meta.mask := FULL_MASK_64
-      req.meta.replay := false.B
+      req.id   := 0.U
       req
     }
 
@@ -278,7 +271,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
       req.addr := addr
       req.data := data
       req.mask := Fill(req.mask.getWidth, true.B)
-      req.meta := DontCare
+      req.id   := DontCare
       req
     }
 
