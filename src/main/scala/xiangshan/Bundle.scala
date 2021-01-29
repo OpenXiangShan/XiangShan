@@ -388,6 +388,8 @@ class TlbFeedback extends XSBundle {
   val hit = Bool()
 }
 
+class RSFeedback extends TlbFeedback
+
 class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
