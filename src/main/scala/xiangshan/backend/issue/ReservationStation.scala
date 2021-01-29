@@ -125,6 +125,8 @@ class ReservationStation
   ctrl.io.in.valid := select.io.enq.fire() && !io.redirect.valid // NOTE: same as select
   ctrl.io.in.bits.addr := select.io.enq.bits
   ctrl.io.in.bits.uop := io.fromDispatch.bits
+  ctrl.io.validVec := select.io.validVec
+  ctrl.io.indexVec := select.io.indexVec
   ctrl.io.redirect := io.redirect
   ctrl.io.feedback := io.feedback
   ctrl.io.sel.valid := select.io.deq.valid
@@ -186,6 +188,8 @@ class ReservationStationSelect
     val feedbackVec = Input(Vec(IssQueSize+1, Bool()))
     val redirectVec = Input(Vec(IssQueSize, Bool()))
     val readyVec = Input(Vec(IssQueSize, Bool()))
+    val validVec = Output(Vec(IssQueSize, Bool()))
+    val indexVec = Output(Vec(IssQueSize, UInt(iqIdxWidth.W)))
 
     // val enq = Flipped(DecoupledIO(UInt(iqIdxWidth.W)))
     val enq = new Bundle {
@@ -324,6 +328,9 @@ class ReservationStationSelect
     stateQueue(enqIdx) := s_valid
   }
 
+  io.validVec := validIdxQueue.zip(lastSelMask.asBools).map{ case (a, b) => a & b }
+  io.indexVec := indexQueue
+
   io.enq.ready := !isFull || (if(feedback || nonBlocked) dequeue else false.B)
   io.enq.bits  := enqIdx
   io.deq.valid := selectValid
@@ -364,6 +371,8 @@ class ReservationStationCtrl
     val feedbackVec = Output(Vec(IssQueSize+1, Bool()))
     val redirectVec = Output(Vec(IssQueSize, Bool()))
     val readyVec = Output(Vec(IssQueSize, Bool()))
+    val validVec = Input(Vec(IssQueSize, Bool()))
+    val indexVec = Input(Vec(IssQueSize, UInt(iqIdxWidth.W)))
 
     val fastUopOut = ValidIO(new MicroOp)
     val fastUopsIn = Flipped(Vec(fastPortsCnt, ValidIO(new MicroOp)))
@@ -463,16 +472,16 @@ class ReservationStationCtrl
 
   io.fastUopOut := DontCare
   if (fastWakeup) {
-    val asynUop = Module(new AsyncDataModuleTemplate(new fastSendUop, iqSize, 1, 1))
-    asynUop.io.wen(0) := enqEn
-    asynUop.io.waddr(0) := enqPtr
-    asynUop.io.wdata(0) := (Wire(new fastSendUop)).apply(enqUop)
-    asynUop.io.raddr(0) := selPtr
+    val asynUop = Reg(Vec(iqSize, new fastSendUop))
+    when (enqEn) { asynUop(enqPtr) := (Wire(new fastSendUop)).apply(enqUop) }
+    val asynIdxUop = (0 until iqSize).map(i => asynUop(io.indexVec(i)) )
+    val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueue(io.indexVec(i))).andR )
+    val fastAsynUop = ParallelPriorityMux(readyIdxVec zip asynIdxUop)
     val fastSentUop = Wire(new MicroOp)
     fastSentUop := DontCare
-    fastSentUop.pdest := asynUop.io.rdata(0).pdest
-    fastSentUop.ctrl.rfWen := asynUop.io.rdata(0).rfWen
-    fastSentUop.ctrl.fpWen := asynUop.io.rdata(0).fpWen
+    fastSentUop.pdest := fastAsynUop.pdest
+    fastSentUop.ctrl.rfWen := fastAsynUop.rfWen
+    fastSentUop.ctrl.fpWen := fastAsynUop.fpWen
 
     if (fixedDelay == 0) {
       io.fastUopOut.valid := selValid
@@ -488,7 +497,7 @@ class ReservationStationCtrl
       io.fastUopOut.bits.cf.exceptionVec  := 0.U.asTypeOf(ExceptionVec())
     }
 
-    val fastSentUopReg = RegNext(asynUop.io.rdata(0))
+    val fastSentUopReg = RegNext(fastAsynUop)
     io.out.bits.pdest := fastSentUopReg.pdest
     io.out.bits.ctrl.rfWen := fastSentUopReg.rfWen
     io.out.bits.ctrl.fpWen := fastSentUopReg.fpWen
@@ -533,13 +542,13 @@ class ReservationStationCtrl
       for (k <- 0 until fastPortsCnt) {
         val fastHit = listenHitEntry(j, k, i, fastUops(k).bits) && fastUops(k).valid
         val fastHitNoConflict = fastHit && !(enqPtr===i.U && enqEn)
-        when (fastHitNoConflict) { srcUpdate(i)(j)(k) := true.B }
+        when (fastHitNoConflict) { srcUpdateListen(i)(j)(k) := true.B }
         when (RegNext(fastHitNoConflict) && !(enqPtr===i.U && enqEn)) { data(j)(i)(k) := true.B }
       }
       for (k <- 0 until slowPortsCnt) {
         val slowHit = listenHitEntry(j, k + fastPortsCnt, i, slowUops(k).bits) && slowUops(k).valid
         val slowHitNoConflict = slowHit && !(enqPtr===i.U && enqEn)
-        when (slowHitNoConflict) { srcUpdate(i)(j)(k+fastPortsCnt) := true.B }
+        when (slowHitNoConflict) { srcUpdateListen(i)(j)(k+fastPortsCnt) := true.B }
         when (slowHitNoConflict) { data(j)(i)(k + fastPortsCnt) := true.B }
       }
     }
@@ -550,14 +559,14 @@ class ReservationStationCtrl
     for (k <- 0 until fastPortsCnt) {
       val fastHit = listenHitEnq(fastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && fastUops(k).valid
       val lastFastHit = listenHitEnq(lastFastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && lastFastUops(k).valid
-      when (fastHit || lastFastHit) { srcUpdate(enqPtr)(j)(k) := true.B }
+      when (fastHit || lastFastHit) { srcUpdateListen(enqPtr)(j)(k) := true.B }
       when (lastFastHit)            { data(j)(enqPtr)(k) := true.B }
       when (RegNext(fastHit))       { data(j)(enqPtrReg)(k) := true.B }
     }
     for (k <- 0 until slowPortsCnt) {
       val slowHit = listenHitEnq(slowUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && slowUops(k).valid
       when (slowHit) {
-        srcUpdate(enqPtr)(j)(k+fastPortsCnt) := true.B
+        srcUpdateListen(enqPtr)(j)(k+fastPortsCnt) := true.B
         data(j)(enqPtr)(k + fastPortsCnt) := true.B
       }
     }
