@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
+import xiangshan.backend.issue.{ReservationStation}
 
 
 class FpBlockToCtrlIO extends XSBundle {
@@ -71,68 +71,63 @@ class FloatBlock
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readFpRf).map(_.io.toFp.bits.data)
     val writeBackData = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
-    val wakeupCnt = writeBackData.length
+    val fastPortsCnt = writeBackData.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readFpRf).map(_.io.toFp)
-    val extraListenPorts = inBlockListenPorts ++ io.wakeUpIn.slow
-    val extraListenPortsCnt = extraListenPorts.length
+    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow
+    val slowPortsCnt = slowPorts.length
 
-    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} " +
-      s"extraListenPorts: ${extraListenPortsCnt} " +
+    println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
+      s"slowPorts: ${slowPortsCnt} " +
       s"delay:${certainLatency}"
     )
 
-    val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = false))
-    val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = false))
+    val rs = Module(new ReservationStation(cfg, fastPortsCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = false))
 
-    rsCtrl.io.data <> rsData.io.ctrl
-    rsCtrl.io.redirect <> redirect // TODO: remove it
-    rsCtrl.io.flush <> flush // TODO: remove it
-    rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
-    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rs.io.redirect <> redirect // TODO: remove it
+    rs.io.flush <> flush // TODO: remove it
+    rs.io.numExist <> io.toCtrlBlock.numExist(i)
+    rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
 
-    rsData.io.srcRegValue := DontCare
+    rs.io.srcRegValue := DontCare
     val src1Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3).data))
     val src2Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 1).data))
     val src3Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 2).data))
-    
-    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg.fpSrcCnt > 2) rsData.io.srcRegValue(2) := src3Value(readPortIndex(i))
-    rsData.io.redirect <> redirect
-    rsData.io.flush <> flush
 
-    rsData.io.writeBackedData <> writeBackData
-    for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
+    rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
+
+    rs.io.fastDatas <> writeBackData
+    for ((x, y) <- rs.io.slowPorts.zip(slowPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
     }
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
-    exeUnits(i).io.fromFp <> rsData.io.deq
-    rsData.io.feedback := DontCare
+    exeUnits(i).io.fromFp <> rs.io.deq
+    rs.io.feedback := DontCare
 
-    rsCtrl.suggestName(s"rsc_${cfg.name}")
-    rsData.suggestName(s"rsd_${cfg.name}")
+    rs.suggestName(s"rs_${cfg.name}")
 
-    rsData
+    rs
   })
 
   for(rs <- reservedStations){
     val inBlockUops = reservedStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeFpRf
     ).map(x => {
-      val raw = WireInit(x.io.selectedUop)
-      raw.valid := x.io.selectedUop.valid && raw.bits.ctrl.fpWen
+      val raw = WireInit(x.io.fastUopOut)
+      raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.fpWen
       raw
     })
-    rs.io.broadcastedUops <> inBlockUops ++ io.wakeUpIn.fastUops
+    rs.io.fastUopsIn <> inBlockUops ++  io.wakeUpIn.fastUops
   }
 
   io.wakeUpFpOut.fastUops <> reservedStations.filter(
     rs => fpFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop).map(fpValid)
+  ).map(_.io.fastUopOut).map(fpValid)
 
   io.wakeUpFpOut.fast <> exeUnits.filter(
     x => fpFastFilter(x.config)
@@ -144,7 +139,7 @@ class FloatBlock
 
   io.wakeUpIntOut.fastUops <> reservedStations.filter(
     rs => intFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop).map(intValid)
+  ).map(_.io.fastUopOut).map(intValid)
 
   io.wakeUpIntOut.fast <> exeUnits.filter(
     x => intFastFilter(x.config)
