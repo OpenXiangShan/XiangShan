@@ -618,7 +618,7 @@ class Tage extends BaseTage {
 
       tables(i).io.update.uMask(w) := updateUMask(i)(w)
       tables(i).io.update.u(w) := updateU(i)(w)
-      tables(i).io.update.pc := packetAligned(u.ftqPC) + (i << instOffsetBits).U
+      tables(i).io.update.pc := packetAligned(u.ftqPC) + (w << instOffsetBits).U
     }
     // use fetch pc instead of instruction pc
     tables(i).io.update.hist := updateHist
