@@ -175,8 +175,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val next = io.redirect.bits.ftqIdx + 1.U
     tailPtr := next
     val offset = Mux(io.flush, io.flushOffset, io.redirect.bits.ftqOffset)
+    val notMisPredict = io.flush || (io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
     commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-      when(i.U > offset){
+      when(i.U > offset || (notMisPredict && i.U === offset)){
         s := s_invalid
       }
     })
