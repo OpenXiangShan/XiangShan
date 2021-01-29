@@ -227,6 +227,15 @@ class RAS extends BasePredictor
     io.meta.rasTopCtr := DontCare
     io.meta.rasToqAddr := DontCare
 
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+        val rasAns = Wire(new PredictorAnswer)
+        rasAns.hit := io.out.valid
+        rasAns.taken := DontCare
+        rasAns.target := io.out.bits.target
+
+        ExcitingUtils.addSource(rasAns, "rasAns")
+    }
+
     if (BPUDebug && debug) {
         val spec_debug = spec.debugIO
         val commit_debug = commit.debugIO

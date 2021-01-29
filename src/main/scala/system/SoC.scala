@@ -165,6 +165,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     val difftestIO0 = IO(new DifftestBundle())
     val difftestIO1 = IO(new DifftestBundle())
     val difftestIO = Seq(difftestIO0, difftestIO1)
+
+    val trapIO0 = IO(new xiangshan.TrapIO())
+    val trapIO1 = IO(new xiangshan.TrapIO())
+    val trapIO = Seq(trapIO0, trapIO1)
+
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
 
     for (i <- 0 until NumCores) {
@@ -179,6 +184,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     if (env.DualCoreDifftest) {
       difftestIO0 <> xs_core(0).module.difftestIO
       difftestIO1 <> xs_core(1).module.difftestIO
+      trapIO0 <> xs_core(0).module.trapIO
+      trapIO1 <> xs_core(1).module.trapIO
     }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)

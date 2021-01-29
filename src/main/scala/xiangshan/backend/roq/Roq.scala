@@ -43,6 +43,14 @@ class RoqCSRIO extends XSBundle {
   }
 }
 
+class RoqLsqIO extends XSBundle {
+  val lcommit = Output(UInt(3.W))
+  val scommit = Output(UInt(3.W))
+  val pendingld = Output(Bool())
+  val pendingst = Output(Bool())
+  val commit = Output(Bool())
+}
+
 class RoqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
   val isEmpty = Output(Bool())
@@ -57,7 +65,6 @@ class RoqDispatchData extends RoqCommitInfo {
 }
 
 class RoqWbData extends XSBundle {
-  val fflags = UInt(5.W)
   val flushPipe = Bool()
 }
 
@@ -204,6 +211,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // exu + brq
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = new RoqCommitIO
+    val lsq = new RoqLsqIO
     val bcommit = Output(UInt(BrTagWidth.W))
     val roqDeqPtr = Output(new RoqPtr)
     val csr = new RoqCSRIO
@@ -222,6 +230,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val scFailed = Output(Bool())
   })
   difftestIO <> DontCare
+
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
 
   // instvalid field
   // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
@@ -278,6 +289,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val writebackDataRead = writebackData.io.rdata
 
   val exceptionDataRead = Wire(Vec(CommitWidth, ExceptionVec()))
+  val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
 
   io.roqDeqPtr := deqPtr
 
@@ -367,8 +379,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   io.exception := debug_deqUop
   io.exception.ctrl.commitType := deqDispatchData.commitType
-  io.exception.lqIdx := deqDispatchData.lqIdx
-  io.exception.sqIdx := deqDispatchData.sqIdx
   io.exception.cf.pc := deqDispatchData.pc
   io.exception.cf.exceptionVec := deqExceptionVec
   io.exception.cf.crossPageIPFFix := deqDispatchData.crossPageIPFFix
@@ -405,7 +415,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }).unzip
   val fflags = Wire(Valid(UInt(5.W)))
   fflags.valid := Mux(io.commits.isWalk, false.B, Cat(wflags).orR())
-  fflags.bits := wflags.zip(writebackDataRead.map(_.fflags)).map({
+  fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_|_)
   val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
@@ -439,7 +449,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       io.commits.info(i).pdest,
       io.commits.info(i).old_pdest,
       debug_exuData(deqPtrVec(i).value),
-      writebackDataRead(i).fflags.asUInt
+      fflagsDataRead(i)
     )
     XSInfo(state === s_walk && io.commits.valid(i), "walked pc %x wen %d ldst %d data %x\n",
       debug_microOp(walkPtrVec(i).value).cf.pc,
@@ -456,12 +466,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
+  // sync fflags/dirty_fs to csr
   io.csr.fflags := fflags
   io.csr.dirty_fs := dirty_fs
+
   // commit branch to brq
   val cfiCommitVec = VecInit(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{case(v, t) => v && CommitType.isBranch(t)})
   io.bcommit := Mux(io.commits.isWalk, 0.U, PopCount(cfiCommitVec))
 
+  // commit load/store to lsq
+  val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.LOAD))
+  val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE))
+  io.lsq.lcommit := Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec))
+  io.lsq.scommit := Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec))
+  io.lsq.pendingld := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value)
+  io.lsq.pendingst := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value)
+  io.lsq.commit := !io.commits.isWalk && io.commits.valid(0)
 
   /**
     * state changes
@@ -631,8 +651,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     wdata.commitType := req.ctrl.commitType
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest
-    wdata.lqIdx := req.lqIdx
-    wdata.sqIdx := req.sqIdx
     wdata.pc := req.cf.pc
     wdata.crossPageIPFFix := req.cf.crossPageIPFFix
     // wdata.exceptionVec := req.cf.exceptionVec
@@ -642,13 +660,13 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   writebackData.io.wen := io.exeWbResults.map(_.valid)
   writebackData.io.waddr := io.exeWbResults.map(_.bits.uop.roqIdx.value)
   writebackData.io.wdata.zip(io.exeWbResults.map(_.bits)).map{ case (wdata, wb) =>
-    wdata.fflags := wb.fflags
     wdata.flushPipe := wb.uop.ctrl.flushPipe
   }
   writebackData.io.raddr := commitReadAddr_next
 
   for (i <- 0 until 16) {
     val exceptionData = Module(new SyncDataModuleTemplate(Bool(), RoqSize, CommitWidth, RenameWidth + writebackCount(i)))
+    exceptionData.suggestName("exceptionData")
     var wPortIdx = 0
     for (j <- 0 until RenameWidth) {
       exceptionData.io.wen  (wPortIdx) := canEnqueue(j)
@@ -688,6 +706,30 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     exceptionData.io.raddr := VecInit(deqPtrVec_next.map(_.value))
     exceptionDataRead.zip(exceptionData.io.rdata).map{ case (d, r) => d(i) := r }
   }
+
+  val fflagsDataModule = Module(new SyncDataModuleTemplate(UInt(5.W), RoqSize, CommitWidth, 7))
+  var wPortIdx = 0
+  // 4 FMACs
+  for (i <- 0 until 4) {
+    fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(8+i).valid
+    fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(8+i).bits.uop.roqIdx.value
+    fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(8+i).bits.fflags
+    wPortIdx = wPortIdx + 1
+  }
+  // 2 FMISCs (the first one includes I2F from JumpUnit)
+  for (i <- 0 until 2) {
+    fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(14+i).valid
+    fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(14+i).bits.uop.roqIdx.value
+    fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(14+i).bits.fflags
+    wPortIdx = wPortIdx + 1
+  }
+  // 1 FMISC (Int Wb)
+  fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(7).valid
+  fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(7).bits.uop.roqIdx.value
+  fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(7).bits.fflags
+  fflagsDataModule.io.raddr := VecInit(deqPtrVec_next.map(_.value))
+  fflagsDataRead := fflagsDataModule.io.rdata
+
 
   /**
     * debug info
@@ -774,6 +816,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     debug_deqUop.ctrl.fuType === FuType.mou &&
     (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
 
+  val hitTrap = trapVec.reduce(_||_)
+  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+  val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
+
   if (!env.FPGAPlatform) {
 
     val difftestIntrNO = WireInit(0.U(XLEN.W))
@@ -794,10 +840,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
-
-    val hitTrap = trapVec.reduce(_||_)
-    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-    val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
     ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
     ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
@@ -821,5 +863,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     difftestIO.wpc := RegNext(wpc)
     difftestIO.isRVC := RegNext(isRVC.asUInt)
     difftestIO.scFailed := RegNext(scFailed)
+
+    trapIO.valid := RegNext(hitTrap)
+    trapIO.code := RegNext(trapCode)
+    trapIO.pc := RegNext(trapPC)
+    trapIO.cycleCnt := RegNext(GTimer())
+    trapIO.instrCnt := RegNext(instrCnt)
   }
 }

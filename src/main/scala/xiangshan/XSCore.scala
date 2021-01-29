@@ -187,6 +187,7 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
+    replacer = Some("setlru"),
     nMissEntries = 2
   )
 
@@ -359,8 +360,12 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
     val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
+  
   val difftestIO = IO(new DifftestBundle())
   difftestIO <> DontCare
+  
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
   AddressSpace.printMemmap()
@@ -463,8 +468,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   floatBlock.io.frm <> integerBlock.io.csrio.frm
 
-  memBlock.io.lsqio.commits <> ctrlBlock.io.roqio.commits
-  memBlock.io.lsqio.roqDeqPtr <> ctrlBlock.io.roqio.roqDeqPtr
+  memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)
@@ -499,6 +503,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
     difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
     difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
+    trapIO <> ctrlBlock.trapIO
 
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
     ExcitingUtils.addSink(debugIntReg, s"DEBUG_INT_ARCH_REG$id", ExcitingUtils.Debug)
