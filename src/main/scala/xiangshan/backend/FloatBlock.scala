@@ -37,6 +37,7 @@ class FloatBlock
   })
 
   val redirect = io.fromCtrlBlock.redirect
+  val flush = io.fromCtrlBlock.flush
 
   val fpRf = Module(new Regfile(
     numReadPorts = NRFpReadPorts,
@@ -84,6 +85,7 @@ class FloatBlock
     val rs = Module(new ReservationStation(cfg, fastPortsCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = false))
 
     rs.io.redirect <> redirect // TODO: remove it
+    rs.io.flush <> flush // TODO: remove it
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
     rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
 
@@ -103,6 +105,7 @@ class FloatBlock
     }
 
     exeUnits(i).io.redirect <> redirect
+    exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromFp <> rs.io.deq
     rs.io.feedback := DontCare
 

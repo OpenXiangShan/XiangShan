@@ -33,11 +33,11 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
   val divZero = b === 0.U
   val divZeroReg = RegEnable(divZero, newReq)
 
-  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
 
   switch(state){
     is(s_idle){
-      when (io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)) {
+      when (io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)) {
         state := Mux(divZero, s_finish, s_lzd)
       }
     }
