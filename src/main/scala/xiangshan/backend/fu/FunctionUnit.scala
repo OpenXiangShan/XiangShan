@@ -199,7 +199,7 @@ object FunctionUnit extends HasXSParameter {
     writeIntRf = false,
     writeFpRf = true,
     hasRedirect = false,
-    CertainLatency(0)
+    UncertainLatency()
   )
 
   val divCfg = FuConfig(

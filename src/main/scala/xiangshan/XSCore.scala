@@ -187,6 +187,7 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
+    replacer = Some("setlru"),
     nMissEntries = 2
   )
 
@@ -200,8 +201,9 @@ trait HasXSParameter {
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     nMissEntries = 16,
-    nLoadMissEntries = 8,
-    nStoreMissEntries = 8
+    nProbeEntries = 16,
+    nReleaseEntries = 16,
+    nStoreReplayEntries = 16
   )
 
   val LRSCCycles = 100
@@ -358,8 +360,12 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
     val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
+  
   val difftestIO = IO(new DifftestBundle())
   difftestIO <> DontCare
+  
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
   AddressSpace.printMemmap()
@@ -497,6 +503,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
     difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
     difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
+    trapIO <> ctrlBlock.trapIO
 
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
     ExcitingUtils.addSink(debugIntReg, s"DEBUG_INT_ARCH_REG$id", ExcitingUtils.Debug)
