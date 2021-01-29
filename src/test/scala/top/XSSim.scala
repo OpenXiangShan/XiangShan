@@ -53,19 +53,16 @@ class DiffTestIO extends XSBundle {
   val storeAddr   = Output(Vec(2, UInt(64.W)))
   val storeData   = Output(Vec(2, UInt(64.W)))
   val storeMask   = Output(Vec(2, UInt(8.W)))
+
+  val sbufferResp = Output(Bool())
+  val sbufferAddr = Output(UInt(64.W))
+  val sbufferData = Output(Vec(64, UInt(8.W)))
+  val sbufferMask = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
   val log_begin, log_end = Input(UInt(64.W))
   val log_level = Input(UInt(64.W)) // a cpp uint
-}
-
-class TrapIO extends XSBundle {
-  val valid = Output(Bool())
-  val code = Output(UInt(3.W))
-  val pc = Output(UInt(VAddrBits.W))
-  val cycleCnt = Output(UInt(XLEN.W))
-  val instrCnt = Output(UInt(XLEN.W))
 }
 
 class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
@@ -112,11 +109,14 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val difftest = new DiffTestIO
+      val difftest  = new DiffTestIO
+      val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
+      val trap2 = new TrapIO
       val uart = new UARTIO
     })
+    io.difftest2 <> DontCare
 
     dontTouch(io.difftest)
     dontTouch(io.logCtrl)
@@ -129,58 +129,112 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       soc.module.io.extIntrs(i) := false.B
     }
 
-    val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
+    val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
+    val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
+    
     if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(difftest.commit, "difftestCommit", Debug)
-      ExcitingUtils.addSink(difftest.thisPC, "difftestThisPC", Debug)
-      ExcitingUtils.addSink(difftest.thisINST, "difftestThisINST", Debug)
-      ExcitingUtils.addSink(difftest.skip, "difftestSkip", Debug)
-      ExcitingUtils.addSink(difftest.isRVC, "difftestIsRVC", Debug)
-      ExcitingUtils.addSink(difftest.wen, "difftestWen", Debug)
-      ExcitingUtils.addSink(difftest.wdata, "difftestWdata", Debug)
-      ExcitingUtils.addSink(difftest.wdst, "difftestWdst", Debug)
-      ExcitingUtils.addSink(difftest.wpc, "difftestWpc", Debug)
-      ExcitingUtils.addSink(difftest.intrNO, "difftestIntrNO", Debug)
-      ExcitingUtils.addSink(difftest.cause, "difftestCause", Debug)
-      ExcitingUtils.addSink(difftest.r, "difftestRegs", Debug)
-      ExcitingUtils.addSink(difftest.priviledgeMode, "difftestMode", Debug)
-      ExcitingUtils.addSink(difftest.mstatus, "difftestMstatus", Debug)
-      ExcitingUtils.addSink(difftest.sstatus, "difftestSstatus", Debug)
-      ExcitingUtils.addSink(difftest.mepc, "difftestMepc", Debug)
-      ExcitingUtils.addSink(difftest.sepc, "difftestSepc", Debug)
-      ExcitingUtils.addSink(difftest.mtval, "difftestMtval", Debug)
-      ExcitingUtils.addSink(difftest.stval, "difftestStval", Debug)
-      ExcitingUtils.addSink(difftest.mtvec, "difftestMtvec", Debug)
-      ExcitingUtils.addSink(difftest.stvec, "difftestStvec", Debug)
-      ExcitingUtils.addSink(difftest.mcause, "difftestMcause", Debug)
-      ExcitingUtils.addSink(difftest.scause, "difftestScause", Debug)
-      ExcitingUtils.addSink(difftest.satp, "difftestSatp", Debug)
-      ExcitingUtils.addSink(difftest.mip, "difftestMip", Debug)
-      ExcitingUtils.addSink(difftest.mie, "difftestMie", Debug)
-      ExcitingUtils.addSink(difftest.mscratch, "difftestMscratch", Debug)
-      ExcitingUtils.addSink(difftest.sscratch, "difftestSscratch", Debug)
-      ExcitingUtils.addSink(difftest.mideleg, "difftestMideleg", Debug)
-      ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
-      ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
-      ExcitingUtils.addSink(difftest.storeCommit, "difftestStoreCommit", Debug)
-      ExcitingUtils.addSink(difftest.storeAddr, "difftestStoreAddr", Debug)
-      ExcitingUtils.addSink(difftest.storeData, "difftestStoreData", Debug)
-      ExcitingUtils.addSink(difftest.storeMask, "difftestStoreMask", Debug)
+      ExcitingUtils.addSink(difftest(0).commit, "difftestCommit", Debug)
+      ExcitingUtils.addSink(difftest(0).thisPC, "difftestThisPC", Debug)
+      ExcitingUtils.addSink(difftest(0).thisINST, "difftestThisINST", Debug)
+      ExcitingUtils.addSink(difftest(0).skip, "difftestSkip", Debug)
+      ExcitingUtils.addSink(difftest(0).isRVC, "difftestIsRVC", Debug)
+      ExcitingUtils.addSink(difftest(0).wen, "difftestWen", Debug)
+      ExcitingUtils.addSink(difftest(0).wdata, "difftestWdata", Debug)
+      ExcitingUtils.addSink(difftest(0).wdst, "difftestWdst", Debug)
+      ExcitingUtils.addSink(difftest(0).wpc, "difftestWpc", Debug)
+      ExcitingUtils.addSink(difftest(0).intrNO, "difftestIntrNO", Debug)
+      ExcitingUtils.addSink(difftest(0).cause, "difftestCause", Debug)
+      ExcitingUtils.addSink(difftest(0).r, "difftestRegs", Debug)
+      ExcitingUtils.addSink(difftest(0).priviledgeMode, "difftestMode", Debug)
+      ExcitingUtils.addSink(difftest(0).mstatus, "difftestMstatus", Debug)
+      ExcitingUtils.addSink(difftest(0).sstatus, "difftestSstatus", Debug)
+      ExcitingUtils.addSink(difftest(0).mepc, "difftestMepc", Debug)
+      ExcitingUtils.addSink(difftest(0).sepc, "difftestSepc", Debug)
+      ExcitingUtils.addSink(difftest(0).mtval, "difftestMtval", Debug)
+      ExcitingUtils.addSink(difftest(0).stval, "difftestStval", Debug)
+      ExcitingUtils.addSink(difftest(0).mtvec, "difftestMtvec", Debug)
+      ExcitingUtils.addSink(difftest(0).stvec, "difftestStvec", Debug)
+      ExcitingUtils.addSink(difftest(0).mcause, "difftestMcause", Debug)
+      ExcitingUtils.addSink(difftest(0).scause, "difftestScause", Debug)
+      ExcitingUtils.addSink(difftest(0).satp, "difftestSatp", Debug)
+      ExcitingUtils.addSink(difftest(0).mip, "difftestMip", Debug)
+      ExcitingUtils.addSink(difftest(0).mie, "difftestMie", Debug)
+      ExcitingUtils.addSink(difftest(0).mscratch, "difftestMscratch", Debug)
+      ExcitingUtils.addSink(difftest(0).sscratch, "difftestSscratch", Debug)
+      ExcitingUtils.addSink(difftest(0).mideleg, "difftestMideleg", Debug)
+      ExcitingUtils.addSink(difftest(0).medeleg, "difftestMedeleg", Debug)
+      ExcitingUtils.addSink(difftest(0).scFailed, "difftestScFailed", Debug)
+      ExcitingUtils.addSink(difftest(0).storeCommit, "difftestStoreCommit", Debug)
+      ExcitingUtils.addSink(difftest(0).storeAddr, "difftestStoreAddr", Debug)
+      ExcitingUtils.addSink(difftest(0).storeData, "difftestStoreData", Debug)
+      ExcitingUtils.addSink(difftest(0).storeMask, "difftestStoreMask", Debug)
     }
 
-    // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
-    io.difftest := difftest
+    if (env.DualCoreDifftest) {
+      for (i <- 0 until NumCores) {
+        difftest(i).commit := soc.module.difftestIO(i).fromRoq.commit
+        difftest(i).thisPC := soc.module.difftestIO(i).fromRoq.thisPC
+        difftest(i).thisINST := soc.module.difftestIO(i).fromRoq.thisINST
+        difftest(i).skip := soc.module.difftestIO(i).fromRoq.skip
+        difftest(i).isRVC := soc.module.difftestIO(i).fromRoq.isRVC
+        difftest(i).wen := soc.module.difftestIO(i).fromRoq.wen
+        difftest(i).wdata := soc.module.difftestIO(i).fromRoq.wdata
+        difftest(i).wdst := soc.module.difftestIO(i).fromRoq.wdst
+        difftest(i).wpc := soc.module.difftestIO(i).fromRoq.wpc
+        difftest(i).scFailed := soc.module.difftestIO(i).fromRoq.scFailed
+        
+        difftest(i).r := soc.module.difftestIO(i).fromXSCore.r
 
-    val trap = WireInit(0.U.asTypeOf(new TrapIO))
+        difftest(i).intrNO := soc.module.difftestIO(i).fromCSR.intrNO
+        difftest(i).cause := soc.module.difftestIO(i).fromCSR.cause
+        difftest(i).priviledgeMode := soc.module.difftestIO(i).fromCSR.priviledgeMode
+        difftest(i).mstatus := soc.module.difftestIO(i).fromCSR.mstatus
+        difftest(i).sstatus := soc.module.difftestIO(i).fromCSR.sstatus
+        difftest(i).mepc := soc.module.difftestIO(i).fromCSR.mepc
+        difftest(i).sepc := soc.module.difftestIO(i).fromCSR.sepc
+        difftest(i).mtval := soc.module.difftestIO(i).fromCSR.mtval
+        difftest(i).stval := soc.module.difftestIO(i).fromCSR.stval
+        difftest(i).mtvec := soc.module.difftestIO(i).fromCSR.mtvec
+        difftest(i).stvec := soc.module.difftestIO(i).fromCSR.stvec
+        difftest(i).mcause := soc.module.difftestIO(i).fromCSR.mcause
+        difftest(i).scause := soc.module.difftestIO(i).fromCSR.scause
+        difftest(i).satp := soc.module.difftestIO(i).fromCSR.satp
+        difftest(i).mip := soc.module.difftestIO(i).fromCSR.mip
+        difftest(i).mie := soc.module.difftestIO(i).fromCSR.mie
+        difftest(i).mscratch := soc.module.difftestIO(i).fromCSR.mscratch
+        difftest(i).sscratch := soc.module.difftestIO(i).fromCSR.sscratch
+        difftest(i).mideleg := soc.module.difftestIO(i).fromCSR.mideleg
+        difftest(i).medeleg := soc.module.difftestIO(i).fromCSR.medeleg
+
+        difftest(i).storeCommit := soc.module.difftestIO(i).fromSQ.storeCommit
+        difftest(i).storeAddr := soc.module.difftestIO(i).fromSQ.storeAddr
+        difftest(i).storeData := soc.module.difftestIO(i).fromSQ.storeData
+        difftest(i).storeMask := soc.module.difftestIO(i).fromSQ.storeMask
+
+        difftest(i).sbufferResp := soc.module.difftestIO(i).fromSbuffer.sbufferResp
+        difftest(i).sbufferAddr := soc.module.difftestIO(i).fromSbuffer.sbufferAddr
+        difftest(i).sbufferData := soc.module.difftestIO(i).fromSbuffer.sbufferData
+        difftest(i).sbufferMask := soc.module.difftestIO(i).fromSbuffer.sbufferMask
+      
+        trap(i) <> soc.module.trapIO(i)
+      }      
+    }
+    
     if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(trap.valid, "trapValid")
-      ExcitingUtils.addSink(trap.code, "trapCode")
-      ExcitingUtils.addSink(trap.pc, "trapPC")
-      ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
-      ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+      ExcitingUtils.addSink(trap(0).valid, "trapValid")
+      ExcitingUtils.addSink(trap(0).code, "trapCode")
+      ExcitingUtils.addSink(trap(0).pc, "trapPC")
+      ExcitingUtils.addSink(trap(0).cycleCnt, "trapCycleCnt")
+      ExcitingUtils.addSink(trap(0).instrCnt, "trapInstrCnt")
     }
 
-    io.trap := trap
+    io.difftest := difftest(0)
+    io.trap := trap(0)
+
+    if (env.DualCoreDifftest) {
+      io.difftest2 := difftest(1)
+      io.trap2 := trap(1)
+    }
 
     if (env.EnableDebug) {
       val timer = GTimer()
@@ -196,7 +250,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 }
 
 class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
-  println(axiSim)
+  println(s"axiSim:${axiSim}")
   val dut = LazyModule(new XSSimSoC(axiSim))
   val axiSimRam = {
     if (axiSim) LazyModule(new AXI4RAM(
@@ -213,17 +267,24 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
-      val difftest = new DiffTestIO
+      val difftest  = new DiffTestIO
+      val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
+      val trap2 = new TrapIO
       val uart = new UARTIO
       val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
     })
+    io.difftest2 <> DontCare
 
-    io.difftest <> dut.module.io.difftest
+    io.difftest  <> dut.module.io.difftest
     io.logCtrl <> dut.module.io.logCtrl
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
+    if (env.DualCoreDifftest) {
+      io.difftest2 <> dut.module.io.difftest2
+      io.trap2 <> dut.module.io.trap2
+    }
     if (axiSim) {
       io.memAXI <> axiSimRam.module.io
     }

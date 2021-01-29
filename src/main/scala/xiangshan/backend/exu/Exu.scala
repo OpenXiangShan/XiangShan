@@ -30,7 +30,7 @@ case class ExuParameters
 
   def NRFuType = 9
 
-  def FuOpWidth = 7
+  def FuOpWidth = 6
 }
 
 case class ExuConfig
@@ -82,6 +82,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
     val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
   })
@@ -100,19 +101,20 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val src2 = in.bits.src2
     val src3 = in.bits.src3
 
-    fu.io.in.valid := in.valid && sel && !in.bits.uop.roqIdx.needFlush(io.redirect)
+    fu.io.in.valid := in.valid && sel
     fu.io.in.bits.uop := in.bits.uop
     fu.io.in.bits.src.foreach(_ <> DontCare)
     if (fuCfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if (fuCfg.srcCnt > 1) {
+    if (fuCfg.srcCnt > 1 || fuCfg == jmpCfg) { // jump is special for jalr target
       fu.io.in.bits.src(1) := src2
     }
     if (fuCfg.srcCnt > 2) {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
+    fu.io.flushIn := io.flush
   }
 
 
@@ -187,7 +189,6 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   def assignDontCares(out: ExuOutput) = {
-    out.brUpdate := DontCare
     out.fflags := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B

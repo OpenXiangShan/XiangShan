@@ -23,14 +23,15 @@ object ExcitingUtils {
   (
     var connType: ConnectionType,
     var sourceModule: Option[String] = None,
-    var sinkModule: Option[String] = None
+    var sinkModule: Option[String] = None,
+    var warned: Boolean = false
   ){
 
     override def toString: String =
       s"type:[$connType] source location:[${sourceModule.getOrElse(strToErrorMsg("Not Found"))}]" +
         s" sink location:[${sinkModule.getOrElse(strToErrorMsg("Not Found"))}]"
 
-    def islegalConnection: Boolean = sourceModule.nonEmpty && sinkModule.nonEmpty
+    def isLegalConnection: Boolean = sourceModule.nonEmpty && sinkModule.nonEmpty
   }
 
   private val map = mutable.LinkedHashMap[String, Connection]()
@@ -44,7 +45,10 @@ object ExcitingUtils {
     uniqueName: Boolean = false
   ): String = {
     val conn = map.getOrElseUpdate(name, new Connection(connType))
-    require(conn.sourceModule.isEmpty)
+    if (!conn.sourceModule.isEmpty && !conn.warned) {
+      println(s"[WARN] Signal |$name| has multiple sources")
+      conn.warned = true
+    }
     require(conn.connType == connType)
     conn.sourceModule = Some(component.parentModName)
     BoringUtils.addSource(component, name, disableDedup, uniqueName)
@@ -59,7 +63,10 @@ object ExcitingUtils {
     forceExists: Boolean = false
   ): Unit = {
     val conn = map.getOrElseUpdate(name, new Connection(connType))
-    require(conn.sinkModule.isEmpty)
+    if (!conn.sinkModule.isEmpty && !conn.warned) {
+      println(s"[WARN] Signal |$name| has multiple sinks")
+      conn.warned = true
+    }
     require(conn.connType == connType)
     conn.sinkModule = Some(component.parentModName)
     BoringUtils.addSink(component, name, disableDedup, forceExists)
@@ -83,7 +90,7 @@ object ExcitingUtils {
     val buf = new mutable.StringBuilder()
     for((id, conn) <- map){
       buf ++= s"Connection:[$id] $conn\n"
-      if(!conn.islegalConnection) legal = false
+      if(!conn.isLegalConnection) legal = false
     }
     print(buf)
     require(legal, strToErrorMsg("Error: Illegal connection found!"))

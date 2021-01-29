@@ -16,7 +16,7 @@ int isGzFile(const char *filename) {
 long snapshot_compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
   gzFile compressed_mem = gzopen(filename, "wb");
 
-  if(compressed_mem == NULL) {
+  if (compressed_mem == NULL) {
     printf("Can't open compressed binary file '%s'", filename);
     return -1;
   }
@@ -44,7 +44,7 @@ long snapshot_compressToFile(uint8_t *ptr, const char *filename, long buf_size) 
 
   delete [] temp_page;
 
-  if(gzclose(compressed_mem)) {
+  if (gzclose(compressed_mem)) {
     printf("Error closing '%s'\n", filename);
     return -1;
   }
@@ -55,7 +55,7 @@ long readFromGz(void* ptr, const char *file_name, long buf_size, uint8_t load_ty
   assert(buf_size > 0);
   gzFile compressed_mem = gzopen(file_name, "rb");
 
-  if(compressed_mem == NULL) {
+  if (compressed_mem == NULL) {
     printf("Can't open compressed binary file '%s'", file_name);
     return -1;
   }

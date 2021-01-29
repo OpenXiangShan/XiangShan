@@ -58,7 +58,7 @@ class Alu extends FunctionUnit with HasRedirectOut {
   )
 
   val isBranch = ALUOpType.isBranch(func)
-  val isRVC = uop.cf.brUpdate.pd.isRVC
+  val isRVC = uop.cf.pd.isRVC
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = (pc + offset)(VAddrBits-1,0)
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
@@ -67,26 +67,13 @@ class Alu extends FunctionUnit with HasRedirectOut {
   // Only brTag, level, roqIdx are needed
   // other infos are stored in brq
   redirectOut := DontCare
-  redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
   redirectOut.roqIdx := uop.roqIdx
-
-//  redirectOut.pc := DontCare//uop.cf.pc
-//  redirectOut.target := DontCare//Mux(!taken && isBranch, snpc, target)
-//  redirectOut.interrupt := DontCare//DontCare
-
-  // Only taken really needed, do we need brTag ?
-  brUpdate := DontCare
-  brUpdate.taken := isBranch && taken
-  brUpdate.brTag := uop.brTag
-
-//  brUpdate := uop.cf.brUpdate
-//  // override brUpdate
-//  brUpdate.pc := uop.cf.pc
-//  brUpdate.target := Mux(!taken && isBranch, snpc, target)
-//  brUpdate.brTarget := target
-//  brUpdate.taken := isBranch && taken
-//  brUpdate.brTag := uop.brTag
+  redirectOut.ftqIdx := uop.cf.ftqPtr
+  redirectOut.ftqOffset := uop.cf.ftqOffset
+  redirectOut.cfiUpdate.isMisPred := (uop.cf.pred_taken ^ taken) && isBranch
+  redirectOut.cfiUpdate.taken := taken
+  redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
 
   io.in.ready := io.out.ready
   io.out.valid := valid

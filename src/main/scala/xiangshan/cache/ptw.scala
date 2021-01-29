@@ -113,6 +113,7 @@ class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
   val tag  = UInt(tagLen.W)
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
+  // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
   def tagClip(addr: UInt) = {
     require(addr.getWidth==PAddrBits)
@@ -193,6 +194,7 @@ class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   val ppns    = Vec(num, UInt(ppnLen.W))
   val perms    = Vec(num, new PtePermBundle)
   val vs      = Vec(num, Bool())
+  // println(s"L2TlbEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} perms:${num}*${(new PtePermBundle).asUInt.getWidth} vs:${num}*1")
 
   def tagClip(vpn: UInt) = { // full vpn => tagLen
     vpn(vpn.getWidth-1, vpn.getWidth-tagLen)
@@ -323,8 +325,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
-  val tlbl2 = Module(new SRAMWrapper(
-    "L2TLB",
+  val tlbl2 = Module(new SRAMTemplate(
     new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
     set = TlbL2LineNum,
     singlePort = true
@@ -339,8 +340,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = Reg(UInt(PtwL1EntrySize.W))
-  val ptwl2 = Module(new SRAMWrapper(
-    "L2PTW",
+  val ptwl2 = Module(new SRAMTemplate(
     new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
     set = PtwL2LineNum,
     singlePort = true

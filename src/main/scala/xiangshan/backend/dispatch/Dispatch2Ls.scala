@@ -5,17 +5,16 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
+import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.backend.exu.Exu._
 
 class Dispatch2Ls extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort(XLEN)))
-    val readFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort(XLEN + 1)))
-    // val intRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    // val fpRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
-    val intRegRdy = Vec(NRMemReadPorts, Input(Bool()))
-    val fpRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
+    val readIntRf = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
+    val readFpRf = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
+    val readIntState = Vec(NRMemReadPorts, Flipped(new BusyTableReadIO))
+    val readFpState = Vec(exuParameters.StuCnt, Flipped(new BusyTableReadIO))
     val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   })
@@ -24,13 +23,13 @@ class Dispatch2Ls extends XSModule {
     * Part 1: generate indexes for reservation stations
     */
   val loadIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.LduCnt, true))
-  val loadCanAccept = VecInit(io.fromDq.map(deq => deq.valid && ldExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val loadCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.loadCanAccept(deq.bits.ctrl.fuType)))
   val loadPriority = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
   loadIndexGen.io.validBits := loadCanAccept
   loadIndexGen.io.priority := loadPriority
 
   val storeIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.StuCnt, true))
-  val storeCanAccept = VecInit(io.fromDq.map(deq => deq.valid && stExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val storeCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.storeCanAccept(deq.bits.ctrl.fuType)))
   val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
   storeIndexGen.io.validBits := storeCanAccept
   storeIndexGen.io.priority := storePriority
@@ -50,16 +49,26 @@ class Dispatch2Ls extends XSModule {
   assert(exuParameters.LduCnt == 2)
   assert(exuParameters.StuCnt == 2)
   val readPort = Seq(0, 1, 2, 4)
+  val firstStorePsrc2 = PriorityMux(storeCanAccept, io.fromDq.map(_.bits.psrc2))
+  val secondStorePsrc2 = PriorityMux((1 until 4).map(i => Cat(storeCanAccept.take(i)).orR && storeCanAccept(i)), io.fromDq.drop(1).map(_.bits.psrc2))
   for (i <- 0 until exuParameters.LsExuCnt) {
     if (i < exuParameters.LduCnt) {
-      io.readIntRf(readPort(i)).addr := io.fromDq(indexVec(i)).bits.psrc1
+      io.readIntRf(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
     }
     else {
-      io.readFpRf(i - exuParameters.LduCnt).addr := io.fromDq(indexVec(i)).bits.psrc2
-      io.readIntRf(readPort(i)  ).addr := io.fromDq(indexVec(i)).bits.psrc1
-      io.readIntRf(readPort(i)+1).addr := io.fromDq(indexVec(i)).bits.psrc2
+      io.readFpRf(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc2
+      io.readIntRf(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc1
+      io.readIntRf(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc2
     }
   }
+  // src1 always needs srcState but only store's src2 needs srcState
+  for (i <- 0 until 4) {
+    io.readIntState(i).req := io.fromDq(i).bits.psrc1
+  }
+  io.readIntState(4).req := firstStorePsrc2
+  io.readIntState(5).req := secondStorePsrc2
+  io.readFpState(0).req := firstStorePsrc2
+  io.readFpState(1).req := secondStorePsrc2
 
   /**
     * Part 3: dispatch to reservation stations
@@ -75,13 +84,15 @@ class Dispatch2Ls extends XSModule {
       enq.valid := storeIndexGen.io.mapping(i - exuParameters.LduCnt).valid && storeReady
     }
     enq.bits := io.fromDq(indexVec(i)).bits
-    enq.bits.src1State := io.intRegRdy(readPort(i))
+    enq.bits.src1State := io.readIntState(indexVec(i)).resp
     if (i < exuParameters.LduCnt) {
       enq.bits.src2State := DontCare
     }
     else {
       enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
-        io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
+        Mux(storePriority(i-2) === 0.U, io.readFpState(0).resp, io.readFpState(1).resp),
+        Mux(storePriority(i-2) === 0.U, io.readIntState(4).resp, io.readIntState(5).resp)
+      )
     }
     enq.bits.src3State := DontCare
 

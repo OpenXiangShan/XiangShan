@@ -27,17 +27,16 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert $(SIM_ARGS)
-	# mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
-	# $(MEM_GEN) $(@D)/$(@F).conf >> $@
+	mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
-	# @git log -n 1 >> .__head__
-	# @git diff >> .__diff__
-	# @sed -i 's/^/\/\// ' .__head__
-	# @sed -i 's/^/\/\//' .__diff__
-	# @cat .__head__ .__diff__ $@ > .__out__
-	# @mv .__out__ $@
-	# @rm .__head__ .__diff__
+	@git log -n 1 >> .__head__
+	@git diff >> .__diff__
+	@sed -i 's/^/\/\// ' .__head__
+	@sed -i 's/^/\/\//' .__diff__
+	@cat .__head__ .__diff__ $@ > .__out__
+	@mv .__out__ $@
+	@rm .__head__ .__diff__
 
 deploy: build/top.zip
 

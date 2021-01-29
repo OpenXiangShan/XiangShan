@@ -4,6 +4,22 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 
+object hartIdRFInt extends (() => Int) {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    x-1
+  }
+}
+
+object hartIdRFFp extends (() => Int) {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    x-1
+  }
+}
+
 class RfReadPort(len: Int) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
@@ -35,9 +51,8 @@ class Regfile
   if (!useBlackBox) {
     val mem = Mem(NRPhyRegs, UInt(len.W))
     for (r <- io.readPorts) {
-      val raddr_reg = RegNext(r.addr)
-      val rdata = if (hasZero) Mux(raddr_reg === 0.U, 0.U, mem(raddr_reg)) else mem(raddr_reg)
-      r.data := rdata
+      val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
+      r.data := RegNext(rdata)
     }
     for (w <- io.writePorts) {
       when(w.wen) {
@@ -63,6 +78,29 @@ class Regfile
       ExcitingUtils.addSource(
         debugArchReg,
         if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG",
+        ExcitingUtils.Debug
+      )
+    }
+
+    if (env.DualCoreDifftest) {
+      val id = if (hasZero) hartIdRFInt() else hartIdRFFp()
+      val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+      ExcitingUtils.addSink(
+        debugArchRat,
+        if(hasZero) s"DEBUG_INI_ARCH_RAT$id" else s"DEBUG_FP_ARCH_RAT$id",
+        ExcitingUtils.Debug
+      )
+
+      val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(
+        x => if(hasZero){
+          if(x._2 == 0) 0.U else mem(x._1)
+        } else {
+          ieee(mem(x._1))
+        }
+      )))
+      ExcitingUtils.addSource(
+        debugArchReg,
+        if(hasZero) s"DEBUG_INT_ARCH_REG$id" else s"DEBUG_FP_ARCH_REG$id",
         ExcitingUtils.Debug
       )
     }
