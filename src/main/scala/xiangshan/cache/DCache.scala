@@ -206,7 +206,7 @@ class DuplicatedDataArray extends AbstractDataArray
           val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
           array.io.r.req.valid := ren
           array.io.r.req.bits.apply(setIdx=raddr)
-          resp(k) := RegNext(array.io.r.resp.data(0))
+          resp(k) := array.io.r.resp.data(0)
         }
       }
     }

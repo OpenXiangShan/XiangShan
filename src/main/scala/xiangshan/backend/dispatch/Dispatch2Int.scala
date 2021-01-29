@@ -26,9 +26,9 @@ class Dispatch2Int extends XSModule {
     * Part 1: generate indexes for reservation stations
     */
   assert(jmpCnt == 1)
-  val jmpCanAccept = VecInit(io.fromDq.map(deq => deq.valid && jumpExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
-  val mduCanAccept = VecInit(io.fromDq.map(deq => deq.valid && mulDivExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
-  val aluCanAccept = VecInit(io.fromDq.map(deq => deq.valid && aluExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val jmpCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.jmpCanAccept(deq.bits.ctrl.fuType)))
+  val mduCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.mduCanAccept(deq.bits.ctrl.fuType)))
+  val aluCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.aluCanAccept(deq.bits.ctrl.fuType)))
 
   val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, jmpCnt, false))
   val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, mduCnt, true))

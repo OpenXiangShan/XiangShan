@@ -22,13 +22,13 @@ class Dispatch2Fp extends XSModule {
     * Part 1: generate indexes for reservation stations
     */
   val fmacIndexGen = Module(new IndexMapping(dpParams.FpDqDeqWidth, exuParameters.FmacCnt, true))
-  val fmacCanAccept = VecInit(io.fromDq.map(deq => deq.valid && fmacExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val fmacCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.fmacCanAccept(deq.bits.ctrl.fuType)))
   val fmacPriority = PriorityGen((0 until exuParameters.FmacCnt).map(i => io.numExist(i)))
   fmacIndexGen.io.validBits := fmacCanAccept
   fmacIndexGen.io.priority := fmacPriority
 
   val fmiscIndexGen = Module(new IndexMapping(dpParams.FpDqDeqWidth, exuParameters.FmiscCnt, true))
-  val fmiscCanAccept = VecInit(io.fromDq.map(deq => deq.valid && fmiscExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val fmiscCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.fmiscCanAccept(deq.bits.ctrl.fuType)))
   val fmiscPriority = PriorityGen((0 until exuParameters.FmiscCnt).map(i => io.numExist(i+exuParameters.FmacCnt)))
   fmiscIndexGen.io.validBits := fmiscCanAccept
   fmiscIndexGen.io.priority := fmiscPriority

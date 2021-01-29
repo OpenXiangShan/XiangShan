@@ -48,6 +48,7 @@ class LoadPipe extends DCacheModule
   data_read.rmask  := UIntToOH(get_row(io.lsu.req.bits.addr))
 
   // Pipeline
+  // --------------------------------------------------------------------------------
   // stage 0
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
@@ -56,6 +57,8 @@ class LoadPipe extends DCacheModule
 
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
+
+  // --------------------------------------------------------------------------------
   // stage 1
   val s1_req = RegNext(s0_req)
   val s1_valid = RegNext(s0_valid, init = false.B)
@@ -81,6 +84,33 @@ class LoadPipe extends DCacheModule
   val s1_hit_meta  = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
   val s1_hit_coh = s1_hit_meta.coh
 
+
+  // select the row we are interested in
+  val s1_data = Wire(Vec(nWays, UInt(encRowBits.W)))
+  val data_resp = io.data_resp
+  for (w <- 0 until nWays) { s1_data(w) := data_resp(w)(get_row(s1_addr)) }
+
+  // select the word
+  // the index of word in a row, in case rowBits != wordBits
+  val s1_word_idx   = if (rowWords == 1) 0.U else s1_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
+
+  // load data gen
+  val s1_data_words = Wire(Vec(nWays, Vec(rowWords, UInt(encWordBits.W))))
+  for (w <- 0 until nWays) {
+    for (r <- 0 until rowWords) {
+      s1_data_words(w)(r) := s1_data(w)(encWordBits * (r + 1) - 1, encWordBits * r)
+    }
+  }
+
+  val s1_words = (0 until nWays) map (i => s1_data_words(i)(s1_word_idx))
+
+  val s1_decoded = (0 until nWays) map (i => cacheParams.dataCode.decode(s1_words(i)))
+  val s1_word_decoded = VecInit((0 until nWays) map (i => s1_decoded(i).corrected))
+  (0 until nWays) map (i => assert (!(s1_valid && s1_tag_match && (i.U === OHToUInt(s1_tag_match_way)) && s1_decoded(i).uncorrectable)))
+
+  io.lsu.s1_data := s1_word_decoded
+
+  // --------------------------------------------------------------------------------
   // stage 2
   val s2_req   = RegNext(s1_req)
   val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
@@ -100,23 +130,9 @@ class LoadPipe extends DCacheModule
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
 
   // generate data
-  val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
-  val data_resp = io.data_resp
-  for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)(get_row(s2_addr))
-  }
-
+  val s2_data = RegNext(s1_word_decoded)
+  // select the way out
   val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
-  // the index of word in a row, in case rowBits != wordBits
-  val s2_word_idx   = if (rowWords == 1) 0.U else s2_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
-  // load data gen
-  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
-  for (w <- 0 until rowWords) {
-    s2_data_words(w) := s2_data_muxed(encWordBits * (w + 1) - 1, encWordBits * w)
-  }
-  val s2_data_word =  s2_data_words(s2_word_idx)
-  val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
-  val s2_data_word_decoded = s2_decoded.corrected
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
@@ -147,7 +163,7 @@ class LoadPipe extends DCacheModule
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid     := s2_valid
   resp.bits      := DontCare
-  resp.bits.data := s2_data_word_decoded
+  resp.bits.data := s2_data_muxed
   // on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
@@ -162,6 +178,8 @@ class LoadPipe extends DCacheModule
   when (resp.valid) {
     resp.bits.dump()
   }
+
+  io.lsu.s2_hit_way := s2_tag_match_way
 
   // -------
   // Debug logging functions

@@ -83,7 +83,8 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
       .withAnnotations(Seq(VerilatorBackendAnnotation,
         LineCoverageAnnotation,
         ToggleCoverageAnnotation,
-        VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
+        VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000",
+          "+define+RANDOMIZE_REG_INIT", "+define+RANDOMIZE_MEM_INIT")),
         RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
         c.io.dcacheIO.load.foreach { l =>
           l.req.initSource().setSourceClock(c.clock)

@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import xiangshan._
 import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqLsqIO}
 import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
@@ -77,12 +77,26 @@ class MemBlockImp
 
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
-      val commits = Flipped(new RoqCommitIO) // to lsq
-      val roqDeqPtr = Input(new RoqPtr) // to lsq
+      val roq = Flipped(new RoqLsqIO) // roq to lsq
     }
 
     val toDCachePrefetch = DecoupledIO(new MissReq)
   })
+  val difftestIO = IO(new Bundle() {
+    val fromSbuffer = new Bundle() {
+      val sbufferResp = Output(Bool())
+      val sbufferAddr = Output(UInt(64.W))
+      val sbufferData = Output(Vec(64, UInt(8.W)))
+      val sbufferMask = Output(UInt(64.W))
+    }
+    val fromSQ = new Bundle() {
+      val storeCommit = Output(UInt(2.W))
+      val storeAddr   = Output(Vec(2, UInt(64.W)))
+      val storeData   = Output(Vec(2, UInt(64.W)))
+      val storeMask   = Output(Vec(2, UInt(8.W)))
+    }
+  })
+  difftestIO <> DontCare
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -195,6 +209,10 @@ class MemBlockImp
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
   dtlb.io.csr    <> io.tlbCsr
+  if (env.DualCoreDifftest) {
+    difftestIO.fromSbuffer <> sbuffer.difftestIO
+    difftestIO.fromSQ <> lsq.difftestIO.fromSQ
+  }
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -212,6 +230,7 @@ class MemBlockImp
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
+    lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
   }
 
   // StoreUnit
@@ -240,10 +259,9 @@ class MemBlockImp
   }
 
   // Lsq
-  lsq.io.commits        <> io.lsqio.commits
+  lsq.io.roq            <> io.lsqio.roq
   lsq.io.enq            <> io.fromCtrlBlock.enqLsq
   lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
-  lsq.io.roqDeqPtr      <> io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
   lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
@@ -271,8 +289,8 @@ class MemBlockImp
 
   val atomic_rs0  = exuParameters.LduCnt + 0
   val atomic_rs1  = exuParameters.LduCnt + 1
-  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType === FuType.mou
-  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType === FuType.mou
+  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType)
+  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType)
 
   when (st0_atomics) {
     reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready

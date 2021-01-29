@@ -168,8 +168,6 @@ class MainPipe extends DCacheModule
     when (s0_req.miss) {
       assert (full_overwrite)
     }
-    // AMO not yet finished
-    assert (s0_req.source =/= AMO_SOURCE.U)
     OneHot.checkOneHot(Seq(s0_req.miss, s0_req.probe))
   }
 
@@ -186,17 +184,19 @@ class MainPipe extends DCacheModule
   meta_read.tag    := DontCare
 
   // Data read for new requests
-  data_read.addr   := s0_req.addr
-  data_read.way_en := ~0.U(nWays.W)
-
   val rowWordBits = log2Floor(rowWords)
   val amo_row  = s0_req.word_idx >> rowWordBits
   val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
+  val amo_word_addr = s0_req.addr + (s0_req.word_idx << wordOffBits)
 
   val store_rmask = row_write & ~row_full_overwrite
   val amo_rmask   = UIntToOH(amo_row)
   val full_rmask  = ~0.U(blockRows.W)
   val none_rmask  = 0.U(blockRows.W)
+
+  val rmask = Mux(store_need_data, store_rmask,
+    Mux(amo_need_data, amo_rmask,
+      Mux(probe_need_data || miss_need_data, full_rmask, none_rmask)))
 
   // generate wmask here and use it in stage 2
   val store_wmask = word_write
@@ -205,9 +205,10 @@ class MainPipe extends DCacheModule
   val full_wmask  = VecInit((0 until blockRows) map (i => ~0.U(rowWords.W)))
   val none_wmask  = VecInit((0 until blockRows) map (i => 0.U(rowWords.W)))
 
-  data_read.rmask  := Mux(store_need_data, store_rmask,
-    Mux(amo_need_data, amo_rmask,
-      Mux(probe_need_data || miss_need_data, full_rmask, none_rmask)))
+  data_read.addr   := s0_req.addr
+  data_read.way_en := ~0.U(nWays.W)
+
+  data_read.rmask  := rmask
 
   dump_pipeline_reqs("MainPipe s0", s0_valid, s0_req)
 
@@ -221,10 +222,15 @@ class MainPipe extends DCacheModule
   val s1_fire  = s1_valid && !stall
   val s1_req = RegEnable(s0_req, s0_fire)
 
+  val s1_rmask       = RegEnable(rmask, s0_fire)
   val s1_store_wmask = RegEnable(store_wmask, s0_fire)
   val s1_amo_wmask   = RegEnable(amo_wmask, s0_fire)
   val s1_full_wmask  = RegEnable(full_wmask, s0_fire)
   val s1_none_wmask  = RegEnable(none_wmask, s0_fire)
+
+  val s1_amo_row       = RegEnable(amo_row, s0_fire)
+  val s1_amo_word      = RegEnable(amo_word, s0_fire)
+  val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
 
   s1_s0_set_conflict := s1_valid && get_idx(s1_req.addr) === get_idx(s0_req.addr)
 
@@ -260,15 +266,28 @@ class MainPipe extends DCacheModule
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
   val s1_repl_coh = s1_repl_meta.coh
 
+  // only true miss request(not permission miss) need to do replacement
+  // we use repl meta when we really need to a replacement
+  val s1_need_replacement = s1_req.miss && !s1_tag_match
+  val s1_way_en        = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
+  val s1_meta          = Mux(s1_need_replacement, s1_repl_meta,   s1_hit_meta)
+  val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
+
   // for now, since we are using random replacement
   // we only need to update replacement states after every valid replacement decision
   // we only do replacement when we are true miss(not permission miss)
   when (s1_fire) {
-    when (s1_req.miss && !s1_tag_match) {
+    when (s1_need_replacement) {
       replacer.miss
     }
   }
 
+  // s1 data
+  val s1_data_resp_latched = Reg(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
+  val s1_data_resp = Mux(RegNext(next = stall, init = false.B), s1_data_resp_latched, io.data_resp)
+  when (stall) {
+    s1_data_resp_latched := s1_data_resp
+  }
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -278,10 +297,16 @@ class MainPipe extends DCacheModule
   val s2_fire  = s2_valid && !stall
   val s2_req = RegEnable(s1_req, s1_fire)
 
+  val s2_rmask       = RegEnable(s1_rmask, s1_fire)
   val s2_store_wmask = RegEnable(s1_store_wmask, s1_fire)
   val s2_amo_wmask   = RegEnable(s1_amo_wmask, s1_fire)
   val s2_full_wmask  = RegEnable(s1_full_wmask, s1_fire)
   val s2_none_wmask  = RegEnable(s1_none_wmask, s1_fire)
+
+  val s2_amo_row       = RegEnable(s1_amo_row, s1_fire)
+  val s2_amo_word      = RegEnable(s1_amo_word, s1_fire)
+  val s2_amo_word_addr = RegEnable(s1_amo_word_addr, s1_fire)
+
 
   s2_s0_set_conflict := s2_valid && get_idx(s2_req.addr) === get_idx(s0_req.addr)
 
@@ -304,10 +329,11 @@ class MainPipe extends DCacheModule
 
   // only true miss request(not permission miss) need to do replacement
   // we use repl meta when we really need to a replacement
-  val need_replacement = s2_req.miss && !s2_tag_match
-  val s2_way_en        = Mux(need_replacement, s2_repl_way_en, s2_tag_match_way)
-  val s2_meta          = Mux(need_replacement, s2_repl_meta,   s2_hit_meta)
-  val s2_coh           = Mux(need_replacement, s2_repl_coh,  s2_hit_coh)
+  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
+  val s2_way_en           = RegEnable(s1_way_en, s1_fire)
+  val s2_meta             = RegEnable(s1_meta, s1_fire)
+  val s2_coh              = RegEnable(s1_coh, s1_fire)
+  val s2_data_resp        = RegEnable(s1_data_resp, s1_fire)
 
   // --------------------------------------------------------------------------------
   // Permission checking
@@ -340,8 +366,8 @@ class MainPipe extends DCacheModule
   val s2_amo_hit   = s2_hit && !s2_req.miss && !s2_req.probe && s2_req.source === AMO_SOURCE.U
 
   when (s2_valid) {
-    XSDebug("MainPipe: s2 s2_tag_match: %b s2_has_permission: %b s2_hit: %b need_replacement: %b s2_way_en: %x s2_state: %d\n",
-      s2_tag_match, s2_has_permission, s2_hit, need_replacement, s2_way_en, s2_coh.state)
+    XSDebug("MainPipe: s2 s2_tag_match: %b s2_has_permission: %b s2_hit: %b s2_need_replacement: %b s2_way_en: %x s2_state: %d\n",
+      s2_tag_match, s2_has_permission, s2_hit, s2_need_replacement, s2_way_en, s2_coh.state)
   }
 
   // --------------------------------------------------------------------------------
@@ -369,6 +395,61 @@ class MainPipe extends DCacheModule
 
 
   // --------------------------------------------------------------------------------
+  // LR, SC and AMO
+  val debug_sc_fail_addr = RegInit(0.U)
+  val debug_sc_fail_cnt  = RegInit(0.U(8.W))
+
+  val lrsc_count = RegInit(0.U(log2Ceil(lrscCycles).W))
+  val lrsc_valid = lrsc_count > lrscBackoff.U
+  val lrsc_addr  = Reg(UInt())
+  val s2_lr = !s2_req.probe && s2_req.source === AMO_SOURCE.U && s2_req.cmd === M_XLR
+  val s2_sc = !s2_req.probe && s2_req.source === AMO_SOURCE.U && s2_req.cmd === M_XSC
+  val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
+  val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
+  val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
+
+  val s2_can_do_amo = (s2_req.miss && !s2_req.probe && s2_req.source === AMO_SOURCE.U) || s2_amo_hit
+  val s2_can_do_amo_write = s2_can_do_amo && isWrite(s2_req.cmd) && !s2_sc_fail
+  when (s2_valid && (s2_lr || s2_sc)) {
+    when (s2_can_do_amo && s2_lr) {
+      lrsc_count := (lrscCycles - 1).U
+      lrsc_addr := get_block_addr(s2_req.addr)
+    } .otherwise {
+      lrsc_count := 0.U
+    }
+  } .elsewhen (lrsc_count > 0.U) {
+    lrsc_count := lrsc_count - 1.U
+  }
+
+  io.lrsc_locked_block.valid := lrsc_valid
+  io.lrsc_locked_block.bits  := lrsc_addr
+
+  // when we release this block,
+  // we invalidate this reservation set
+  when (io.wb_req.fire()) {
+    when (io.wb_req.bits.addr === lrsc_addr) {
+      lrsc_count := 0.U
+    }
+  }
+
+  when (s2_valid) {
+    when (s2_req.addr === debug_sc_fail_addr) {
+      when (s2_sc_fail) {
+        debug_sc_fail_cnt := debug_sc_fail_cnt + 1.U
+      } .elsewhen (s2_sc) {
+        debug_sc_fail_cnt := 0.U
+      }
+    } .otherwise {
+      when (s2_sc_fail) {
+        debug_sc_fail_addr := s2_req.addr
+        debug_sc_fail_cnt  := 1.U
+      }
+    }
+  }
+  assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
+
+
+  // --------------------------------------------------------------------------------
   // Write to DataArray
   // Miss:
   //   1. not store and not amo, data: store_data mask: store_mask(full_mask)
@@ -384,7 +465,7 @@ class MainPipe extends DCacheModule
   // which word do we need to write
   val wmask = Mux(s2_req.miss, s2_full_wmask,
       Mux(s2_store_hit, s2_store_wmask,
-      Mux(s2_amo_hit, s2_amo_wmask,
+      Mux(s2_can_do_amo_write, s2_amo_wmask,
         s2_none_wmask)))
   val need_write_data = VecInit(wmask.map(w => w.orR)).asUInt.orR
 
@@ -396,47 +477,55 @@ class MainPipe extends DCacheModule
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val s2_data_latched = Reg(Vec(blockRows, Bits(encRowBits.W)))
-  val s2_data = Mux(RegNext(next = stall, init = false.B), s2_data_latched, Mux1H(s2_way_en, io.data_resp))
-  when (stall) {
-    s2_data_latched := s2_data
-  }
+  val s2_data = Mux1H(s2_way_en, s2_data_resp)
 
+  // TODO: deal with ECC errors
   val s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
       val data = s2_data(r)(encWordBits * (w + 1) - 1, encWordBits * w)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
+      assert(!(s2_valid && s2_hit && s2_rmask(r) && decoded.uncorrectable))
       decoded.corrected
     }
   }
 
-  // TODO: deal with ECC errors
   for (i <- 0 until blockRows) {
     store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
       val old_data = s2_data_decoded(i)(w)
       val new_data = s2_req.store_data(rowBits * (i + 1) - 1, rowBits * i)(wordBits * (w + 1) - 1, wordBits * w)
-      val wmask = s2_req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w)
+      // for amo hit, we should use read out SRAM data
+      // do not merge with store data
+      val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W),
+        s2_req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w))
       val store_data = mergePutData(old_data, new_data, wmask)
       store_data
     })
   }
 
+  // AMO hits
+  val s2_amo_row_data  = store_data_merged(s2_amo_row)
+  val s2_amo_word_data = VecInit((0 until rowWords) map (w => s2_amo_row_data(wordBits * (w + 1) - 1, wordBits * w)))
+  val s2_data_word = s2_amo_word_data(s2_amo_word)
+
+  val amoalu   = Module(new AMOALU(wordBits))
+  amoalu.io.mask := s2_req.amo_mask
+  amoalu.io.cmd  := s2_req.cmd
+  amoalu.io.lhs  := s2_data_word
+  amoalu.io.rhs  := s2_req.amo_data
+
+  // merge amo write data
   val amo_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
   for (i <- 0 until blockRows) {
-    amo_data_merged(i) := store_data_merged(i)
-  }
-  // TODO: do amo calculation
-  // and merge amo data
-  /*
-  for (i <- 0 until blockRows) {
-    store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
-      val old_data = store_data_merged(i)(w)
-      val wmask = Mux(s2_req.source === AMO_SOURCE.U && (s2_req.miss || s2_hit) && s2_req.word_idx === i.U, s2_req.amo_mask, 0.U)
-      val store_data = mergePutData(old_data, new_data, wmask)
+    amo_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
+      val old_data = store_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
+      val new_data = amoalu.io.out
+      val wmask = Mux(s2_can_do_amo_write && i.U === s2_amo_row && w.U === s2_amo_word,
+        ~0.U(wordBytes.W), 0.U(wordBytes.W))
+      val data = mergePutData(old_data, new_data, wmask)
+      data
     })
   }
-  */
+
 
   // ECC encode data
   val wdata_merged = Wire(Vec(blockRows, UInt(encRowBits.W)))
@@ -463,7 +552,7 @@ class MainPipe extends DCacheModule
   // whether we need to write back a block
   // TODO: add support for ProbePerm
   // Now, we only deal with ProbeBlock
-  val miss_writeback  = need_replacement && s2_coh === ClientStates.Dirty
+  val miss_writeback  = s2_need_replacement && s2_coh === ClientStates.Dirty
   // even probe missed, we still need to use write back to send ProbeAck NtoN response
   // val probe_writeback = s2_req.probe && s2_tag_match && s2_coh.state =/= probe_new_coh.state
   val probe_writeback = s2_req.probe
@@ -520,8 +609,14 @@ class MainPipe extends DCacheModule
   io.store_resp.valid  := s2_fire && s2_req.source === STORE_SOURCE.U
   io.store_resp.bits   := resp
 
-  io.amo_resp.valid    := s2_fire && s2_req.source === AMO_SOURCE.U
-  io.amo_resp.bits     := resp
+  io.amo_resp.valid     := s2_fire && s2_req.source === AMO_SOURCE.U
+  io.amo_resp.bits      := resp
+  io.amo_resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word)
+  // reuse this field to pass lr sc valid to commit
+  // nemu use this to see whether lr sc counter is still valid
+  io.amo_resp.bits.id   := lrsc_valid
+
+
 
   when (io.req.fire()) {
     io.req.bits.dump()

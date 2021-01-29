@@ -500,34 +500,45 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits := fetchPacketWire
   io.fetchPacket.valid := fetchPacketValid
 
-//  if(IFUDebug) {
+  if(!env.FPGAPlatform && env.EnablePerfDebug) {
     val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
-    val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
+    val predictor_s4 = Mux(if4_redirect, 2.U(log2Up(4).W), predictor_s3)
     val predictor = predictor_s4
 
-    fetchPacketWire.bpuMeta.map(_.predictor := predictor)
- // }
+    // io.pc.valid && read_hit_vec.asUInt ubtb hit
+    val ubtbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    val btbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    val bimResp = WireInit(VecInit(Seq.fill(PredictWidth) {false.B} ))
+    val tageAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    val rasAns = WireInit(0.U.asTypeOf(new PredictorAnswer))
+    val loopAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
 
-  // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
-  // val predWrong = cfiUpdate.valid && cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
+    ExcitingUtils.addSink(ubtbAns, "ubtbAns")
+    ExcitingUtils.addSink(btbAns, "btbAns")
+    ExcitingUtils.addSink(bimResp, "bimResp")
+    ExcitingUtils.addSink(tageAns, "tageAns")
+    ExcitingUtils.addSink(rasAns, "rasAns")
+    ExcitingUtils.addSink(loopAns, "loopAns")
 
-  // val ubtbRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 0.U
-  // val ubtbWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 0.U
-  // val btbRight  = predRight && cfiUpdate.bits.bpuMeta.predictor === 1.U
-  // val btbWrong  = predWrong && cfiUpdate.bits.bpuMeta.predictor === 1.U
-  // val tageRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 2.U
-  // val tageWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 2.U
-  // val loopRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 3.U
-  // val loopWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 3.U
+    val ubtbAns_s3 = RegEnable(ubtbAns, if2_fire)
+    val ubtbAns_s4 = RegEnable(ubtbAns_s3, if3_fire)
 
-  // ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
-  // ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
-  // ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
-  // ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
-  // ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
-  // ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
-  // ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
-  // ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
+    val btbAns_s3 = RegEnable(btbAns, if2_fire)
+    val btbAns_s4 = RegEnable(btbAns_s3, if3_fire)
+    val bimResp_s3 = RegEnable(bimResp, if2_fire)
+    val bimResp_s4 = RegEnable(bimResp_s3, if3_fire)
+
+    fetchPacketWire.bpuMeta.zipWithIndex.foreach{ case(x,i) =>
+      x.predictor := predictor
+
+      x.ubtbAns := ubtbAns_s4(i)
+      x.btbAns := btbAns_s4(i)
+      x.btbAns.taken := bimResp_s4(i)
+      x.tageAns := tageAns(i)
+      x.rasAns := rasAns // Is this right?
+      x.loopAns := loopAns(i)
+    }
+  }
 
   // debug info
   if (IFUDebug) {
@@ -540,7 +551,6 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_snpc)
     XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
-    XSDebug("[predictor] predictor_s3=%d, predictor_s4=%d, predictor=%d\n", predictor_s3, predictor_s4, predictor)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", icache.io.req.valid, icache.io.req.ready, icache.io.req.bits.addr)
     XSDebug("[IF1][ghr] hist=%b\n", if1_gh.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", if1_gh.asUInt)

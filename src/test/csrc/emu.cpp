@@ -276,19 +276,26 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern uint32_t uptime(void);
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
-  uint64_t lastcommit = max_cycle;
-  uint64_t instr_left_last_cycle = max_instr;
+  uint64_t lastcommit[NumCore];
+  uint64_t instr_left_last_cycle[NumCore];
   const int stuck_limit = 2000;
+  uint64_t core_max_instr[NumCore];
 
-  uint32_t wdst[DIFFTEST_WIDTH];
-  uint64_t wdata[DIFFTEST_WIDTH];
-  uint64_t wpc[DIFFTEST_WIDTH];
-  uint64_t reg[DIFFTEST_NR_REG];
-  DiffState diff;
-  diff.reg_scala = reg;
-  diff.wpc = wpc;
-  diff.wdata = wdata;
-  diff.wdst = wdst;
+  uint32_t wdst[NumCore][DIFFTEST_WIDTH];
+  uint64_t wdata[NumCore][DIFFTEST_WIDTH];
+  uint64_t wpc[NumCore][DIFFTEST_WIDTH];
+  uint64_t reg[NumCore][DIFFTEST_NR_REG];
+  DiffState diff[NumCore];
+  for (int i = 0; i < NumCore; i++) {
+    diff[i].reg_scala = reg[i];
+    diff[i].wpc = wpc[i];
+    diff[i].wdata = wdata[i];
+    diff[i].wdst = wdst[i];
+    lastcommit[i] = max_cycle;
+    instr_left_last_cycle[i] = max_cycle;
+    core_max_instr[i] = max_instr;
+  }
+
 
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
@@ -298,8 +305,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
-    if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
-      trapCode = STATE_LIMIT_EXCEEDED;
+    if (!(max_cycle > 0 && 
+          core_max_instr[0] > 0 && 
+          instr_left_last_cycle[0] >= core_max_instr[0])) {
+      trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
     }
     if (assert_count > 0) {
@@ -319,7 +328,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
     if (trapCode != STATE_RUNNING) break;
 
-    if (lastcommit - max_cycle > stuck_limit && hascommit) {
+    if (lastcommit[0] - max_cycle > stuck_limit && hascommit) {
       eprintf("No instruction commits for %d cycles, maybe get stuck\n"
           "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
           stuck_limit, stuck_limit);
@@ -329,57 +338,66 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
     if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
       hascommit = 1;
-      read_emu_regs(reg);
+      read_emu_regs(reg[0]);
       void* get_img_start();
       long get_img_size();
-      ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
-      ref_difftest_setregs(reg);
+      ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), 0);
+      ref_difftest_setregs(reg[0], 0);
       printf("The first instruction has commited. Difftest enabled. \n");
     }
 
     // difftest
-    if (dut_ptr->io_difftest_commit && hascommit) {
-      read_emu_regs(reg);
-      read_wb_info(wpc, wdata, wdst);
 
-      diff.commit = dut_ptr->io_difftest_commit;
-      diff.this_inst = dut_ptr->io_difftest_thisINST;
-      diff.skip = dut_ptr->io_difftest_skip;
-      diff.isRVC = dut_ptr->io_difftest_isRVC;
-      diff.wen = dut_ptr->io_difftest_wen;
-      diff.intrNO = dut_ptr->io_difftest_intrNO;
-      diff.cause = dut_ptr->io_difftest_cause;
-      diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
+    for (int i = 0; i < NumCore; i++) {
+      if (dut_ptr->io_difftest_commit && hascommit) {
+        read_emu_regs(reg[i]);
+        read_wb_info(wpc[i], wdata[i], wdst[i]);
 
-      diff.sync.scFailed = dut_ptr->io_difftest_scFailed;
+        diff[i].commit = dut_ptr->io_difftest_commit;
+        diff[i].this_inst = dut_ptr->io_difftest_thisINST;
+        diff[i].skip = dut_ptr->io_difftest_skip;
+        diff[i].isRVC = dut_ptr->io_difftest_isRVC;
+        diff[i].wen = dut_ptr->io_difftest_wen;
+        diff[i].intrNO = dut_ptr->io_difftest_intrNO;
+        diff[i].cause = dut_ptr->io_difftest_cause;
+        diff[i].priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
-      if (difftest_step(&diff)) {
-        trapCode = STATE_ABORT;
+        diff[i].sync.scFailed = dut_ptr->io_difftest_scFailed;
+
+        if (i == 0) {
+          if (difftest_step(&diff[i])) {
+            trapCode = STATE_ABORT;
+          }
+        }
+        lastcommit[i] = max_cycle;
+
+        // update instr_cnt
+        instr_left_last_cycle[i] = core_max_instr[i];
+        core_max_instr[i] -= diff[i].commit;
       }
-      lastcommit = max_cycle;
 
-      // update instr_cnt
-      instr_left_last_cycle = max_instr;
-      max_instr -= diff.commit;
-    }
+#ifdef DIFFTEST_STORE_COMMIT
+      for (int core = 0; core < NumCore; core++) {
+        if (dut_ptr->io_difftest_storeCommit) {
+          read_store_info(diff[core].store_addr, diff[core].store_data, diff[core].store_mask);
 
-    if (dut_ptr->io_difftest_storeCommit) {
-      read_store_info(diff.store_addr, diff.store_data, diff.store_mask);
-
-      for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
-        auto addr = diff.store_addr[i];
-        auto data = diff.store_data[i];
-        auto mask = diff.store_mask[i];
-        if (difftest_store_step(&addr, &data, &mask)) {
-          difftest_display(dut_ptr->io_difftest_priviledgeMode);
-          printf("Mismatch for store commits: \n");
-          printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
-          printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
-            diff.store_addr[i], diff.store_data[i], diff.store_mask[i]);
-          trapCode = STATE_ABORT;
-          break;
+          for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
+            auto addr = diff[core].store_addr[i];
+            auto data = diff[core].store_data[i];
+            auto mask = diff[core].store_mask[i];
+            if (difftest_store_step(&addr, &data, &mask)) {
+              difftest_display(dut_ptr->io_difftest_priviledgeMode);
+              printf("Mismatch for store commits: \n");
+              printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
+              printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
+                diff[core].store_addr[i], diff[core].store_data[i], diff[core].store_mask[i]);
+              trapCode = STATE_ABORT;
+              break;
+            }
+          }
         }
       }
+#endif
     }
 
     uint32_t t = uptime();
@@ -504,23 +522,23 @@ void Emulator::snapshot_save(const char *filename) {
   stream.unbuf_write(get_ram_start(), size);
 
   uint64_t ref_r[DIFFTEST_NR_REG];
-  ref_difftest_getregs(&ref_r);
+  ref_difftest_getregs(&ref_r, 0);
   stream.unbuf_write(ref_r, sizeof(ref_r));
 
   uint64_t nemu_this_pc = get_nemu_this_pc();
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
-  ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
+  ref_difftest_memcpy_from_ref(buf, 0x80000000, size, 0);
   stream.unbuf_write(buf, size);
   munmap(buf, size);
 
   struct SyncState sync_mastate;
-  ref_difftest_get_mastatus(&sync_mastate);
+  ref_difftest_get_mastatus(&sync_mastate, 0);
   stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
   uint64_t csr_buf[4096];
-  ref_difftest_get_csr(csr_buf);
+  ref_difftest_get_csr(csr_buf, 0);
   stream.unbuf_write(&csr_buf, sizeof(csr_buf));
 
   long sdcard_offset;
@@ -553,7 +571,7 @@ void Emulator::snapshot_load(const char *filename) {
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
-  ref_difftest_memcpy_from_dut(0x80000000, buf, size);
+  ref_difftest_memcpy_from_dut(0x80000000, buf, size, 0);
   munmap(buf, size);
 
   struct SyncState sync_mastate;
