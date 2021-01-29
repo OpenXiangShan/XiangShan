@@ -171,15 +171,15 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val cfiUpdate = wb.bits.redirect.cfiUpdate
     when(wb.bits.redirectValid) {
       mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
-      when(!cfiUpdate.taken && offset === cfiIndex_vec(wbIdx).bits) {
-        cfiIndex_vec(wbIdx).valid := false.B
-      }
       when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
         cfiIndex_vec(wbIdx).valid := true.B
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
         cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
         cfiIsRVC(wbIdx) := wb.bits.uop.cf.pd.isRVC
+      }
+      when (offset === cfiIndex_vec(wbIdx).bits) {
+        cfiIndex_vec(wbIdx).valid := cfiUpdate.taken
       }
     }
   }
