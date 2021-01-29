@@ -236,7 +236,10 @@ class MicroBTB extends BasePredictor
     }
 
 
-
+    val new_preds = VecInit((0 until PredictWidth).map(i => 
+                                Mux(!update_hits(i),
+                                    Mux(update_takens(i),3.U,0.U),
+                                    satUpdate( metas(i).rpred,2,update_takens(i)))))
     //write the uBTBMeta
     (0 until PredictWidth).map(i => metas(i).rWay := update_write_ways(i))
     val update_write_metas = Wire(Vec(PredictWidth, new MicroBTBMeta))
@@ -245,10 +248,7 @@ class MicroBTB extends BasePredictor
         update_write_metas(i).is_RVC := u.rvc_mask(i)
         update_write_metas(i).valid  := true.B
         update_write_metas(i).tag    := update_tag
-        update_write_metas(i).pred   := Mux(!update_hits(i),
-                                        Mux(update_takens(i),3.U,0.U),
-                                        satUpdate( metas(i).rpred,2,update_takens(i))
-                                    )
+        update_write_metas(i).pred   := new_preds(i)
     }
 
     for (b <- 0 until PredictWidth) {
@@ -262,18 +262,14 @@ class MicroBTB extends BasePredictor
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {
             XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
-                                    i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
-            XSDebug(meta_write_valids(i),"uBTB update(%d): update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_tag:%x | update_lower 0x%x\n ",
-                        i.U, update_pcs(i),update_hits(i),update_write_ways(i),update_tag,update_target_lower(lowerBitsSize-1,0))
-            XSDebug(meta_write_valids(i), "uBTB update(%d): update_taken:%d | old_pred:%b | new_pred:%b\n",
-                i.U, update_takens(i), metas(i).rpred,
-                Mux(!update_hits(i),
-                        Mux(update_takens(i),3.U,0.U),
-                        satUpdate( metas(i).rpred,2,update_takens(i))
-                    ))
+                        i.U, read_hit_vec(i), read_hit_ways(i), read_resp(i).valid, read_resp(i).is_RVC,
+                        read_resp(i).taken, read_resp(i).is_Br, read_resp(i).target, out_ubtb_br_info.writeWay(i))
+            XSDebug(entry_write_valid && (i.U === update_bank),
+                        "uBTB update data(%d): update | pc:0x%x  | update hits:%b | update_write_way:%d  |  update_lower 0x%x\n ",
+                        i.U, update_pcs(i), update_hits(i), update_write_ways(i), update_target_lower(lowerBitsSize-1,0))
+            XSDebug(meta_write_valids(i), "uBTB update meta(%d): update_taken:%d | old_pred:%b | new_pred:%b | br:%d | rvc:%d | update_tag:%x\n",
+                i.U, update_takens(i), metas(i).rpred, new_preds(i), u.br_mask(i), u.rvc_mask(i), update_tag)
         }
-
-
     }
 
     if (extended_stat) {
