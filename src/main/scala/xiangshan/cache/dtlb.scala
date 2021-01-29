@@ -418,11 +418,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 
-  val tooManyPf = PopCount(pf) > 5.U
-  when (tooManyPf) { // when too much pf, just clear
-    XSDebug(p"Too many pf just flush all the pf v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
-    v.zipWithIndex.map{ case (a, i) => a := a & !pf(i) }
-  }
+  // val tooManyPf = PopCount(pf) > 5.U
+  // when (tooManyPf) { // when too much pf, just clear
+  //   XSDebug(p"Too many pf just flush all the pf v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
+  //   v.zipWithIndex.map{ case (a, i) => a := a & !pf(i) }
+  // }
 
   // sfence (flush)
   when (sfence.valid) {
