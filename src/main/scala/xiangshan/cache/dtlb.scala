@@ -305,14 +305,14 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   when (refill) {
     val resp = ptw.resp.bits
-    when (resp.entry.level === 2.U) {
+    when (resp.entry.level.getOrElse(0.U) === 2.U) {
       val refillIdx = randReplace(nv.asUInt)
       nv(refillIdx) := true.B
       nentry(refillIdx).apply(
         vpn   = resp.entry.tag,
         ppn   = resp.entry.ppn,
-        level = resp.entry.level,
-        perm  = VecInit(resp.entry.perm).asUInt,
+        level = resp.entry.level.getOrElse(0.U),
+        perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
@@ -322,8 +322,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       sentry(refillIdx).apply(
         vpn   = resp.entry.tag,
         ppn   = resp.entry.ppn,
-        level = resp.entry.level,
-        perm  = VecInit(resp.entry.perm).asUInt,
+        level = resp.entry.level.getOrElse(0.U),
+        perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
       XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
