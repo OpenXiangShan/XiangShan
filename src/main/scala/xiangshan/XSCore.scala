@@ -100,7 +100,7 @@ case class XSCoreParameters
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
-  TlbL2EntrySize: Int = 4096, //(256 * 16) or 512
+  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
   TlbL2SPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048,//(256 * 8)
@@ -179,7 +179,7 @@ trait HasXSParameter {
   val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
   val TlbEntrySize = core.TlbEntrySize
   val TlbSPEntrySize = core.TlbSPEntrySize
-  val TlbL2EntrySize = core.TlbL2EntrySize
+  val PtwL3EntrySize = core.PtwL3EntrySize
   val TlbL2SPEntrySize = core.TlbL2SPEntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize

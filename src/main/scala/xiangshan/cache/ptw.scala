@@ -12,29 +12,54 @@ import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMaster
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
-  val TlbL2WayNum = 16
-  val TlbL2LineSize = MemBandWidth/XLEN
-  val TlbL2LineNum  = TlbL2EntrySize/(TlbL2LineSize * TlbL2WayNum)
+
+  // ptwl1: fully-associated
+  val PtwL1TagLen = vpnnLen
+
+  /* +-------+----------+-------------+
+   * |  Tag  |  SetIdx  |  SectorIdx  |
+   * +-------+----------+-------------+
+   */
+  // ptwl2: 8-way group-associated
   val PtwL2WayNum = 8
-  val PtwL2LineSize = MemBandWidth/XLEN
-  val PtwL2LineNum  = PtwL2EntrySize/(PtwL2LineSize * PtwL2WayNum)
-  val PtwL1TagLen = PAddrBits - log2Up(XLEN/8)
-  val PtwL2TagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
-  val TlbL2TagLen = vpnLen - log2Up(TlbL2EntrySize)
-  val tlbl2Replacer = Some("setplru")
+  val PtwL2WaySize = PtwL2EntrySize / PtwL2WayNum
+  val PtwL2SectorSize = MemBandWidth/XLEN
+  val PtwL2LineSize = PtwL2SectorSize * PtwL2WayNum
+  val PtwL2LineNum  = PtwL2EntrySize / PtwL2LineSize
+  val PtwL2IdxLen = log2Up(PtwL2WaySize)
+  val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
+  val PtwL2SetIdxLen = log2Up(PtwL2LineNum)
+  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
   val ptwl2Replacer = Some("random")
-
-
-  def tlbl2replace = ReplacementPolicy.fromString(tlbl2Replacer,TlbL2WayNum,TlbL2LineNum)
   def ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
 
-  def genPtwL2Idx(addr: UInt) = {
-    /* tagLen :: outSizeIdxLen :: insideIdxLen*/
-    addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(PtwL2LineSize)+log2Up(XLEN/8))
+  // ptwl3: 16-way group-associated
+  val PtwL3WayNum = 16
+  val PtwL3WaySize = PtwL3EntrySize / PtwL3WayNum
+  val PtwL3SectorSize = MemBandWidth / XLEN
+  val PtwL3LineSize = PtwL3SectorSize * PtwL3WayNum
+  val PtwL3LineNum  = PtwL3EntrySize / PtwL3LineSize
+  val PtwL3IdxLen = log2Up(PtwL3WaySize)
+  val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
+  val PtwL3SetIdxLen = log2Up(PtwL3LineNum)
+  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
+  val ptwl3Replacer = Some("setplru")
+  def ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
+
+  def genPtwL2Idx(vpn: UInt) = {
+    (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
   }
 
-  def genTlbL2Idx(vpn: UInt) = {
-    vpn(log2Up(TlbL2LineNum)-1+log2Up(TlbL2LineSize), 0+log2Up(TlbL2LineSize))
+  def genPtwL2SetIdx(vpn: UInt) = {
+    genPtwL2Idx(vpn)(PtwL2SetIdxLen + PtwL2SectorIdxLen - 1, PtwL2SectorIdxLen)
+  }
+
+  def genPtwL3Idx(vpn: UInt) = {
+    vpn(PtwL3IdxLen - 1, 0)
+  }
+
+  def genPtwL3SetIdx(vpn: UInt) = {
+    genPtwL3Idx(vpn)(PtwL3SetIdxLen + PtwL3SectorIdxLen - 1, PtwL3SectorIdxLen)
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
@@ -45,6 +70,14 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   def getVpnn(vpn: UInt, idx: Int) = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
+
+  def getVpnClip(vpn: UInt, level: Int) = {
+    // level 0  /* vpnn2 */
+    // level 1  /* vpnn2 * vpnn1 */
+    // level 2  /* vpnn2 * vpnn1 * vpnn0*/
+    vpn(vpnLen - 1, (2 - level) * vpnnLen)
+  }
+
 }
 
 abstract class PtwBundle extends XSBundle with HasPtwConst
@@ -86,173 +119,186 @@ class PteBundle extends PtwBundle{
   }
 }
 
-class PtwEntry(tagLen: Int) extends PtwBundle {
+class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
+  val perm = if (hasPerm) Some(new PtePermBundle) else None
+  val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
 
-  def hit(addr: UInt) = {
-    require(addr.getWidth >= PAddrBits)
-    tag === addr(PAddrBits-1, PAddrBits-tagLen)
+  def hit(vpn: UInt) = {
+    require(vpn.getWidth == vpnLen)
+    tag === vpn(vpnLen - 1, vpnLen - tagLen)
   }
 
-  def refill(addr: UInt, pte: UInt) {
-    tag := addr(PAddrBits-1, PAddrBits-tagLen)
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
+    tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(pteBundle).ppn
-  }
+    perm.map(_ := pte.asTypeOf(pteBundle).perm)
+    level.map(_ := level)
+  } 
 
-  def genPtwEntry(addr: UInt, pte: UInt) = {
-    val e = Wire(new PtwEntry(tagLen))
-    e.tag := addr(PAddrBits-1, PAddrBits-tagLen)
-    e.ppn := pte.asTypeOf(pteBundle).ppn
+  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
+    val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
+    e.refill(vpn, pte, level)
     e
   }
 
-  override def cloneType: this.type = (new PtwEntry(tagLen)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new PtwEntry(tagLen, hasPerm, hasLevel)).asInstanceOf[this.type]
 
   override def toPrintable: Printable = {
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
-    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)}"
+    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} " +
+      (if (hasPerm) p"perm:${perm.getOrElse(0.U.asTypeOf(new PtePermBundle))} " else p"") +
+      (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"")
   }
 }
 
-class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
+class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
 
   val tag  = UInt(tagLen.W)
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
+  val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
-  def tagClip(addr: UInt) = {
-    require(addr.getWidth==PAddrBits)
-
-    addr(PAddrBits-1, PAddrBits-tagLen)
+  def tagClip(vpn: UInt) = {
+    require(vpn.getWidth == vpnLen)
+    vpn(vpnLen - 1, vpnLen - tagLen)
   }
 
-  def hit(idx: UInt, addr: UInt) = {
-    require(idx.getWidth == log2Up(num), s"PtwEntries.hit: error idx width idxWidth:${idx.getWidth} num:${num}")
-
-    (tag === tagClip(addr)) && vs(idx)
-  }
-
-  def genEntries(addr: UInt, data: UInt, level: UInt): PtwEntries = {
-    require((data.getWidth / XLEN) == num,
-      "input data length must be multiple of pte length")
-
-    val ps = Wire(new PtwEntries(num, tagLen))
-    ps.tag := tagClip(addr)
-    for (i <- 0 until num) {
-      val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
-      ps.ppns(i) := pte.ppn
-      ps.vs(i)   := !pte.isPf(level) && !pte.isLeaf()
-    }
-
-    ps
-  }
-
-  def get(idx: UInt) = {
-    require(idx.getWidth == log2Up(num), s"PtwEntries.get: error idx width idxWidth:${idx.getWidth} num:${num}")
-
-    (vs(idx), ppns(idx))
-  }
-
-  override def cloneType: this.type = (new PtwEntries(num, tagLen)).asInstanceOf[this.type]
-  override def toPrintable: Printable = {
-    require(num == 4, "if num is not 4, please comment this toPrintable")
-    // NOTE: if num is not 4, please comment this toPrintable
-    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
-    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} vs:${Binary(vs.asUInt)}"
-  }
-}
-
-class L2TlbEntry extends TlbBundle {
-  val tag = UInt(vpnLen.W) // tag is vpn
-  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
-  val ppn = UInt(ppnLen.W)
-  val perm = new PtePermBundle
-
-  def hit(vpn: UInt):Bool = {
-    val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
-    val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
-      Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
-    val mask = maskLevel(level)
-    (mask&this.tag) === (mask&vpn)
-  }
-
-  def apply(pte: UInt, level: UInt, vpn: UInt) = {
-    this.tag := vpn
-    this.level := level
-    this.ppn := pte.asTypeOf(pteBundle).ppn
-    this.perm := pte.asTypeOf(pteBundle).perm
-    this
-  }
-
-  override def toPrintable: Printable = {
-    p"vpn:0x${Hexadecimal(tag)} level:${level} ppn:${Hexadecimal(ppn)} perm:${perm}"
-  }
-}
-
-class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
-  require(log2Up(num)==log2Down(num))
-  /* vpn can be divide into three part */
-  // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
-  val cutLen  = log2Up(num)
-
-  val tag     = UInt(tagLen.W) // NOTE: high part of vpn
-  val ppns    = Vec(num, UInt(ppnLen.W))
-  val perms    = Vec(num, new PtePermBundle)
-  val vs      = Vec(num, Bool())
-  // println(s"L2TlbEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} perms:${num}*${(new PtePermBundle).asUInt.getWidth} vs:${num}*1")
-
-  def tagClip(vpn: UInt) = { // full vpn => tagLen
-    vpn(vpn.getWidth-1, vpn.getWidth-tagLen)
-  }
-
-  // NOTE: get insize idx
-  def idxClip(vpn: UInt) = {
-    vpn(cutLen-1, 0)
+  def sectorIdxClip(vpn: UInt, level: Int) = {
+    getVpnClip(vpn, level)(log2Up(num) - 1, 0)
   }
 
   def hit(vpn: UInt) = {
-    (tag === tagClip(vpn)) && vs(idxClip(vpn))
+    tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
   }
 
-  def genEntries(data: UInt, level: UInt, vpn: UInt): L2TlbEntires = {
+  def genEntries(vpn: UInt, data: UInt, level: UInt) = {
     require((data.getWidth / XLEN) == num,
       "input data length must be multiple of pte length")
-    assert(level===2.U, "tlb entries only support 4K pages")
-
-    val ts = Wire(new L2TlbEntires(num, tagLen))
-    ts.tag := tagClip(vpn)
+  
+    val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
+    ps.tag := tagClip(vpn)
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
-      ts.ppns(i) := pte.ppn
-      ts.perms(i):= pte.perm // this.perms has no v
-      ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+      ps.ppns(i) := pte.ppn
+      ps.vs(i)   := !pte.isPf(level) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.perms.map(_(i) := pte.perm)
     }
-
-    ts
+    ps
   }
 
-  def get(vpn: UInt): L2TlbEntry = {
-    val t = Wire(new L2TlbEntry)
-    val idx = idxClip(vpn)
-    t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
-    t.level := 2.U // L2TlbEntries only support 4k page
-    t.ppn := ppns(idx)
-    t.perm := perms(idx)
-    t
+  def getLeafEntry(vpn: UInt): PtwEntry = {
+    require(hasPerm)
+    val e = Wire(new PtwEntry(tagLen, hasPerm, true))
+    e.tag := tagClip(vpn)
+    e.ppn := ppns(sectorIdxClip(vpn, level))
+    e.perm.map(_ := perms(sectorIdxClip(vpn, level)))
+    e.level.map(_ := level.U)
+    e
   }
 
-  override def cloneType: this.type = (new L2TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new PtwEntries(num, tagLen, level, hasPerm)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
-    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
-    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
-    p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
+    val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
+    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))} " +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} vs:${Binary(vs.asUInt)} " +
+    (if (hasPerm) p"perms(0):${permsInner(0)} perms(1):${permsInner(1)} perms(2):${permsInner(2)} perms(3):${permsInner(3)}" else p"")
   }
 }
+
+// class L2TlbEntry extends TlbBundle {
+//   val tag = UInt(vpnLen.W) // tag is vpn
+//   val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
+//   val ppn = UInt(ppnLen.W)
+//   val perm = new PtePermBundle
+
+//   def hit(vpn: UInt):Bool = {
+//     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
+//     val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
+//       Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
+//     val mask = maskLevel(level)
+//     (mask&this.tag) === (mask&vpn)
+//   }
+
+//   def apply(pte: UInt, level: UInt, vpn: UInt) = {
+//     this.tag := vpn
+//     this.level := level
+//     this.ppn := pte.asTypeOf(pteBundle).ppn
+//     this.perm := pte.asTypeOf(pteBundle).perm
+//     this
+//   }
+
+//   override def toPrintable: Printable = {
+//     p"vpn:0x${Hexadecimal(tag)} level:${level} ppn:${Hexadecimal(ppn)} perm:${perm}"
+//   }
+// }
+
+// class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+//   require(log2Up(num)==log2Down(num))
+//   /* vpn can be divide into three part */
+//   // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
+//   val cutLen  = log2Up(num)
+
+//   val tag     = UInt(tagLen.W) // NOTE: high part of vpn
+//   val ppns    = Vec(num, UInt(ppnLen.W))
+//   val perms    = Vec(num, new PtePermBundle)
+//   val vs      = Vec(num, Bool())
+//   // println(s"L2TlbEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} perms:${num}*${(new PtePermBundle).asUInt.getWidth} vs:${num}*1")
+
+//   def tagClip(vpn: UInt) = { // full vpn => tagLen
+//     vpn(vpn.getWidth-1, vpn.getWidth-tagLen)
+//   }
+
+//   // NOTE: get insize idx
+//   def idxClip(vpn: UInt) = {
+//     vpn(cutLen-1, 0)
+//   }
+
+//   def hit(vpn: UInt) = {
+//     (tag === tagClip(vpn)) && vs(idxClip(vpn))
+//   }
+
+//   def genEntries(data: UInt, level: UInt, vpn: UInt): L2TlbEntires = {
+//     require((data.getWidth / XLEN) == num,
+//       "input data length must be multiple of pte length")
+//     assert(level===2.U, "tlb entries only support 4K pages")
+
+//     val ts = Wire(new L2TlbEntires(num, tagLen))
+//     ts.tag := tagClip(vpn)
+//     for (i <- 0 until num) {
+//       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+//       ts.ppns(i) := pte.ppn
+//       ts.perms(i):= pte.perm // this.perms has no v
+//       ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+//     }
+
+//     ts
+//   }
+
+//   def get(vpn: UInt): L2TlbEntry = {
+//     val t = Wire(new L2TlbEntry)
+//     val idx = idxClip(vpn)
+//     t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
+//     t.level := 2.U // L2TlbEntries only support 4k page
+//     t.ppn := ppns(idx)
+//     t.perm := perms(idx)
+//     t
+//   }
+
+//   override def cloneType: this.type = (new L2TlbEntires(num, tagLen)).asInstanceOf[this.type]
+//   override def toPrintable: Printable = {
+//     require(num == 4, "if num is not 4, please comment this toPrintable")
+//     // NOTE: if num is not 4, please comment this toPrintable
+//     p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+//     p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
+//     p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
+//   }
+// }
 
 class PtwReq extends PtwBundle {
   val vpn = UInt(vpnLen.W)
@@ -334,13 +380,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
   val tlbl2 = Module(new SRAMTemplate(
-    new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen),
-    set = TlbL2LineNum,
+    new L2TlbEntires(num = PtwL3SectorSize, tagLen = PtwL3TagLen),
+    set = PtwL3LineNum,
     way = TlbL2WayNum,
     singlePort = true
   )) // (total 256, one line is 4 => 64 lines)
-  val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
-  val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
+  val tlbv  = RegInit(0.U(PtwL3LineNum.W)) // valid
+  val tlbg  = Reg(UInt(PtwL3LineNum.W)) // global
 
   val sp = Reg(Vec(TlbL2SPEntrySize, new L2TlbEntry)) // (total 16, one is 4M or 1G)
   val spv = RegInit(0.U(TlbL2SPEntrySize.W))
@@ -350,7 +396,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = Reg(UInt(PtwL1EntrySize.W))
   val ptwl2 = Module(new SRAMTemplate(
-    new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen),
+    new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen),
     set = PtwL2LineNum,
     way = PtwL2WayNum,
     singlePort = true
@@ -362,7 +408,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val memRdata = mem.d.bits.data
   val memSelData = Wire(UInt(XLEN.W))
   val memPte   = memSelData.asTypeOf(new PteBundle)
-  val memPtes  =(0 until TlbL2LineSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
+  val memPtes  =(0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
   val memValid = mem.d.valid
   val memRespReady = mem.d.ready
   val memRespFire = mem.d.fire()
@@ -391,7 +437,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(req.vpn) })
     val hitWayData = Mux1H(PriorityEncoderOH(hitVec), ramDatas)
 
-    when(hitVec.asUInt.orR && vidx) {tlbl2replace.access(ridxReg.asUInt,OHToUInt(hitVec))}
+    when(hitVec.asUInt.orR && vidx) {ptwl3replace.access(ridxReg.asUInt,OHToUInt(hitVec))}
 
 
     assert(tlbl2.io.r.req.ready || !tlbl2.io.r.req.valid)
@@ -432,9 +478,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitPPN) = {
     val readRam = (!tlbHit && l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
-    val ridx = genPtwL2Idx(l2addr)
+    val ridx = genPtwL2SetIdx(l2addr)
     val ridxReg = RegNext(ridx)
-    val idx  = RegEnable(l2addr(log2Up(PtwL2LineSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
+    val idx  = RegEnable(l2addr(log2Up(PtwL2SectorSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
 
     assert(ptwl2.io.r.req.ready || !readRam)
@@ -576,14 +622,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     }
     when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
-      val refillIdx = genPtwL2Idx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
+      val refillIdx = genPtwL2SetIdx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
       // replacement policy
       val victimWayOH = UIntToOH(ptwl2replace.way(refillIdx))
       //TODO: check why the old refillIdx is right
 
       assert(ptwl2.io.w.req.ready)
-      val ps = new PtwEntries(PtwL2LineSize, PtwL2TagLen).genEntries(l2addrStore, memRdata, level)
+      val ps = new PtwEntries(PtwL2SectorSize, PtwL2TagLen).genEntries(l2addrStore, memRdata, level)
       ptwl2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
@@ -595,14 +641,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)} ps:${ps}\n")
     }
     when (memPte.isLeaf() && (level===2.U)) {
-      val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
+      val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(PtwL3EntrySize)-1, 0)
       val rfOH = UIntToOH(refillIdx)
       // replacement policy
-      val victimWayOH = UIntToOH(tlbl2replace.way(refillIdx))
+      val victimWayOH = UIntToOH(ptwl3replace.way(refillIdx))
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
-      val ts = new L2TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen).genEntries(memRdata, level, req.vpn)
+      val ts = new L2TlbEntires(num = PtwL3SectortorSize, tagLen = PtwL3TagLen).genEntries(memRdata, level, req.vpn)
       tlbl2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
