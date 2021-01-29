@@ -245,6 +245,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   })
   difftestIO <> DontCare
 
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
+
   // instvalid field
   // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val valid = Mem(RoqSize, Bool())
@@ -435,8 +438,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
+  // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
-    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).valid
+    io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).bits.redirectValid
   ))).orR()
   val misPredBlockCounter = Reg(UInt(2.W))
   misPredBlockCounter := Mux(misPredWb,
@@ -846,6 +850,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     debug_deqUop.ctrl.fuType === FuType.mou &&
     (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
 
+  val hitTrap = trapVec.reduce(_||_)
+  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+  val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
+
   if (!env.FPGAPlatform) {
 
     val difftestIntrNO = WireInit(0.U(XLEN.W))
@@ -866,10 +874,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
-
-    val hitTrap = trapVec.reduce(_||_)
-    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-    val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
     ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
     ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
@@ -893,5 +897,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     difftestIO.wpc := RegNext(wpc)
     difftestIO.isRVC := RegNext(isRVC.asUInt)
     difftestIO.scFailed := RegNext(scFailed)
+
+    trapIO.valid := RegNext(hitTrap)
+    trapIO.code := RegNext(trapCode)
+    trapIO.pc := RegNext(trapPC)
+    trapIO.cycleCnt := RegNext(GTimer())
+    trapIO.instrCnt := RegNext(instrCnt)
   }
 }

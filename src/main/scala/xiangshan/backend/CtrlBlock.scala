@@ -196,6 +196,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   difftestIO <> DontCare
 
   val ftq = Module(new Ftq)
+  val trapIO = IO(new TrapIO())
+  trapIO <> DontCare
+
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
@@ -225,6 +228,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   ftq.io.redirect <> backendRedirect
   ftq.io.flush := flush
+  ftq.io.flushIdx := roq.io.flushOut.bits.ftqIdx
+  ftq.io.flushOffset := roq.io.flushOut.bits.ftqOffset
   ftq.io.frontendRedirect <> frontendRedirect
   ftq.io.exuWriteback <> io.fromIntBlock.exuRedirect
 
@@ -265,7 +270,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      backendRedirect.valid || frontendRedirect.valid)
+      backendRedirect.valid || flush || io.frontend.redirect_cfiUpdate.valid)
   }
 
   rename.io.redirect <> backendRedirect
@@ -323,6 +328,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   if (env.DualCoreDifftest) {
     difftestIO.fromRoq <> roq.difftestIO
+    trapIO <> roq.trapIO
   }
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex

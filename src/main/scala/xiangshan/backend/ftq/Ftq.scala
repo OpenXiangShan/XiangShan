@@ -48,6 +48,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     // redirect, reset enq ptr
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
+    val flushIdx = Input(new FtqPtr)
+    val flushOffset = Input(UInt(log2Up(PredictWidth).W))
     // update mispredict target
     val frontendRedirect = Flipped(ValidIO(new Redirect))
     // exu write back, update info
@@ -65,7 +67,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.enq.ready := validEntries < FtqSize.U
   io.enqPtr := tailPtr
 
-  val real_fire = io.enq.fire() && !io.redirect.valid && !io.frontendRedirect.valid
+  val stage2Flush = io.redirect.valid || io.flush
+  val stage3Flush = RegNext(stage2Flush)
+
+  val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
 
   val dataModule = Module(new DataModuleTemplate(new FtqEntry, FtqSize, 4, 1, true))
   dataModule.io.wen(0) := real_fire
@@ -165,18 +170,14 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // redirect, reset ptr
-  when(io.flush) { // flush pipe / exception
-    // clear ftq
-    tailPtr := headPtr
-    commitStateQueue(headPtr.value).foreach(_ := s_invalid)
-    assert(headPtr === io.redirect.bits.ftqIdx)
-  }.elsewhen(io.redirect.valid) { // branch misprediction or load replay
-    val isReplay = RedirectLevel.flushItself(io.redirect.bits.level)
+  when(io.flush || io.redirect.valid){
+    val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
     val next = io.redirect.bits.ftqIdx + 1.U
     tailPtr := next
-    val offset = io.redirect.bits.ftqOffset
-    commitStateQueue(io.redirect.bits.ftqIdx.value).zipWithIndex.foreach({ case (s, i) =>
-      when(i.U > offset || (isReplay && i.U === offset)) { // replay will not commit
+    val offset = Mux(io.flush, io.flushOffset, io.redirect.bits.ftqOffset)
+    val notMisPredict = io.flush || (io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+    commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
+      when(i.U > offset || (notMisPredict && i.U === offset)){
         s := s_invalid
       }
     })
