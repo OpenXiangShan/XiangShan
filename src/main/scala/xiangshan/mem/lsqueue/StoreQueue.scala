@@ -404,6 +404,16 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
 
+  // perf counter
+  XSPerf("sqFull", !io.allowEnqueue, acc = true)
+  XSPerf("sqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
+  XSPerf("sqMmioCnt", io.uncache.req.fire(), acc = true)
+  XSPerf("sqWriteback", io.mmioStout.fire(), acc = true)
+  XSPerf("sqWbBlocked", io.mmioStout.valid && !io.mmioStout.ready, acc = true)
+  XSPerf("sqValidEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
+  XSPerf("sqCmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
+  XSPerf("sqNCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
+
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
 

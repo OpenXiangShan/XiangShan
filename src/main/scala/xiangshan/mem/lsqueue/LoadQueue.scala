@@ -421,7 +421,7 @@ class LoadQueue extends XSModule
 
     XSDebug(
       l1Violation,
-      "need rollback (l4 load) pc %x roqidx %d target %x\n",
+      "need rollback (l1 load) pc %x roqidx %d target %x\n",
       io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l1ViolationUop.roqIdx.asUInt
     )
     XSDebug(
@@ -600,6 +600,15 @@ class LoadQueue extends XSModule
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
+
+  // perf counter
+  XSPerf("lqRollback", io.rollback.valid, acc = true) // rollback redirect generated
+  XSPerf("lqFull", !io.allowEnqueue, acc = true)
+  XSPerf("lqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
+  XSPerf("lqMmioCnt", io.uncache.req.fire(), acc = true)
+  XSPerf("lqRefill", io.dcache.valid, acc = true)
+  XSPerf("lqWriteback", PopCount(VecInit(0 until LoadPipelineWidth).map(_ => io.ldout(_).fire())), acc = true)
+  XSPerf("lqWbBlocked", PopCount(VecInit(0 until LoadPipelineWidth).map(_ => io.ldout(_).valid && !io.ldout(_).ready), acc = true)
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
