@@ -480,11 +480,14 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
-  val ptwRepester = Module(new PTWRepeater())
-  ptwRepester.io.tlb <> frontend.io.ptw
-  ptwRepester.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.tlb(0) <> memBlock.io.ptw
-  ptw.io.tlb(1) <> ptwRepester.io.ptw
+  val itlbRepester = Module(new PTWRepeater())
+  val dtlbRepester = Module(new PTWRepeater())
+  itlbRepester.io.tlb <> frontend.io.ptw
+  dtlbRepester.io.tlb <> memBlock.io.ptw
+  itlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
+  dtlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
+  ptw.io.tlb(0) <> dtlbRepester.io.ptw
+  ptw.io.tlb(1) <> itlbRepester.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr    <> integerBlock.io.csrio.tlb
 
