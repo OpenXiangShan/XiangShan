@@ -894,7 +894,7 @@ class CSR extends FunctionUnit with HasCSRConst
     }
 
     ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+    ExcitingUtils.addSource(Mux(io.exception.valid, causeNO, 0.U), "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
