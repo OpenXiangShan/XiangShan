@@ -395,7 +395,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.uop := RegEnable(debug_deqUop, exceptionHappen)
   io.exception.bits.uop.ctrl.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
-  io.exception.bits.uop.cf.pc := DontCare // we get pc at ftq, so roq don't save pc
   io.exception.bits.uop.cf.exceptionVec := RegEnable(deqExceptionVec, exceptionHappen)
   io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(deqDispatchData.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
@@ -843,8 +842,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     isRVC(i) := uop.cf.pd.isRVC
   }
   val retireCounterFix = Mux(io.exception.valid, 1.U, retireCounter)
-  val retirePCFix = SignExt(Mux(io.exception.valid, debug_deqUop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
-  val retireInstFix = Mux(io.exception.valid, debug_deqUop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
+  val retirePCFix = SignExt(Mux(io.exception.valid, io.exception.bits.uop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
+  val retireInstFix = Mux(io.exception.valid, io.exception.bits.uop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
 
   val scFailed = !diffTestDebugLrScValid(0) &&
     debug_deqUop.ctrl.fuType === FuType.mou &&
