@@ -55,6 +55,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // Ibuffer define
   // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
+  ibuf.io.wdata.map(w => dontTouch(w.ftqOffset))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
   val next_head_ptr = WireInit(head_ptr)
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
