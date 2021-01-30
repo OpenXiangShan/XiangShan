@@ -58,9 +58,28 @@ object AddressSpace {
   def printMemmap(){
     println("-------------------- memory map --------------------")
     for(i <- MemMapList){
-      println(i._1._1 + "->" + i._1._2 + " width " + (if(i._2.get("width").get == "0") "unlimited" else i._2.get("width").get) + " " + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
+      println("[" + i._1._1 + " -> " + i._1._2 + "] Width:" + (if(i._2.get("width").get == "h0") "unlimited" else i._2.get("width").get) + " Description:" + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
     }
     println("----------------------------------------------------")
+  }
+
+  def checkMemmap(){
+    for(i <- MemMapList){
+      // pma mode check
+      val s = i._2.get("mode").get
+      if(
+        s.toUpperCase.indexOf("A") >= 0 && 
+        !(s.toUpperCase.indexOf("R") >= 0 && s.toUpperCase.indexOf("W") >= 0)
+      ){
+        println("[error] pma atomicable area must be both readable and writeable")
+        throw new IllegalArgumentException
+      }
+      // pma area size check
+      if(!i._1._1.endsWith("000") || !i._1._2.endsWith("FFF")){
+        println("[error] pma area must be larger than 4KB")
+        throw new IllegalArgumentException()
+      }
+    }
   }
 
   def genMemmapMatchVec(addr: UInt): UInt = {
