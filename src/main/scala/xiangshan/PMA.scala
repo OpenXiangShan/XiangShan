@@ -65,7 +65,10 @@ object AddressSpace {
 
   def genMemmapMatchVec(addr: UInt): UInt = {
     VecInit(MemMapList.map(i => {
-      i._1._1.U <= addr && addr < i._1._2.U
+      // calculate addr tag and compare mask
+      // i._1._1.U <= addr && addr < i._1._2.U
+      val mask = i._1._2.U - i._1._1.U
+      (~(i._1._1.U ^ addr) | mask).andR
     }).toSeq).asUInt
   }
 

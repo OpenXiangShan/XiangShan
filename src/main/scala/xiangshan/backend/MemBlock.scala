@@ -263,8 +263,11 @@ class MemBlockImp
   lsq.io.enq            <> io.fromCtrlBlock.enqLsq
   lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
   io.toCtrlBlock.replay <> lsq.io.rollback
-  lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
+  // delay dcache refill for 1 cycle for better timing
+  // TODO: remove RegNext after fixing refill paddr timing
+  // lsq.io.dcache         <> dcache.io.lsu.lsq 
+  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq) 
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
