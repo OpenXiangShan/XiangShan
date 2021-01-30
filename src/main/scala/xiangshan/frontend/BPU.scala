@@ -9,10 +9,10 @@ import xiangshan.backend.JumpOpType
 import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = true
+  val BPUDebug = true && !env.FPGAPlatform
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
-  val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
+  val EnableBPUTimeRecord = (EnableCFICommitLog || EnbaleCFIPredLog) && !env.FPGAPlatform
   val EnableCommit = false
 }
 
