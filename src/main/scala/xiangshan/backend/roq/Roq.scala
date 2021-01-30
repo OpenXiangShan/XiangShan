@@ -166,51 +166,6 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
-// class RoqStateWrapper extends XSModule with HasCircularQueuePtrHelper {
-//   val io = IO(new Bundle {
-//     val redirect = ValidIO(new Redirect)
-//     val raddr = Vec(CommitWidth, Input(UInt(log2Up(numEntries).W)))
-//     val wen = Vec(RenameWidth, Input(Bool()))
-//     val waddr = Vec(RenameWidth)
-//   })
-
-//   val valid = Mme(RoqSize, Bool())
-//   val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
-
-//   for (i <- 0 until RoqSize) {
-//     when (reset.asBool || io.redirectOut.valid) {
-//       valid(i) := false.B
-//     }.elsewhen (io.redirectOut.valid)
-//   }
-//   when (reset.asBool) {
-//     valid(i)
-//   }
-//   // enqueue logic writes 6 valid
-//   for (i <- 0 until RenameWidth) {
-//     when (canEnqueue(i) && !io.redirect.valid) {
-//       valid(enqPtrVec(i).value) := true.B
-//     }
-//   }
-//   // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
-//   for (i <- 0 until CommitWidth) {
-//     when (io.commits.valid(i) && state =/= s_extrawalk) {
-//       valid(commitReadAddr(i)) := false.B
-//     }
-//   }
-//   // reset: when exception, reset all valid to false
-//   when (io.redirectOut.valid) {
-//     for (i <- 0 until RoqSize) {
-//       valid(i) := false.B
-//     }
-//   }
-
-// }
-
-class RoqExceptionInfo extends XSBundle {
-  val uop = new MicroOp
-  val isInterrupt = Bool()
-}
-
 class RoqFlushInfo extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -221,7 +176,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val redirect = Input(Valid(new Redirect))
     val enq = new RoqEnqIO
     val flushOut = ValidIO(new RoqFlushInfo)
-    val exception = ValidIO(new RoqExceptionInfo)
+    val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = new RoqCommitIO

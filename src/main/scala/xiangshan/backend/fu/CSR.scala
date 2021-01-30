@@ -7,7 +7,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.util._
-import xiangshan.backend.roq.RoqExceptionInfo
 
 object hartId extends (() => Int) {
   var x = 0
@@ -132,7 +131,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // to FPU
     val fpu = Flipped(new FpuCsrIO)
     // from rob
-    val exception = Flipped(ValidIO(new RoqExceptionInfo))
+    val exception = Flipped(ValidIO(new ExceptionInfo))
     // to ROB
     val isXRet = Output(Bool())
     val trapTarget = Output(UInt(VAddrBits.W))
