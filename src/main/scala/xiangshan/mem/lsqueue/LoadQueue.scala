@@ -460,15 +460,14 @@ class LoadQueue extends XSModule
 
   val rollbackSelected = ParallelOperation(rollback, rollbackSel)
   val lastCycleRedirect = RegNext(io.brqRedirect)
+  val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
   // S2: select rollback and generate rollback request 
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
   val rollbackGen = Wire(Valid(new Redirect))
   val rollbackReg = Reg(Valid(new Redirect))
-  rollbackGen.valid := rollbackSelected.valid &&
-    (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
+  rollbackGen.valid := rollbackSelected.valid
 
   rollbackGen.bits.roqIdx := rollbackSelected.bits.roqIdx
   rollbackGen.bits.level := RedirectLevel.flush
@@ -483,7 +482,9 @@ class LoadQueue extends XSModule
   io.rollback := rollbackReg
   io.rollback.valid := rollbackReg.valid && 
     (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional())
+    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional()) &&
+    (!lastlastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastlastCycleRedirect.bits.roqIdx)) &&
+    !(lastlastCycleRedirect.valid && lastlastCycleRedirect.bits.isUnconditional())
 
   when(io.rollback.valid) {
     XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
