@@ -164,7 +164,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     ppn := pte.asTypeOf(pteBundle).ppn
     perm.map(_ := pte.asTypeOf(pteBundle).perm)
     this.level.map(_ := level)
-  } 
+  }
 
   def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
@@ -207,7 +207,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
   def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) = {
     require((data.getWidth / XLEN) == num,
       "input data length must be multiple of pte length")
-  
+
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
     for (i <- 0 until num) {
@@ -869,12 +869,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   // fsm
   val s_idle :: s_read_ptw :: s_req :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  val level = Reg(UInt(log2Up(Level).W))
+  val level = RegInit(0.U(log2Up(Level).W))
   val levelNext = level + 1.U
   val latch = Reg(new PtwResp)
   val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
-  
+
   // l1
   val l1HitReg = Reg(Bool())
   val l1HitPPNReg = Reg(UInt(ppnLen.W))
@@ -1011,9 +1011,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   mem.a.valid := state === s_req && !sfenceLatch && !sfence.valid
   mem.d.ready := state === s_resp || sfenceLatch
   memSelData := memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrReg(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
-  
+
   // resp
-  val ptwFinish = state === s_read_ptw && pteHit || 
+  val ptwFinish = state === s_read_ptw && pteHit ||
                   memRespFire && !sfenceLatch && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
   for (i <- 0 until PtwWidth) {
     resp(i).valid := valid && ptwFinish && arbChosen === i.U
