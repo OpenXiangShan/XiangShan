@@ -270,7 +270,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
-    val next = io.redirect.bits.ftqIdx + 1.U
+    val next = idx + 1.U
     tailPtr := next
     val offset = Mux(io.flush, io.flushOffset, io.redirect.bits.ftqOffset)
     val notMisPredict = io.flush || (io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
