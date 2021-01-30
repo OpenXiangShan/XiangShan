@@ -681,3 +681,31 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   // TODO: add ptw perf cnt
 }
+
+class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+  val io = IO(new Bundle {
+    val tlb = Flipped(new TlbPtwIO)
+    val ptw = new TlbPtwIO
+    val sfence = Input(new SfenceBundle)
+  })
+
+  val (tlb, ptw, sfence) = (io.tlb, io.ptw, io.sfence.valid)
+  val req = RegEnable(tlb.req.bits, tlb.req.fire())
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
+  val haveOne = BoolStopWatch(tlb.req.fire(), tlb.resp.fire() || sfence)
+  val sent = BoolStopWatch(ptw.req.fire(), tlb.req.fire() || sfence)
+  val recv = BoolStopWatch(ptw.resp.fire(), tlb.req.fire() || sfence)
+
+  tlb.req.ready := !haveOne
+  ptw.req.valid := haveOne && !sent
+  ptw.req.bits := req
+
+  tlb.resp.bits := resp
+  tlb.resp.valid := haveOne && recv
+  ptw.resp.ready := !recv
+
+  XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
+  XSDebug(io.tlb.req.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(io.ptw.req.valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
+  assert(!RegNext(recv && io.ptw.resp.valid), "re-receive ptw.resp")
+}
