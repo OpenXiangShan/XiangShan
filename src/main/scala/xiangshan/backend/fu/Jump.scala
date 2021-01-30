@@ -50,7 +50,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOut.cfiUpdate.predTaken := true.B
   redirectOut.cfiUpdate.taken := true.B
   redirectOut.cfiUpdate.target := target
-  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target
+  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target || !uop.cf.pred_taken
 
 
   // Output

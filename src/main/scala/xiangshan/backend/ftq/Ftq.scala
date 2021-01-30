@@ -172,7 +172,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     when(wb.bits.redirectValid) {
       mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
       when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
-        
+        cfiIndex_vec(wbIdx).valid := true.B
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
         cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
@@ -270,7 +270,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
-    val next = io.redirect.bits.ftqIdx + 1.U
+    val next = idx + 1.U
     tailPtr := next
     val offset = Mux(io.flush, io.flushOffset, io.redirect.bits.ftqOffset)
     val notMisPredict = io.flush || (io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
