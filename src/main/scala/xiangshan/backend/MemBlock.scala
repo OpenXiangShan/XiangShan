@@ -172,7 +172,7 @@ class MemBlockImp
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
-    rs.io.feedback := DontCare
+    rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rsd_${cfg.name}")
 
@@ -215,7 +215,8 @@ class MemBlockImp
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
-    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.feedback
+    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.memfeedback
+    loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
@@ -239,7 +240,8 @@ class MemBlockImp
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
-    stu.io.tlbFeedback <> rs.io.feedback
+    stu.io.tlbFeedback <> rs.io.memfeedback
+    stu.io.rsIdx       := rs.io.rsIdx
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
@@ -313,6 +315,7 @@ class MemBlockImp
 
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
+  atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
   atomicsUnit.io.flush <> io.fromCtrlBlock.flush
 
@@ -336,12 +339,12 @@ class MemBlockImp
   }
 
   when (state === s_atomics_0) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs0).io.feedback
+    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs0).io.memfeedback
 
     assert(!storeUnits(0).io.tlbFeedback.valid)
   }
   when (state === s_atomics_1) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs1).io.feedback
+    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs1).io.memfeedback
 
     assert(!storeUnits(1).io.tlbFeedback.valid)
   }
