@@ -19,7 +19,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val (src1, jalr_target, pc, immMin, func, uop) = (
     io.in.bits.src(0),
     io.in.bits.src(1)(VAddrBits - 1, 0),
-    io.in.bits.uop.cf.pc,
+    SignExt(io.in.bits.uop.cf.pc, XLEN),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     io.in.bits.uop
