@@ -1,7 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package freechips.rocketchip.devices.debug
-
+package devices.debug
 import chisel3._
 import chisel3.experimental.{IntParam, noPrefix}
 import chisel3.util._
@@ -55,6 +54,8 @@ class DebugIO(implicit val p: Parameters) extends Bundle {
   val dmactiveAck = Input(Bool())
   val extTrigger = (p(DebugModuleKey).get.nExtTriggers > 0).option(new DebugExtTriggerIO())
   val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
+
+  val debug_int = Output(Vec(2, Bool()))
 }
 
 class PSDIO(implicit val p: Parameters) extends Bundle with CanHavePSDTestModeIO {
@@ -83,7 +84,7 @@ trait HasPeripheryDebug { this: BaseSubsystem =>
   val debugOpt = p(DebugModuleKey).map { params =>
     val debug = LazyModule(new TLDebugModule(tlbus.beatBytes))
 
-    LogicalModuleTree.add(logicalTreeNode, debug.logicalTreeNode)
+    // LogicalModuleTree.add(logicalTreeNode, debug.logicalTreeNode)
 
     debug.node := tlbus.coupleTo("debug"){ TLFragmenter(tlbus) := _ }
     debug.dmInner.dmInner.customNode := debugCustomXbarOpt.get.node
@@ -142,6 +143,8 @@ trait HasPeripheryDebugModuleImp extends LazyModuleImp {
 
     outerdebug.module.io.debug_reset := debug.reset
     outerdebug.module.io.debug_clock := debug.clock
+
+    outerdebug.module.io.debug_int := debug.debug_int
 
     debug.ndreset := outerdebug.module.io.ctrl.ndreset
     debug.dmactive := outerdebug.module.io.ctrl.dmactive

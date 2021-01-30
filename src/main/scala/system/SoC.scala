@@ -13,6 +13,7 @@ import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveC
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
+import devices.debug.TLDebugModule
 
 case class SoCParameters
 (
@@ -155,6 +156,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   ))
   val plicIdentity = AXI4IdentityNode()
   plic.node := plicIdentity := AXI4UserYanker() := TLToAXI4() := mmioXbar
+
+  // DM
+  val DM = LazyModule(new TLDebugModule(beatBytes = 8))
+  DM.module.io := DontCare
+
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{

@@ -1,6 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package freechips.rocketchip.devices.debug
+package devices.debug
 
 import chisel3._
 import chisel3.util._

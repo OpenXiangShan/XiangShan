@@ -1,6 +1,6 @@
 // See LICENSE.SiFive for license details.
 
-package freechips.rocketchip.devices.debug
+package devices.debug
 
 
 import chisel3._
@@ -291,10 +291,13 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
 
   val cfg = p(DebugModuleKey).get
 
+  // original interrupt node
+
   val intnode = IntNexusNode(
     sourceFn       = { _ => IntSourcePortParameters(Seq(IntSourceParameters(1, Seq(Resource(device, "int"))))) },
     sinkFn         = { _ => IntSinkPortParameters(Seq(IntSinkParameters())) },
     outputRequiresInput = false)
+  
 
   val dmiNode = TLRegisterNode (
     address = AddressSet.misaligned(DMI_DMCONTROL   << 2, 4) ++
@@ -320,6 +323,8 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
       val hgDebugInt = Input(Vec(nComponents, Bool()))
       val hartResetReq = cfg.hasHartResets.option(Output(Vec(nComponents, Bool())))
       val dmAuthenticated = cfg.hasAuthentication.option(Input(Bool()))
+
+      val debug_int = Output(Vec(nComponents, Bool()))
     })
 
     val omRegMap = withReset(reset.asAsyncReset) {
@@ -555,9 +560,16 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
 
     debugIntNxt := debugIntRegs
 
+    /*  original intnode
     val (intnode_out, _) = intnode.out.unzip
     for (component <- 0 until nComponents) {
       intnode_out(component)(0) := debugIntRegs(component) | io.hgDebugInt(component)
+    }
+    */
+
+    // XS debug_int
+    for (component <- 0 until nComponents ){
+      io.debug_int(component) := debugIntRegs(component) | io.hgDebugInt(component)
     }
 
     // Halt request registers are set & cleared by writes to DMCONTROL.haltreq
@@ -565,6 +577,8 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
     // so resumereq is passed through to Inner.
     // hartsel/hasel/hamask must also be used by the DebugModule state machine,
     // so it is passed to Inner.
+
+    // TODO how long this int lasts?
 
     for (component <- 0 until nComponents) {
       when (~dmactive || ~dmAuthenticated) {
@@ -669,6 +683,8 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
       val hgDebugInt = Input(Vec(nComponents, Bool()))
       val hartResetReq = p(DebugModuleKey).get.hasHartResets.option(Output(Vec(nComponents, Bool())))
       val dmAuthenticated = p(DebugModuleKey).get.hasAuthentication.option(Input(Bool()))
+
+      val debug_int = Output(Vec(nComponents, Bool()))
     })
     val rf_reset = IO(Input(Reset()))    // RF transform
 
@@ -687,6 +703,7 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
       dmOuter.module.io.hgDebugInt := io.hgDebugInt
       io.hartResetReq.foreach { x => dmOuter.module.io.hartResetReq.foreach {y => x := y}}
       io.dmAuthenticated.foreach { x => dmOuter.module.io.dmAuthenticated.foreach { y => y := x}}
+      io.debug_int.foreach { x => dmOuter.module.io.debug_int.foreach { y => y := x}} // TODO debug int line clock? 
     }
   }
 }
@@ -1851,6 +1868,9 @@ class TLDebugModule(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
       val hartIsInReset = Input(Vec(nComponents, Bool()))
       val hartResetReq = p(DebugModuleKey).get.hasHartResets.option(Output(Vec(nComponents, Bool())))
       val auth = p(DebugModuleKey).get.hasAuthentication.option(new DebugAuthenticationIO())
+
+      // XS Int
+      val debug_int = Output(Vec(nComponents, Bool()))
     })
 
     childClock := io.tl_clock
@@ -1885,11 +1905,15 @@ class TLDebugModule(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
     io.hartResetReq.foreach { x => dmOuter.module.io.hartResetReq.foreach {y => x := y}}
     io.auth.foreach { x => dmOuter.module.io.dmAuthenticated.get := x.dmAuthenticated }
     io.auth.foreach { x => dmInner.module.io.auth.foreach {y => x <> y}}
+
+    io.debug_int := dmOuter.module.io.debug_int
   }
 
+  /*
   val logicalTreeNode = new DebugLogicalTreeNode(
     device,
     () => dmOuter,
     () => dmInner
   )
+  */
 }
