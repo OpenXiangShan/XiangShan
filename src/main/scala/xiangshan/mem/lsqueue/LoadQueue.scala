@@ -358,11 +358,25 @@ class LoadQueue extends XSModule
     *   Generate match vector for store address with rangeMask(stPtr, enqPtr).
     *   Besides, load instructions in LoadUnit_S1 and S2 are also checked.
     * Cycle 1: Redirect Generation
-    *   There're three possible types of violations. Choose the oldest load.
-    *   Prepare redirect request according to the detected violation.
+    *   There're three possible types of violations, up to 6 possible redirect requests.
+    *   Choose the oldest load (part 1). (4 + 2) -> (1 + 2)
     * Cycle 2: Redirect Fire
+    *   Choose the oldest load (part 2). (3 -> 1)
+    *   Prepare redirect request according to the detected violation.
     *   Fire redirect request (if valid)
     */
+
+  // stage 0:        lq l1 wb     l1 wb lq
+  //                 |  |  |      |  |  |  (paddr match)
+  // stage 1:        lq l1 wb     l1 wb lq
+  //                 |  |  |      |  |  |
+  //                 |  |------------|  |
+  //                 |        |         |
+  // stage 2:        lq      l1wb       lq
+  //                 |        |         |
+  //                 --------------------
+  //                          |
+  //                      rollback req
   io.load_s1 := DontCare
   def detectRollback(i: Int) = {
     val startIndex = io.storeIn(i).bits.uop.lqIdx.value
@@ -410,15 +424,6 @@ class LoadQueue extends XSModule
     val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.load_s1.map(_.uop))))
     XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
-    val rollbackValidVec = Seq(lqViolation, wbViolation, l1Violation)
-    val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l1ViolationUop)
-
-    val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
-    val oneAfterZero = mask(1)(0)
-    val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-      rollbackUopVec(0),
-      Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
-
     XSDebug(
       l1Violation,
       "need rollback (l4 load) pc %x roqidx %d target %x\n",
@@ -435,15 +440,7 @@ class LoadQueue extends XSModule
       io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, wbViolationUop.roqIdx.asUInt
     )
 
-    (RegNext(io.storeIn(i).valid) && Cat(rollbackValidVec).orR, rollbackUop)
-  }
-
-  // rollback check
-  val rollback = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
-  for (i <- 0 until StorePipelineWidth) {
-    val detectedRollback = detectRollback(i)
-    rollback(i).valid := detectedRollback._1
-    rollback(i).bits := detectedRollback._2
+    ((lqViolation, lqViolationUop), (wbViolation, wbViolationUop), (l1Violation, l1ViolationUop))
   }
 
   def rollbackSel(a: Valid[MicroOp], b: Valid[MicroOp]): ValidIO[MicroOp] = {
@@ -457,34 +454,70 @@ class LoadQueue extends XSModule
       b // sel b
     )
   }
-
-  val rollbackSelected = ParallelOperation(rollback, rollbackSel)
   val lastCycleRedirect = RegNext(io.brqRedirect)
   val lastlastCycleRedirect = RegNext(lastCycleRedirect)
 
-  // S2: select rollback and generate rollback request 
+  // S2: select rollback (part1) and generate rollback request
+  // rollback check
+  // Wb/L1 rollback seq check is done in s2
+  val rollbackWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
+  val rollbackL1 = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
+  val rollbackL1Wb = Wire(Vec(StorePipelineWidth*2, Valid(new MicroOp)))
+  // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
+  val rollbackLq = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
+  for (i <- 0 until StorePipelineWidth) {
+    val detectedRollback = detectRollback(i)
+    rollbackLq(i).valid := detectedRollback._1._1 && RegNext(io.storeIn(i).valid)
+    rollbackLq(i).bits := detectedRollback._1._2
+    rollbackWb(i).valid := detectedRollback._2._1 && RegNext(io.storeIn(i).valid)
+    rollbackWb(i).bits := detectedRollback._2._2
+    rollbackL1(i).valid := detectedRollback._3._1 && RegNext(io.storeIn(i).valid)
+    rollbackL1(i).bits := detectedRollback._3._2
+    rollbackL1Wb(2*i) := rollbackL1(i)
+    rollbackL1Wb(2*i+1) := rollbackWb(i)
+  }
+
+  val rollbackL1WbSelected = ParallelOperation(rollbackL1Wb, rollbackSel)
+  val rollbackL1WbVReg = RegNext(rollbackL1WbSelected.valid)
+  val rollbackL1WbReg = RegEnable(rollbackL1WbSelected.bits, rollbackL1WbSelected.valid)
+  val rollbackLq0VReg = RegNext(rollbackLq(0).valid)
+  val rollbackLq0Reg = RegEnable(rollbackLq(0).bits, rollbackLq(0).valid)
+  val rollbackLq1VReg = RegNext(rollbackLq(1).valid)
+  val rollbackLq1Reg = RegEnable(rollbackLq(1).bits, rollbackLq(1).valid)
+
+  // S3: select rollback (part2), generate rollback request, then fire rollback request
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
-  val rollbackGen = Wire(Valid(new Redirect))
-  val rollbackReg = Reg(Valid(new Redirect))
-  rollbackGen.valid := rollbackSelected.valid
 
-  rollbackGen.bits.roqIdx := rollbackSelected.bits.roqIdx
-  rollbackGen.bits.level := RedirectLevel.flush
-  rollbackGen.bits.interrupt := DontCare
-  rollbackGen.bits.pc := DontCare
-  rollbackGen.bits.target := rollbackSelected.bits.cf.pc
-  rollbackGen.bits.brTag := rollbackSelected.bits.brTag
+  // FIXME: this is ugly
+  val rollbackValidVec = Seq(rollbackL1WbVReg, rollbackLq0VReg, rollbackLq1VReg)
+  val rollbackUopVec = Seq(rollbackL1WbReg, rollbackLq0Reg, rollbackLq1Reg)
 
-  rollbackReg := rollbackGen
+  // select uop in parallel
+  val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
+  val oneAfterZero = mask(1)(0)
+  val rollbackUop = Mux(oneAfterZero && mask(2)(0),
+    rollbackUopVec(0),
+    Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
 
-  // S3: fire rollback request
-  io.rollback := rollbackReg
-  io.rollback.valid := rollbackReg.valid && 
-    (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional()) &&
-    (!lastlastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastlastCycleRedirect.bits.roqIdx)) &&
-    !(lastlastCycleRedirect.valid && lastlastCycleRedirect.bits.isUnconditional())
+  // check if rollback request is still valid in parallel
+  val rollbackValidVecChecked = Wire(Vec(3, Bool()))
+  for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopVec).zipWithIndex) {
+    rollbackValidVecChecked(idx) := v && 
+      (!lastCycleRedirect.valid || !isAfter(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
+      !(lastCycleRedirect.valid && lastCycleRedirect.bits.isUnconditional()) &&
+      (!lastlastCycleRedirect.valid || !isAfter(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx)) &&
+      !(lastlastCycleRedirect.valid && lastlastCycleRedirect.bits.isUnconditional())
+  }
+
+  io.rollback.bits.roqIdx := rollbackUop.roqIdx
+  io.rollback.bits.level := RedirectLevel.flush
+  io.rollback.bits.interrupt := DontCare
+  io.rollback.bits.pc := DontCare
+  io.rollback.bits.target := rollbackUop.cf.pc
+  io.rollback.bits.brTag := rollbackUop.brTag
+
+  io.rollback.valid := rollbackValidVecChecked.asUInt.orR
 
   when(io.rollback.valid) {
     XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
