@@ -578,7 +578,7 @@ class LoadQueue extends XSModule
   /**
     * update pointers
     */
-  val lastCycleCancelCount = PopCount(RegNext(needCancel))
+  val lastCycleCancelCount = PopCount(RegNext(needCancel)) - commitCount
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
   val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
   when (lastCycleRedirect.valid || lastCycleFlush) {
