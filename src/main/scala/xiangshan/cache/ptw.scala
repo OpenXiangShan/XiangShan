@@ -30,7 +30,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2LineNum)
   val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
-  val ptwl2Replacer = Some("random")
+  val ptwl2Replacer = Some("setplru")
   def ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
 
   // ptwl3: 16-way group-associated
@@ -408,7 +408,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     // val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(vpn) })
     val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.hit(vpn) && v })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until PtwL2WayNum).map(_.U))
 
     when (hit) { ptwl2replace.access(genPtwL2SetIdx(vpn), hitWay) }
@@ -426,7 +426,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val ramDatas = l3.io.r.resp.data
     val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.hit(vpn) && v })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until PtwL3WayNum).map(_.U))
 
     when (hit) { ptwl3replace.access(genPtwL3SetIdx(vpn), hitWay) }
@@ -442,7 +442,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn) && spv(i) }
     val hitVec = hitVecT.map(RegEnable(_, validOneCycle))
     val hitData = ParallelPriorityMux(hitVec zip sp)
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
     (hit, hitData)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
