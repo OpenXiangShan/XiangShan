@@ -107,8 +107,9 @@ object AddressSpace {
       // calculate addr tag and compare mask
       // val mask = i._1._2.U - i._1._1.U
       // (~(i._1._1.U ^ addr) | mask).andR
-      val addrwidth = addr.getWidth
-      i._1._1.U(addrwidth-1, 12) <= addr(addrwidth-1, 12) && addr(addrwidth-1, 12) < i._1._2.U(addrwidth-1, 12)
+
+      // pma is not current critical path, use simple compare for now
+      i._1._1.U <= addr && addr < i._1._2.U
     }).toSeq).asUInt
   }
 
@@ -118,6 +119,7 @@ object AddressSpace {
     }).toSeq))
   }
 
+  // TODO: FIXME
   def queryModeFast(matchVec: UInt): UInt = {
     var r = WireInit(false.B)
     var w = WireInit(false.B)
@@ -138,7 +140,7 @@ object AddressSpace {
       if (modes.toUpperCase.indexOf("A") >= 0) a = a || matchVec(idx).asBool
       if (modes.toUpperCase.indexOf("C") >= 0) c = c || matchVec(idx).asBool
     }
-    VecInit(VecInit(Cat(r, w, x, i, d, s, a, c)).reverse).asUInt
+    VecInit(Seq(r, w, x, i, d, s, a, c)).asUInt
   }
 
   def queryWidth(matchVec: UInt): UInt = {
@@ -149,6 +151,10 @@ object AddressSpace {
 
   def memmapAddrMatch(addr: UInt): (UInt, UInt) = {
     val matchVec = genMemmapMatchVec(addr)
+    // when(queryMode(matchVec) =/= queryModeFast(matchVec)){
+    //   printf("pma fail: right %b wrong %b\n", queryMode(matchVec), queryModeFast(matchVec))
+    // }
+    assert(queryMode(matchVec) === queryModeFast(matchVec))
     (queryModeFast(matchVec), queryWidth(matchVec))
   }
 

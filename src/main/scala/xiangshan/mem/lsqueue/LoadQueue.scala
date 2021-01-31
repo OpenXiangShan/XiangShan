@@ -534,11 +534,13 @@ class LoadQueue extends XSModule
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
+  val lqTailMmioPending = WireInit(pending(deqPtr))
+  val lqTailAllocated = WireInit(allocated(deqPtr))
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
-      when(io.roq.pendingld && pending(deqPtr) && allocated(deqPtr)) {
+      when(io.roq.pendingld && lqTailMmioPending && lqTailAllocated) {
         uncacheState := s_req
       }
     }
