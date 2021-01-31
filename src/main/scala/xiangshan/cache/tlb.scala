@@ -38,6 +38,8 @@ trait HasTlbConst extends HasXSParameter {
       val v    = Bool()
     }
   }
+
+
 }
 
 abstract class TlbBundle extends XSBundle with HasTlbConst
@@ -307,10 +309,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     Mux(full, randIdx, priorIdx)
   }
 
+  val normalReplacer = if (isDtlb) Some("random") else Some("plru")
+  val superReplacer = if (isDtlb) Some("random") else Some("plru")
+  val nReplace = ReplacementPolicy.fromString(normalReplacer, TlbEntrySize)
+  val sReplace = ReplacementPolicy.fromString(superReplacer, TlbSPEntrySize)
+
   when (refill) {
     val resp = ptw.resp.bits
     when (resp.entry.level.getOrElse(0.U) === 2.U) {
-      val refillIdx = randReplace(nv.asUInt)
+      val refillIdx = nReplace.way
       nv(refillIdx) := true.B
       nentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -321,7 +328,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       )
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
-      val refillIdx = randReplace(sv.asUInt)
+      val refillIdx = sReplace.way
       sv(refillIdx) := true.B
       sentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -358,6 +365,16 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val miss    = !hit && validReg && vmEnable && ~pfArray
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
+
+    if (!isDtlb) { // NOTE: only support one access
+      val hitVecUInt = VecInit(hitVec).asUInt
+      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) (
+        nReplace.access(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))
+      )
+      when (Cat(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)).orR && validReg && vmEnable) {
+        sReplace.access(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))
+      }
+    }
 
     XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
     XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
