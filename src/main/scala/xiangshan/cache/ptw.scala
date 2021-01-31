@@ -15,6 +15,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
+  val ptwl1Replacer = Some("plru")
+  def ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -392,7 +394,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(vpn) && l1v(i) }
     val hitVec = hitVecT.map(RegEnable(_, validOneCycle))
     val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+
+    when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
     (hit, hitPPN)
   }
 
@@ -536,7 +540,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   // refill
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level === 0.U && !memPte.isLeaf()) {
-      val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
+      // val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
+      val refillIdx = ptwl1replace.way
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
       l1v := l1v | rfOH
