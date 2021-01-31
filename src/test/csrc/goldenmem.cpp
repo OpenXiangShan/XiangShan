@@ -3,7 +3,7 @@
 #include <sys/mman.h>
 #include <time.h>
 
-static uint8_t *pmem;
+uint8_t *pmem;
 
 void* guest_to_host(paddr_t addr) { return &pmem[addr]; }
 
@@ -18,6 +18,9 @@ void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len) {
   uint8_t *dataArray = (uint8_t*)data;
   for (int i = 0; i < len; i++) {
 		if (((mask >> i) & 1) != 0) {
+      // if (addr+i == 0x8055fa5c) {
+      //   printf("+++++++++++ 0x%x\n", dataArray[i]);
+      // }
 			paddr_write(addr + i, dataArray[i], 1);
 		}
   }

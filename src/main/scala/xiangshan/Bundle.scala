@@ -469,6 +469,13 @@ class DifftestBundle extends XSBundle {
     val atomicAddr = Output(UInt(64.W))
     val atomicData = Output(UInt(64.W))
     val atomicMask = Output(UInt(8.W))
+    val atomicFuop = Output(UInt(8.W))
+    val atomicOut  = Output(UInt(64.W))
+  }
+  val fromPtw = new Bundle() {
+    val ptwResp = Output(Bool())
+    val ptwAddr = Output(UInt(64.W))
+    val ptwData = Output(Vec(4, UInt(64.W)))
   }
 }
 

@@ -100,6 +100,8 @@ class MemBlockImp
       val atomicAddr = Output(UInt(64.W))
       val atomicData = Output(UInt(64.W))
       val atomicMask = Output(UInt(8.W))
+      val atomicFuop = Output(UInt(8.W))
+      val atomicOut  = Output(UInt(64.W))
     }
   })
   difftestIO <> DontCare

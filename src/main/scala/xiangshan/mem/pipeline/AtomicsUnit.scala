@@ -24,6 +24,8 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val atomicAddr = Output(UInt(64.W))
     val atomicData = Output(UInt(64.W))
     val atomicMask = Output(UInt(8.W))
+    val atomicFuop = Output(UInt(8.W))
+    val atomicOut  = Output(UInt(64.W))
   })
   difftestIO <> DontCare
 
@@ -40,12 +42,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val is_mmio = Reg(Bool())
   // dcache response data
   val resp_data = Reg(UInt())
+  val resp_data_wire = WireInit(0.U)
   val is_lrsc_valid = Reg(Bool())
 
   // Difftest signals
   val paddr_reg = Reg(UInt(64.W))
   val data_reg = Reg(UInt(64.W))
   val mask_reg = Reg(UInt(8.W))
+  val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
   io.exceptionAddr.bits  := in.src1
@@ -180,6 +184,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       paddr_reg := io.dcache.req.bits.addr
       data_reg := io.dcache.req.bits.data
       mask_reg := io.dcache.req.bits.mask
+      fuop_reg := in.uop.ctrl.fuOpType
     }
   }
 
@@ -199,7 +204,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         "b111".U -> rdata(63, 56)
       ))
 
-      resp_data := LookupTree(in.uop.ctrl.fuOpType, List(
+      resp_data_wire := LookupTree(in.uop.ctrl.fuOpType, List(
         LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.sc_w      -> rdata,
         LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
@@ -225,6 +230,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
       ))
 
+      resp_data := resp_data_wire
       state := s_finish
     }
   }
@@ -255,5 +261,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     difftestIO.atomicAddr := WireInit(paddr_reg)
     difftestIO.atomicData := WireInit(data_reg)
     difftestIO.atomicMask := WireInit(mask_reg)
+    difftestIO.atomicFuop := WireInit(fuop_reg)
+    difftestIO.atomicOut  := resp_data_wire
   }
 }

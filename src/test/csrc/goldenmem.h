@@ -26,6 +26,8 @@ typedef uint64_t word_t;
 #define PMEM_SIZE (8 * 1024 * 1024 * 1024UL)
 // #define PMEM_SIZE (256 * 1024 * 1024UL) 
 
+extern uint8_t* pmem;
+
 void init_goldenmem();
 void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len);
 void read_goldenmem(paddr_t addr, void *data, uint64_t len);

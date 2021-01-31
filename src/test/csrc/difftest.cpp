@@ -78,6 +78,10 @@ void init_difftest() {
   void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
 
+  void (*ref_misc_put_gmaddr)(void *) = (void (*)(void*))dlsym(handle, "misc_put_gmaddr");
+  assert(ref_misc_put_gmaddr);
+
+  ref_misc_put_gmaddr(pmem);
   for (int i = 0; i < NumCore; i++) {
     ref_difftest_init(i);
   }
@@ -210,7 +214,11 @@ int difftest_step(DiffState *s, int coreid) {
                   case 1: len = 2; break;
                   case 2: len = 4; break;
                   case 3: len = 8; break;
-                  default: panic("Unknown fuOpType: 0x%x", s->ltype[i]);
+                  case 4: len = 1; break;
+                  case 5: len = 2; break;
+                  case 6: len = 4; break;
+                  default: 
+                    printf("Unknown fuOpType: 0x%x\n", s->ltype[i]);
                 }
               } else if (s->lfu[i] == 0xF) {
                 if (s->ltype[i] % 2 == 0) {
@@ -220,6 +228,13 @@ int difftest_step(DiffState *s, int coreid) {
                 }
               }
               read_goldenmem(s->lpaddr[i], &golden, len);
+              if (s->lfu[i] == 0xC) {
+                switch (s->ltype[i]) {
+                  case 0: golden = (int64_t)(int8_t)golden; break;
+                  case 1: golden = (int64_t)(int16_t)golden; break;
+                  case 2: golden = (int64_t)(int32_t)golden; break;
+                }
+              }
               printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
               if (golden == s->wdata[i]) {
                 // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
@@ -228,6 +243,15 @@ int difftest_step(DiffState *s, int coreid) {
                   ref_r[s->wdst[i]] = s->wdata[i];
                   ref_difftest_setregs(ref_r, coreid);
                 }
+              } else if (s->lfu[i] == 0xE) {
+                ref_difftest_memcpy_from_dut(s->lpaddr[i], &golden, len, coreid);
+                if (s->wdst[i] != 0) {
+                  ref_r[s->wdst[i]] = s->wdata[i];
+                  ref_difftest_setregs(ref_r, coreid);
+                }
+                printf("---    atomic instr found: carefully handled\n");
+              } else {
+                printf("---    golden fucked up as well\n");
               }
             }
           }
@@ -270,6 +294,8 @@ int difftest_step(DiffState *s, int coreid) {
             reg_name[i], this_pc, ref_r[i], s->reg_scala[i]);
       }
     }
+    printf("(((Another Core)))\n");
+    difftest_display(s->priviledgeMode, 1-coreid);
     return 1;
   }
   return 0;

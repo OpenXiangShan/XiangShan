@@ -306,6 +306,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
+  
+  val difftestIO = IO(new Bundle() {
+    val ptwResp = Output(Bool())
+    val ptwAddr = Output(UInt(64.W))
+    val ptwData = Output(Vec(4, UInt(64.W)))
+  })
+
+  difftestIO <> DontCare
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
   arb.io.in <> VecInit(io.tlb.map(_.req))
@@ -509,7 +517,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
+    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),  // 00000
     lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
@@ -521,6 +529,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val memAddrLatch = RegEnable(memAddr, mem.a.valid)
   memSelData := memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
+
+  if (env.DualCoreDifftest) {
+    val ptwAddr = Reg(UInt(64.W))
+    when (memReqFire) {
+      ptwAddr := Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W))
+    }
+    difftestIO.ptwResp := memRespFire
+    difftestIO.ptwAddr := ptwAddr
+    difftestIO.ptwData := memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))
+  }
 
   /*
    * resp

@@ -100,9 +100,9 @@ Emulator::Emulator(int argc, const char *argv[]):
   extern void init_device(void);
   init_device();
 
-  init_difftest();
-
   init_goldenmem();
+
+  init_difftest();
 
 #if VM_TRACE == 1
   enable_waveform = args.enable_waveform;
@@ -401,6 +401,79 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
+inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
+  if (!(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff)) {
+    printf("Mask fucked: %lx\n", atomicMask);
+  }
+  assert(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff);
+
+  if (atomicMask == 0xff) {
+    uint64_t rs = *atomicData;  // rs2
+    uint64_t t  = atomicOut;
+    uint64_t ret;
+    uint64_t mem;
+    read_goldenmem(atomicAddr, &mem, 8);
+    if (mem != t && atomicFuop != 007) {
+      printf("Atomic instr fucked up, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", mem, t, atomicFuop, atomicAddr);
+      // assert(0);
+    }
+    switch (atomicFuop) {
+      case 002: case 003: ret = t; break;
+      case 006: case 007: ret = rs; break;  // TODO
+      case 012: case 013: ret = rs; break;
+      case 016: case 017: ret = t+rs; break;
+      case 022: case 023: ret = (t^rs); break;
+      case 026: case 027: ret = t & rs; break;
+      case 032: case 033: ret = t | rs; break;
+      case 036: case 037: ret = ((int64_t)t < (int64_t)rs)? t : rs; break;
+      case 042: case 043: ret = ((int64_t)t > (int64_t)rs)? t : rs; break;
+      case 046: case 047: ret = (t < rs) ? t : rs; break;
+      case 052: case 053: ret = (t > rs) ? t : rs; break;
+      default: printf("Unknown atomic fuOpType: 0x%x\n", atomicFuop);
+    }
+    update_goldenmem(atomicAddr, &ret, atomicMask, 8);
+  }
+  if (atomicMask == 0xf || atomicMask == 0xf0) {
+    uint32_t rs = *(uint32_t*)atomicData;  // rs2
+    uint32_t t  = (uint32_t)atomicOut;
+    uint32_t ret;
+    uint32_t mem;
+    uint64_t mem_temp;
+    uint64_t ret_temp;
+    atomicAddr = (atomicAddr & 0xfffffffffffffff8);
+    read_goldenmem(atomicAddr, &mem_temp, 8);
+    
+    if (atomicMask == 0xf) 
+      mem = (uint32_t)mem_temp;
+    else
+      mem = (uint32_t)(mem_temp >> 32);
+
+    if (mem != t && atomicFuop != 006) {
+      printf("Atomic instr fucked up, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", mem_temp, mem, t, atomicFuop, atomicAddr);
+      // assert(0);
+    }
+    switch (atomicFuop) {
+      case 002: case 003: ret = t; break;
+      case 006: case 007: ret = rs; break;  // TODO
+      case 012: case 013: ret = rs; break;
+      case 016: case 017: ret = t+rs; break;
+      case 022: case 023: ret = (t^rs); break;
+      case 026: case 027: ret = t & rs; break;
+      case 032: case 033: ret = t | rs; break;
+      case 036: case 037: ret = ((int32_t)t < (int32_t)rs)? t : rs; break;
+      case 042: case 043: ret = ((int32_t)t > (int32_t)rs)? t : rs; break;
+      case 046: case 047: ret = (t < rs) ? t : rs; break;
+      case 052: case 053: ret = (t > rs) ? t : rs; break;
+      default: printf("Unknown atomic fuOpType: 0x%x\n", atomicFuop);
+    }
+    ret_temp = ret;
+    if (atomicMask == 0xf0) 
+      ret_temp = (ret_temp << 32);
+    update_goldenmem(atomicAddr, &ret_temp, atomicMask, 8);
+  }
+  
+}
+
 inline void Emulator::load_diff_info(void* diff_ptr, int coreid) {
 #define load_info(x)  diff[0].x = dut_ptr->io_difftest_##x
 #define load_info2(x) diff[1].x = dut_ptr->io_difftest2_##x
@@ -558,7 +631,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 
     // Update Golden Memory info
-    assert(!(dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp));
+    // if (dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp) {
+    //   printf("Double sbuffer resp\n");
+    // }
+    // assert(!(dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp));
     if (dut_ptr->io_difftest_sbufferResp) {
       read_sbuffer_info(sbufferData);
       uint64_t sbufferAddr = dut_ptr->io_difftest_sbufferAddr;
@@ -574,15 +650,19 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
     if (dut_ptr->io_difftest_atomicResp) {
       uint64_t* atomicData = &dut_ptr->io_difftest_atomicData;
-      uint64_t atomicAddr = dut_ptr->io_difftest_atomicAddr;
-      uint64_t atomicMask = dut_ptr->io_difftest_atomicMask;
-      update_goldenmem(atomicAddr, atomicData, atomicMask, 8);
+      uint64_t  atomicAddr =  dut_ptr->io_difftest_atomicAddr;
+      uint64_t  atomicMask =  dut_ptr->io_difftest_atomicMask;
+      uint8_t   atomicFuop =  dut_ptr->io_difftest_atomicFuop;
+      uint64_t  atomicOut  =  dut_ptr->io_difftest_atomicOut;
+      handle_atomic(atomicAddr, atomicData, atomicMask, atomicFuop, atomicOut);
     }
     if (dut_ptr->io_difftest2_atomicResp) {
       uint64_t* atomicData = &dut_ptr->io_difftest2_atomicData;
-      uint64_t atomicAddr = dut_ptr->io_difftest2_atomicAddr;
-      uint64_t atomicMask = dut_ptr->io_difftest2_atomicMask;
-      update_goldenmem(atomicAddr, atomicData, atomicMask, 8);
+      uint64_t  atomicAddr =  dut_ptr->io_difftest2_atomicAddr;
+      uint64_t  atomicMask =  dut_ptr->io_difftest2_atomicMask;
+      uint8_t   atomicFuop =  dut_ptr->io_difftest2_atomicFuop;
+      uint64_t  atomicOut  =  dut_ptr->io_difftest2_atomicOut;
+      handle_atomic(atomicAddr, atomicData, atomicMask, atomicFuop, atomicOut);
     }
 
     uint32_t t = uptime();
