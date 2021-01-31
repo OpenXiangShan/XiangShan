@@ -746,7 +746,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  val isXRet = func === CSROpType.jmp && !isEcall
+  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
   // ctrl block use these 2 cycles later
   //  0          1       2
   // XRet
