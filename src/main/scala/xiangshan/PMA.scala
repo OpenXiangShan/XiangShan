@@ -85,9 +85,10 @@ object AddressSpace {
   def genMemmapMatchVec(addr: UInt): UInt = {
     VecInit(MemMapList.map(i => {
       // calculate addr tag and compare mask
-      // i._1._1.U <= addr && addr < i._1._2.U
-      val mask = i._1._2.U - i._1._1.U
-      (~(i._1._1.U ^ addr) | mask).andR
+      // val mask = i._1._2.U - i._1._1.U
+      // (~(i._1._1.U ^ addr) | mask).andR
+      val addrwidth = addr.getWidth
+      i._1._1.U(addrwidth-1, 12) <= addr(addrwidth-1, 12) && addr(addrwidth-1, 12) < i._1._2.U(addrwidth-1, 12)
     }).toSeq).asUInt
   }
 
@@ -95,6 +96,29 @@ object AddressSpace {
     Mux1H(matchVec, VecInit(MemMapList.map(i => {
       PMAMode.strToMode(i._2.get("mode").get)
     }).toSeq))
+  }
+
+  def queryModeFast(matchVec: UInt): UInt = {
+    var r = WireInit(false.B)
+    var w = WireInit(false.B)
+    var x = WireInit(false.B)
+    var i = WireInit(false.B)
+    var d = WireInit(false.B)
+    var s = WireInit(false.B)
+    var a = WireInit(false.B)
+    var c = WireInit(false.B)
+    for((j, idx) <- MemMapList.zipWithIndex){
+      val modes = j._2.get("mode").get
+      if (modes.toUpperCase.indexOf("R") >= 0) r = r || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("W") >= 0) w = w || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("X") >= 0) x = x || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("I") >= 0) i = i || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("D") >= 0) d = d || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("S") >= 0) s = s || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("A") >= 0) a = a || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("C") >= 0) c = c || matchVec(idx).asBool
+    }
+    VecInit(VecInit(Cat(r, w, x, i, d, s, a, c)).reverse).asUInt
   }
 
   def queryWidth(matchVec: UInt): UInt = {
@@ -105,7 +129,7 @@ object AddressSpace {
 
   def memmapAddrMatch(addr: UInt): (UInt, UInt) = {
     val matchVec = genMemmapMatchVec(addr)
-    (queryMode(matchVec), queryWidth(matchVec))
+    (queryModeFast(matchVec), queryWidth(matchVec))
   }
 
   def isDMMIO(addr: UInt): Bool = !PMAMode.dcache(memmapAddrMatch(addr)._1)
