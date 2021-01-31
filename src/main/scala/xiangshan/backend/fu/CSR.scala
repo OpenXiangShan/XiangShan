@@ -747,11 +747,16 @@ class CSR extends FunctionUnit with HasCSRConst
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
   val isXRet = func === CSROpType.jmp && !isEcall
-  csrio.isXRet := RegNext(isXRet)
-  csrio.trapTarget := RegNext(Mux(csrio.isXRet,
-    retTarget,
+  // ctrl block use these 2 cycles later
+  //  0          1       2
+  // XRet
+  //  wb  -> commit
+  //      -> flush -> frontend redirect
+  csrio.isXRet := RegNext(RegNext(isXRet))
+  csrio.trapTarget := Mux(RegNext(RegNext(isXRet)),
+    RegNext(RegNext(retTarget)),
     Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
-  ))
+  )
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -819,7 +824,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
     // "ExitLoop3" -> (0x102e, "CntExitLoop3")
-    
+
     "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
     "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),
     "btbRight"    -> (0x1032, "perfCntbtbRight"),
