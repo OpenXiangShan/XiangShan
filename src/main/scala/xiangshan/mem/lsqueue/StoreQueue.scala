@@ -143,9 +143,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.wen(i) := false.B
     paddrModule.io.wen(i) := false.B
-    vaddrModule.io.wen(i) := false.B
+    val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
-      val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
       writebacked(stWbIndex) := !io.storeIn(i).bits.mmio
       pending(stWbIndex) := io.storeIn(i).bits.mmio
@@ -163,9 +162,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wen(i) := true.B
 
-      vaddrModule.io.waddr(i) := stWbIndex
-      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
-      vaddrModule.io.wen(i) := true.B
 
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
@@ -178,6 +174,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
         io.storeIn(i).bits.mmio
         )
     }
+    // vaddrModule write is delayed, as vaddrModule will not be read right after write
+    vaddrModule.io.waddr(i) := RegNext(stWbIndex)
+    vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
+    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
   }
 
   /**

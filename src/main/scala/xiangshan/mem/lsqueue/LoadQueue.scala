@@ -142,7 +142,7 @@ class LoadQueue extends XSModule
     */
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
-    vaddrModule.io.wen(i) := false.B
+    val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
@@ -168,7 +168,6 @@ class LoadQueue extends XSModule
         io.loadIn(i).bits.forwardMask.asUInt,
         io.loadIn(i).bits.mmio
       )}
-      val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
       datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) && !io.loadIn(i).bits.mmio
       writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
 
@@ -180,9 +179,6 @@ class LoadQueue extends XSModule
       dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
       dataModule.io.wb.wen(i) := true.B
 
-      vaddrModule.io.waddr(i) := loadWbIndex
-      vaddrModule.io.wdata(i) := io.loadIn(i).bits.vaddr
-      vaddrModule.io.wen(i) := true.B
 
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
 
@@ -191,6 +187,10 @@ class LoadQueue extends XSModule
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
       uop(loadWbIndex).debugInfo.issueTime := io.loadIn(i).bits.uop.debugInfo.issueTime
     }
+    // vaddrModule write is delayed, as vaddrModule will not be read right after write
+    vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
+    vaddrModule.io.wdata(i) := RegNext(io.loadIn(i).bits.vaddr)
+    vaddrModule.io.wen(i) := RegNext(io.loadIn(i).fire())
   }
 
   when(io.dcache.valid) {
