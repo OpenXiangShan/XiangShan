@@ -289,6 +289,15 @@ class ReservationStationSelect
     indexQueue.last := indexQueue(deqPtr)
   }
 
+  if (feedback) {
+    when (io.memfeedback.valid) {
+      stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
+      when (!io.memfeedback.bits.hit) {
+        countQueue(io.memfeedback.bits.rsIdx) := (replayDelay-1).U
+      }
+    }
+  }
+
   when (issueFire) {
     if (feedback) { when (stateQueue(selectIndexReg) === s_valid) { stateQueue(selectIndexReg) := s_wait } }
     else { stateQueue(selectIndexReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
@@ -302,15 +311,9 @@ class ReservationStationSelect
       count := count - 1.U
       when (count === 0.U) { stateQueue(i) := s_valid }
     }
-    if (feedback) {
-      when (io.memfeedback.valid) {
-        stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
-        countQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, count, (replayDelay-1).U)
-      }
-    }
 
     // redirect
-    when (io.redirectVec(i) && stateQueue(i) =/= s_idle) {
+    when (io.redirectVec(i)) {
       stateQueue(i) := s_idle
     }
   }
