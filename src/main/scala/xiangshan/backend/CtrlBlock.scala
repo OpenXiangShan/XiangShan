@@ -274,13 +274,13 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
 
   rename.io.redirect <> backendRedirect
-  rename.io.flush := flush
+  rename.io.flush := RegNext(flush)
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
 
   dispatch.io.redirect <> backendRedirect
-  dispatch.io.flush := flush
+  dispatch.io.flush := RegNext(flush)
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.toLsBlock.enqLsq
   dispatch.io.readIntRf <> io.toIntBlock.readRf
@@ -296,8 +296,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 //  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
-  fpBusyTable.io.flush := flush
-  intBusyTable.io.flush := flush
+  fpBusyTable.io.flush := RegNext(flush)
+  intBusyTable.io.flush := RegNext(flush)
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
@@ -320,9 +320,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
-  io.toIntBlock.flush <> flush
+  io.toIntBlock.flush <> RegNext(flush)
   io.toFpBlock.redirect <> backendRedirect
-  io.toFpBlock.flush <> flush
+  io.toFpBlock.flush <> RegNext(flush)
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> RegNext(flush)
 

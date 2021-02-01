@@ -102,7 +102,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update roqIdx, lqIdx, sqIdx
     // updatedUop(i).roqIdx := io.enqRoq.resp(i)
-    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
+//    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
   }
