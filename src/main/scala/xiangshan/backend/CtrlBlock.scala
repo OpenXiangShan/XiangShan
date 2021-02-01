@@ -116,7 +116,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   }.otherwise({
     s1_redirect_valid_reg := false.B
   })
-  io.stage2Redirect.valid := s1_redirect_valid_reg
+  io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
   io.stage2Redirect.bits := s1_redirect_bits_reg
   io.stage2Redirect.bits.cfiUpdate := DontCare
   // at stage2, we read ftq to get pc
