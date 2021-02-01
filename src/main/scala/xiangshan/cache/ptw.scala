@@ -93,6 +93,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     vpn(vpnLen - 1, (2 - level) * vpnnLen)
   }
 
+  def printVec[T <: Data](x: Seq[T]): Printable = {
+    (0 until x.length).map(i => p"(${i.U})${x(i)} ").reduce(_+_)
+  }
+
 }
 
 abstract class PtwBundle extends XSBundle with HasPtwConst
@@ -223,28 +227,13 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
     ps
   }
 
-  // def getLeafEntry(vpn: UInt): PtwEntry = {
-  //   require(hasPerm)
-  //   val e = Wire(new PtwEntry(tagLen, hasPerm, true))
-  //   e.tag := tagClip(vpn)
-  //   e.ppn := ppns(sectorIdxClip(vpn, level))
-  //   e.perm.map(_ := perms(sectorIdxClip(vpn, level)))
-  //   e.level.map(_ := level.U)
-  //   e
-  // }
-  // def get(vpn: UInt) = {
-  //   val secIdx = sectorIdxClip(vpn, )
-  //   (ppns())
-  // }
-
   override def cloneType: this.type = (new PtwEntries(num, tagLen, level, hasPerm)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
-    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
     val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
-    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))} " +
-    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} vs:${Binary(vs.asUInt)} " +
-    (if (hasPerm) p"perms(0):${permsInner(0)} perms(1):${permsInner(1)} perms(2):${permsInner(2)} perms(3):${permsInner(3)}" else p"")
+    p"tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
+      (if (hasPerm) p"perms:${printVec(permsInner)}" else p"")
   }
 }
 
@@ -398,6 +387,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
+
+    for (i <- 0 until PtwL1EntrySize) {
+      XSDebug(validOneCycle, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn)}\n")
+    }
+    XSDebug(validOneCycle, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
+    XSDebug(valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} l1HitReg:${l1HitReg} l1HitPPNReg:${Hexadecimal(l1HitPPNReg)} hitVec:${VecInit(hitVec).asUInt}\n")
+    
+    VecInit(hitVecT).suggestName(s"l1_hitVecT")
+    VecInit(hitVec).suggestName(s"l1_hitVec")
+
     (hit, hitPPN)
   }
 
@@ -416,7 +415,20 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until PtwL2WayNum).map(_.U))
 
+    ridx.suggestName(s"l2_ridx")
+    vidx.suggestName(s"l2_vidx")
+    ramDatas.suggestName(s"l2_ramDatas")
+    hitVec.suggestName(s"l2_hitVec")
+    hitWayData.suggestName(s"l2_hitWayData")
+    hitWay.suggestName(s"l2_hitWay")
+
     when (hit) { ptwl2replace.access(genPtwL2SetIdx(vpn), hitWay) }
+
+    XSDebug(validOneCycle, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
+    for (i <- 0 until PtwL2WayNum) {
+      XSDebug(RegNext(validOneCycle), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
+    }
+    XSDebug(valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(vpn)))} l2HitReg:${l2HitReg} l2HitPPNReg:0x${Hexadecimal(l2HitPPNReg)} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
 
     (hit, hitWayData.ppns(genPtwL2SectorIdx(vpn)))
   }
@@ -436,6 +448,18 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl3replace.access(genPtwL3SetIdx(vpn), hitWay) }
 
+    XSDebug(validOneCycle, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
+    for (i <- 0 until PtwL3WayNum) {
+      XSDebug(RegNext(validOneCycle), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
+    }
+    XSDebug(valid, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} l3HitReg:${l3HitReg} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
+
+    ridx.suggestName(s"l3_ridx")
+    vidx.suggestName(s"l3_vidx")
+    ramDatas.suggestName(s"l3_ramDatas")
+    hitVec.suggestName(s"l3_hitVec")
+    hitWay.suggestName(s"l3_hitWay")
+
     (hit, hitWayData)
   }
   val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(vpn))
@@ -450,6 +474,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
+
+    for (i <- 0 until PtwSPEntrySize) {
+      XSDebug(validOneCycle, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn)} spv:${spv(i)}\n")
+    }
+    XSDebug(valid, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
+
+    VecInit(hitVecT).suggestName(s"sp_hitVecT")
+    VecInit(hitVec).suggestName(s"sp_hitVec")
+    
     (hit, hitData)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
@@ -549,6 +582,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       l1(refillIdx).refill(vpn, memSelData)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
+
+      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(vpn, memSelData)}\n")
+      XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
+
+      refillIdx.suggestName(s"l1_refillIdx")
+      rfOH.suggestName(s"l1_rfOH")
     }
 
     when (level === 1.U && !memPte.isLeaf()) {
@@ -566,6 +605,19 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       )
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+      XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
+      XSDebug(p"[l2 refill] refilldata:0x${
+        (new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)).genEntries(
+          vpn = vpn, data = memRdata, levelUInt = 1.U)
+      }\n")
+      XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
+      XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+
+      refillIdx.suggestName(s"l2_refillIdx")
+      victimWay.suggestName(s"l2_victimWay")
+      victimWayOH.suggestName(s"l2_victimWayOH")
+      rfvOH.suggestName(s"l2_rfvOH")
     }
 
     when (level === 2.U && memPte.isLeaf()) {
@@ -583,6 +635,19 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       )
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+      XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
+      XSDebug(p"[l3 refill] refilldata:0x${
+        (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
+          vpn = vpn, data = memRdata, levelUInt = 2.U)
+      }\n")
+      XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
+      XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
+
+      refillIdx.suggestName(s"l3_refillIdx")
+      victimWay.suggestName(s"l3_victimWay")
+      victimWayOH.suggestName(s"l3_victimWayOH")
+      rfvOH.suggestName(s"l3_rfvOH")
     }
 
     when ((level === 0.U || level === 1.U) && memPte.isLeaf()) {
@@ -591,6 +656,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       sp(refillIdx).refill(vpn, memSelData, level)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
+
+      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(vpn, memSelData, level)}\n")
+      XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
+
+      refillIdx.suggestName(s"sp_refillIdx")
+      rfOH.suggestName(s"sp_rfOH")
     }
   }
 
@@ -621,6 +692,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       val flushSetIdxOH = UIntToOH(genPtwL3SetIdx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
       // val flushMask = VecInit(flushSetIdxOH.asBools.map(Fill(PtwL3WayNum, _.asUInt))).asUInt
       val flushMask = VecInit(flushSetIdxOH.asBools.map { a => Fill(PtwL3WayNum, a.asUInt) }).asUInt
+      flushSetIdxOH.suggestName(s"sfence_nrs1_flushSetIdxOH")
+      flushMask.suggestName(s"sfence_nrs1_flushMask")
       when (sfence.bits.rs2) {
         // specific leaf of addr && all asid
         l3v := l3v & ~flushMask
@@ -632,6 +705,34 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       spv := 0.U
     }
   }
+
+  // debug info
+  for (i <- 0 until PtwWidth) {
+    XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
+  }
+  XSDebug(p"[io.sfence] ${io.sfence}\n")
+  XSDebug(p"[io.csr] ${io.csr}\n")
+
+  XSDebug(p"req:${req} arb.io.out:(${arb.io.out.valid},${arb.io.out.ready}) arbChosen:${arbChosen} ptwFinish:${ptwFinish}\n")
+
+  XSDebug(p"[mem][A] (${mem.a.valid},${mem.a.ready})\n")
+  XSDebug(p"[mem][A] memAddr:0x${Hexadecimal(memAddr)} l1addr:0x${Hexadecimal(l1addr)} l2addr:0x${Hexadecimal(l2addr)} l3addr:0x${Hexadecimal(l3addr)} memAddrReg:0x${Hexadecimal(memAddrReg)} memPteReg.ppn:0x${Hexadecimal(memPteReg.ppn)}")
+  XSDebug(p"[mem][D] (${mem.d.valid},${mem.d.ready}) memSelData:0x${Hexadecimal(memSelData)} memPte:${memPte} memPte.isLeaf:${memPte.isLeaf()} memPte.isPf(${level}):${memPte.isPf(level)}\n")
+  XSDebug(memRespFire, p"[mem][D] memPtes:${printVec(memPtes)}\n")
+  
+  XSDebug(p"[fsm] state:${state} level:${level} pteHit:${pteHit} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
+  XSDebug(sfence.valid, p"[sfence] original v and g vector:\n")
+  XSDebug(sfence.valid, p"[sfence] l1v:${Binary(l1v)}\n")
+  XSDebug(sfence.valid, p"[sfence] l2v:${Binary(l2v)}\n")
+  XSDebug(sfence.valid, p"[sfence] l3v:${Binary(l3v)}\n")
+  XSDebug(sfence.valid, p"[sfence] l3g:${Binary(l3g)}\n")
+  XSDebug(sfence.valid, p"[sfence] spv:${Binary(spv)}\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] new v and g vector:\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] l1v:${Binary(l1v)}\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] l2v:${Binary(l2v)}\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] l3v:${Binary(l3v)}\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] l3g:${Binary(l3g)}\n")
+  XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
 }
 
 class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
