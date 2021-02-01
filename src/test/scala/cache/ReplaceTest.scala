@@ -39,7 +39,7 @@ class RepTestTop extends Module
     val fakeCache = RegInit(VecInit( (0 until nWays).map{ w => w.U(tagBits.W) } ))
 
     val req = io.req
-    val replacer = ReplacementPolicy.fromString("plru",nWays)
+    val replacer = ReplacementPolicy.fromString("random",nWays)
 
     val hitVec = VecInit(fakeCache.map{w =>  req.valid && (req.bits.tag === w) }).asUInt
     val hit = hitVec.orR
