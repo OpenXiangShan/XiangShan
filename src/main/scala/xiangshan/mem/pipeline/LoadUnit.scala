@@ -175,9 +175,20 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.roqIdx := s2_uop.roqIdx
 
-  val forwardMask = io.out.bits.forwardMask
-  val forwardData = io.out.bits.forwardData
+  // merge forward result
+  // lsq has higher priority than sbuffer
+  val forwardMask = Wire(Vec(8, Bool()))
+  val forwardData = Wire(Vec(8, UInt(8.W)))
+
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U
+  io.lsq := DontCare
+  io.sbuffer := DontCare
+
+  // generate XLEN/8 Muxs
+  for (i <- 0 until XLEN / 8) {
+    forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
+    forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
+  }
 
   XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_uop.cf.pc,
@@ -186,8 +197,9 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   )
 
   // data merge
-  val rdata = VecInit((0 until XLEN / 8).map(j =>
-    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j)))).asUInt
+  val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))))
+  val rdata = rdataVec.asUInt
   val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),
     "b001".U -> rdata(63, 8),
@@ -199,8 +211,6 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     "b111".U -> rdata(63, 56)
   ))
   val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
-
-  // TODO: ECC check
 
   io.out.valid := io.in.valid && !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   // Inst will be canceled in store queue / lsq,
@@ -218,28 +228,16 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // and dcache query is no longer needed.
   // Such inst will be writebacked from load queue.
   io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
+  // io.out.bits.forwardX will be send to lq
+  io.out.bits.forwardMask := forwardMask 
+  // data retbrived from dcache is also included in io.out.bits.forwardData
+  io.out.bits.forwardData := rdataVec
 
   io.in.ready := io.out.ready || !io.in.valid
 
-  // merge forward result
-  // lsq has higher priority than sbuffer
-  io.lsq := DontCare
-  io.sbuffer := DontCare
-  // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
-    when (io.sbuffer.forwardMask(i)) {
-      io.out.bits.forwardMask(i) := true.B
-      io.out.bits.forwardData(i) := io.sbuffer.forwardData(i)
-    }
-    when (io.lsq.forwardMask(i)) {
-      io.out.bits.forwardMask(i) := true.B
-      io.out.bits.forwardData(i) := io.lsq.forwardData(i)
-    }
-  }
-
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
-    io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
+    forwardData.asUInt, forwardMask.asUInt
   )
 }
 
