@@ -243,7 +243,7 @@ int difftest_step(DiffState *s, int coreid) {
                   ref_r[s->wdst[i]] = s->wdata[i];
                   ref_difftest_setregs(ref_r, coreid);
                 }
-              } else if (s->lfu[i] == 0xE) {
+              } else if (s->lfu[i] == 0xF) {
                 ref_difftest_memcpy_from_dut(s->lpaddr[i], &golden, len, coreid);
                 if (s->wdst[i] != 0) {
                   ref_r[s->wdst[i]] = s->wdata[i];
