@@ -43,7 +43,7 @@ trait HasTlbConst extends HasXSParameter {
     val width = v.getWidth
     val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U)))
     val full = Cat(v).andR
-    Mux(full, emptyIdx, lruIdx)
+    Mux(full, lruIdx, emptyIdx)
   }
 
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
