@@ -190,7 +190,13 @@ class ReservationStationSelect
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(nonBlocked==fastWakeup)
-  val replayDelay = 5
+  val delayMap = Map(
+    0 -> 5,
+    1 -> 10,
+    2 -> 40,
+    3 -> 40
+  )
+  def replayDelay(times: UInt) = ParallelMux((0 until 4).map( i => (i.U === times, delayMap(i).U)))
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
@@ -233,7 +239,8 @@ class ReservationStationSelect
   val indexQueue    = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val validQueue    = VecInit(stateQueue.map(_ === s_valid))
   val emptyQueue    = VecInit(stateQueue.map(_ === s_idle))
-  val countQueue    = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
+  val countQueue    = Reg(Vec(iqSize, UInt(log2Up(delayMap(3)).W)))
+  val cntCountQueue = Reg(Vec(iqSize, UInt(2.W)))
   val validIdxQueue = widthMap(i => validQueue(indexQueue(i)))
   val readyIdxQueue = widthMap(i => validQueue(indexQueue(i)) && io.readyVec(indexQueue(i)))
   val emptyIdxQueue = widthMap(i => emptyQueue(indexQueue(i)))
@@ -293,7 +300,7 @@ class ReservationStationSelect
     when (io.memfeedback.valid) {
       stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
       when (!io.memfeedback.bits.hit) {
-        countQueue(io.memfeedback.bits.rsIdx) := (replayDelay-1).U
+        countQueue(io.memfeedback.bits.rsIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.rsIdx))
       }
     }
   }
@@ -306,10 +313,12 @@ class ReservationStationSelect
   // redirect and feedback && wakeup
   for (i <- 0 until iqSize) {
     // replay
-    val count = countQueue(i)
     when (stateQueue(i) === s_replay) {
-      count := count - 1.U
-      when (count === 0.U) { stateQueue(i) := s_valid }
+      countQueue(i) := countQueue(i) - 1.U
+      when (countQueue(i) === 0.U) {
+        stateQueue(i) := s_valid
+        cntCountQueue(i) := Mux(cntCountQueue(i)===3.U, cntCountQueue(i), cntCountQueue(i) + 1.U)
+      }
     }
 
     // redirect
@@ -338,6 +347,7 @@ class ReservationStationSelect
   val enqIdx = indexQueue(enqPtr)
   when (enqueue) {
     stateQueue(enqIdx) := s_valid
+    cntCountQueue(enqIdx) := 0.U
   }
 
   io.validVec := validIdxQueue.zip(lastSelMask.asBools).map{ case (a, b) => a & b }

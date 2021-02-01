@@ -234,6 +234,7 @@ class FPUCtrlSignals extends XSBundle {
   val typ = UInt(2.W)
   val fmt = UInt(2.W)
   val ren3 = Bool() //TODO: remove SrcType.fp
+  val rm = UInt(3.W)
 }
 
 // Decode DecodeWidth insts at Decode Stage
