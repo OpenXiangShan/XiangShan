@@ -543,7 +543,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
-      val refillIdx = ptwl1replace.way
+      val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
+      refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
       l1v := l1v | rfOH
@@ -552,7 +553,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (level === 1.U && !memPte.isLeaf()) {
       val refillIdx = genPtwL2SetIdx(vpn)
-      val victimWay = ptwl2replace.way(refillIdx)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(vpn).asBools).asUInt, validOneCycle), ptwl2replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l2.io.w.apply(
@@ -569,7 +570,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (level === 2.U && memPte.isLeaf()) {
       val refillIdx = genPtwL3SetIdx(vpn)
-      val victimWay = ptwl3replace.way(refillIdx)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(vpn).asBools).asUInt, validOneCycle), ptwl3replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l3.io.w.apply(

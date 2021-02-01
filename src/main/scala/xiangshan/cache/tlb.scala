@@ -39,7 +39,16 @@ trait HasTlbConst extends HasXSParameter {
     }
   }
 
+  def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
+    val width = v.getWidth
+    val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U)))
+    val full = Cat(v).andR
+    Mux(full, emptyIdx, lruIdx)
+  }
 
+  def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
+    replaceWrapper(VecInit(v).asUInt, lruIdx)
+  }
 }
 
 abstract class TlbBundle extends XSBundle with HasTlbConst
@@ -301,20 +310,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     * PTW refill
     */
   val refill = ptw.resp.fire() && !sfence.valid
-  def randReplace(v: UInt) = {
-    val width = v.getWidth
-    val randIdx = LFSR64()(log2Up(width)-1, 0)
-    val priorIdx = PriorityEncoder(~(v))
-    val full = Cat(v).andR
-    Mux(full, randIdx, priorIdx)
-  }
 
   val normalReplacer = if (isDtlb) Some("random") else Some("plru")
   val superReplacer = if (isDtlb) Some("random") else Some("plru")
   val nReplace = ReplacementPolicy.fromString(normalReplacer, TlbEntrySize)
   val sReplace = ReplacementPolicy.fromString(superReplacer, TlbSPEntrySize)
-  val nRefillIdx = nReplace.way
-  val sRefillIdx = sReplace.way
+  val nRefillIdx = replaceWrapper(nv, nReplace.way)
+  val sRefillIdx = replaceWrapper(sv, sReplace.way)
 
   when (refill) {
     val resp = ptw.resp.bits
