@@ -574,7 +574,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
-    when (canEnqueue(i) && !io.redirect.valid) {
+    when (canEnqueue(i) && !io.redirect.valid && !RegNext(io.flushOut.valid)) {
       valid(enqPtrVec(i).value) := true.B
     }
   }
