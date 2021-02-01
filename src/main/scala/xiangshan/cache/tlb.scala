@@ -318,6 +318,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val resp = ptw.resp.bits
     when (resp.entry.level.getOrElse(0.U) === 2.U) {
       val refillIdx = nReplace.way
+      refillIdx.suggestName(s"NormalRefillIdx")
       nv(refillIdx) := true.B
       nentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -329,6 +330,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
       val refillIdx = sReplace.way
+      refillIdx.suggestName(s"SuperRefillIdx")
       sv(refillIdx) := true.B
       sentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -357,27 +359,38 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
     val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
     val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+    entryHitVecReg.suggestName(s"entryHitVecReg_${i}")
 
-    val hitVec  = (v zip entryHitVecReg).map{ case (a,b) => a&b }
-    val pfHitVec   = (pf zip entryHitVecReg).map{ case (a,b) => a&b }
+    val hitVec  = VecInit((v zip entryHitVecReg).map{ case (a,b) => a&b })
+    val pfHitVec   = VecInit((pf zip entryHitVecReg).map{ case (a,b) => a&b })
     val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
     val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
     val miss    = !hit && validReg && vmEnable && ~pfArray
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
 
+    hitVec.suggestName(s"hitVec_${i}")
+    pfHitVec.suggestName(s"pfHitVec_${i}")
+    hit.suggestName(s"hit_${i}")
+    miss.suggestName(s"miss_${i}")
+    hitppn.suggestName(s"hitppn_${i}")
+    hitPerm.suggestName(s"hitPerm_${i}")
+
     if (!isDtlb) { // NOTE: only support one access
-      val hitVecUInt = VecInit(hitVec).asUInt
-      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) (
+      val hitVecUInt = hitVec.asUInt
+      XSDebug(hitVecUInt.orR, p"HitVecUInt:${Hexadecimal(hitVecUInt)}\n")
+      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) {
         nReplace.access(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))
-      )
+        XSDebug(p"Normal Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))}\n")
+      }
       when (Cat(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)).orR && validReg && vmEnable) {
         sReplace.access(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))
+        XSDebug(p"Super Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))}\n")
       }
     }
 
     XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
-    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
+    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(hitVec.asUInt)} pfHitVec:${Hexadecimal(pfHitVec.asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
     val multiHit = {
       val hitSum = PopCount(hitVec)
