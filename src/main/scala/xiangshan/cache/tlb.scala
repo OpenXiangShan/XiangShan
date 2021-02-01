@@ -39,7 +39,16 @@ trait HasTlbConst extends HasXSParameter {
     }
   }
 
+  def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
+    val width = v.getWidth
+    val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U)))
+    val full = Cat(v).andR
+    Mux(full, emptyIdx, lruIdx)
+  }
 
+  def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
+    replaceWrapper(VecInit(v).asUInt, lruIdx)
+  }
 }
 
 abstract class TlbBundle extends XSBundle with HasTlbConst
@@ -300,24 +309,20 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * PTW refill
     */
-  val refill = ptw.resp.fire()
-  def randReplace(v: UInt) = {
-    val width = v.getWidth
-    val randIdx = LFSR64()(log2Up(width)-1, 0)
-    val priorIdx = PriorityEncoder(~(v))
-    val full = Cat(v).andR
-    Mux(full, randIdx, priorIdx)
-  }
+  val refill = ptw.resp.fire() && !sfence.valid
 
   val normalReplacer = if (isDtlb) Some("random") else Some("plru")
   val superReplacer = if (isDtlb) Some("random") else Some("plru")
   val nReplace = ReplacementPolicy.fromString(normalReplacer, TlbEntrySize)
   val sReplace = ReplacementPolicy.fromString(superReplacer, TlbSPEntrySize)
+  val nRefillIdx = replaceWrapper(nv, nReplace.way)
+  val sRefillIdx = replaceWrapper(sv, sReplace.way)
 
   when (refill) {
     val resp = ptw.resp.bits
     when (resp.entry.level.getOrElse(0.U) === 2.U) {
-      val refillIdx = nReplace.way
+      val refillIdx = nRefillIdx
+      refillIdx.suggestName(s"NormalRefillIdx")
       nv(refillIdx) := true.B
       nentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -328,7 +333,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       )
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
-      val refillIdx = sReplace.way
+      val refillIdx = sRefillIdx
+      refillIdx.suggestName(s"SuperRefillIdx")
       sv(refillIdx) := true.B
       sentry(refillIdx).apply(
         vpn   = resp.entry.tag,
@@ -344,11 +350,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * L1 TLB read
     */
-  // val tlb_read_mask = Mux(refill, ((1<<(TlbEntrySize+TlbSPEntrySize))-1).U, 0.U((TlbEntrySize+TlbSPEntrySize).W))
+  val nRefillMask = Mux(refill, UIntToOH(nRefillIdx)(TlbEntrySize-1, 0), 0.U).asBools
+  val sRefillMask = Mux(refill, UIntToOH(sRefillIdx)(TlbSPEntrySize-1, 0), 0.U).asBools
   def TLBNormalRead(i: Int) = {
     val entryHitVec = (
       if (isDtlb)
-        VecInit(entry.map{ e => ~refill && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
+        VecInit(entry.zip(nRefillMask ++ sRefillMask).map{ case (e,m) => ~m && e.hit(reqAddr(i).vpn)})
       else
         VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
     )
@@ -357,27 +364,38 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
     val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
     val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+    entryHitVecReg.suggestName(s"entryHitVecReg_${i}")
 
-    val hitVec  = (v zip entryHitVecReg).map{ case (a,b) => a&b }
-    val pfHitVec   = (pf zip entryHitVecReg).map{ case (a,b) => a&b }
+    val hitVec  = VecInit((v zip entryHitVecReg).map{ case (a,b) => a&b })
+    val pfHitVec   = VecInit((pf zip entryHitVecReg).map{ case (a,b) => a&b })
     val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
     val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
     val miss    = !hit && validReg && vmEnable && ~pfArray
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
 
+    hitVec.suggestName(s"hitVec_${i}")
+    pfHitVec.suggestName(s"pfHitVec_${i}")
+    hit.suggestName(s"hit_${i}")
+    miss.suggestName(s"miss_${i}")
+    hitppn.suggestName(s"hitppn_${i}")
+    hitPerm.suggestName(s"hitPerm_${i}")
+
     if (!isDtlb) { // NOTE: only support one access
-      val hitVecUInt = VecInit(hitVec).asUInt
-      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) (
+      val hitVecUInt = hitVec.asUInt
+      XSDebug(hitVecUInt.orR, p"HitVecUInt:${Hexadecimal(hitVecUInt)}\n")
+      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) {
         nReplace.access(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))
-      )
+        XSDebug(p"Normal Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))}\n")
+      }
       when (Cat(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)).orR && validReg && vmEnable) {
         sReplace.access(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))
+        XSDebug(p"Super Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))}\n")
       }
     }
 
     XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
-    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
+    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(hitVec.asUInt)} pfHitVec:${Hexadecimal(pfHitVec.asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
     val multiHit = {
       val hitSum = PopCount(hitVec)
@@ -427,7 +445,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     waiting := false.B
   }
   // ptw <> DontCare // TODO: need check it
-  ptw.req.valid := hasMissReq && !sfence.valid && !waiting && !RegNext(refill)
+  ptw.req.valid := hasMissReq && !waiting && !RegNext(refill)
   ptw.resp.ready := waiting
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
@@ -447,7 +465,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // sfence (flush)
   when (sfence.valid) {
-    ptw.req.valid := false.B
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid

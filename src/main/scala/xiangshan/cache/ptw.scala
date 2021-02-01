@@ -303,15 +303,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
-
-  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
-  val validOneCycle = OneCycleValid(arb.io.out.fire())
-  arb.io.out.ready := !valid// || resp(arbChosen).fire()
-
   val sfence = io.sfence
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
+
+  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire(), sfence.valid)
+  val validOneCycle = OneCycleValid(arb.io.out.fire(), sfence.valid)
+  arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -577,7 +576,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
-      val refillIdx = ptwl1replace.way
+      val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
+      refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
       l1v := l1v | rfOH
@@ -592,7 +592,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (level === 1.U && !memPte.isLeaf()) {
       val refillIdx = genPtwL2SetIdx(vpn)
-      val victimWay = ptwl2replace.way(refillIdx)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(vpn).asBools).asUInt, validOneCycle), ptwl2replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l2.io.w.apply(
@@ -622,7 +622,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (level === 2.U && memPte.isLeaf()) {
       val refillIdx = genPtwL3SetIdx(vpn)
-      val victimWay = ptwl3replace.way(refillIdx)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(vpn).asBools).asUInt, validOneCycle), ptwl3replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l3.io.w.apply(
@@ -667,7 +667,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   // sfence
   when (sfence.valid) {
-    valid := false.B
     state := s_idle
     when (state === s_resp && !memRespFire) {
       sfenceLatch := true.B
