@@ -188,7 +188,7 @@ class IntegerBlock
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.fromInt <> rs.io.deq
     exeUnits(i).io.flush <> flush
-    rs.io.feedback := DontCare
+    // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
 
