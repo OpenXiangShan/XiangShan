@@ -327,7 +327,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.toFpBlock.redirect <> backendRedirect
   io.toFpBlock.flush <> flush
   io.toLsBlock.redirect <> backendRedirect
-  io.toLsBlock.flush <> flush
+  io.toLsBlock.flush <> RegNext(flush)
 
   if (env.DualCoreDifftest) {
     difftestIO.fromRoq <> roq.difftestIO

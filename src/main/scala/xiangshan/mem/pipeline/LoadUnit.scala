@@ -155,8 +155,8 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
-  val s2_mmio = io.in.bits.mmio
   val s2_exception = selectLoad(io.in.bits.uop.cf.exceptionVec, false).asUInt.orR
+  val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 

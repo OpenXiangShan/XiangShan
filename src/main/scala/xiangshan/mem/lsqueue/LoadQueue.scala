@@ -239,7 +239,7 @@ class LoadQueue extends XSModule
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
-  // generate lastCycleSelect mask 
+  // generate lastCycleSelect mask
   val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
   val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
   // generate real select vec
@@ -256,7 +256,7 @@ class LoadQueue extends XSModule
   loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
   loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
-  
+
   (0 until LoadPipelineWidth).map(i => {
     loadWbSel(i) := RegNext(loadWbSelGen(i))
     loadWbSelV(i) := RegNext(loadWbSelVGen(i), init = false.B)
@@ -465,7 +465,7 @@ class LoadQueue extends XSModule
   val lastCycleRedirect = RegNext(io.brqRedirect)
   val lastCycleFlush = RegNext(io.flush)
 
-  // S2: select rollback and generate rollback request 
+  // S2: select rollback and generate rollback request
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
   val rollbackGen = Wire(Valid(new Redirect))
@@ -486,7 +486,7 @@ class LoadQueue extends XSModule
 
   // S3: fire rollback request
   io.rollback := rollbackReg
-  io.rollback.valid := rollbackReg.valid && 
+  io.rollback.valid := rollbackReg.valid &&
     (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
     !lastCycleFlush
 
