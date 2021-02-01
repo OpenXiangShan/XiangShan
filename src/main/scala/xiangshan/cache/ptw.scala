@@ -487,7 +487,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     }
 
     is (s_req) {
-      when (memReqReady && !sfenceLatch) {
+      when (memReqFire && !sfenceLatch) {
         state := s_resp
       }
     }
