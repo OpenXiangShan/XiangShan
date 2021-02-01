@@ -411,13 +411,15 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   
   toFtqBuf := DontCare
   toFtqBuf.ftqPC    := if4_pc
+  toFtqBuf.lastPacketPC.valid := if4_pendingPrevHalfInstr
+  toFtqBuf.lastPacketPC.bits  := if4_prevHalfInstr.bits.pc
+
   toFtqBuf.hist     := final_gh
   toFtqBuf.predHist := if4_predHist.asTypeOf(new GlobalHistory)
   toFtqBuf.rasSp    := bpu.io.brInfo.rasSp
   toFtqBuf.rasTop   := bpu.io.brInfo.rasTop
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
-  toFtqBuf.hasLastPrev := if4_pendingPrevHalfInstr
 
   val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
   val if4_taken = WireInit(if4_bp.taken)

@@ -131,7 +131,9 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
 
   val ftqRead = io.stage2FtqRead.entry
-  val pc = GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset, ftqRead.hasLastPrev)
+  val pc = Cat(ftqRead.ftqPC.head(VAddrBits - s2_redirect_bits_reg.ftqOffset.getWidth - instOffsetBits),
+               s2_redirect_bits_reg.ftqOffset,
+               0.U(instOffsetBits.W))
   val brTarget = pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
   val snpc = pc + Mux(s2_pd.isRVC, 2.U, 4.U)
   val isReplay = RedirectLevel.flushItself(s2_redirect_bits_reg.level)
@@ -238,7 +240,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val flushPC = GetPcByFtq(
     ftq.io.ftqRead(2).entry.ftqPC,
     RegEnable(roq.io.flushOut.bits.ftqOffset, roq.io.flushOut.valid),
-    ftq.io.ftqRead(2).entry.hasLastPrev
+    ftq.io.ftqRead(2).entry.lastPacketPC.valid,
+    ftq.io.ftqRead(2).entry.lastPacketPC.bits
   )
 
   val flushRedirect = Wire(Valid(new Redirect))
@@ -263,7 +266,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   ftqOffsetReg := jumpInst.cf.ftqOffset
   ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
   io.toIntBlock.jumpPc := GetPcByFtq(
-    ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg, ftq.io.ftqRead(0).entry.hasLastPrev
+    ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg,
+    ftq.io.ftqRead(0).entry.lastPacketPC.valid,
+    ftq.io.ftqRead(0).entry.lastPacketPC.bits
   )
   io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.target
 
