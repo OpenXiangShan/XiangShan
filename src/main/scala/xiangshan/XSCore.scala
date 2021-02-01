@@ -50,7 +50,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = false,
   EnableSC: Boolean = false,
-  EnbaleTlbDebug: Boolean = true,
+  EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
