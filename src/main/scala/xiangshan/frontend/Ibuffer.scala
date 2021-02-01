@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.fu.HasExceptionNO
-
+import xiangshan.backend.ftq.FtqPtr
 
 class IbufPtr extends CircularQueuePtr(IbufPtr.IBufSize) { }
 
@@ -31,12 +31,13 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   class IBufEntry extends XSBundle {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
-    val pnpc = UInt(VAddrBits.W)
-    val brInfo = new BpuMeta
     val pd = new PreDecodeInfo
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
+    val pred_taken = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
   }
 
   // Ignore
@@ -54,6 +55,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // Ibuffer define
   // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
+  ibuf.io.wdata.map(w => dontTouch(w.ftqOffset))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
   val next_head_ptr = WireInit(head_ptr)
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
@@ -92,12 +94,13 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       when(io.in.bits.mask(i)) {
         inWire.inst := io.in.bits.instrs(i)
         inWire.pc := io.in.bits.pc(i)
-        inWire.pnpc := io.in.bits.pnpc(i)
-        inWire.brInfo := io.in.bits.bpuMeta(i)
         inWire.pd := io.in.bits.pd(i)
         inWire.ipf := io.in.bits.ipf
         inWire.acf := io.in.bits.acf
         inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
+        inWire.pred_taken := io.in.bits.pred_taken(i)
+        inWire.ftqPtr := io.in.bits.ftqPtr
+        inWire.ftqOffset := i.U
         // ibuf(tail_vec(offset(i)).value) := inWire
       }
       ibuf.io.waddr(i) := tail_vec(offset(i)).value
@@ -130,11 +133,11 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
       io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
       // io.out(i).bits.brUpdate := outWire.brInfo
-      io.out(i).bits.brUpdate := DontCare
-      io.out(i).bits.brUpdate.pc := outWire.pc
-      io.out(i).bits.brUpdate.pnpc := outWire.pnpc
-      io.out(i).bits.brUpdate.pd := outWire.pd
-      io.out(i).bits.brUpdate.bpuMeta := outWire.brInfo
+      io.out(i).bits.pd := outWire.pd
+      io.out(i).bits.pred_taken := outWire.pred_taken
+      io.out(i).bits.ftqPtr := outWire.ftqPtr
+      io.out(i).bits.ftqOffset := outWire.ftqOffset
+
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
       
       val head_wire = next_head_ptr.value + i.U

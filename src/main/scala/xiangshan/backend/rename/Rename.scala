@@ -16,6 +16,7 @@ class RenameBypassInfo extends XSBundle {
 class Rename extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val roqCommits = Flipped(new RoqCommitIO)
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
@@ -47,9 +48,11 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
 
   allPhyResource.map{ case (rat, freelist, _) =>
-    rat.redirect := io.redirect
+    rat.redirect := io.redirect.valid
+    rat.flush := io.flush
     rat.walkWen := io.roqCommits.isWalk
-    freelist.redirect := io.redirect
+    freelist.redirect := io.redirect.valid
+    freelist.flush := io.flush
     freelist.walk.valid := io.roqCommits.isWalk
   }
   val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
@@ -69,10 +72,15 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   // speculatively assign the instruction with an roqIdx
   val validCount = PopCount(io.in.map(_.valid))
   val roqIdxHead = RegInit(0.U.asTypeOf(new RoqPtr))
-  val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.isUnconditional() && !io.redirect.bits.flushItself())
-  val roqIdxHeadNext = Mux(io.redirect.valid,
-    Mux(io.redirect.bits.isUnconditional(), 0.U.asTypeOf(new RoqPtr), io.redirect.bits.roqIdx),
-    Mux(lastCycleMisprediction, roqIdxHead + 1.U, Mux(canOut, roqIdxHead + validCount, roqIdxHead))
+  val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
+  val roqIdxHeadNext = Mux(io.flush,
+    0.U.asTypeOf(new RoqPtr),
+    Mux(io.redirect.valid,
+      io.redirect.bits.roqIdx,
+      Mux(lastCycleMisprediction,
+        roqIdxHead + 1.U,
+        Mux(canOut, roqIdxHead + validCount, roqIdxHead))
+    )
   )
   roqIdxHead := roqIdxHeadNext
 
@@ -100,7 +108,6 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
-    uops(i).brTag := io.in(i).bits.brTag
 
     val inValid = io.in(i).valid
 

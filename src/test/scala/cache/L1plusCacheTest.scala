@@ -349,14 +349,7 @@ class StoreQueue(nEntries: Int) extends Queue(nEntries, "StoreQueue") {
       req.bits.addr.poke(r.addr.U)
       req.bits.data.poke(r.data.U)
       req.bits.mask.poke(FULL_MASK)
-      req.bits.meta.id.poke(tId.U)
-      req.bits.meta.vaddr.poke(r.addr.U)
-      req.bits.meta.paddr.poke(r.addr.U)
-      // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
-      req.bits.meta.mmio.poke(false.B)
-      req.bits.meta.tlb_miss.poke(false.B)
-      req.bits.meta.mask.poke(FULL_MASK)
-      req.bits.meta.replay.poke(false.B)
+      req.bits.id.poke(tId.U)
     }
 
     if (req.valid.peek().litToBoolean && req.ready.peek().litToBoolean) {
@@ -369,7 +362,7 @@ class StoreQueue(nEntries: Int) extends Queue(nEntries, "StoreQueue") {
     // always ready
     resp.ready.poke(true.B)
     if (resp.valid.peek().litToBoolean) {
-      val id = resp.bits.meta.id.peek().litValue.longValue.toInt
+      val id = resp.bits.id.peek().litValue.longValue.toInt
       idPool.free(id)
       retire(id)
     }
