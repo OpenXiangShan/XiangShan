@@ -313,11 +313,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val superReplacer = if (isDtlb) Some("random") else Some("plru")
   val nReplace = ReplacementPolicy.fromString(normalReplacer, TlbEntrySize)
   val sReplace = ReplacementPolicy.fromString(superReplacer, TlbSPEntrySize)
+  val nRefillIdx = nReplace.way
+  val sRefillIdx = sReplace.way
 
   when (refill) {
     val resp = ptw.resp.bits
     when (resp.entry.level.getOrElse(0.U) === 2.U) {
-      val refillIdx = nReplace.way
+      val refillIdx = nRefillIdx
       refillIdx.suggestName(s"NormalRefillIdx")
       nv(refillIdx) := true.B
       nentry(refillIdx).apply(
@@ -329,7 +331,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       )
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
-      val refillIdx = sReplace.way
+      val refillIdx = sRefillIdx
       refillIdx.suggestName(s"SuperRefillIdx")
       sv(refillIdx) := true.B
       sentry(refillIdx).apply(
@@ -346,11 +348,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * L1 TLB read
     */
-  // val tlb_read_mask = Mux(refill, ((1<<(TlbEntrySize+TlbSPEntrySize))-1).U, 0.U((TlbEntrySize+TlbSPEntrySize).W))
+  val nRefillMask = Mux(refill, UIntToOH(nRefillIdx)(TlbEntrySize-1, 0), 0.U).asBools
+  val sRefillMask = Mux(refill, UIntToOH(sRefillIdx)(TlbSPEntrySize-1, 0), 0.U).asBools
   def TLBNormalRead(i: Int) = {
     val entryHitVec = (
       if (isDtlb)
-        VecInit(entry.map{ e => ~refill && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
+        VecInit(entry.zip(nRefillMask ++ sRefillMask).map{ case (e,m) => ~m && e.hit(reqAddr(i).vpn)})
       else
         VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
     )
