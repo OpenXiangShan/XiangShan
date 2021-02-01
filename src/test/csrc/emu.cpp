@@ -501,6 +501,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint64_t lastcommit[NumCore];
   uint64_t instr_left_last_cycle[NumCore];
   const int stuck_limit = 2000;
+  const int firstCommit_limit = 10000;
   uint64_t core_max_instr[NumCore];
 
   uint32_t wdst[NumCore][DIFFTEST_WIDTH];
@@ -525,7 +526,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     core_max_instr[i] = max_instr;
   }
 
-
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
@@ -534,8 +534,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
-    if (!(max_cycle > 0 && 
-          core_max_instr[0] > 0 && 
+    if (!(max_cycle > 0 &&
+          core_max_instr[0] > 0 &&
           instr_left_last_cycle[0] >= core_max_instr[0])) {
       trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
