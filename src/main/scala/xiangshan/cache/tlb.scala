@@ -300,7 +300,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * PTW refill
     */
-  val refill = ptw.resp.fire()
+  val refill = ptw.resp.fire() && !sfence.valid
   def randReplace(v: UInt) = {
     val width = v.getWidth
     val randIdx = LFSR64()(log2Up(width)-1, 0)
@@ -427,7 +427,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     waiting := false.B
   }
   // ptw <> DontCare // TODO: need check it
-  ptw.req.valid := hasMissReq && !sfence.valid && !waiting && !RegNext(refill)
+  ptw.req.valid := hasMissReq && !waiting && !RegNext(refill)
   ptw.resp.ready := waiting
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
@@ -447,7 +447,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // sfence (flush)
   when (sfence.valid) {
-    ptw.req.valid := false.B
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid

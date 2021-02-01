@@ -314,15 +314,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
-
-  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
-  val validOneCycle = OneCycleValid(arb.io.out.fire())
-  arb.io.out.ready := !valid// || resp(arbChosen).fire()
-
   val sfence = io.sfence
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
+
+  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire(), sfence.valid)
+  val validOneCycle = OneCycleValid(arb.io.out.fire(), sfence.valid)
+  arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -596,7 +595,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   // sfence
   when (sfence.valid) {
-    valid := false.B
     state := s_idle
     when (state === s_resp && !memRespFire) {
       sfenceLatch := true.B
