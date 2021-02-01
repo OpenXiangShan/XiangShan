@@ -152,7 +152,7 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
   // enqueue
   val canAccept = io.allowEnqueue && !io.hasBlockBackward
-  val dispatchNum = Mux(canAccept, PopCount(io.enq), 0.U)
+  val dispatchNum = Mux(canAccept && !RegNext(redirectOutValid), PopCount(io.enq), 0.U)
 
   when (redirectOutValid) {
     enqPtr := 0.U.asTypeOf(new RoqPtr)
