@@ -178,37 +178,6 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
     r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
 }
 
-inline void Emulator::read_emu_regs2(uint64_t *r) {
-#define macro2(x) r[x] = dut_ptr->io_difftest2_r_##x
-    macro2(0); macro2(1); macro2(2); macro2(3); macro2(4); macro2(5); macro2(6); macro2(7);
-    macro2(8); macro2(9); macro2(10); macro2(11); macro2(12); macro2(13); macro2(14); macro2(15);
-    macro2(16); macro2(17); macro2(18); macro2(19); macro2(20); macro2(21); macro2(22); macro2(23);
-    macro2(24); macro2(25); macro2(26); macro2(27); macro2(28); macro2(29); macro2(30); macro2(31);
-    macro2(32); macro2(33); macro2(34); macro2(35); macro2(36); macro2(37); macro2(38); macro2(39);
-    macro2(40); macro2(41); macro2(42); macro2(43); macro2(44); macro2(45); macro2(46); macro2(47);
-    macro2(48); macro2(49); macro2(50); macro2(51); macro2(52); macro2(53); macro2(54); macro2(55);
-    macro2(56); macro2(57); macro2(58); macro2(59); macro2(60); macro2(61); macro2(62); macro2(63);
-    r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest2_thisPC;
-    r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest2_mstatus;
-    r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest2_sstatus;
-    r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest2_mepc;
-    r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest2_sepc;
-    r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest2_mcause;
-    r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest2_scause;
-    r[DIFFTEST_SATP   ] = dut_ptr->io_difftest2_satp;
-    r[DIFFTEST_MIP    ] = dut_ptr->io_difftest2_mip;
-    r[DIFFTEST_MIE    ] = dut_ptr->io_difftest2_mie;
-    r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest2_mscratch;
-    r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest2_sscratch;
-    r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest2_mideleg;
-    r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest2_medeleg;
-    r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest2_mtval;
-    r[DIFFTEST_STVAL]   = dut_ptr->io_difftest2_stval;
-    r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest2_mtvec;
-    r[DIFFTEST_STVEC]   = dut_ptr->io_difftest2_stvec;
-    r[DIFFTEST_MODE]    = dut_ptr->io_difftest2_priviledgeMode;
-}
-
 inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu) {
 #define dut_ptr_wpc(x)  wpc[x] = dut_ptr->io_difftest_wpc_##x
 #define dut_ptr_wdata(x) wdata[x] = dut_ptr->io_difftest_wdata_##x
@@ -246,6 +215,77 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
 #if DIFFTEST_WIDTH >= 12
   dut_ptr_read_wb(11);
 #endif
+}
+
+inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
+#define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
+#define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
+#define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
+#define dut_ptr_read_store(x) dut_ptr_saddr(x); dut_ptr_sdata(x); dut_ptr_smask(x);
+  dut_ptr_read_store(0);
+  dut_ptr_read_store(1);
+}
+
+inline void Emulator::read_sbuffer_info(uint8_t *sbufferData) {
+#define dut_ptr_data(x)  sbufferData[x] = dut_ptr->io_difftest_sbufferData_##x
+  dut_ptr_data(0);  dut_ptr_data(1);  dut_ptr_data(2);  dut_ptr_data(3);
+  dut_ptr_data(4);  dut_ptr_data(5);  dut_ptr_data(6);  dut_ptr_data(7);
+  dut_ptr_data(8);  dut_ptr_data(9);  dut_ptr_data(10); dut_ptr_data(11);
+  dut_ptr_data(12); dut_ptr_data(13); dut_ptr_data(14); dut_ptr_data(15);
+  dut_ptr_data(16); dut_ptr_data(17); dut_ptr_data(18); dut_ptr_data(19);
+  dut_ptr_data(20); dut_ptr_data(21); dut_ptr_data(22); dut_ptr_data(23);
+  dut_ptr_data(24); dut_ptr_data(25); dut_ptr_data(26); dut_ptr_data(27);
+  dut_ptr_data(28); dut_ptr_data(29); dut_ptr_data(30); dut_ptr_data(31);
+  dut_ptr_data(32); dut_ptr_data(33); dut_ptr_data(34); dut_ptr_data(35);
+  dut_ptr_data(36); dut_ptr_data(37); dut_ptr_data(38); dut_ptr_data(39);
+  dut_ptr_data(40); dut_ptr_data(41); dut_ptr_data(42); dut_ptr_data(43);
+  dut_ptr_data(44); dut_ptr_data(45); dut_ptr_data(46); dut_ptr_data(47);
+  dut_ptr_data(48); dut_ptr_data(49); dut_ptr_data(50); dut_ptr_data(51);
+  dut_ptr_data(52); dut_ptr_data(53); dut_ptr_data(54); dut_ptr_data(55);
+  dut_ptr_data(56); dut_ptr_data(57); dut_ptr_data(58); dut_ptr_data(59);
+  dut_ptr_data(60); dut_ptr_data(61); dut_ptr_data(62); dut_ptr_data(63);
+}
+
+inline void Emulator::load_diff_info(void* diff_ptr, int coreid) {
+#define load_info(x)  diff[coreid].x = dut_ptr->io_difftest_##x
+  DiffState* diff = (DiffState*)diff_ptr;
+  load_info(commit);  load_info(thisINST);
+  load_info(skip);    load_info(isRVC);
+  load_info(wen);     load_info(intrNO);
+  load_info(cause);   load_info(priviledgeMode);
+  load_info(scFailed);
+}
+
+#ifdef DUALCORE
+inline void Emulator::read_emu_regs2(uint64_t *r) {
+#define macro2(x) r[x] = dut_ptr->io_difftest2_r_##x
+    macro2(0); macro2(1); macro2(2); macro2(3); macro2(4); macro2(5); macro2(6); macro2(7);
+    macro2(8); macro2(9); macro2(10); macro2(11); macro2(12); macro2(13); macro2(14); macro2(15);
+    macro2(16); macro2(17); macro2(18); macro2(19); macro2(20); macro2(21); macro2(22); macro2(23);
+    macro2(24); macro2(25); macro2(26); macro2(27); macro2(28); macro2(29); macro2(30); macro2(31);
+    macro2(32); macro2(33); macro2(34); macro2(35); macro2(36); macro2(37); macro2(38); macro2(39);
+    macro2(40); macro2(41); macro2(42); macro2(43); macro2(44); macro2(45); macro2(46); macro2(47);
+    macro2(48); macro2(49); macro2(50); macro2(51); macro2(52); macro2(53); macro2(54); macro2(55);
+    macro2(56); macro2(57); macro2(58); macro2(59); macro2(60); macro2(61); macro2(62); macro2(63);
+    r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest2_thisPC;
+    r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest2_mstatus;
+    r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest2_sstatus;
+    r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest2_mepc;
+    r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest2_sepc;
+    r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest2_mcause;
+    r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest2_scause;
+    r[DIFFTEST_SATP   ] = dut_ptr->io_difftest2_satp;
+    r[DIFFTEST_MIP    ] = dut_ptr->io_difftest2_mip;
+    r[DIFFTEST_MIE    ] = dut_ptr->io_difftest2_mie;
+    r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest2_mscratch;
+    r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest2_sscratch;
+    r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest2_mideleg;
+    r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest2_medeleg;
+    r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest2_mtval;
+    r[DIFFTEST_STVAL]   = dut_ptr->io_difftest2_stval;
+    r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest2_mtvec;
+    r[DIFFTEST_STVEC]   = dut_ptr->io_difftest2_stvec;
+    r[DIFFTEST_MODE]    = dut_ptr->io_difftest2_priviledgeMode;
 }
 
 inline void Emulator::read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu) {
@@ -287,15 +327,6 @@ inline void Emulator::read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wd
 #endif
 }
 
-inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
-#define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
-#define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
-#define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
-#define dut_ptr_read_store(x) dut_ptr_saddr(x); dut_ptr_sdata(x); dut_ptr_smask(x);
-  dut_ptr_read_store(0);
-  dut_ptr_read_store(1);
-}
-
 inline void Emulator::read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
 #define dut_ptr_saddr2(x)  saddr[x] = dut_ptr->io_difftest2_storeAddr_##x
 #define dut_ptr_sdata2(x) sdata[x] = dut_ptr->io_difftest2_storeData_##x
@@ -303,26 +334,6 @@ inline void Emulator::read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t
 #define dut_ptr_read_store2(x) dut_ptr_saddr2(x); dut_ptr_sdata2(x); dut_ptr_smask2(x);
   dut_ptr_read_store2(0);
   dut_ptr_read_store2(1);
-}
-
-inline void Emulator::read_sbuffer_info(uint8_t *sbufferData) {
-#define dut_ptr_data(x)  sbufferData[x] = dut_ptr->io_difftest_sbufferData_##x
-  dut_ptr_data(0);  dut_ptr_data(1);  dut_ptr_data(2);  dut_ptr_data(3);
-  dut_ptr_data(4);  dut_ptr_data(5);  dut_ptr_data(6);  dut_ptr_data(7);
-  dut_ptr_data(8);  dut_ptr_data(9);  dut_ptr_data(10); dut_ptr_data(11);
-  dut_ptr_data(12); dut_ptr_data(13); dut_ptr_data(14); dut_ptr_data(15);
-  dut_ptr_data(16); dut_ptr_data(17); dut_ptr_data(18); dut_ptr_data(19);
-  dut_ptr_data(20); dut_ptr_data(21); dut_ptr_data(22); dut_ptr_data(23);
-  dut_ptr_data(24); dut_ptr_data(25); dut_ptr_data(26); dut_ptr_data(27);
-  dut_ptr_data(28); dut_ptr_data(29); dut_ptr_data(30); dut_ptr_data(31);
-  dut_ptr_data(32); dut_ptr_data(33); dut_ptr_data(34); dut_ptr_data(35);
-  dut_ptr_data(36); dut_ptr_data(37); dut_ptr_data(38); dut_ptr_data(39);
-  dut_ptr_data(40); dut_ptr_data(41); dut_ptr_data(42); dut_ptr_data(43);
-  dut_ptr_data(44); dut_ptr_data(45); dut_ptr_data(46); dut_ptr_data(47);
-  dut_ptr_data(48); dut_ptr_data(49); dut_ptr_data(50); dut_ptr_data(51);
-  dut_ptr_data(52); dut_ptr_data(53); dut_ptr_data(54); dut_ptr_data(55);
-  dut_ptr_data(56); dut_ptr_data(57); dut_ptr_data(58); dut_ptr_data(59);
-  dut_ptr_data(60); dut_ptr_data(61); dut_ptr_data(62); dut_ptr_data(63);
 }
 
 inline void Emulator::read_sbuffer_info2(uint8_t *sbufferData) {
@@ -344,6 +355,18 @@ inline void Emulator::read_sbuffer_info2(uint8_t *sbufferData) {
   dut_ptr_data2(56); dut_ptr_data2(57); dut_ptr_data2(58); dut_ptr_data2(59);
   dut_ptr_data2(60); dut_ptr_data2(61); dut_ptr_data2(62); dut_ptr_data2(63);
 }
+
+inline void Emulator::load_diff_info2(void* diff_ptr, int coreid) {
+#define load_info2(x) diff[coreid].x = dut_ptr->io_difftest2_##x
+  assert(coreid == 1);
+  DiffState* diff = (DiffState*)diff_ptr;
+  load_info2(commit);  load_info2(thisINST);
+  load_info2(skip);    load_info2(isRVC);
+  load_info2(wen);     load_info2(intrNO);
+  load_info2(cause);   load_info2(priviledgeMode);
+  load_info2(scFailed);
+}
+#endif
 
 inline void Emulator::reset_ncycles(size_t cycles) {
   for(int i = 0; i < cycles; i++) {
@@ -474,25 +497,6 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
   
 }
 
-inline void Emulator::load_diff_info(void* diff_ptr, int coreid) {
-#define load_info(x)  diff[0].x = dut_ptr->io_difftest_##x
-#define load_info2(x) diff[1].x = dut_ptr->io_difftest2_##x
-  DiffState* diff = (DiffState*)diff_ptr;
-  if (coreid == 0) {
-    load_info(commit);  load_info(thisINST);
-    load_info(skip);    load_info(isRVC);
-    load_info(wen);     load_info(intrNO);
-    load_info(cause);   load_info(priviledgeMode);
-    load_info(scFailed);
-  } else {
-    load_info2(commit);  load_info2(thisINST);
-    load_info2(skip);    load_info2(isRVC);
-    load_info2(wen);     load_info2(intrNO);
-    load_info2(cause);   load_info2(priviledgeMode);
-    load_info2(scFailed);
-  }
-}
-
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
@@ -562,15 +566,23 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         eprintf("No instruction of core%d commits for %d cycles, maybe get stuck\n"
             "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
             i, stuck_limit, stuck_limit);
+#ifdef DUALCORE
         int priviledgeMode = (i == 0) ? dut_ptr->io_difftest_priviledgeMode : dut_ptr->io_difftest2_priviledgeMode;
+#else
+        int priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
+#endif
         difftest_display(priviledgeMode, i);
         trapCode = STATE_ABORT;
       }
     }
 
     for (int i = 0; i < NumCore; i++) {
+#ifdef DUALCORE
       int first_instr_commit = (i == 0) ? dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u :
                                           dut_ptr->io_difftest2_commit && dut_ptr->io_difftest2_thisPC == 0x80000000u;
+#else
+      int first_instr_commit = dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u;
+#endif
       if (!hascommit[i] && first_instr_commit) {
         hascommit[i] = 1;
         if (i == 0) read_emu_regs(reg[i]); else read_emu_regs2(reg[i]);
@@ -585,16 +597,25 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     // difftest
 
     for (int i = 0; i < NumCore; i++) {
+#ifdef DUALCORE
       int core_nr_commit = (i == 0) ? dut_ptr->io_difftest_commit : dut_ptr->io_difftest2_commit;
+#else
+      int core_nr_commit = dut_ptr->io_difftest_commit;
+#endif
       if (core_nr_commit && hascommit[i]) {
         if (i == 0) {
           read_emu_regs(reg[i]);
           read_wb_info(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
+          load_diff_info(diff, i);
         } else {
+#ifdef DUALCORE
           read_emu_regs2(reg[i]);
           read_wb_info2(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
+          load_diff_info2(diff, i);
+#else
+          assert(0);
+#endif
         }
-        load_diff_info(diff, i);
 
         if (difftest_step(&diff[i], i)) {
           trapCode = STATE_ABORT;
@@ -631,20 +652,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 
     // Update Golden Memory info
-    // if (dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp) {
-    //   printf("Double sbuffer resp\n");
-    // }
-    // assert(!(dut_ptr->io_difftest_sbufferResp && dut_ptr->io_difftest2_sbufferResp));
     if (dut_ptr->io_difftest_sbufferResp) {
       read_sbuffer_info(sbufferData);
       uint64_t sbufferAddr = dut_ptr->io_difftest_sbufferAddr;
       uint64_t sbufferMask = dut_ptr->io_difftest_sbufferMask;
-      update_goldenmem(sbufferAddr, sbufferData, sbufferMask, 64);
-    }
-    if (dut_ptr->io_difftest2_sbufferResp) {
-      read_sbuffer_info2(sbufferData);
-      uint64_t sbufferAddr = dut_ptr->io_difftest2_sbufferAddr;
-      uint64_t sbufferMask = dut_ptr->io_difftest2_sbufferMask;
       update_goldenmem(sbufferAddr, sbufferData, sbufferMask, 64);
     }
 
@@ -656,6 +667,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       uint64_t  atomicOut  =  dut_ptr->io_difftest_atomicOut;
       handle_atomic(atomicAddr, atomicData, atomicMask, atomicFuop, atomicOut);
     }
+
+#ifdef DUALCORE
+    if (dut_ptr->io_difftest2_sbufferResp) {
+      read_sbuffer_info2(sbufferData);
+      uint64_t sbufferAddr = dut_ptr->io_difftest2_sbufferAddr;
+      uint64_t sbufferMask = dut_ptr->io_difftest2_sbufferMask;
+      update_goldenmem(sbufferAddr, sbufferData, sbufferMask, 64);
+    }
     if (dut_ptr->io_difftest2_atomicResp) {
       uint64_t* atomicData = &dut_ptr->io_difftest2_atomicData;
       uint64_t  atomicAddr =  dut_ptr->io_difftest2_atomicAddr;
@@ -664,6 +683,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       uint64_t  atomicOut  =  dut_ptr->io_difftest2_atomicOut;
       handle_atomic(atomicAddr, atomicData, atomicMask, atomicFuop, atomicOut);
     }
+#endif
 
     uint32_t t = uptime();
     if (t - lasttime_poll > 100) {

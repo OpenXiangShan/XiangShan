@@ -8,7 +8,13 @@
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
 // #define DIFFTEST_STORE_COMMIT
-#define NumCore 2
+// #define DUALCORE
+
+#ifdef DUALCORE
+  #define NumCore 2
+#else
+  #define NumCore 1
+#endif
 
 struct EmuArgs {
   uint32_t seed;

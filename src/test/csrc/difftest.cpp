@@ -27,6 +27,34 @@ static void (*ref_difftest_exec)(uint64_t n, int coreid) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO, int coreid) = NULL;
 static void (*ref_isa_reg_display)(int coreid) = NULL;
 
+static const char *reg_name[DIFFTEST_NR_REG] = {
+  "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
+  "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
+  "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
+  "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6",
+  "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
+  "fs0", "fs1", "fa0", "fa1", "fa2", "fa3", "fa4", "fa5",
+  "fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
+  "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11",
+  "this_pc",
+  "mstatus", "mcause", "mepc",
+  "sstatus", "scause", "sepc",
+  "satp", 
+  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg", 
+  "mtval", "stval", "mtvec", "stvec", "mode"
+};
+
+static uint64_t nemu_this_pc[NumCore];
+static uint64_t pc_retire_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
+static uint32_t inst_retire_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
+static uint32_t retire_cnt_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
+static int pc_retire_pointer[NumCore];
+static uint64_t pc_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
+static uint64_t wen_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
+static uint32_t wdst_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
+static uint64_t wdata_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
+static int wb_pointer[NumCore] = {0};
+
 void init_difftest() {
 
 #undef REF_SO
@@ -85,35 +113,12 @@ void init_difftest() {
   for (int i = 0; i < NumCore; i++) {
     ref_difftest_init(i);
   }
+
+  for (int i = 0; i < NumCore; i++) {
+    nemu_this_pc[i] = 0x80000000;
+    pc_retire_pointer[i] = DEBUG_RETIRE_TRACE_SIZE-1;
+  }
 }
-
-static const char *reg_name[DIFFTEST_NR_REG] = {
-  "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
-  "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
-  "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
-  "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6",
-  "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
-  "fs0", "fs1", "fa0", "fa1", "fa2", "fa3", "fa4", "fa5",
-  "fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
-  "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11",
-  "this_pc",
-  "mstatus", "mcause", "mepc",
-  "sstatus", "scause", "sepc",
-  "satp", 
-  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg", 
-  "mtval", "stval", "mtvec", "stvec", "mode"
-};
-
-static uint64_t nemu_this_pc[NumCore] = {0x80000000, 0x80000000};
-static uint64_t pc_retire_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
-static uint32_t inst_retire_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
-static uint32_t retire_cnt_queue[NumCore][DEBUG_RETIRE_TRACE_SIZE] = {0};
-static int pc_retire_pointer[NumCore] = {DEBUG_RETIRE_TRACE_SIZE-1, DEBUG_RETIRE_TRACE_SIZE-1};
-static uint64_t pc_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
-static uint64_t wen_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
-static uint32_t wdst_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
-static uint64_t wdata_wb_queue[NumCore][DEBUG_WB_TRACE_SIZE] = {0};
-static int wb_pointer[NumCore] = {0, 0};
 
 uint64_t get_nemu_this_pc(int coreid) { return nemu_this_pc[coreid]; }
 void set_nemu_this_pc(uint64_t pc, int coreid) { nemu_this_pc[coreid] = pc; }
@@ -294,8 +299,10 @@ int difftest_step(DiffState *s, int coreid) {
             reg_name[i], this_pc, ref_r[i], s->reg_scala[i]);
       }
     }
+#ifdef DUALCORE
     printf("(((Another Core)))\n");
     difftest_display(s->priviledgeMode, 1-coreid);
+#endif
     return 1;
   }
   return 0;
