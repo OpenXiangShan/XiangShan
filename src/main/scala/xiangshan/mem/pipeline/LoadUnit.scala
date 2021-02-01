@@ -13,7 +13,7 @@ class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
-  val forward = new LoadForwardQueryIO
+  val forward = new MaskedLoadForwardQueryIO
 }
 
 // Load Pipeline Stage 0
@@ -98,7 +98,7 @@ class LoadUnit_S1 extends XSModule {
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
-    val lsq = new LoadForwardQueryIO
+    val lsq = new MaskedLoadForwardQueryIO
   })
 
   val s1_uop = io.in.bits.uop
@@ -128,6 +128,7 @@ class LoadUnit_S1 extends XSModule {
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
+  io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
@@ -280,6 +281,10 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
+
+  // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
+  val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
+  io.lsq.forward.sqIdxMask := sqIdxMaskReg
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

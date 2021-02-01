@@ -37,7 +37,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val uncache = new DCacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
@@ -198,7 +198,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
-    val forwardMask = UIntToMask(io.forward(i).sqIdx.value, StoreQueueSize)
+    val forwardMask = io.forward(i).sqIdxMask
     val storeWritebackedVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
     for (j <- 0 until StoreQueueSize) {
       storeWritebackedVec(j) := datavalid(j) && allocated(j) // all datavalid terms need to be checked
