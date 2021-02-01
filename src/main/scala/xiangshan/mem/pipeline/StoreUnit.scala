@@ -20,7 +20,7 @@ class StoreUnit_S0 extends XSModule {
   val saddr_old = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
   val imm12 = WireInit(io.in.bits.uop.ctrl.imm(11,0))
   val saddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(imm12(11), 
+  val saddr_hi = Mux(imm12(11),
     Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
     Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
   )
@@ -73,6 +73,8 @@ class StoreUnit_S1 extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
+  val s1_mmio = io.dtlbResp.bits.mmio
+  val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
 
   io.in.ready := true.B
 
@@ -95,13 +97,12 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := io.dtlbResp.bits.mmio
+  io.lsq.bits.mmio := s1_mmio && !s1_exception
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
   io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
 
   // mmio inst with exception will be writebacked immediately
-  val hasException = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
-  io.out.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
+  io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
 
   // encode data for fp store

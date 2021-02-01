@@ -529,10 +529,12 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.fetchPacket.valid := fetchPacketValid
 
 //  if(IFUDebug) {
+  if (!env.FPGAPlatform) {
     val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_can_go)
     val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
     val predictor = predictor_s4
-  toFtqBuf.metas.map(_.predictor := predictor)
+    toFtqBuf.metas.map(_.predictor := predictor)
+  }
  // }
 
   // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay

@@ -109,9 +109,9 @@ class BranchPrediction extends XSBundle with HasIFUConst {
 }
 
 class PredictorAnswer extends XSBundle {
-  val hit = Bool()
-  val taken = Bool()
-  val target = UInt(VAddrBits.W)
+  val hit    = if (!env.FPGAPlatform) Bool() else UInt(0.W)
+  val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
+  val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
 }
 
 class BpuMeta extends XSBundle with HasBPUParameter {
