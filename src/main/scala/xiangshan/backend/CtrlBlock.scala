@@ -131,14 +131,19 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
 
   val ftqRead = io.stage2FtqRead.entry
-  val pc = Cat(ftqRead.ftqPC.head(VAddrBits - s2_redirect_bits_reg.ftqOffset.getWidth - instOffsetBits),
-               s2_redirect_bits_reg.ftqOffset,
-               0.U(instOffsetBits.W))
-  val brTarget = pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
-  val snpc = pc + Mux(s2_pd.isRVC, 2.U, 4.U)
+  val cfiUpdate_pc = 
+    Cat(ftqRead.ftqPC.head(VAddrBits - s2_redirect_bits_reg.ftqOffset.getWidth - instOffsetBits),
+        s2_redirect_bits_reg.ftqOffset,
+        0.U(instOffsetBits.W))
+  val real_pc = 
+    GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset,
+               ftqRead.lastPacketPC.valid,
+               ftqRead.lastPacketPC.bits)
+  val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
+  val snpc = real_pc + Mux(s2_pd.isRVC, 2.U, 4.U)
   val isReplay = RedirectLevel.flushItself(s2_redirect_bits_reg.level)
   val target = Mux(isReplay,
-    pc, // repaly from itself
+    real_pc, // repaly from itself
     Mux(s2_redirect_bits_reg.cfiUpdate.taken,
       Mux(s2_isJump, s2_jumpTarget, brTarget),
       snpc
@@ -147,7 +152,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   io.stage3Redirect.valid := s2_redirect_valid_reg
   io.stage3Redirect.bits := s2_redirect_bits_reg
   val stage3CfiUpdate = io.stage3Redirect.bits.cfiUpdate
-  stage3CfiUpdate.pc := pc
+  stage3CfiUpdate.pc := cfiUpdate_pc
   stage3CfiUpdate.pd := s2_pd
   stage3CfiUpdate.rasSp := ftqRead.rasSp
   stage3CfiUpdate.rasEntry := ftqRead.rasTop
