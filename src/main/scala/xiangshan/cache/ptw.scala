@@ -595,7 +595,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   when (sfence.valid) {
     valid := false.B
     state := s_idle
-    when (state === s_resp && memRespFire) {
+    when (state === s_resp && !memRespFire) {
       sfenceLatch := true.B
     }
 
