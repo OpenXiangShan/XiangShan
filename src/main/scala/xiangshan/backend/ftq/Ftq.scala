@@ -20,10 +20,12 @@ object FtqPtr extends HasXSParameter {
 object GetPcByFtq extends HasXSParameter {
   def apply(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
     assert(ftqPC.getWidth == VAddrBits)
+    assert(lastPacketPC.getWidth == VAddrBits)
     assert(ftqOffset.getWidth == log2Up(PredictWidth))
     val idxBits = ftqPC.head(VAddrBits - ftqOffset.getWidth - instOffsetBits)
+    val lastIdxBits = lastPacketPC.head(VAddrBits - ftqOffset.getWidth - instOffsetBits)
     val selLastPacket = hasLastPrev && (ftqOffset === 0.U)
-    val packetIdx = Mux(selLastPacket, lastPacketPC, idxBits)
+    val packetIdx = Mux(selLastPacket, lastIdxBits, idxBits)
     Cat(
       packetIdx, // packet pc
       Mux(selLastPacket, Fill(ftqOffset.getWidth, 1.U(1.W)), ftqOffset),
