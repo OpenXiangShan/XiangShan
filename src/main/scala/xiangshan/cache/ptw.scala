@@ -383,7 +383,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val levelNext = level + 1.U
-  val latch = Reg(new PtwResp)
   val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
 
