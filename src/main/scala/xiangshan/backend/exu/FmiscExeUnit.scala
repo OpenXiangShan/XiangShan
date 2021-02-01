@@ -19,7 +19,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
 
   val input = io.fromFp
   val isRVF = input.bits.uop.ctrl.isRVF
-  val instr_rm = input.bits.uop.cf.instr(14, 12)
+  val instr_rm = input.bits.uop.ctrl.fpu.rm
   val (src1, src2) = (input.bits.src1, input.bits.src2)
 
   supportedFunctionUnits.foreach { module =>
