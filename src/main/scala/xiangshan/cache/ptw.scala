@@ -50,6 +50,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
+  val spReplacer = Some("plru")
+  def spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
@@ -446,6 +448,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val hitVec = hitVecT.map(RegEnable(_, validOneCycle))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+
+    when (hit) { spreplace.access(OHToUInt(hitVec)) }
     (hit, hitData)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
@@ -582,7 +586,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     }
 
     when ((level === 0.U || level === 1.U) && memPte.isLeaf()) {
-      val refillIdx = LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
+      val refillIdx = spreplace.way// LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
       sp(refillIdx).refill(vpn, memSelData, level)
       spv := spv | rfOH
