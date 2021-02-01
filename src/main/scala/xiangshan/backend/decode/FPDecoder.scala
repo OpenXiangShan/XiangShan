@@ -98,8 +98,9 @@ class FPDecoder extends XSModule{
     ctrl.div, ctrl.sqrt, ctrl.fcvt
   )
   sigs.zip(decoder).foreach({case (s, d) => s := d})
-  ctrl.typ := io.instr(21,20)
-  ctrl.fmt := io.instr(26,25)
+  ctrl.typ := io.instr(21, 20)
+  ctrl.fmt := io.instr(26, 25)
+  ctrl.rm := io.instr(14, 12)
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
     FADD_S  -> List(BitPat("b00"),N),
