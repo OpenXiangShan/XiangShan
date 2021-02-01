@@ -106,10 +106,10 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
   // --------------------------------------------
   when (state === s_send_resp) {
     io.resp.valid := true.B
-    io.resp.bits.data := resp_data
+    io.resp.bits.data   := resp_data
     // meta data should go with the response
-    io.resp.bits.meta := req.meta
-    io.resp.bits.miss := false.B
+    io.resp.bits.id     := req.id
+    io.resp.bits.miss   := false.B
     io.resp.bits.replay := false.B
 
     when (io.resp.fire()) {

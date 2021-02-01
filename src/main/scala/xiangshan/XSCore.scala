@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache, MemoryOpConstants, MissReq}
+import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, Uncache, MemoryOpConstants, MissReq}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -48,8 +48,10 @@ case class XSCoreParameters
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
-  EnableLoop: Boolean = true,
+  EnableLoop: Boolean = false,
   EnableSC: Boolean = false,
+  EnableJal: Boolean = false,
+  EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -65,6 +67,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
+  FtqSize: Int = 48,
   IssQueSize: Int = 12,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
@@ -156,6 +159,7 @@ trait HasXSParameter {
   val RenameWidth = core.RenameWidth
   val CommitWidth = core.CommitWidth
   val BrqSize = core.BrqSize
+  val FtqSize = core.FtqSize
   val IssQueSize = core.IssQueSize
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
@@ -184,9 +188,13 @@ trait HasXSParameter {
   val NumPerfCounters = core.NumPerfCounters
   val NrExtIntr = core.NrExtIntr
 
+  val instBytes = if (HasCExtension) 2 else 4
+  val instOffsetBits = log2Ceil(instBytes)
+
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
+    replacer = Some("setlru"),
     nMissEntries = 2
   )
 
@@ -200,8 +208,9 @@ trait HasXSParameter {
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     nMissEntries = 16,
-    nLoadMissEntries = 8,
-    nStoreMissEntries = 8
+    nProbeEntries = 16,
+    nReleaseEntries = 16,
+    nStoreReplayEntries = 16
   )
 
   val LRSCCycles = 100
@@ -358,10 +367,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
     val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
-  
+
   val difftestIO = IO(new DifftestBundle())
   difftestIO <> DontCare
-  
+
   val trapIO = IO(new TrapIO())
   trapIO <> DontCare
 
@@ -405,7 +414,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
-  frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
+  frontend.io.tlbCsr := RegNext(integerBlock.io.csrio.tlb)
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
@@ -454,25 +463,31 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.isInterrupt <> ctrlBlock.io.roqio.isInterrupt
   integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
+  integerBlock.io.csrio.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
-  integerBlock.io.csrio.tlb <> memBlock.io.tlbCsr
   integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+  memBlock.io.tlbCsr := RegNext(integerBlock.io.csrio.tlb)
 
   floatBlock.io.frm <> integerBlock.io.csrio.frm
 
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
-  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
-  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)
+  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
+  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
+  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
-  ptw.io.tlb(0) <> memBlock.io.ptw
-  ptw.io.tlb(1) <> frontend.io.ptw
+  val itlbRepester = Module(new PTWRepeater())
+  val dtlbRepester = Module(new PTWRepeater())
+  itlbRepester.io.tlb <> frontend.io.ptw
+  dtlbRepester.io.tlb <> memBlock.io.ptw
+  itlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
+  dtlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
+  ptw.io.tlb(0) <> dtlbRepester.io.ptw
+  ptw.io.tlb(1) <> itlbRepester.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr    <> integerBlock.io.csrio.tlb
 

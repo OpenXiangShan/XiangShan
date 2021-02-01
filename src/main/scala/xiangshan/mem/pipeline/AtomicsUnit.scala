@@ -13,9 +13,11 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
+    val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
+    val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
 
@@ -85,7 +87,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // since we will continue polling tlb all by ourself
   io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
+  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -112,7 +114,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
-      val exception = !addrAligned || 
+      val exception = !addrAligned ||
         io.dtlb.resp.bits.excp.pf.st ||
         io.dtlb.resp.bits.excp.pf.ld ||
         io.dtlb.resp.bits.excp.af.st ||
@@ -174,10 +176,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
-    io.dcache.req.bits.meta.id       := DontCare
-    io.dcache.req.bits.meta.paddr    := paddr
-    io.dcache.req.bits.meta.tlb_miss := false.B
-    io.dcache.req.bits.meta.replay   := false.B
+    io.dcache.req.bits.id   := DontCare
 
     when(io.dcache.req.fire()){
       state := s_cache_resp
@@ -191,7 +190,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
-      is_lrsc_valid := io.dcache.resp.bits.meta.id
+      is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
         "b000".U -> rdata(63, 0),
@@ -243,7 +242,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
-    io.out.bits.brUpdate := DontCare
     io.out.bits.debug.isMMIO := is_mmio
     io.out.bits.debug.paddr := paddr
     when (io.out.fire()) {
@@ -252,7 +250,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     }
   }
 
-  when(io.redirect.valid){
+  when(io.redirect.valid || io.flush){
     atom_override_xtval := false.B
   }
 
