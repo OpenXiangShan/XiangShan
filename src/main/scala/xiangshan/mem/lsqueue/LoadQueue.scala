@@ -471,8 +471,7 @@ class LoadQueue extends XSModule
   val rollbackGen = Wire(Valid(new Redirect))
   val rollbackReg = Reg(Valid(new Redirect))
   rollbackGen.valid := rollbackSelected.valid &&
-    (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !lastCycleFlush
+    !rollbackSelected.bits.roqIdx.needFlush(lastCycleRedirect, lastCycleFlush)
 
   rollbackGen.bits.roqIdx := rollbackSelected.bits.roqIdx
   rollbackGen.bits.ftqIdx := rollbackSelected.bits.cf.ftqPtr
@@ -487,8 +486,7 @@ class LoadQueue extends XSModule
   // S3: fire rollback request
   io.rollback := rollbackReg
   io.rollback.valid := rollbackReg.valid &&
-    (!lastCycleRedirect.valid || !isAfter(rollbackReg.bits.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-    !lastCycleFlush
+    !rollbackReg.bits.roqIdx.needFlush(lastCycleRedirect, lastCycleFlush)
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.cfi, io.rollback.bits.roqIdx.asUInt)
