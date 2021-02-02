@@ -141,7 +141,8 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
