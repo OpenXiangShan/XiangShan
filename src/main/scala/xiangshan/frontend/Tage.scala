@@ -31,11 +31,7 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter with HasIFUCo
   val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
   val TageCtrBits = 3
-  val SCHistLens = 0 :: TableInfo.map{ case (_,h,_) => h}.toList
-  val SCNTables = 6
-  val SCCtrBits = 6
-  val SCNRows = 1024
-  val SCTableInfo = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {case ((n, cb), h) => (n, cb, h)}
+
   val TotalBits = TableInfo.map {
     case (s, h, t) => {
       s * (1+t+TageCtrBits) * PredictWidth
@@ -43,10 +39,27 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter with HasIFUCo
   }.reduce(_+_)
 }
 
-abstract class TageBundle extends XSBundle with HasTageParameter with PredictorUtils
-abstract class TageModule extends XSModule with HasTageParameter with PredictorUtils { val debug = true }
+trait HasFoldedHistory {
+  val histLen: Int
+  def compute_folded_hist(hist: UInt, l: Int) = {
+    if (histLen > 0) {
+      val nChunks = (histLen + l - 1) / l
+      val hist_chunks = (0 until nChunks) map {i =>
+        hist(min((i+1)*l, histLen)-1, i*l)
+      }
+      ParallelXOR(hist_chunks)
+    }
+    else 0.U
+  }
+}
 
-
+abstract class TageBundle extends XSBundle
+  with HasIFUConst with HasTageParameter
+  with PredictorUtils
+abstract class TageModule extends XSModule
+  with HasIFUConst with HasTageParameter
+  with PredictorUtils
+  { val debug = true }
 
 
 class TageReq extends TageBundle {
@@ -83,7 +96,8 @@ class FakeTageTable() extends TageModule {
 
 }
 @chiselName
-class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int) extends TageModule with HasIFUConst {
+class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int)
+  extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
@@ -92,14 +106,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 4
-
-  def compute_folded_hist(hist: UInt, l: Int) = {
-    val nChunks = (histLen + l - 1) / l
-    val hist_chunks = (0 until nChunks) map {i =>
-      hist(min((i+1)*l, histLen)-1, i*l)
-    }
-    hist_chunks.reduce(_^_)
-  }
 
   def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt) = {
     val idx_history = compute_folded_hist(hist, log2Ceil(nRows))
@@ -385,23 +391,6 @@ class Tage extends BaseTage {
       t
   }
 
-  val scTables = SCTableInfo.map {
-    case (nRows, ctrBits, histLen) => {
-      val t = if (EnableSC) Module(new SCTable(nRows/TageBanks, ctrBits, histLen)) else Module(new FakeSCTable)
-      val req = t.io.req
-      req.valid := io.pc.valid
-      req.bits.pc := io.pc.bits
-      req.bits.hist := io.hist
-      req.bits.mask := io.inMask
-      if (!EnableSC) {t.io.update := DontCare}
-      t
-    }
-  }
-
-  val scThreshold = RegInit(SCThreshold(5))
-  val useThreshold = WireInit(scThreshold.thres)
-  val updateThreshold = WireInit((useThreshold << 3) + 21.U)
-
   override val debug = true
 
   // Keep the table responses to process in s3
@@ -409,7 +398,7 @@ class Tage extends BaseTage {
   // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=s3_fire)
   
   val if3_resps = VecInit(tables.map(t => t.io.resp))
-  val if3_scResps = VecInit(scTables.map(t => t.io.resp))
+
 
   val if3_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
   val if4_bim = RegEnable(if3_bim, enable=s3_fire)
@@ -439,15 +428,21 @@ class Tage extends BaseTage {
   updateOldCtr := DontCare
   updateU := DontCare
 
-  val scUpdateMask = WireInit(0.U.asTypeOf(Vec(SCNTables, Vec(TageBanks, Bool()))))
-  val scUpdateTagePred = Wire(Bool())
-  val scUpdateTaken = Wire(Bool())
-  val scUpdateOldCtrs = Wire(Vec(SCNTables, SInt(SCCtrBits.W)))
-  scUpdateTagePred := DontCare
-  scUpdateTaken := DontCare
-  scUpdateOldCtrs := DontCare
+  val if3_tageTakens = Wire(Vec(TageBanks, Bool()))
+  val if3_provideds = Wire(Vec(TageBanks, Bool()))
+  val if3_providers = Wire(Vec(TageBanks, UInt(log2Ceil(TageBanks).W)))
+  val if3_finalAltPreds = Wire(Vec(TageBanks, Bool()))
+  val if3_providerUs = Wire(Vec(TageBanks, UInt(2.W)))
+  val if3_providerCtrs = Wire(Vec(TageBanks, UInt(3.W)))
 
-  val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
+  val if4_tageTakens = RegEnable(if3_tageTakens, s3_fire)
+  val if4_provideds = RegEnable(if3_provideds, s3_fire)
+  val if4_providers = RegEnable(if3_providers, s3_fire)
+  val if4_finalAltPreds = RegEnable(if3_finalAltPreds, s3_fire)
+  val if4_providerUs = RegEnable(if3_providerUs, s3_fire)
+  val if4_providerCtrs = RegEnable(if3_providerCtrs, s3_fire)
+
+
   val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i) && updateBrMask(i)))
 
   // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
@@ -471,21 +466,21 @@ class Tage extends BaseTage {
       if3_provider = Mux(hit, i.U, if3_provider)  // Use the last hit as provider
       if3_altPred = Mux(hit, ctr(2), if3_altPred) // Save current pred as potential altpred
     }
-    val if4_provided = RegEnable(if3_provided, s3_fire)
-    val if4_provider = RegEnable(if3_provider, s3_fire)
-    val if4_finalAltPred = RegEnable(if3_finalAltPred, s3_fire)
-    val if4_tageTaken = RegEnable(if3_tageTaken, s3_fire)
-    val if4_providerU = RegEnable(if3_resps(if3_provider)(w).bits.u, s3_fire)
-    val if4_providerCtr = RegEnable(if3_resps(if3_provider)(w).bits.ctr, s3_fire)
+    if3_provideds(w) := if3_provided
+    if3_providers(w) := if3_provider
+    if3_finalAltPreds(w) := if3_finalAltPred
+    if3_tageTakens(w) := if3_tageTaken
+    if3_providerUs(w) := if3_resps(if3_provider)(w).bits.u
+    if3_providerCtrs(w) := if3_resps(if3_provider)(w).bits.ctr
 
-    io.resp.hits(w) := if4_provided
-    io.resp.takens(w) := if4_tageTaken
-    io.meta(w).provider.valid := if4_provided
-    io.meta(w).provider.bits := if4_provider
-    io.meta(w).altDiffers := if4_finalAltPred =/= io.resp.takens(w)
-    io.meta(w).providerU := if4_providerU
-    io.meta(w).providerCtr := if4_providerCtr
-    io.meta(w).taken := if4_tageTaken
+    io.resp.hits(w) := if4_provideds(w)
+    io.resp.takens(w) := if4_tageTakens(w)
+    io.meta(w).provider.valid := if4_provideds(w)
+    io.meta(w).provider.bits := if4_providers(w)
+    io.meta(w).altDiffers := if4_finalAltPreds(w) =/= io.resp.takens(w)
+    io.meta(w).providerU := if4_providerUs(w)
+    io.meta(w).providerCtr := if4_providerCtrs(w)
+    io.meta(w).taken := if4_tageTakens(w)
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
@@ -498,51 +493,6 @@ class Tage extends BaseTage {
     val allocEntry = Mux(allocatableSlots(maskedEntry), maskedEntry, firstEntry)
     io.meta(w).allocate.valid := allocatableSlots =/= 0.U
     io.meta(w).allocate.bits := allocEntry
-
-    val scMeta = io.meta(w).scMeta
-    scMeta := DontCare
-    val scTableSums = VecInit(
-      (0 to 1) map { i => {
-          // val providerCtr = if4_resps(if4_provider)(w).bits.ctr.zext()
-          // val pvdrCtrCentered = (((providerCtr - 4.S) << 1) + 1.S) << 3
-          // sum += pvdrCtrCentered
-          if (EnableSC) {
-            (0 until SCNTables) map { j => 
-              scTables(j).getCenteredValue(RegEnable(if3_scResps(j)(w).ctr(i), s3_fire))
-            } reduce (_+_) // TODO: rewrite with adder tree
-          }
-          else 0.S
-        }
-      }
-    )
-
-    if (EnableSC) {
-      scMeta.tageTaken := if4_tageTaken
-      scMeta.scUsed := if4_provided
-      scMeta.scPred := if4_tageTaken
-      scMeta.sumAbs := 0.U
-      when (if4_provided) {
-        val providerCtr = if4_providerCtr.zext()
-        val pvdrCtrCentered = ((((providerCtr - 4.S) << 1).asSInt + 1.S) << 3).asSInt
-        val totalSum = scTableSums(if4_tageTaken.asUInt) + pvdrCtrCentered
-        val sumAbs = totalSum.abs().asUInt
-        val sumBelowThreshold = totalSum.abs.asUInt < useThreshold
-        val scPred = totalSum >= 0.S
-        scMeta.sumAbs := sumAbs
-        scMeta.ctrs   := RegEnable(VecInit(if3_scResps.map(r => r(w).ctr(if3_tageTaken.asUInt))), s3_fire)
-        for (i <- 0 until SCNTables) {
-          val if4_scResps = RegEnable(if3_scResps, s3_fire)
-          XSDebug(RegNext(s3_fire), p"SCTable(${i.U})(${w.U}): ctr:(${if4_scResps(i)(w).ctr(0)},${if4_scResps(i)(w).ctr(1)})\n")
-        }
-        XSDebug(RegNext(s3_fire), p"SC(${w.U}): pvdCtr(${providerCtr}), pvdCentred(${pvdrCtrCentered}), totalSum(${totalSum}), abs(${sumAbs}) useThres(${useThreshold}), scPred(${scPred})\n")
-        // Use prediction from Statistical Corrector
-        when (!sumBelowThreshold) {
-          XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${scPred}\n")
-          scMeta.scPred := scPred
-          io.resp.takens(w) := scPred
-        }
-      }
-    }
 
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
@@ -586,29 +536,6 @@ class Tage extends BaseTage {
     }
   }
 
-
-  // if (EnableSC) {
-  //   when (updateValid && updateSCMeta.scUsed.asBool && updateIsBr) {
-  //     val scPred = updateSCMeta.scPred
-  //     val tageTaken = updateSCMeta.tageTaken
-  //     val sumAbs = updateSCMeta.sumAbs.asUInt
-  //     val scOldCtrs = updateSCMeta.ctrs
-  //     when (scPred =/= tageTaken && sumAbs < useThreshold - 2.U) {
-  //       val newThres = scThreshold.update(scPred =/= u.taken)
-  //       scThreshold := newThres
-  //       XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
-  //     }
-  //     when (scPred =/= u.taken || sumAbs < updateThreshold) {
-  //       scUpdateMask.foreach(t => t(updateBank) := true.B)
-  //       scUpdateTagePred := tageTaken
-  //       scUpdateTaken := u.taken
-  //       (scUpdateOldCtrs zip scOldCtrs).foreach{case (t, c) => t := c}
-  //       XSDebug(p"scUpdate: bank(${updateBank}), scPred(${scPred}), tageTaken(${tageTaken}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPred})\n")
-  //       XSDebug(p"update: sc: ${updateSCMeta}\n")
-  //     }
-  //   }
-  // }
-
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
       tables(i).io.update.mask(w) := updateMask(i)(w)
@@ -623,16 +550,6 @@ class Tage extends BaseTage {
     // use fetch pc instead of instruction pc
     tables(i).io.update.hist := updateHist
   }
-
-  // for (i <- 0 until SCNTables) {
-  //   scTables(i).io.update.mask := scUpdateMask(i)
-  //   scTables(i).io.update.tagePred := scUpdateTagePred
-  //   scTables(i).io.update.taken    := scUpdateTaken
-  //   scTables(i).io.update.oldCtr   := scUpdateOldCtrs(i)
-  //   scTables(i).io.update.pc := u.pc
-  //   scTables(i).io.update.hist := updateHist
-  // }
-
 
 
   if (BPUDebug && debug) {
@@ -656,6 +573,9 @@ class Tage extends BaseTage {
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
   }
 }
+
+
+class Tage_SC extends Tage with HasSC {}
 
 object TageTest extends App {
   override def main(args: Array[String]): Unit = {

@@ -361,7 +361,8 @@ trait BranchPredictorComponents extends HasXSParameter {
   val ubtb = Module(new MicroBTB)
   val btb = Module(new BTB)
   val bim = Module(new BIM)
-  val tage = (if(EnableBPD) { Module(new Tage) } 
+  val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC) 
+                              else          Module(new Tage) } 
               else          { Module(new FakeTage) })
   // val loop = Module(new LoopPredictor)
   val preds = Seq(ubtb, btb, bim, tage/* , loop */)

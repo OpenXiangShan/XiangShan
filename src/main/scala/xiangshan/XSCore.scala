@@ -49,7 +49,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = false,
-  EnableSC: Boolean = false,
+  EnableSC: Boolean = true,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
