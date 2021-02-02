@@ -18,10 +18,11 @@ class IntToFP extends FPUSubModule {
 
   val src1 = RegEnable(io.in.bits.src(0)(XLEN-1, 0), io.in.fire())
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val rmReg = RegEnable(rm, io.in.fire())
 
   switch(state){
     is(s_idle){
-      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn)){
+      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)){
         state := s_cvt
       }
     }
@@ -34,7 +35,7 @@ class IntToFP extends FPUSubModule {
       }
     }
   }
-  when(state =/= s_idle && uopReg.roqIdx.needFlush(io.redirectIn)){
+  when(state =/= s_idle && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)){
     state := s_idle
   }
 
@@ -63,7 +64,7 @@ class IntToFP extends FPUSubModule {
       val i2f = Module(new INToRecFN(XLEN, t.exp, t.sig))
       i2f.io.signedIn := ~typ(0)
       i2f.io.in := intValue
-      i2f.io.roundingMode := rm
+      i2f.io.roundingMode := rmReg
       i2f.io.detectTininess := hardfloat.consts.tininess_afterRounding
       (sanitizeNaN(i2f.io.out, t), i2f.io.exceptionFlags)
     }

@@ -136,16 +136,15 @@ class TlbEntry(superpage: Boolean = false) extends TlbBundle {
   val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
   val data = new TlbEntryData
 
-
   def hit(vpn: UInt): Bool = {
     if (superpage) {
       val insideLevel = level.getOrElse(0.U)
       val a = tag(vpnnLen*3-1, vpnnLen*2) === vpn(vpnnLen*3-1, vpnnLen*2)
       val b = tag(vpnnLen*2-1, vpnnLen*1) === vpn(vpnnLen*2-1, vpnnLen*1)
-      XSDebug(Mux(insideLevel.asBool, a&b, a), p"Hit superpage: hit:${Mux(insideLevel.asBool, a&b, a)} tag:${Hexadecimal(tag)} level:${insideLevel} data:${data} a:${a} b:${b} vpn:${Hexadecimal(vpn)}\n")("TlbEntrySuperpage")
+      XSDebug(Mux(insideLevel.asBool, a&b, a), p"Hit superpage: hit:${Mux(insideLevel.asBool, a&b, a)} tag:${Hexadecimal(tag)} level:${insideLevel} data:${data} a:${a} b:${b} vpn:${Hexadecimal(vpn)}\n")
       Mux(insideLevel.asBool, a&b, a)
     } else {
-      XSDebug(tag === vpn, p"Hit normalpage: hit:${tag === vpn} tag:${Hexadecimal(tag)} data:${data}  vpn:${Hexadecimal(vpn)}\n")("TlbEntryNormalpage")
+      XSDebug(tag === vpn, p"Hit normalpage: hit:${tag === vpn} tag:${Hexadecimal(tag)} data:${data}  vpn:${Hexadecimal(vpn)}\n")
       tag === vpn
     }
   }
@@ -259,6 +258,10 @@ class BlockTlbRequestIO() extends TlbBundle {
 class TlbPtwIO extends TlbBundle {
   val req = DecoupledIO(new PtwReq)
   val resp = Flipped(DecoupledIO(new PtwResp))
+
+  override def toPrintable: Printable = {
+    p"req:${req.valid} ${req.ready} ${req.bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
+  }
 }
 
 class TlbIO(Width: Int) extends TlbBundle {
@@ -442,11 +445,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 
-  val tooManyPf = PopCount(pf) > 5.U
-  when (tooManyPf) { // when too much pf, just clear
-    XSDebug(p"Too many pf just flush all the pf v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
-    v.zipWithIndex.map{ case (a, i) => a := a & !pf(i) }
-  }
+  // val tooManyPf = PopCount(pf) > 5.U
+  // when (tooManyPf) { // when too much pf, just clear
+  //   XSDebug(p"Too many pf just flush all the pf v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
+  //   v.zipWithIndex.map{ case (a, i) => a := a & !pf(i) }
+  // }
 
   // sfence (flush)
   when (sfence.valid) {
