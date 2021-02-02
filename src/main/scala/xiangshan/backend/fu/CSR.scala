@@ -746,14 +746,19 @@ class CSR extends FunctionUnit with HasCSRConst
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
-  // ctrl block use these 2 cycles later
-  //  0          1       2
-  // XRet
-  //  wb  -> commit
-  //      -> flush -> frontend redirect
-  csrio.isXRet := RegNext(RegNext(isXRet))
-  csrio.trapTarget := Mux(RegNext(RegNext(isXRet)),
-    RegNext(RegNext(retTarget)),
+
+  // ctrl block will use theses later for flush
+  val isXRetFlag = RegInit(false.B)
+  val retTargetReg = Reg(retTarget.cloneType)
+  when (io.flushIn) {
+    isXRetFlag := false.B
+  }.elsewhen (isXRet) {
+    isXRetFlag := true.B
+    retTargetReg := retTarget
+  }
+  csrio.isXRet := isXRetFlag
+  csrio.trapTarget := Mux(isXRetFlag,
+    retTargetReg,
     Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   )
 
