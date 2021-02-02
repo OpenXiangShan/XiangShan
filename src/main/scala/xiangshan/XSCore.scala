@@ -367,6 +367,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   trapIO <> DontCare
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.checkMemmap()
   AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs

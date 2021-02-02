@@ -60,6 +60,7 @@ class PtePermBundle extends TlbBundle {
 
 class TlbPermBundle extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
+  // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
   val g = Bool()
@@ -67,13 +68,14 @@ class TlbPermBundle extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
+  // pma perm (hardwired)
+  val pr = Bool() //readable
+  val pw = Bool() //writeable
+  val pe = Bool() //executable
+  val pa = Bool() //atom op permitted
+  val pi = Bool() //icacheable
+  val pd = Bool() //dcacheable
 
-  // pma perm check
-  // val at = Bool() // Access Type
-  // val as = Bool() // Atomic Swap
-  // val al = Bool() // Atomic Logical
-  // val aa = Bool() // Atomic Arithmetic
-  // TODO: add pma check
   override def toPrintable: Printable = {
     p"pf:${pf} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
   }
@@ -162,6 +164,8 @@ class TlbEntry(superpage: Boolean = false) extends TlbBundle {
     this.tag := vpn
     this.level.map(_ := level(0))
     this.data.ppn := ppn
+
+    // refill pagetable perm
     val ptePerm = perm.asTypeOf(new PtePermBundle)
     this.data.perm.pf:= pf
     this.data.perm.d := ptePerm.d
@@ -171,6 +175,15 @@ class TlbEntry(superpage: Boolean = false) extends TlbBundle {
     this.data.perm.x := ptePerm.x
     this.data.perm.w := ptePerm.w
     this.data.perm.r := ptePerm.r
+
+    // get pma perm
+    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(ppn, 0.U(12.W)))
+    this.data.perm.pr := PMAMode.read(pmaMode)
+    this.data.perm.pw := PMAMode.write(pmaMode)
+    this.data.perm.pe := PMAMode.execute(pmaMode)
+    this.data.perm.pa := PMAMode.atomic(pmaMode)
+    this.data.perm.pi := PMAMode.icache(pmaMode)
+    this.data.perm.pd := PMAMode.dcache(pmaMode)
 
     this
   }
@@ -382,11 +395,22 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.excp.pf.st    := stPf || update
     resp(i).bits.excp.pf.instr := instrPf || update
 
+    // if vmenable, use pre-calcuated pma check result
+    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd)
+    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)
+    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)
+    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)
+
+    // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
-    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
-    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
+    when(!vmEnable){
+      resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
+      resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
+      resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
+      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
+    }
+
+    // TODO: MMIO check
 
     (hit, miss, pfHitVec, multiHit)
   }

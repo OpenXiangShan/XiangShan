@@ -232,9 +232,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
   )
 
-  io.in(0).ready := firstCanInsert || canMerge(0)
-  io.in(1).ready := (secondCanInsert || canMerge(1)) && !sameWord && io.in(0).ready
-
+  io.in(0).ready := firstCanInsert
+  io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
   def wordReqToBufLine(req: DCacheWordReq, tag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateUpdate(insertIdx) := s_valid
