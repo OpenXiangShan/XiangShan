@@ -301,7 +301,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   do_eviction := validCount >= 12.U
 
-  io.flush.empty := empty && io.sqempty
+  io.flush.empty := RegNext(empty && io.sqempty)
   lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
   switch(sbuffer_state){
     is(x_idle){
