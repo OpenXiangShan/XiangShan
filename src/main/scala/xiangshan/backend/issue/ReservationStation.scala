@@ -489,6 +489,7 @@ class ReservationStationCtrl
     val asynIdxUop = (0 until iqSize).map(i => asynUop(io.indexVec(i)) )
     val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueue(io.indexVec(i))).andR )
     val fastAsynUop = ParallelPriorityMux(readyIdxVec zip asynIdxUop)
+    val fastRoqIdx = ParallelPriorityMux(readyIdxVec zip roqIdx)
     val fastSentUop = Wire(new MicroOp)
     fastSentUop := DontCare
     fastSentUop.pdest := fastAsynUop.pdest
@@ -502,6 +503,7 @@ class ReservationStationCtrl
       val bpQueue = Module(new BypassQueue(fixedDelay))
       bpQueue.io.in.valid := selValid
       bpQueue.io.in.bits  := fastSentUop
+      bpQueue.io.in.bits.roqIdx := fastRoqIdx
       bpQueue.io.redirect := io.redirect
       bpQueue.io.flush    := io.flush
       io.fastUopOut.valid := bpQueue.io.out.valid

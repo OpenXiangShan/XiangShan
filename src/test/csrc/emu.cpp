@@ -572,7 +572,7 @@ void Emulator::snapshot_load(const char *filename) {
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   stream.read(ref_r, sizeof(ref_r));
-  ref_difftest_setregs(&ref_r);
+  ref_difftest_setregs(&ref_r, 0);
 
   uint64_t nemu_this_pc;
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
@@ -585,11 +585,11 @@ void Emulator::snapshot_load(const char *filename) {
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
-  ref_difftest_set_mastatus(&sync_mastate);
+  ref_difftest_set_mastatus(&sync_mastate, 0);
 
   uint64_t csr_buf[4096];
   stream.read(&csr_buf, sizeof(csr_buf));
-  ref_difftest_set_csr(csr_buf);
+  ref_difftest_set_csr(csr_buf, 0);
 
   long sdcard_offset = 0;
   stream.read(&sdcard_offset, sizeof(sdcard_offset));
