@@ -416,7 +416,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
-  frontend.io.tlbCsr := RegNext(integerBlock.io.csrio.tlb)
+  frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
@@ -473,7 +473,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
-  memBlock.io.tlbCsr := RegNext(integerBlock.io.csrio.tlb)
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
 
   floatBlock.io.frm <> integerBlock.io.csrio.frm
 
