@@ -13,7 +13,7 @@ class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
-  val forward = new LoadForwardQueryIO
+  val forward = new MaskedLoadForwardQueryIO
 }
 
 // Load Pipeline Stage 0
@@ -24,6 +24,7 @@ class LoadUnit_S0 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
   })
 
   val s0_uop = io.in.bits.uop
@@ -39,6 +40,7 @@ class LoadUnit_S0 extends XSModule {
   // when(io.in.fire() && s0_vaddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
     // printf("s0_vaddr %x s0_vaddr_old %x\n", s0_vaddr, s0_vaddr_old(VAddrBits-1,0))
   // }
+  // val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
@@ -56,14 +58,7 @@ class LoadUnit_S0 extends XSModule {
   io.dcacheReq.bits.data := DontCare
 
   // TODO: update cache meta
-  io.dcacheReq.bits.meta.id       := DontCare
-  io.dcacheReq.bits.meta.vaddr    := s0_vaddr
-  io.dcacheReq.bits.meta.paddr    := DontCare
-  io.dcacheReq.bits.meta.uop      := s0_uop
-  io.dcacheReq.bits.meta.mmio     := false.B
-  io.dcacheReq.bits.meta.tlb_miss := false.B
-  io.dcacheReq.bits.meta.mask     := s0_mask
-  io.dcacheReq.bits.meta.replay   := false.B
+  io.dcacheReq.bits.id   := DontCare
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
@@ -79,6 +74,7 @@ class LoadUnit_S0 extends XSModule {
   io.out.bits.mask := s0_mask
   io.out.bits.uop := s0_uop
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
+  io.out.bits.rsIdx := io.rsIdx
 
   io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
 
@@ -98,7 +94,7 @@ class LoadUnit_S1 extends XSModule {
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
-    val lsq = new LoadForwardQueryIO
+    val lsq = new MaskedLoadForwardQueryIO
   })
 
   val s1_uop = io.in.bits.uop
@@ -128,6 +124,7 @@ class LoadUnit_S1 extends XSModule {
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
+  io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
@@ -137,6 +134,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
+  io.out.bits.rsIdx := io.in.bits.rsIdx
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -160,8 +158,8 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
-  val s2_mmio = io.in.bits.mmio
   val s2_exception = selectLoad(io.in.bits.uop.cf.exceptionVec, false).asUInt.orR
+  val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
@@ -172,7 +170,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // feedback tlb result to RS
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
-  io.tlbFeedback.bits.roqIdx := s2_uop.roqIdx
+  io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -246,7 +244,9 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val ldout = Decoupled(new ExuOutput)
     val fpout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
@@ -260,8 +260,9 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s0.io.in <> io.ldin
   load_s0.io.dtlbReq <> io.dtlb.req
   load_s0.io.dcacheReq <> io.dcache.req
+  load_s0.io.rsIdx := io.rsIdx
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   load_s1.io.dtlbResp <> io.dtlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
@@ -269,7 +270,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
@@ -279,6 +280,14 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
   io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid) && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect)
+
+  // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
+  val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
+  io.lsq.forward.sqIdxMask := sqIdxMaskReg
+
+  // use s2_hit_way to select data received in s1
+  load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
+  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
@@ -304,7 +313,6 @@ class LoadUnit extends XSModule with HasLoadHelper {
   intHitLoadOut.bits.data := load_s2.io.out.bits.data
   intHitLoadOut.bits.redirectValid := false.B
   intHitLoadOut.bits.redirect := DontCare
-  intHitLoadOut.bits.brUpdate := DontCare
   intHitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
   intHitLoadOut.bits.debug.isPerfCnt := false.B
   intHitLoadOut.bits.fflags := DontCare

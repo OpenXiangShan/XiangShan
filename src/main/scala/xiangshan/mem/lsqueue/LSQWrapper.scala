@@ -17,8 +17,8 @@ class ExceptionAddrIO extends XSBundle {
 }
 
 class FwdEntry extends XSBundle {
-  val mask = Vec(8, Bool())
-  val data = Vec(8, UInt(8.W))
+  val valid = Bool()
+  val data = UInt(8.W)
 }
 
 // inflight miss block reqs
@@ -38,14 +38,15 @@ class LsqEnqIO extends XSBundle {
 class LsqWrappper extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val enq = new LsqEnqIO
-    val brqRedirect = Input(Valid(new Redirect))
+    val brqRedirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect))
     val dcache = Flipped(ValidIO(new Refill))
@@ -89,6 +90,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
 
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect
+  loadQueue.io.flush <> io.flush
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.loadDataForwarded <> io.loadDataForwarded
@@ -102,6 +104,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   // store queue wiring
   // storeQueue.io <> DontCare
   storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.flush <> io.flush
   storeQueue.io.storeIn <> io.storeIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout

@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
+import xiangshan.backend.roq.RoqExceptionInfo
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
@@ -14,9 +15,9 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val fflags = Flipped(ValidIO(UInt(5.W)))
     val dirty_fs = Input(Bool())
     val frm = Output(UInt(3.W))
-    val exception = Flipped(ValidIO(new MicroOp))
-    val isInterrupt = Input(Bool())
+    val exception = Flipped(ValidIO(new RoqExceptionInfo))
     val trapTarget = Output(UInt(VAddrBits.W))
+    val isXRet = Output(Bool())
     val interrupt = Output(Bool())
     val memExceptionVAddr = Input(UInt(VAddrBits.W))
     val externalInterrupt = new ExternalInterruptIO
@@ -76,8 +77,8 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.fpu.dirty_fs <> csrio.dirty_fs
   csr.csrio.fpu.frm <> csrio.frm
   csr.csrio.exception <> csrio.exception
-  csr.csrio.isInterrupt <> csrio.isInterrupt
   csr.csrio.trapTarget <> csrio.trapTarget
+  csr.csrio.isXRet <> csrio.isXRet
   csr.csrio.interrupt <> csrio.interrupt
   csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr
   csr.csrio.externalInterrupt <> csrio.externalInterrupt
@@ -93,23 +94,12 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   fence.io.out.ready := true.B
 
   val uop = io.fromInt.bits.uop
-  val instr_rm = uop.cf.instr(14, 12)
+  val instr_rm = uop.ctrl.fpu.rm
   i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.csrio.fpu.frm)
 
   val isDouble = !uop.ctrl.isRVF
 
-  when(csr.io.out.valid){
-    io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid
-    io.toInt.bits.redirect.brTag := uop.brTag
-    io.toInt.bits.redirect.level := RedirectLevel.flushAfter
-    io.toInt.bits.redirect.interrupt := DontCare
-    io.toInt.bits.redirect.roqIdx := uop.roqIdx
-    io.toInt.bits.redirect.target := csr.csrio.redirectOut.bits
-    io.toInt.bits.redirect.pc := uop.cf.pc
-    io.toInt.bits.debug.isPerfCnt := csr.csrio.isPerfCnt
-  }.elsewhen(jmp.io.out.valid){
-    io.toInt.bits.redirectValid := jmp.redirectOutValid
-    io.toInt.bits.redirect := jmp.redirectOut
-    io.toInt.bits.brUpdate := jmp.brUpdate
-  }
+
+  io.toInt.bits.redirectValid := jmp.redirectOutValid
+  io.toInt.bits.redirect := jmp.redirectOut
 }

@@ -33,7 +33,8 @@ object hartIdRTFp extends (() => Int) {
 
 class RenameTable(float: Boolean) extends XSModule {
   val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
+    val redirect = Input(Bool())
+    val flush = Input(Bool())
     val walkWen = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, new RatWritePort)
@@ -48,8 +49,8 @@ class RenameTable(float: Boolean) extends XSModule {
 
   // When redirect happens (mis-prediction), don't update the rename table
   // However, when mis-prediction and walk happens at the same time, rename table needs to be updated
-  for(w <- io.specWritePorts){
-    when(w.wen && (!io.redirect.valid || io.walkWen)) {
+  for (w <- io.specWritePorts){
+    when (w.wen && (!(io.redirect || io.flush) || io.walkWen)) {
       spec_table(w.addr) := w.wdata
     }
   }
@@ -65,8 +66,7 @@ class RenameTable(float: Boolean) extends XSModule {
     when(w.wen){ arch_table(w.addr) := w.wdata }
   }
 
-  val flush = io.redirect.valid && io.redirect.bits.isUnconditional()
-  when (flush) {
+  when (io.flush) {
     spec_table := arch_table
     // spec table needs to be updated when flushPipe
     for (w <- io.archWritePorts) {
