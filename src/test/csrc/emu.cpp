@@ -279,6 +279,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint64_t lastcommit[NumCore];
   uint64_t instr_left_last_cycle[NumCore];
   const int stuck_limit = 2000;
+  const int firstCommit_limit = 10000;
   uint64_t core_max_instr[NumCore];
 
   uint32_t wdst[NumCore][DIFFTEST_WIDTH];
@@ -296,7 +297,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     core_max_instr[i] = max_instr;
   }
 
-
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
@@ -305,8 +305,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
-    if (!(max_cycle > 0 && 
-          core_max_instr[0] > 0 && 
+    if (!(max_cycle > 0 &&
+          core_max_instr[0] > 0 &&
           instr_left_last_cycle[0] >= core_max_instr[0])) {
       trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
@@ -336,6 +336,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       trapCode = STATE_ABORT;
     }
 
+    if (lastcommit[0] - max_cycle > firstCommit_limit && !hascommit) {
+      eprintf("No instruction commits for %d cycles. Please check the first instruction.\n", firstCommit_limit);
+      eprintf("Note: The first instruction may lies in 0x10000000 which may executes and commits after 500 cycles.\n");
+      eprintf("      Or the first instruction may lies in 0x80000000 which may exeutes and commits after 2000 cycles.\n");
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      trapCode = STATE_ABORT;
+    }
+
     if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
       hascommit = 1;
       read_emu_regs(reg[0]);
@@ -345,6 +353,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       ref_difftest_setregs(reg[0], 0);
       printf("The first instruction has commited. Difftest enabled. \n");
     }
+
 
     // difftest
 
