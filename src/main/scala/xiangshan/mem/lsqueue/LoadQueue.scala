@@ -506,8 +506,8 @@ class LoadQueue extends XSModule
   val rollbackValidVecChecked = Wire(Vec(3, Bool()))
   for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopVec).zipWithIndex) {
     rollbackValidVecChecked(idx) := v && 
-      (!lastCycleRedirect.valid || !isAfter(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-      (!lastlastCycleRedirect.valid || !isAfter(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx))
+      !uop.roqIdx.needFlush(lastCycleRedirect, lastCycleFlush) &&
+      !uop.roqIdx.needFlush(lastlastCycleRedirect, lastlastCycleFlush)
   }
 
   io.rollback.bits.roqIdx := rollbackUop.roqIdx
@@ -519,7 +519,7 @@ class LoadQueue extends XSModule
   io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
   // io.rollback.bits.pc := DontCare
 
-  io.rollback.valid := rollbackValidVecChecked.asUInt.orR && !lastCycleFlush && !lastlastCycleFlush
+  io.rollback.valid := rollbackValidVecChecked.asUInt.orR
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.cfi, io.rollback.bits.roqIdx.asUInt)
