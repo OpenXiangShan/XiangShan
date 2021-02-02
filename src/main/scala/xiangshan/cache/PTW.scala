@@ -392,7 +392,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     }
     XSDebug(validOneCycle, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} l1HitReg:${l1HitReg} l1HitPPNReg:${Hexadecimal(l1HitPPNReg)} hitVec:${VecInit(hitVec).asUInt}\n")
-    
+
     VecInit(hitVecT).suggestName(s"l1_hitVecT")
     VecInit(hitVec).suggestName(s"l1_hitVec")
 
@@ -481,15 +481,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     VecInit(hitVecT).suggestName(s"sp_hitVecT")
     VecInit(hitVec).suggestName(s"sp_hitVec")
-    
+
     (hit, hitData)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
 
   // default values
-  resp.map(_.valid := false.B)
-  resp.map(_.bits := DontCare)
+  // resp.map(_.valid := false.B)
+  // resp.map(_.bits := DontCare)
   l2.io.w.req <> DontCare
   l3.io.w.req <> DontCare
   l2.io.w.req.valid := false.B
@@ -498,6 +498,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   // fsm
   val pteHit = l3Hit || spHit
   val notFound = WireInit(false.B)
+  notFound.suggestName("PtwNotFound")
   switch (state) {
     is (s_idle) {
       when (valid) {
@@ -531,6 +532,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       when (memRespFire) {
         when (memPte.isLeaf() || memPte.isPf(level)) {
           state := s_idle
+          notFound := memPte.isPf(level)
         }.otherwise {
           when (level =/= 2.U) {
             level := levelNext
@@ -570,6 +572,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     resp(i).bits.entry.ppn := Mux(memRespFire, memPte.ppn, Mux(l3Hit, l3HitPPN, spHitData.ppn))
     resp(i).bits.entry.perm.map(_ := Mux(memRespFire, memPte.getPerm(), Mux(l3Hit, l3HitPerm, spHitPerm)))
     resp(i).bits.entry.level.map(_ := Mux(memRespFire, level, Mux(l3Hit, 2.U, spHitLevel)))
+    resp(i).bits.pf := level === 3.U || notFound
   }
 
   // refill
@@ -718,7 +721,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(p"[mem][A] memAddr:0x${Hexadecimal(memAddr)} l1addr:0x${Hexadecimal(l1addr)} l2addr:0x${Hexadecimal(l2addr)} l3addr:0x${Hexadecimal(l3addr)} memAddrReg:0x${Hexadecimal(memAddrReg)} memPteReg.ppn:0x${Hexadecimal(memPteReg.ppn)}")
   XSDebug(p"[mem][D] (${mem.d.valid},${mem.d.ready}) memSelData:0x${Hexadecimal(memSelData)} memPte:${memPte} memPte.isLeaf:${memPte.isLeaf()} memPte.isPf(${level}):${memPte.isPf(level)}\n")
   XSDebug(memRespFire, p"[mem][D] memPtes:${printVec(memPtes)}\n")
-  
+
   XSDebug(p"[fsm] state:${state} level:${level} pteHit:${pteHit} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
   XSDebug(sfence.valid, p"[sfence] original v and g vector:\n")
   XSDebug(sfence.valid, p"[sfence] l1v:${Binary(l1v)}\n")
