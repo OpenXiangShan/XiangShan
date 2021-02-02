@@ -129,6 +129,8 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       soc.module.io.extIntrs(i) := false.B
     }
 
+    soc.module.io.sj := DontCare
+
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {
       ExcitingUtils.addSink(difftest.commit, "difftestCommit", Debug)

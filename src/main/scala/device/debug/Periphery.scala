@@ -1,6 +1,7 @@
 // See LICENSE.SiFive for license details.
 
 package devices.debug
+
 import chisel3._
 import chisel3.experimental.{IntParam, noPrefix}
 import chisel3.util._
@@ -24,7 +25,7 @@ case object APB extends DebugExportProtocol
 
 /** Options for possible debug interfaces */
 case class DebugAttachParams(
-  protocols: Set[DebugExportProtocol] = Set(DMI),
+  protocols: Set[DebugExportProtocol] = Set(JTAG),
   externalDisable: Boolean = false,
   masterWhere: TLBusWrapperLocation = FBUS,
   slaveWhere: TLBusWrapperLocation = CBUS
@@ -54,8 +55,6 @@ class DebugIO(implicit val p: Parameters) extends Bundle {
   val dmactiveAck = Input(Bool())
   val extTrigger = (p(DebugModuleKey).get.nExtTriggers > 0).option(new DebugExtTriggerIO())
   val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
-
-  val debug_int = Output(Vec(2, Bool()))
 }
 
 class PSDIO(implicit val p: Parameters) extends Bundle with CanHavePSDTestModeIO {
@@ -74,7 +73,7 @@ class ResetCtrlIO(val nComponents: Int)(implicit val p: Parameters) extends Bund
 trait HasPeripheryDebug { this: BaseSubsystem =>
   private val tlbus = locateTLBusWrapper(p(ExportDebug).slaveWhere)
 
-  val debugCustomXbarOpt = p(DebugModuleKey).map(params => LazyModule( new DebugCustomXbar(outputRequiresInput = false)))
+  // val debugCustomXbarOpt = p(DebugModuleKey).map(params => LazyModule( new DebugCustomXbar(outputRequiresInput = false)))
   val apbDebugNodeOpt = p(ExportDebug).apb.option(APBMasterNode(Seq(APBMasterPortParameters(Seq(APBMasterParameters("debugAPB"))))))
   val debugTLDomainOpt = p(DebugModuleKey).map { _ =>
     val domain = ClockSinkNode(Seq(ClockSinkParameters()))
@@ -84,10 +83,10 @@ trait HasPeripheryDebug { this: BaseSubsystem =>
   val debugOpt = p(DebugModuleKey).map { params =>
     val debug = LazyModule(new TLDebugModule(tlbus.beatBytes))
 
-    // LogicalModuleTree.add(logicalTreeNode, debug.logicalTreeNode)
+     // LogicalModuleTree.add(logicalTreeNode, debug.logicalTreeNode)
 
     debug.node := tlbus.coupleTo("debug"){ TLFragmenter(tlbus) := _ }
-    debug.dmInner.dmInner.customNode := debugCustomXbarOpt.get.node
+    // debug.dmInner.dmInner.customNode := debugCustomXbarOpt.get.node
 
     (apbDebugNodeOpt zip debug.apbNodeOpt) foreach { case (master, slave) =>
       slave := master
@@ -110,7 +109,7 @@ trait HasPeripheryDebugModuleImp extends LazyModuleImp {
   val resetctrl = outer.debugOpt.map { outerdebug =>
     outerdebug.module.io.tl_reset := outer.debugTLDomainOpt.get.in.head._1.reset
     outerdebug.module.io.tl_clock := outer.debugTLDomainOpt.get.in.head._1.clock
-    val resetctrl = IO(new ResetCtrlIO(outerdebug.dmOuter.dmOuter.intnode.edges.out.size))
+    val resetctrl = IO(new ResetCtrlIO(p(DebugModuleKey).get.nComponents))
     outerdebug.module.io.hartIsInReset := resetctrl.hartIsInReset
     resetctrl.hartResetReq.foreach { rcio => outerdebug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
     resetctrl
@@ -144,8 +143,6 @@ trait HasPeripheryDebugModuleImp extends LazyModuleImp {
     outerdebug.module.io.debug_reset := debug.reset
     outerdebug.module.io.debug_clock := debug.clock
 
-    outerdebug.module.io.debug_int := debug.debug_int
-
     debug.ndreset := outerdebug.module.io.ctrl.ndreset
     debug.dmactive := outerdebug.module.io.ctrl.dmactive
     outerdebug.module.io.ctrl.dmactiveAck := debug.dmactiveAck
@@ -161,7 +158,7 @@ trait HasPeripheryDebugModuleImp extends LazyModuleImp {
 
   def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
 
-    val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, p(JtagDTMKey)))
+    val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize)) //, p(JtagDTMKey)))
     dtm.io.jtag <> sj.jtag
 
     debug.map(_.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x })  // force TMS high when debug is disabled

@@ -13,7 +13,7 @@ import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveC
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
-import devices.debug.TLDebugModule
+import devices.debug.{TLDebugModule, SystemJTAGIO, DebugTransportModuleJTAG, DebugModuleKey}
 
 case class SoCParameters
 (
@@ -159,14 +159,14 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   // DM
   val DM = LazyModule(new TLDebugModule(beatBytes = 8))
-  DM.module.io := DontCare
-
-
+  DM.dmInner.dmInner.tlNode := mmioXbar
+  
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
       val extIntrs = Input(Vec(NrExtIntr, Bool()))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
+      val sj = new SystemJTAGIO
     })
 
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
@@ -177,6 +177,20 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
     }
+
+    val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize))
+
+    dtm.io.jtag_clock  := io.sj.jtag.TCK
+    dtm.io.jtag_reset  := io.sj.reset
+    dtm.io.jtag_mfr_id := io.sj.mfr_id
+    dtm.io.jtag_part_number := io.sj.part_number
+    dtm.io.jtag_version := io.sj.version
+    dtm.rf_reset := io.sj.reset
+
+    DM.module.io.dmi.get.dmi <> dtm.io.dmi
+    DM.module.io.dmi.get.dmiClock := io.sj.jtag.TCK
+    DM.module.io.dmi.get.dmiReset := io.sj.reset
+
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)
     chisel3.dontTouch(extDev.out.head._1)

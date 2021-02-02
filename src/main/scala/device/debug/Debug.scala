@@ -10,11 +10,12 @@ import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.rocket.{CSRs, Instructions}
-import freechips.rocketchip.tile.MaxHartIdBits
+// import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.util._
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.devices.debug.systembusaccess._
 import freechips.rocketchip.devices.tilelink.TLBusBypass
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.DebugLogicalTreeNode
@@ -104,11 +105,11 @@ case class DebugModuleParams (
   baseAddress : BigInt = BigInt(0),
   nDMIAddrSize  : Int = 7,
   nProgramBufferWords: Int = 16,
-  nAbstractDataWords : Int = 4,
+  nAbstractDataWords : Int = 2,
   nScratch : Int = 1,
   hasBusMaster : Boolean = false,
   clockGate : Boolean = true,
-  maxSupportedSBAccess : Int = 32,
+  maxSupportedSBAccess : Int = 64,
   supportQuickAccess : Boolean = false,
   supportHartArray   : Boolean = true,
   nHaltGroups        : Int = 1,
@@ -116,7 +117,9 @@ case class DebugModuleParams (
   hasHartResets      : Boolean = false,
   hasImplicitEbreak  : Boolean = false,
   hasAuthentication  : Boolean = false,
-  crossingHasSafeReset : Boolean = true
+  crossingHasSafeReset : Boolean = true,
+  nComponents : Int = 2,
+  maxHrtIdBits : Int = 2
 ) {
 
   require ((nDMIAddrSize >= 7) && (nDMIAddrSize <= 32), s"Legal DMIAddrSize is 7-32, not ${nDMIAddrSize}")
@@ -292,12 +295,12 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
   val cfg = p(DebugModuleKey).get
 
   // original interrupt node
-
+/*
   val intnode = IntNexusNode(
     sourceFn       = { _ => IntSourcePortParameters(Seq(IntSourceParameters(1, Seq(Resource(device, "int"))))) },
     sinkFn         = { _ => IntSinkPortParameters(Seq(IntSinkParameters())) },
     outputRequiresInput = false)
-  
+*/
 
   val dmiNode = TLRegisterNode (
     address = AddressSet.misaligned(DMI_DMCONTROL   << 2, 4) ++
@@ -310,9 +313,9 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
   )
 
   lazy val module = new LazyModuleImp(this) {
-    require (intnode.edges.in.size == 0, "Debug Module does not accept interrupts")
+    // require (intnode.edges.in.size == 0, "Debug Module does not accept interrupts")
 
-    val nComponents = intnode.out.size
+    val nComponents = cfg.nComponents
     def getNComponents = () => nComponents
 
     val supportHartArray = cfg.supportHartArray && (nComponents > 1)    // no hart array if only one hart
@@ -342,7 +345,7 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
     val DMCONTROLNxt = WireInit(0.U.asTypeOf(new DMCONTROLFields()))
     val DMCONTROLReg = RegNext(next=DMCONTROLNxt, init=0.U.asTypeOf(DMCONTROLNxt)).suggestName("DMCONTROLReg")
 
-    val hartsel_mask = if (nComponents > 1) ((1 << p(MaxHartIdBits)) - 1).U else 0.U
+    val hartsel_mask = if (nComponents > 1) ((1 << p(DebugModuleKey).get.maxHrtIdBits) - 1).U else 0.U
     val DMCONTROLWrData = WireInit(0.U.asTypeOf(new DMCONTROLFields()))
     val dmactiveWrEn        = WireInit(false.B)
     val ndmresetWrEn        = WireInit(false.B)
@@ -500,11 +503,11 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
       WNotifyVal(1, 0.U,                      DMCONTROLWrData.setresethaltreq, setresethaltreqWrEn,
         RegFieldDesc("setresethaltreq", "set reset halt request",   reset=Some(0), access=RegFieldAccessType.W)),
       RegField(12),
-      if (nComponents > 1) WNotifyVal(p(MaxHartIdBits),
+      if (nComponents > 1) WNotifyVal(p(DebugModuleKey).get.maxHrtIdBits,
                       DMCONTROLReg.hartsello, DMCONTROLWrData.hartsello, hartselloWrEn,
         RegFieldDesc("hartsello",       "hart select low", reset=Some(0)))
       else RegField(1),
-      if (nComponents > 1) RegField(10-p(MaxHartIdBits))
+      if (nComponents > 1) RegField(10-p(DebugModuleKey).get.maxHrtIdBits)
       else RegField(9),
       if (supportHartArray)
         WNotifyVal(1, DMCONTROLReg.hasel,     DMCONTROLWrData.hasel, haselWrEn,
@@ -663,7 +666,7 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
   })
 
   val dmOuter = LazyModule( new TLDebugModuleOuter(device))
-  val intnode = IntSyncCrossingSource(alreadyRegistered = true) :*= dmOuter.intnode
+  // val intnode = IntSyncCrossingSource(alreadyRegistered = true) :*= dmOuter.intnode
 
   val dmiBypass = LazyModule(new TLBusBypass(beatBytes=4, bufferError=false, maxAtomic=0, maxTransfer=4))
   val dmiInnerNode = TLAsyncCrossingSource() := dmiBypass.node := dmiXbar.node
@@ -671,7 +674,7 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
   
   lazy val module = new LazyRawModuleImp(this) {
 
-    val nComponents = dmOuter.intnode.edges.out.size
+    val nComponents = cfg.nComponents
 
     val io = IO(new Bundle {
       val dmi_clock = Input(Clock())
@@ -703,7 +706,8 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
       dmOuter.module.io.hgDebugInt := io.hgDebugInt
       io.hartResetReq.foreach { x => dmOuter.module.io.hartResetReq.foreach {y => x := y}}
       io.dmAuthenticated.foreach { x => dmOuter.module.io.dmAuthenticated.foreach { y => y := x}}
-      io.debug_int.foreach { x => dmOuter.module.io.debug_int.foreach { y => y := x}} // TODO debug int line clock? 
+      //io.debug_int.foreach { x => dmOuter.module.io.debug_int.foreach { y => y := x}} // TODO debug int line clock?
+      io.debug_int := dmOuter.module.io.debug_int 
     }
   }
 }
@@ -743,7 +747,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
   // If we want to support custom registers read through Abstract Commands,
   // provide a place to bring them into the debug module. What this connects
   // to is up to the implementation.
-  val customNode = new DebugCustomSink()
+  // val customNode = new DebugCustomSink()
 
   lazy val module = new LazyModuleImp(this){
     val nComponents = getNComponents()
@@ -826,7 +830,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
 
     val dmAuthenticated = io.auth.map(a => a.dmAuthenticated).getOrElse(true.B)
 
-    val selectedHartReg = Reg(UInt(p(MaxHartIdBits).W))
+    val selectedHartReg = Reg(UInt(p(DebugModuleKey).get.maxHrtIdBits.W))
       // hamaskFull is a vector of all selected harts including hartsel, whether or not supportHartArray is true
     val hamaskFull = WireInit(VecInit(Seq.fill(nComponents) {false.B} ))
 
@@ -1370,10 +1374,10 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
       }
     }
     // ... and also by custom register read (if implemented)
-    val (customs, customParams) = customNode.in.unzip
-    val needCustom = (customs.size > 0) && (customParams.head.addrs.size > 0)
-    def getNeedCustom = () => needCustom
-
+    // val (customs, customParams) = customNode.in.unzip
+    // val needCustom = (customs.size > 0) && (customParams.head.addrs.size > 0)
+    // def getNeedCustom = () => needCustom
+/*
     if (needCustom) {
       val (custom, customP) = customNode.in.head
       require(customP.width % 8 == 0, s"Debug Custom width must be divisible by 8, not ${customP.width}")
@@ -1385,7 +1389,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
         }
       }
     }
-
+*/
     programBufferMem.zipWithIndex.foreach { case (x, i) =>
       when (dmAuthenticated && dmiProgramBufferWrEnMaybe(i) && dmiProgramBufferAccessLegal) {
         x := programBufferNxt(i)
@@ -1398,7 +1402,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
 
     val goReg        = Reg(Bool())
     val goAbstract   = WireInit(false.B)
-    val goCustom     = WireInit(false.B)
+    // val goCustom     = WireInit(false.B)
     val jalAbstract  = WireInit(Instructions.JAL.value.U.asTypeOf(new GeneratedUJ()))
     jalAbstract.setImm(ABSTRACT(cfg) - WHERETO)
 
@@ -1571,11 +1575,13 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
     //--------------------------------------------------------------
     // Drive Custom Access
     //--------------------------------------------------------------
+    /*
     if (needCustom) {
       val (custom, customP) = customNode.in.head
       custom.addr  := accessRegisterCommandReg.regno
       custom.valid := goCustom
     }
+    */
     //--------------------------------------------------------------
     // Hart Bus Access
     //--------------------------------------------------------------
@@ -1668,14 +1674,15 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
     // We only support abstract commands for GPRs and any custom registers, if specified.
     val accessRegIsLegalSize = (accessRegisterCommandReg.size === 2.U) || (accessRegisterCommandReg.size === 3.U)
     val accessRegIsGPR = (accessRegisterCommandReg.regno >= 0x1000.U && accessRegisterCommandReg.regno <= 0x101F.U) && accessRegIsLegalSize
+    /*
     val accessRegIsCustom = if (needCustom) {
       val (custom, customP) = customNode.in.head
       customP.addrs.foldLeft(false.B){
         (result, current) => result || (current.U === accessRegisterCommandReg.regno)}
     } else false.B
-
+*/
     when (commandRegIsAccessRegister) {
-      when (accessRegIsCustom && accessRegisterCommandReg.transfer && accessRegisterCommandReg.write === false.B) {
+      when (/*accessRegIsCustom && */accessRegisterCommandReg.transfer && accessRegisterCommandReg.write === false.B) {
         commandRegIsUnsupported := false.B
       }.elsewhen (!accessRegisterCommandReg.transfer || accessRegIsGPR) {
         commandRegIsUnsupported := false.B
@@ -1712,12 +1719,12 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
         errorHaltResume := true.B
         ctrlStateNxt := CtrlState(Waiting)
       }.otherwise {
-        when(accessRegIsCustom) {
+        /*when(accessRegIsCustom) {
           ctrlStateNxt := CtrlState(Custom)
-        }.otherwise {
+        }.otherwise {*/
           ctrlStateNxt := CtrlState(Exec)
           goAbstract := true.B
-        }
+        //}
       }
     }.elsewhen (ctrlStateReg === CtrlState(Exec)) {
 
@@ -1732,7 +1739,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
           ctrlStateNxt := CtrlState(Waiting)
         errorException := true.B
       }
-    }.elsewhen (ctrlStateReg === CtrlState(Custom)) {
+    }/*.elsewhen (ctrlStateReg === CtrlState(Custom)) {
       assert(needCustom.B, "Should not be in custom state unless we need it.")
       goCustom := true.B
       val (custom, customP) = customNode.in.head
@@ -1740,6 +1747,7 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int, beatBytes: I
         ctrlStateNxt := CtrlState(Waiting)
       }
     }
+    */
 
     when (~io.dmactive || ~dmAuthenticated) {
       ctrlStateReg := CtrlState(Waiting)
@@ -1837,16 +1845,16 @@ class TLDebugModule(beatBytes: Int)(implicit p: Parameters) extends LazyModule {
   }
 
   val dmOuter : TLDebugModuleOuterAsync = LazyModule(new TLDebugModuleOuterAsync(device)(p))
-  val dmInner : TLDebugModuleInnerAsync = LazyModule(new TLDebugModuleInnerAsync(device, () => {dmOuter.dmOuter.intnode.edges.out.size}, beatBytes)(p))
+  val dmInner : TLDebugModuleInnerAsync = LazyModule(new TLDebugModuleInnerAsync(device, () => {p(DebugModuleKey).get.nComponents}, beatBytes)(p))
 
   val node = dmInner.tlNode
-  val intnode = dmOuter.intnode
+  // val intnode = dmOuter.intnode
   val apbNodeOpt = dmOuter.apbNodeOpt
 
   dmInner.dmiNode := dmOuter.dmiInnerNode
 
   lazy val module = new LazyRawModuleImp(this) {
-    val nComponents = dmOuter.dmOuter.intnode.edges.out.size
+    val nComponents = p(DebugModuleKey).get.nComponents
 
     // Clock/reset domains:
     //  tl_clock / tl_reset = tilelink domain

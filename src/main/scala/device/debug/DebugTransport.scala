@@ -75,7 +75,7 @@ class SystemJTAGIO extends Bundle {
 
 // Use the Chisel Name macro due to the bulk of this being inside a withClockAndReset block
 @chiselName
-class DebugTransportModuleJTAG(debugAddrBits: Int, c: JtagDTMConfig)
+class DebugTransportModuleJTAG(debugAddrBits: Int/*, c: JtagDTMConfig*/)
   (implicit val p: Parameters) extends RawModule  {
 
   val io = IO(new Bundle {
@@ -125,7 +125,7 @@ class DebugTransportModuleJTAG(debugAddrBits: Int, c: JtagDTMConfig)
   dtmInfo.debugVersion  := 1.U // This implements version 1 of the spec.
   dtmInfo.debugAddrBits := debugAddrBits.U
   dtmInfo.dmiStatus     := dmiStatus
-  dtmInfo.dmiIdleCycles := c.debugIdleCycles.U
+  dtmInfo.dmiIdleCycles := 5.U // c.debugIdleCycles.U
   dtmInfo.reserved0     := 0.U
   dtmInfo.dmireset      := false.B // This is write-only
   dtmInfo.reserved1     := 0.U
