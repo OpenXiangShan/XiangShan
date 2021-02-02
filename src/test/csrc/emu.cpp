@@ -246,8 +246,8 @@ inline void Emulator::read_sbuffer_info(uint8_t *sbufferData) {
   dut_ptr_data(60); dut_ptr_data(61); dut_ptr_data(62); dut_ptr_data(63);
 }
 
-inline void Emulator::load_diff_info(void* diff_ptr, int coreid) {
-#define load_info(x)  diff[coreid].x = dut_ptr->io_difftest_##x
+inline void Emulator::read_diff_info(void* diff_ptr) {
+#define load_info(x)  diff[0].x = dut_ptr->io_difftest_##x
   DiffState* diff = (DiffState*)diff_ptr;
   load_info(commit);  load_info(thisINST);
   load_info(skip);    load_info(isRVC);
@@ -356,9 +356,8 @@ inline void Emulator::read_sbuffer_info2(uint8_t *sbufferData) {
   dut_ptr_data2(60); dut_ptr_data2(61); dut_ptr_data2(62); dut_ptr_data2(63);
 }
 
-inline void Emulator::load_diff_info2(void* diff_ptr, int coreid) {
-#define load_info2(x) diff[coreid].x = dut_ptr->io_difftest2_##x
-  assert(coreid == 1);
+inline void Emulator::read_diff_info2(void* diff_ptr) {
+#define load_info2(x) diff[1].x = dut_ptr->io_difftest2_##x
   DiffState* diff = (DiffState*)diff_ptr;
   load_info2(commit);  load_info2(thisINST);
   load_info2(skip);    load_info2(isRVC);
@@ -420,7 +419,6 @@ inline void Emulator::single_cycle() {
     extern uint8_t uart_getc();
     dut_ptr->io_uart_in_ch = uart_getc();
   }
-
   cycles ++;
 }
 
@@ -442,7 +440,7 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
     }
     switch (atomicFuop) {
       case 002: case 003: ret = t; break;
-      case 006: case 007: ret = rs; break;  // TODO
+      case 006: case 007: ret = rs; break;
       case 012: case 013: ret = rs; break;
       case 016: case 017: ret = t+rs; break;
       case 022: case 023: ret = (t^rs); break;
@@ -585,7 +583,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
       if (!hascommit[i] && first_instr_commit) {
         hascommit[i] = 1;
+#ifdef DUALCORE
         if (i == 0) read_emu_regs(reg[i]); else read_emu_regs2(reg[i]);
+#else
+        read_emu_regs(reg[i]);
+#endif
         void* get_img_start();
         long get_img_size();
         ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
@@ -606,12 +608,12 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         if (i == 0) {
           read_emu_regs(reg[i]);
           read_wb_info(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
-          load_diff_info(diff, i);
+          read_diff_info(diff);
         } else {
 #ifdef DUALCORE
           read_emu_regs2(reg[i]);
           read_wb_info2(wpc[i], wdata[i], wdst[i], lpaddr[i], ltype[i], lfu[i]);
-          load_diff_info2(diff, i);
+          read_diff_info2(diff);
 #else
           assert(0);
 #endif

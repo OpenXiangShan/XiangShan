@@ -173,8 +173,7 @@ int difftest_step(DiffState *s, int coreid) {
   if (s->intrNO) {
     ref_difftest_raise_intr(s->intrNO, coreid);
     // ref_difftest_exec(1);//TODO
-  }
-  else {
+  } else {
     assert(s->commit > 0 && s->commit <= DIFFTEST_WIDTH);
     for (int i = 0; i < s->commit; i++) {
       pc_wb_queue[coreid][wb_pointer[coreid]] = s->wpc[i];
@@ -209,7 +208,7 @@ int difftest_step(DiffState *s, int coreid) {
           if (s->lfu[i] == 0xC || s->lfu[i] == 0xF) {  // Load instruction
             ref_difftest_getregs(&ref_r, coreid);
             if (ref_r[s->wdst[i]] != s->wdata[i] && selectBit(s->wen, i) != 0) {
-              printf("---[DIFF Core%d] This load instruction gets fucked!\n", coreid);
+              printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
               printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
               uint64_t golden;
               int len = 0;
@@ -254,9 +253,9 @@ int difftest_step(DiffState *s, int coreid) {
                   ref_r[s->wdst[i]] = s->wdata[i];
                   ref_difftest_setregs(ref_r, coreid);
                 }
-                printf("---    atomic instr found: carefully handled\n");
+                printf("---    atomic instr carefully handled\n");
               } else {
-                printf("---    golden fucked up as well\n");
+                printf("---    goldenmem check failed as well\n");
               }
             }
           }
@@ -300,7 +299,7 @@ int difftest_step(DiffState *s, int coreid) {
       }
     }
 #ifdef DUALCORE
-    printf("(((Another Core)))\n");
+    printf("\n*******   Another Core   *******\n\n");
     difftest_display(s->priviledgeMode, 1-coreid);
 #endif
     return 1;
