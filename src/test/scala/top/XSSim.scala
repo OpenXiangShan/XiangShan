@@ -6,9 +6,9 @@ import chisel3.util._
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4UserYanker, AXI4Xbar, AXI4IdentityNode}
+import freechips.rocketchip.amba.axi4.{AXI4IdIndexer, AXI4IdentityNode, AXI4UserYanker, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLToAXI4}
+import freechips.rocketchip.tilelink.TLToAXI4
 import xiangshan._
 import utils._
 import ExcitingUtils.Debug
@@ -115,7 +115,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     startAddr = 0x80000000L,
     nOp = 0,
     beatBytes = L3BusWidth / 8))
-  soc.dma := burst.node
+  soc.dma := AXI4IdIndexer(16) := burst.node
 
   // AXI MMIO
   // -----------------------------------
