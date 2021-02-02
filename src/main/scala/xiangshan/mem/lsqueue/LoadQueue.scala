@@ -237,7 +237,7 @@ class LoadQueue extends XSModule
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
-  // generate lastCycleSelect mask 
+  // generate lastCycleSelect mask
   val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
   val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
   // generate real select vec
@@ -254,7 +254,7 @@ class LoadQueue extends XSModule
   loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
   loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
   loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
-  
+
   (0 until LoadPipelineWidth).map(i => {
     loadWbSel(i) := RegNext(loadWbSelGen(i))
     loadWbSelV(i) := RegNext(loadWbSelVGen(i), init = false.B)
