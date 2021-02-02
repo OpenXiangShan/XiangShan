@@ -113,7 +113,7 @@ class Alu extends FunctionUnit with HasRedirectOut {
   val slt = xorRes(XLEN-1) ^ sltu
 
   val isW = ALUOpType.isWordOp(func)
-  val shamt = Cat(isW && src2(5), src2(4, 0))
+  val shamt = Cat(!isW && src2(5), src2(4, 0))
 
   val leftShiftModule = Module(new LeftShiftModule)
   leftShiftModule.io.sllSrc := src1
