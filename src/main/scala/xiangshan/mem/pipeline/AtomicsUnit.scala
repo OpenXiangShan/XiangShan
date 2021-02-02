@@ -13,6 +13,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
+    val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
@@ -69,7 +70,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // since we will continue polling tlb all by ourself
   io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
+  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -96,7 +97,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
-      val exception = !addrAligned || 
+      val exception = !addrAligned ||
         io.dtlb.resp.bits.excp.pf.st ||
         io.dtlb.resp.bits.excp.pf.ld ||
         io.dtlb.resp.bits.excp.af.st ||

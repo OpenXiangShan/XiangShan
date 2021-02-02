@@ -93,7 +93,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   fence.io.out.ready := true.B
 
   val uop = io.fromInt.bits.uop
-  val instr_rm = uop.cf.instr(14, 12)
+  val instr_rm = uop.ctrl.fpu.rm
   i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.csrio.fpu.frm)
 
   val isDouble = !uop.ctrl.isRVF

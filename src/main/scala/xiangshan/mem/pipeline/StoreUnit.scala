@@ -12,6 +12,7 @@ import xiangshan.cache._
 class StoreUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
   })
@@ -44,6 +45,7 @@ class StoreUnit_S0 extends XSModule {
   } // not not touch fp store raw data
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
+  io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -83,11 +85,11 @@ class StoreUnit_S1 extends XSModule {
   // Send TLB feedback to store issue queue
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
-  io.tlbFeedback.bits.roqIdx := io.in.bits.uop.roqIdx
+  io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
   XSDebug(io.tlbFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.roqIdx.asUInt
+    io.tlbFeedback.bits.rsIdx
   )
 
 
@@ -150,6 +152,7 @@ class StoreUnit extends XSModule {
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val lsq = ValidIO(new LsPipelineBundle)
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
@@ -161,6 +164,7 @@ class StoreUnit extends XSModule {
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
+  store_s0.io.rsIdx := io.rsIdx
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 

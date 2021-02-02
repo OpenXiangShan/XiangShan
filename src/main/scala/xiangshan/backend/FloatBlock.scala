@@ -107,7 +107,7 @@ class FloatBlock
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromFp <> rs.io.deq
-    rs.io.feedback := DontCare
+    // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
 
