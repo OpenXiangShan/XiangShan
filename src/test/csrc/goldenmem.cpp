@@ -12,15 +12,15 @@ void init_goldenmem() {
   if (pmem == (uint8_t *)MAP_FAILED) {
     printf("ERROR allocating physical memory. \n");
   }
+  void* get_img_start();
+  long get_img_size();
+  memcpy(pmem, get_img_start(), get_img_size());
 }
 
 void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len) {
   uint8_t *dataArray = (uint8_t*)data;
   for (int i = 0; i < len; i++) {
 		if (((mask >> i) & 1) != 0) {
-      // if (addr+i == 0x8055fa5c) {
-      //   printf("+++++++++++ 0x%x\n", dataArray[i]);
-      // }
 			paddr_write(addr + i, dataArray[i], 1);
 		}
   }
@@ -50,7 +50,6 @@ static inline void pmem_write(paddr_t addr, word_t data, int len) {
   store_commit_queue_push(addr, data, len);
 #endif
 
-  // write to pmem, mark pmem addr as dirty
   void *p = &pmem[addr - PMEM_BASE];
   switch (len) {
     case 1: 
