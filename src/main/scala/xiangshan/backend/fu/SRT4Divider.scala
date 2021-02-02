@@ -1,6 +1,7 @@
 package xiangshan.backend.fu
 
 import chisel3._
+import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import utils.SignExt
 import xiangshan.backend.fu.util.CSA3_2
@@ -11,7 +12,7 @@ import xiangshan.backend.fu.util.CSA3_2
   */
 class SRT4Divider(len: Int) extends AbstractDivider(len) {
 
-  val s_idle :: s_lzd :: s_normlize :: s_recurrence :: s_recovery :: s_finish :: Nil = Enum(6)
+  val s_idle :: s_lzd :: s_normlize :: s_recurrence :: s_recovery_1 :: s_recovery_2 :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_idle)
   val newReq = (state === s_idle) && io.in.fire()
   val cnt_next = Wire(UInt(log2Up((len+3)/2).W))
@@ -48,9 +49,12 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
       state := s_recurrence
     }
     is(s_recurrence){ // (ws[j+1], wc[j+1]) = 4(ws[j],wc[j]) - q(j+1)*d
-      when(rec_enough){ state := s_recovery }
+      when(rec_enough){ state := s_recovery_1 }
     }
-    is(s_recovery){ // if rem < 0, rem = rem + d
+    is(s_recovery_1){ // if rem < 0, rem = rem + d
+      state := s_recovery_2
+    }
+    is(s_recovery_2){ // recovery shift
       state := s_finish
     }
     is(s_finish){
@@ -99,7 +103,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
 
   val rem_temp = ws + wc
   val rem_fixed = Mux(rem_temp(wLen-1), rem_temp + d, rem_temp)
-  val rem_abs = (rem_fixed << recoveryShift)(2*len, len+1)
+  val rem_abs = (ws << recoveryShift)(2*len, len+1)
 
   when(newReq){
     ws := Cat(0.U(4.W), Mux(divZero, a, aVal))
@@ -111,7 +115,9 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
   }.elsewhen(state === s_recurrence){
     ws := Mux(rec_enough, ws_next, ws_next << 2)
     wc := Mux(rec_enough, wc_next, wc_next << 2)
-  }.elsewhen(state === s_recovery){
+  }.elsewhen(state === s_recovery_1){
+    ws := rem_fixed
+  }.elsewhen(state === s_recovery_2){
     ws := rem_abs
   }
 
@@ -208,7 +214,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
     qm := MuxLookup(q_sel, 0.U,
       qmMap.map(m => m._1 -> Cat(m._2._1(len-3, 0), m._2._2.U(2.W)))
     )
-  }.elsewhen(state === s_recovery){
+  }.elsewhen(state === s_recovery_1){
     q := Mux(rem_temp(wLen-1), qm, q)
   }
 
