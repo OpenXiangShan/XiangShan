@@ -41,6 +41,7 @@ class LsPipelineBundle extends XSBundle {
   val miss = Bool()
   val tlbMiss = Bool()
   val mmio = Bool()
+  val rsIdx = UInt(log2Up(IssQueSize).W)
 
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))

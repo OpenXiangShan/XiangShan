@@ -3,7 +3,7 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= -1
+E ?= 0
 V ?= OFF
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
@@ -18,7 +18,7 @@ cache:
 	#2>&1 | tee > loader.log
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee > dummy.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 
 
 # ------------------------------------------------------------------
 # run different test sets
@@ -99,6 +99,12 @@ SUITE = cache.L2CacheTest
 
 unit-test:
 	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE)
+
+tlc-test:
+	cd .. && mill XiangShan.test.testOnly -o -s cache.TLCTest.TLCCacheTest
+
+l1-test:
+	cd .. && mill XiangShan.test.testOnly -o -s cache.L1DTest.L1DCacheTest
 
 unit-test-all:
 	cd .. && mill XiangShan.test.test -P$(P)
