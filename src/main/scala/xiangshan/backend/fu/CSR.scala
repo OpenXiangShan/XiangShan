@@ -746,7 +746,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  val isXRet = func === CSROpType.jmp && !isEcall
+  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
   // ctrl block use these 2 cycles later
   //  0          1       2
   // XRet
@@ -894,7 +894,7 @@ class CSR extends FunctionUnit with HasCSRConst
     }
 
     ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+    ExcitingUtils.addSource(Mux(csrio.exception.valid, causeNO, 0.U), "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
