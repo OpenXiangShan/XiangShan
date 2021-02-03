@@ -279,7 +279,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
-  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid) && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect)
+  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid) && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush)
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
