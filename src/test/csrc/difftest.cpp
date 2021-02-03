@@ -105,9 +105,11 @@ void init_difftest() {
   assert(ref_difftest_init);
 
   void (*ref_misc_put_gmaddr)(void *) = (void (*)(void*))dlsym(handle, "misc_put_gmaddr");
-  assert(ref_misc_put_gmaddr);
-
-  ref_misc_put_gmaddr(pmem);
+  
+  if (ref_misc_put_gmaddr) {
+    ref_misc_put_gmaddr(pmem);
+  }
+  
   for (int i = 0; i < NumCore; i++) {
     ref_difftest_init(i);
   }
