@@ -27,7 +27,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
   val isAuipc = JumpOpType.jumpOpisAuipc(func)
-  val offset = SignExt(Mux1H(Seq(
+  val offset = SignExt(ParallelMux(Seq(
     isJalr -> ImmUnion.I.toImm32(immMin),
     isAuipc -> ImmUnion.U.toImm32(immMin),
     !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
