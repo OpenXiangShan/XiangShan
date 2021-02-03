@@ -57,8 +57,6 @@ static int wb_pointer[NumCore] = {0};
 
 void init_difftest() {
 
-#undef REF_SO
-#define REF_SO "/home/wkf/xs/InterEmu/build/interemu-so"
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   puts("Using " REF_SO " for difftest");
