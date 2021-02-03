@@ -26,10 +26,11 @@ object XSLog {
     val logTimestamp = WireInit(0.U(64.W))
     val enableDebug = Parameters.get.envParameters.EnableDebug && debugLevel != XSLogLevel.PERF
     val enablePerf = Parameters.get.envParameters.EnablePerfDebug && debugLevel == XSLogLevel.PERF
-    if (enableDebug || enablePerf) {
+    if (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR) {
       ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      when (cond && logEnable) {
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
+      when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {

@@ -109,7 +109,8 @@ class ReservationStation
 
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val feedback = Flipped(ValidIO(new RSFeedback))
+    val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
+    val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
   })
 
   val select = Module(new ReservationStationSelect(exuCfg, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
@@ -119,12 +120,14 @@ class ReservationStation
   select.io.redirect := io.redirect
   select.io.flush := io.flush
   io.numExist := select.io.numExist
-  select.io.feedbackVec := ctrl.io.feedbackVec
   select.io.redirectVec := ctrl.io.redirectVec
   select.io.readyVec := ctrl.io.readyVec
   select.io.enq.valid := io.fromDispatch.valid
   io.fromDispatch.ready := select.io.enq.ready
   select.io.deq.ready := io.deq.ready
+  if (feedback) {
+    select.io.memfeedback := io.memfeedback
+  }
 
   ctrl.io.in.valid := select.io.enq.fire() && !(io.redirect.valid || io.flush) // NOTE: same as select
   ctrl.io.flush := io.flush
@@ -133,7 +136,6 @@ class ReservationStation
   ctrl.io.validVec := select.io.validVec
   ctrl.io.indexVec := select.io.indexVec
   ctrl.io.redirect := io.redirect
-  ctrl.io.feedback := io.feedback
   ctrl.io.sel.valid := select.io.deq.valid
   ctrl.io.sel.bits  := select.io.deq.bits
   io.fastUopOut := ctrl.io.fastUopOut
@@ -161,6 +163,9 @@ class ReservationStation
     data.io.listen.wdata(i + fastPortsCnt) := io.slowPorts(i).bits.data
   }
 
+  if (feedback) {
+    io.rsIdx := RegNext(select.io.deq.bits) // NOTE: just for feeback
+  }
   io.deq.bits := DontCare
   io.deq.bits.uop  := ctrl.io.out.bits
   io.deq.bits.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
@@ -185,14 +190,20 @@ class ReservationStationSelect
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(nonBlocked==fastWakeup)
-  val replayDelay = 5
+  val delayMap = Map(
+    0 -> 5,
+    1 -> 10,
+    2 -> 40,
+    3 -> 40
+  )
+  def replayDelay(times: UInt) = ParallelMux((0 until 4).map( i => (i.U === times, delayMap(i).U)))
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val numExist = Output(UInt(iqIdxWidth.W))
+    val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
 
-    val feedbackVec = Input(Vec(IssQueSize+1, Bool()))
     val redirectVec = Input(Vec(IssQueSize, Bool()))
     val readyVec = Input(Vec(IssQueSize, Bool()))
     val validVec = Output(Vec(IssQueSize, Bool()))
@@ -228,7 +239,8 @@ class ReservationStationSelect
   val indexQueue    = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val validQueue    = VecInit(stateQueue.map(_ === s_valid))
   val emptyQueue    = VecInit(stateQueue.map(_ === s_idle))
-  val countQueue    = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
+  val countQueue    = Reg(Vec(iqSize, UInt(log2Up(delayMap(3)).W)))
+  val cntCountQueue = Reg(Vec(iqSize, UInt(2.W)))
   val validIdxQueue = widthMap(i => validQueue(indexQueue(i)))
   val readyIdxQueue = widthMap(i => validQueue(indexQueue(i)) && io.readyVec(indexQueue(i)))
   val emptyIdxQueue = widthMap(i => emptyQueue(indexQueue(i)))
@@ -284,6 +296,15 @@ class ReservationStationSelect
     indexQueue.last := indexQueue(deqPtr)
   }
 
+  if (feedback) {
+    when (io.memfeedback.valid) {
+      stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
+      when (!io.memfeedback.bits.hit) {
+        countQueue(io.memfeedback.bits.rsIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.rsIdx))
+      }
+    }
+  }
+
   when (issueFire) {
     if (feedback) { when (stateQueue(selectIndexReg) === s_valid) { stateQueue(selectIndexReg) := s_wait } }
     else { stateQueue(selectIndexReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
@@ -292,23 +313,16 @@ class ReservationStationSelect
   // redirect and feedback && wakeup
   for (i <- 0 until iqSize) {
     // replay
-    val count = countQueue(i)
     when (stateQueue(i) === s_replay) {
-      count := count - 1.U
-      when (count === 0.U) { stateQueue(i) := s_valid }
-    }
-    if (feedback) {
-      val feedbackMatchVec = widthMap(i => io.feedbackVec(i) && (stateQueue(i) === s_wait || stateQueue(i)===s_valid)).asUInt
-      val feedbackHit       = io.feedbackVec(iqSize)
-      // feedback
-      when (feedbackMatchVec(i)) {
-        stateQueue(i) := Mux(!feedbackHit, s_replay, s_idle)
-        countQueue(i) := Mux(feedbackHit, count, (replayDelay-1).U)
+      countQueue(i) := countQueue(i) - 1.U
+      when (countQueue(i) === 0.U) {
+        stateQueue(i) := s_valid
+        cntCountQueue(i) := Mux(cntCountQueue(i)===3.U, cntCountQueue(i), cntCountQueue(i) + 1.U)
       }
     }
 
     // redirect
-    when (io.redirectVec(i) && stateQueue(i) =/= s_idle) {
+    when (io.redirectVec(i)) {
       stateQueue(i) := s_idle
     }
   }
@@ -333,6 +347,7 @@ class ReservationStationSelect
   val enqIdx = indexQueue(enqPtr)
   when (enqueue) {
     stateQueue(enqIdx) := s_valid
+    cntCountQueue(enqIdx) := 0.U
   }
 
   io.validVec := validIdxQueue.zip(lastSelMask.asBools).map{ case (a, b) => a & b }
@@ -376,7 +391,6 @@ class ReservationStationCtrl
     val sel = Flipped(ValidIO(UInt(iqIdxWidth.W)))
     val out = ValidIO(new MicroOp)
 
-    val feedbackVec = Output(Vec(IssQueSize+1, Bool()))
     val redirectVec = Output(Vec(IssQueSize, Bool()))
     val readyVec = Output(Vec(IssQueSize, Bool()))
     val validVec = Input(Vec(IssQueSize, Bool()))
@@ -388,8 +402,6 @@ class ReservationStationCtrl
 
     val listen = Output(Vec(srcNum, Vec(iqSize, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
     val enqSrcReady = Output(Vec(srcNum, Bool()))
-
-    val feedback = Flipped(ValidIO(new RSFeedback))
   })
 
   val selValid = io.sel.valid
@@ -470,14 +482,6 @@ class ReservationStationCtrl
   }
   io.out.bits.roqIdx := roqIdx(selPtrReg)
 
-  io.feedbackVec := DontCare
-  if (feedback) {
-    (0 until iqSize).foreach{ i =>
-      io.feedbackVec(i) := roqIdx(i).asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid
-    }
-    io.feedbackVec(iqSize) := io.feedback.bits.hit
-  }
-
   io.fastUopOut := DontCare
   if (fastWakeup) {
     val asynUop = Reg(Vec(iqSize, new fastSendUop))
@@ -485,6 +489,7 @@ class ReservationStationCtrl
     val asynIdxUop = (0 until iqSize).map(i => asynUop(io.indexVec(i)) )
     val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueue(io.indexVec(i))).andR )
     val fastAsynUop = ParallelPriorityMux(readyIdxVec zip asynIdxUop)
+    val fastRoqIdx = ParallelPriorityMux(readyIdxVec zip roqIdx)
     val fastSentUop = Wire(new MicroOp)
     fastSentUop := DontCare
     fastSentUop.pdest := fastAsynUop.pdest
@@ -498,6 +503,7 @@ class ReservationStationCtrl
       val bpQueue = Module(new BypassQueue(fixedDelay))
       bpQueue.io.in.valid := selValid
       bpQueue.io.in.bits  := fastSentUop
+      bpQueue.io.in.bits.roqIdx := fastRoqIdx
       bpQueue.io.redirect := io.redirect
       bpQueue.io.flush    := io.flush
       io.fastUopOut.valid := bpQueue.io.out.valid

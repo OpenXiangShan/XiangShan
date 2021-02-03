@@ -8,7 +8,6 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.Regfile
-import xiangshan.backend.roq.RoqExceptionInfo
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -76,7 +75,7 @@ class IntegerBlock
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
-      val exception = Flipped(ValidIO(new RoqExceptionInfo))
+      val exception = Flipped(ValidIO(new ExceptionInfo))
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
       val isXRet = Output(Bool())
       val interrupt = Output(Bool()) // to roq
@@ -188,7 +187,7 @@ class IntegerBlock
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.fromInt <> rs.io.deq
     exeUnits(i).io.flush <> flush
-    rs.io.feedback := DontCare
+    // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
 

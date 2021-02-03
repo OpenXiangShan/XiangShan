@@ -78,9 +78,9 @@ case class XSCoreParameters
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
-    IntDqSize = 32,
-    FpDqSize = 32,
-    LsDqSize = 32,
+    IntDqSize = 16,
+    FpDqSize = 16,
+    LsDqSize = 16,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
@@ -414,7 +414,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
-  frontend.io.tlbCsr := RegNext(integerBlock.io.csrio.tlb)
+  frontend.io.tlbCsr := integerBlock.io.csrio.tlb
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
