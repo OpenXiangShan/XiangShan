@@ -359,6 +359,11 @@ class CSRSpecialIO extends XSBundle {
   val interrupt = Output(Bool())
 }
 
+class ExceptionInfo extends XSBundle {
+  val uop = new MicroOp
+  val isInterrupt = Bool()
+}
+
 class RoqCommitInfo extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
