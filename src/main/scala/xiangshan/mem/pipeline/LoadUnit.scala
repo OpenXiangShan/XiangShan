@@ -28,20 +28,16 @@ class LoadUnit_S0 extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  val s0_vaddr = io.in.bits.src1 + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
-  // val s0_vaddr_old = io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN)
-  // val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
-  // val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  // val s0_vaddr_hi = Mux(imm12(11), 
-    // Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
-    // Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
-  // )
-  // val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
-  // when(io.in.fire() && s0_vaddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
-    // printf("s0_vaddr %x s0_vaddr_old %x\n", s0_vaddr, s0_vaddr_old(VAddrBits-1,0))
-  // }
-  // val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
-  val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
+  // val s0_vaddr = io.in.bits.src1 + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
+  val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
+  val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
+  val s0_vaddr_hi = Mux(s0_vaddr_lo(12), 
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
+  )
+  val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
+  val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
