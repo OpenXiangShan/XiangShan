@@ -11,7 +11,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.ftq.{Ftq, FtqRead, GetPcByFtq}
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr, RoqExceptionInfo}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
@@ -180,7 +180,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     val roqio = new Bundle {
       // to int block
       val toCSR = new RoqCSRIO
-      val exception = ValidIO(new RoqExceptionInfo)
+      val exception = ValidIO(new ExceptionInfo)
       // to mem block
       val lsq = new RoqLsqIO
     }
