@@ -517,7 +517,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),  // 00000
+    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
     lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
