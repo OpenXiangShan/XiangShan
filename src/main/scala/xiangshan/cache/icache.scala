@@ -456,7 +456,7 @@ class ICache extends ICacheModule
                                 idx=refillReq.refill_idx,
                                 waymask=refillReq.refill_waymask)
 
-  s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire()) || io.mmio_grant.fire()))
+  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire()) || io.mmio_grant.fire()))
 
 
   when(icacheFlush){ validArray := 0.U }
