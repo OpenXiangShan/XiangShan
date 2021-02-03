@@ -32,20 +32,20 @@ class Dispatch2Int extends XSModule {
 
   val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, jmpCnt, false))
   val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, mduCnt, true))
-  val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, aluCnt, true))
+  // val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, aluCnt, true))
 
-  val mduPriority = PriorityGen(io.numExist.slice(jmpCnt, jmpCnt + mduCnt))
-  val aluPriority = PriorityGen(io.numExist.drop(jmpCnt + mduCnt))
+  val (mduPriority, mduIndex) = PriorityGen(io.numExist.slice(jmpCnt, jmpCnt + mduCnt))
+  val (aluPriority, aluIndex) = PriorityGen(io.numExist.drop(jmpCnt + mduCnt))
   jmpIndexGen.io.validBits := jmpCanAccept
   mduIndexGen.io.validBits := mduCanAccept
-  aluIndexGen.io.validBits := aluCanAccept
+  // aluIndexGen.io.validBits := aluCanAccept
   jmpIndexGen.io.priority := DontCare
   mduIndexGen.io.priority := mduPriority
-  aluIndexGen.io.priority := aluPriority
+  // aluIndexGen.io.priority := aluPriority
 
-  val allIndexGen = Seq(jmpIndexGen, mduIndexGen, aluIndexGen)
-  val validVec = allIndexGen.flatMap(_.io.mapping.map(_.valid))
-  val indexVec = allIndexGen.flatMap(_.io.mapping.map(_.bits))
+  // val allIndexGen = Seq(jmpIndexGen, mduIndexGen, aluIndexGen)
+  // val validVec = allIndexGen.flatMap(_.io.mapping.map(_.valid))
+  // val indexVec = allIndexGen.flatMap(_.io.mapping.map(_.bits))
 
   /**
     * Part 2: assign regfile read ports
@@ -78,15 +78,18 @@ class Dispatch2Int extends XSModule {
     io.readState(2*i  ).req := io.fromDq(i).bits.psrc1
     io.readState(2*i+1).req := io.fromDq(i).bits.psrc2
   }
+  val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
+  val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
 
   /**
     * Part 3: dispatch to reservation stations
     */
   val jmpReady = io.enqIQCtrl(0).ready
   val mduReady = Cat(io.enqIQCtrl.slice(jmpCnt, jmpCnt + mduCnt).map(_.ready)).andR
-  val aluReady = Cat(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready)).andR
+  // val aluReady = Cat(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.IntExuCnt) {
     val enq = io.enqIQCtrl(i)
+    val deqIndex = if (i < jmpCnt) jmpIndexGen.io.mapping(0).bits else if (i < jmpCnt + mduCnt) mduIndexGen.io.mapping(i - jmpCnt).bits else aluPriority(i - (jmpCnt + mduCnt))
     if (i < jmpCnt) {
       enq.valid := jmpIndexGen.io.mapping(i).valid && !io.enqIQCtrl(4).valid
     }
@@ -94,19 +97,17 @@ class Dispatch2Int extends XSModule {
       enq.valid := mduIndexGen.io.mapping(i - jmpCnt).valid && mduReady && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid
     }
     else { // alu
-      enq.valid := aluIndexGen.io.mapping(i - (jmpCnt + mduCnt)).valid && aluReady
+      enq.valid := aluCanAccept(aluPriority(i - (jmpCnt + mduCnt))) //aluIndexGen.io.mapping(i - (jmpCnt + mduCnt)).valid //&& aluReady
     }
-    enq.bits := io.fromDq(indexVec(i)).bits
+    enq.bits := io.fromDq(deqIndex).bits
 
-    val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
-    val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
-    enq.bits.src1State := src1Ready(indexVec(i))
-    enq.bits.src2State := src2Ready(indexVec(i))
+    enq.bits.src1State := src1Ready(deqIndex)
+    enq.bits.src2State := src2Ready(deqIndex)
     enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
-      p"enters reservation station $i from ${indexVec(i)}\n")
+      p"enters reservation station $i from ${deqIndex}\n")
   }
 
   /**
@@ -114,9 +115,10 @@ class Dispatch2Int extends XSModule {
     */
   val mdu2CanOut = !(mduCanAccept(0) && mduCanAccept(1))
   val mdu3CanOut = !(mduCanAccept(0) && mduCanAccept(1) || mduCanAccept(0) && mduCanAccept(2) || mduCanAccept(1) && mduCanAccept(2))
+  val aluReadyVec = VecInit(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
     io.fromDq(i).ready := jmpCanAccept(i) && (if (i == 0) true.B else !Cat(jmpCanAccept.take(i)).orR) && jmpReady && !io.enqIQCtrl(4).valid ||
-                          aluCanAccept(i) && aluReady ||
+                          aluCanAccept(i) && aluReadyVec(aluIndex(i)) ||
                           mduCanAccept(i) && (if (i <= 1) true.B else if (i == 2) mdu2CanOut else mdu3CanOut) && mduReady && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid
 
     XSInfo(io.fromDq(i).fire(),
