@@ -66,10 +66,6 @@ class RoqDispatchData extends RoqCommitInfo {
   val crossPageIPFFix = Bool()
 }
 
-// class RoqWbData extends XSBundle {
-//   // val flushPipe = Bool()
-// }
-
 class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
@@ -334,9 +330,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val dispatchData = Module(new SyncDataModuleTemplate(new RoqDispatchData, RoqSize, CommitWidth, RenameWidth))
   val dispatchDataRead = dispatchData.io.rdata
 
-  // val writebackData = Module(new SyncDataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
-  // val writebackDataRead = writebackData.io.rdata
-
   val exceptionGen = Module(new ExceptionGen)
   val exceptionDataRead = exceptionGen.io.state
   val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
@@ -350,7 +343,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
   // When blockBackward instruction leaves Roq (commit or walk), hasBlockBackward should be set to false.B
-  // val blockBackwardLeave = Cat((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.uop(i).ctrl.blockBackward)).orR
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
@@ -410,7 +402,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     * RedirectOut: Interrupt and Exceptions
     */
   val deqDispatchData = dispatchDataRead(0)
-  // val deqWritebackData = writebackDataRead(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
@@ -730,13 +721,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // wdata.exceptionVec := req.cf.exceptionVec
   }
   dispatchData.io.raddr := commitReadAddr_next
-
-  // writebackData.io.wen := io.exeWbResults.map(_.valid)
-  // writebackData.io.waddr := io.exeWbResults.map(_.bits.uop.roqIdx.value)
-  // writebackData.io.wdata.zip(io.exeWbResults.map(_.bits)).map{ case (wdata, wb) =>
-  //   wdata.flushPipe := wb.uop.ctrl.flushPipe
-  // }
-  // writebackData.io.raddr := commitReadAddr_next
 
   exceptionGen.io.redirect <> io.redirect
   exceptionGen.io.flush := io.flushOut.valid
