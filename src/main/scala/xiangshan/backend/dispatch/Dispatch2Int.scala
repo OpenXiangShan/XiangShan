@@ -32,73 +32,82 @@ class Dispatch2Int extends XSModule {
 
   val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, jmpCnt, false))
   val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, mduCnt, true))
-  val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, aluCnt, true))
+  // val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, aluCnt, true))
 
-  val mduPriority = PriorityGen(io.numExist.slice(jmpCnt, jmpCnt + mduCnt))
-  val aluPriority = PriorityGen(io.numExist.drop(jmpCnt + mduCnt))
+  val (mduPriority, mduIndex) = PriorityGen(io.numExist.slice(jmpCnt, jmpCnt + mduCnt))
+  val (aluPriority, aluIndex) = PriorityGen(io.numExist.drop(jmpCnt + mduCnt))
   jmpIndexGen.io.validBits := jmpCanAccept
   mduIndexGen.io.validBits := mduCanAccept
-  aluIndexGen.io.validBits := aluCanAccept
+  // aluIndexGen.io.validBits := aluCanAccept
   jmpIndexGen.io.priority := DontCare
   mduIndexGen.io.priority := mduPriority
-  aluIndexGen.io.priority := aluPriority
+  // aluIndexGen.io.priority := aluPriority
 
-  val allIndexGen = Seq(jmpIndexGen, mduIndexGen, aluIndexGen)
-  val validVec = allIndexGen.flatMap(_.io.mapping.map(_.valid))
-  val indexVec = allIndexGen.flatMap(_.io.mapping.map(_.bits))
+  // val allIndexGen = Seq(jmpIndexGen, mduIndexGen, aluIndexGen)
+  // val validVec = allIndexGen.flatMap(_.io.mapping.map(_.valid))
+  // val indexVec = allIndexGen.flatMap(_.io.mapping.map(_.bits))
 
   /**
     * Part 2: assign regfile read ports
     */
-  val intStaticIndex = Seq(3, 4, 5, 6)
-  val intDynamicIndex = Seq(0, 1, 2)
-  val intStaticMappedValid = intStaticIndex.map(i => validVec(i))
-  val intDynamicMappedValid = intDynamicIndex.map(i => validVec(i))
-  val (intReadPortSrc, intDynamicExuSrc) = RegfileReadPortGen(intStaticMappedValid, intDynamicMappedValid)
-  val intStaticMapped = intStaticIndex.map(i => indexVec(i))
-  val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
-  for (i <- intStaticIndex.indices) {
-    val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-    io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-    io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
-  }
-  val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
-  intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
-  intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
+  // val intStaticIndex = Seq(3, 4, 5, 6)
+  // val intDynamicIndex = Seq(0, 1, 2)
+  // val intStaticMappedValid = intStaticIndex.map(i => validVec(i))
+  // val intDynamicMappedValid = intDynamicIndex.map(i => validVec(i))
+  // val (intReadPortSrc, intDynamicExuSrc) = RegfileReadPortGen(intStaticMappedValid, intDynamicMappedValid)
+  // val intStaticMapped = intStaticIndex.map(i => indexVec(i))
+  // val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
+  // for (i <- intStaticIndex.indices) {
+  //   val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
+  //   io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
+  //   io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+  // }
+  // val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
+  // intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
+  // intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
+  io.readRf(0) := io.enqIQCtrl(3).bits.psrc1
+  io.readRf(1) := io.enqIQCtrl(3).bits.psrc2
+  io.readRf(2) := Mux(io.enqIQCtrl(4).valid, io.enqIQCtrl(4).bits.psrc1, io.enqIQCtrl(0).bits.psrc1)
+  io.readRf(3) := io.enqIQCtrl(4).bits.psrc2
+  io.readRf(4) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc1, io.enqIQCtrl(1).bits.psrc1)
+  io.readRf(5) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc2, io.enqIQCtrl(1).bits.psrc2)
+  io.readRf(6) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc1, io.enqIQCtrl(2).bits.psrc1)
+  io.readRf(7) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc2, io.enqIQCtrl(2).bits.psrc2)
 
   for (i <- 0 until dpParams.IntDqDeqWidth) {
     io.readState(2*i  ).req := io.fromDq(i).bits.psrc1
     io.readState(2*i+1).req := io.fromDq(i).bits.psrc2
   }
+  val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
+  val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
 
   /**
     * Part 3: dispatch to reservation stations
     */
   val jmpReady = io.enqIQCtrl(0).ready
   val mduReady = Cat(io.enqIQCtrl.slice(jmpCnt, jmpCnt + mduCnt).map(_.ready)).andR
-  val aluReady = Cat(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready)).andR
+  // val aluReady = Cat(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.IntExuCnt) {
     val enq = io.enqIQCtrl(i)
+    val deqIndex = if (i < jmpCnt) jmpIndexGen.io.mapping(0).bits else if (i < jmpCnt + mduCnt) mduIndexGen.io.mapping(i - jmpCnt).bits else aluPriority(i - (jmpCnt + mduCnt))
     if (i < jmpCnt) {
-      enq.valid := jmpIndexGen.io.mapping(i).valid// && jmpReady
+      enq.valid := jmpIndexGen.io.mapping(i).valid && !io.enqIQCtrl(4).valid
     }
     else if (i < jmpCnt + mduCnt) {
-      enq.valid := mduIndexGen.io.mapping(i - jmpCnt).valid && mduReady
+      enq.valid := mduIndexGen.io.mapping(i - jmpCnt).valid && mduReady && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid
     }
     else { // alu
-      enq.valid := aluIndexGen.io.mapping(i - (jmpCnt + mduCnt)).valid && aluReady
+      enq.valid := aluCanAccept(aluPriority(i - (jmpCnt + mduCnt))) //aluIndexGen.io.mapping(i - (jmpCnt + mduCnt)).valid //&& aluReady
     }
-    enq.bits := io.fromDq(indexVec(i)).bits
-    
-    val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
-    val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
-    enq.bits.src1State := src1Ready(indexVec(i))
-    enq.bits.src2State := src2Ready(indexVec(i))
+    enq.bits := io.fromDq(deqIndex).bits
+
+    enq.bits.src1State := src1Ready(deqIndex)
+    enq.bits.src2State := src2Ready(deqIndex)
     enq.bits.src3State := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
-      p"enters reservation station $i from ${indexVec(i)}\n")
+      p"enters reservation station $i from ${deqIndex}\n")
   }
 
   /**
@@ -106,10 +115,11 @@ class Dispatch2Int extends XSModule {
     */
   val mdu2CanOut = !(mduCanAccept(0) && mduCanAccept(1))
   val mdu3CanOut = !(mduCanAccept(0) && mduCanAccept(1) || mduCanAccept(0) && mduCanAccept(2) || mduCanAccept(1) && mduCanAccept(2))
+  val aluReadyVec = VecInit(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    io.fromDq(i).ready := jmpCanAccept(i) && (if (i == 0) true.B else !Cat(jmpCanAccept.take(i)).orR) && jmpReady ||
-                          aluCanAccept(i) && aluReady ||
-                          mduCanAccept(i) && (if (i <= 1) true.B else if (i == 2) mdu2CanOut else mdu3CanOut) && mduReady
+    io.fromDq(i).ready := jmpCanAccept(i) && (if (i == 0) true.B else !Cat(jmpCanAccept.take(i)).orR) && jmpReady && !io.enqIQCtrl(4).valid ||
+                          aluCanAccept(i) && aluReadyVec(aluIndex(i)) ||
+                          mduCanAccept(i) && (if (i <= 1) true.B else if (i == 2) mdu2CanOut else mdu3CanOut) && mduReady && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid
 
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Int dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
@@ -121,7 +131,8 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 5: send read port index of register file to reservation station
     */
-  io.readPortIndex := readPortIndex
+  // io.readPortIndex := readPortIndex
+  io.readPortIndex := DontCare
 //  val readPortIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
 //  val uopReg = Reg(Vec(exuParameters.IntExuCnt, new MicroOp))
 //  val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
