@@ -48,7 +48,7 @@ case class XSCoreParameters
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
-  EnableLoop: Boolean = false,
+  EnableLoop: Boolean = true,
   EnableSC: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
