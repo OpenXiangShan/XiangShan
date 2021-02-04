@@ -298,7 +298,9 @@ class ReservationStationSelect
 
   if (feedback) {
     when (io.memfeedback.valid) {
-      stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
+      when (stateQueue(io.memfeedback.bits.rsIdx) === s_wait) {
+        stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
+      }
       when (!io.memfeedback.bits.hit) {
         countQueue(io.memfeedback.bits.rsIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.rsIdx))
       }
