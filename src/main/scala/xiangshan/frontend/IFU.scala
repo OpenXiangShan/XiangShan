@@ -128,7 +128,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   val if2_valid = RegInit(init = false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
   val if1_fire = (if1_valid &&  if2_allReady) && (icache.io.tlb.resp.valid || !if2_valid)
-  val if1_can_go = if1_fire || if3_flush
+  val if1_can_go = if1_fire 
 
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
@@ -143,16 +143,15 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_can_go)
   val if2_snpc = snpc(if2_pc)
   val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_can_go)
-  val if2_can_go = if2_fire && !if2_flush
   if2_ready := if3_ready || !if2_valid
   when (if1_can_go)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
-  .elsewhen (if2_can_go)  { if2_valid := false.B }
+  .elsewhen (if2_fire)  { if2_valid := false.B }
 
   val npcGen = new PriorityMuxGenerator[UInt]
   npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
   val if2_bp = bpu.io.out(0)
-  
+
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
 
@@ -166,16 +165,15 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   val if4_ready = WireInit(false.B)
   val if3_allValid = if3_valid && icache.io.resp.valid
   val if3_fire = if3_allValid && if4_ready
-  val if3_pc = RegEnable(if2_pc, if2_can_go)
-  val if3_snpc = RegEnable(if2_snpc, if2_can_go)
-  val if3_predHist = RegEnable(if2_predHist, enable=if2_can_go)
-  val if3_can_go = if3_fire && !if3_flush
+  val if3_pc = RegEnable(if2_pc, if2_fire)
+  val if3_snpc = RegEnable(if2_snpc, if2_fire)
+  val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
   if3_ready := if4_ready && icache.io.resp.valid || !if3_valid
   when (if3_flush) {
     if3_valid := false.B
-  }.elsewhen (if2_can_go) {
+  }.elsewhen (if2_fire && !if2_flush) {
     if3_valid := true.B
-  }.elsewhen (if3_can_go) {
+  }.elsewhen (if3_fire) {
     if3_valid := false.B
   }
 
@@ -197,7 +195,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   // the previous half of RVI instruction waits until it meets its last half
   val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_valid
   // set to invalid once consumed or redirect from backend
-  val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_can_go
+  val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
   when (if3_prevHalfFlush) {
     if3_prevHalfInstr.valid := false.B
@@ -259,24 +257,24 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   //********************** IF4 ****************************//
   val ftqEnqBuf_ready = Wire(Bool())
   val if4_ftqEnqPtr = Wire(new FtqPtr)
-  val if4_pd = RegEnable(icache.io.pd_out, if3_can_go)
-  val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.bits.ipf, if3_can_go)
-  val if4_acf = RegEnable(icacheResp.acf, if3_can_go)
-  val if4_crossPageIPF = RegEnable(crossPageIPF, if3_can_go)
+  val if4_pd = RegEnable(icache.io.pd_out, if3_fire)
+  val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.bits.ipf, if3_fire)
+  val if4_acf = RegEnable(icacheResp.acf, if3_fire)
+  val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready && ftqEnqBuf_ready
-  val if4_pc = RegEnable(if3_pc, if3_can_go)
-  val if4_snpc = RegEnable(if3_snpc, if3_can_go)
+  val if4_pc = RegEnable(if3_pc, if3_fire)
+  val if4_snpc = RegEnable(if3_snpc, if3_fire)
   // This is the real mask given from icache
-  val if4_mask = RegEnable(icacheResp.mask, if3_can_go)
+  val if4_mask = RegEnable(icacheResp.mask, if3_fire)
 
 
-  val if4_predHist = RegEnable(if3_predHist, enable=if3_can_go)
+  val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq && ftqEnqBuf_ready || !if4_valid) && GTimer() > 500.U
   when (if4_flush) {
     if4_valid := false.B
-  }.elsewhen (if3_can_go) {
+  }.elsewhen (if3_fire && !if3_flush) {
     if4_valid := Mux(if3_pendingPrevHalfInstr, if3_prevHalfInstrMet, true.B)
   }.elsewhen (if4_fire) {
     if4_valid := false.B
@@ -296,7 +294,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   def br_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
       Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)).asSInt,
-      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()  
+      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()
     )
   }
   val if4_instrs = if4_pd.instrs
@@ -333,7 +331,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   }
 
   prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI && HasCExtension.B
-  
+
   // // this is result of the last half RVI
   prevHalfInstrReq.bits.pc := if4_pd.pc(PredictWidth-1)
   prevHalfInstrReq.bits.npc := snpc(if4_pc)
@@ -408,16 +406,18 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 
   io.toFtq.valid := ftqEnqBuf_valid
   io.toFtq.bits  := ftqEnqBuf
-  
+
   toFtqBuf := DontCare
   toFtqBuf.ftqPC    := if4_pc
+  toFtqBuf.lastPacketPC.valid := if4_pendingPrevHalfInstr
+  toFtqBuf.lastPacketPC.bits  := if4_prevHalfInstr.bits.pc
+
   toFtqBuf.hist     := final_gh
   toFtqBuf.predHist := if4_predHist.asTypeOf(new GlobalHistory)
   toFtqBuf.rasSp    := bpu.io.brInfo.rasSp
   toFtqBuf.rasTop   := bpu.io.brInfo.rasTop
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
-  toFtqBuf.hasLastPrev := if4_pendingPrevHalfInstr
 
   val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
   val if4_taken = WireInit(if4_bp.taken)
@@ -485,7 +485,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 
   bpu.io.inFire(0) := if1_can_go
   bpu.io.inFire(1) := if2_fire
-  bpu.io.inFire(2) := if3_can_go
+  bpu.io.inFire(2) := if3_fire
   bpu.io.inFire(3) := if4_fire
   bpu.io.in.pc := if1_npc
   bpu.io.in.hist := if1_gh.asUInt
@@ -529,10 +529,12 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.fetchPacket.valid := fetchPacketValid
 
 //  if(IFUDebug) {
-    val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_can_go)
+  if (!env.FPGAPlatform) {
+    val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
     val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
     val predictor = predictor_s4
-  toFtqBuf.metas.map(_.predictor := predictor)
+    toFtqBuf.metas.map(_.predictor := predictor)
+  }
  // }
 
   // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
@@ -564,8 +566,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits.cfiUpdate.target)}\n")
 
     XSDebug("[IF1] v=%d     fire=%d  cango=%d          flush=%d pc=%x mask=%b\n", if1_valid, if1_fire,if1_can_go, if1_flush, if1_npc, mask(if1_npc))
-    XSDebug("[IF2] v=%d r=%d fire=%d cango=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_can_go, if2_redirect, if2_flush, if2_pc, if2_snpc)
-    XSDebug("[IF3] v=%d r=%d fire=%d cango=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_can_go, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
+    XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_snpc)
+    XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", icache.io.req.valid, icache.io.req.ready, icache.io.req.bits.addr)
     XSDebug("[IF1][ghr] hist=%b\n", if1_gh.asUInt)
@@ -582,7 +584,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     XSDebug("[IF3][if3_prevHalfInstr] v=%d pc=%x npc=%x  instr=%x ipf=%d\n\n",
     if3_prevHalfInstr.valid, if3_prevHalfInstr.bits.pc, if3_prevHalfInstr.bits.npc, if3_prevHalfInstr.bits.instr, if3_prevHalfInstr.bits.ipf)
     if3_gh.debug("if3")
-    
+
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
     XSDebug("[IF4][snpc]: %x, realMask=%b\n", if4_snpc, if4_mask)
     XSDebug("[IF4][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
@@ -611,7 +613,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
       ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsRVC)
     XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x predHist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
       b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.predHist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
-    XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)  
+    XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)
   }
 
 }

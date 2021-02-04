@@ -19,7 +19,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val (src1, jalr_target, pc, immMin, func, uop) = (
     io.in.bits.src(0),
     io.in.bits.src(1)(VAddrBits - 1, 0),
-    io.in.bits.uop.cf.pc,
+    SignExt(io.in.bits.uop.cf.pc, XLEN),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     io.in.bits.uop
@@ -27,7 +27,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
   val isAuipc = JumpOpType.jumpOpisAuipc(func)
-  val offset = SignExt(Mux1H(Seq(
+  val offset = SignExt(ParallelMux(Seq(
     isJalr -> ImmUnion.I.toImm32(immMin),
     isAuipc -> ImmUnion.U.toImm32(immMin),
     !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
@@ -50,7 +50,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOut.cfiUpdate.predTaken := true.B
   redirectOut.cfiUpdate.taken := true.B
   redirectOut.cfiUpdate.target := target
-  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target
+  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target || !uop.cf.pred_taken
 
 
   // Output

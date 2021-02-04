@@ -7,7 +7,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.util._
-import xiangshan.backend.roq.RoqExceptionInfo
 
 object hartId extends (() => Int) {
   var x = 0
@@ -132,7 +131,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // to FPU
     val fpu = Flipped(new FpuCsrIO)
     // from rob
-    val exception = Flipped(ValidIO(new RoqExceptionInfo))
+    val exception = Flipped(ValidIO(new ExceptionInfo))
     // to ROB
     val isXRet = Output(Bool())
     val trapTarget = Output(UInt(VAddrBits.W))
@@ -323,7 +322,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
   val sipMask  = "h222".U & mideleg
-  val satp = RegInit(0.U(XLEN.W))
+  val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
   val sepc = RegInit(UInt(XLEN.W), 0.U)
@@ -746,12 +745,22 @@ class CSR extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  val isXRet = func === CSROpType.jmp && !isEcall
-  csrio.isXRet := RegNext(isXRet)
-  csrio.trapTarget := RegNext(Mux(csrio.isXRet,
-    retTarget,
+  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
+
+  // ctrl block will use theses later for flush
+  val isXRetFlag = RegInit(false.B)
+  val retTargetReg = Reg(retTarget.cloneType)
+  when (io.flushIn) {
+    isXRetFlag := false.B
+  }.elsewhen (isXRet) {
+    isXRetFlag := true.B
+    retTargetReg := retTarget
+  }
+  csrio.isXRet := isXRetFlag
+  csrio.trapTarget := Mux(isXRetFlag,
+    retTargetReg,
     Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
-  ))
+  )
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -889,7 +898,7 @@ class CSR extends FunctionUnit with HasCSRConst
     }
 
     ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+    ExcitingUtils.addSource(Mux(csrio.exception.valid, causeNO, 0.U), "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)

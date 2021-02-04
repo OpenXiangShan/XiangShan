@@ -60,7 +60,8 @@ class FloatBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  val readPortIndex = Seq(0, 1, 2, 3, 2, 3)
   val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -107,7 +108,7 @@ class FloatBlock
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
     exeUnits(i).io.fromFp <> rs.io.deq
-    rs.io.feedback := DontCare
+    // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
 

@@ -18,12 +18,14 @@ object FtqPtr extends HasXSParameter {
 }
 
 object GetPcByFtq extends HasXSParameter {
-  def apply(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool) = {
+  def apply(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
     assert(ftqPC.getWidth == VAddrBits)
+    assert(lastPacketPC.getWidth == VAddrBits)
     assert(ftqOffset.getWidth == log2Up(PredictWidth))
     val idxBits = ftqPC.head(VAddrBits - ftqOffset.getWidth - instOffsetBits)
+    val lastIdxBits = lastPacketPC.head(VAddrBits - ftqOffset.getWidth - instOffsetBits)
     val selLastPacket = hasLastPrev && (ftqOffset === 0.U)
-    val packetIdx = Mux(selLastPacket, idxBits - 1.U, idxBits)
+    val packetIdx = Mux(selLastPacket, lastIdxBits, idxBits)
     Cat(
       packetIdx, // packet pc
       Mux(selLastPacket, Fill(ftqOffset.getWidth, 1.U(1.W)), ftqOffset),
@@ -58,7 +60,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
 
 class Ftq_4R_SRAMEntry extends XSBundle {
   val ftqPC = UInt(VAddrBits.W)
-  val hasLastPrev = Bool()
+  val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
 }
 
 // redirect and commit need read these infos
@@ -120,7 +122,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   ftq_4r_sram.io.wen := real_fire
   ftq_4r_sram.io.waddr := tailPtr.value
   ftq_4r_sram.io.wdata.ftqPC := io.enq.bits.ftqPC
-  ftq_4r_sram.io.wdata.hasLastPrev := io.enq.bits.hasLastPrev
+  ftq_4r_sram.io.wdata.lastPacketPC := io.enq.bits.lastPacketPC
   val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
   ftq_2r_sram.io.wen := real_fire
   ftq_2r_sram.io.waddr := tailPtr.value
@@ -172,7 +174,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     when(wb.bits.redirectValid) {
       mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
       when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
-        
+        cfiIndex_vec(wbIdx).valid := true.B
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
         cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
@@ -220,7 +222,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   })
   // from 4r sram
   commitEntry.ftqPC := ftq_4r_sram.io.rdata(0).ftqPC
-  commitEntry.hasLastPrev := ftq_4r_sram.io.rdata(0).hasLastPrev
+  commitEntry.lastPacketPC := ftq_4r_sram.io.rdata(0).lastPacketPC
   // from 2r sram
   commitEntry.rasSp := ftq_2r_sram.io.rdata(0).rasSp
   commitEntry.rasTop := ftq_2r_sram.io.rdata(0).rasEntry
@@ -249,7 +251,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     ftq_4r_sram.io.raddr(1 + i) := req.ptr.value
     ftq_4r_sram.io.ren(1 + i) := true.B
     req.entry.ftqPC := ftq_4r_sram.io.rdata(1 + i).ftqPC
-    req.entry.hasLastPrev := ftq_4r_sram.io.rdata(1 + i).hasLastPrev
+    req.entry.lastPacketPC := ftq_4r_sram.io.rdata(1 + i).lastPacketPC
     if(i == 0){ // jump, read npc
       pred_target_sram.io.raddr(0) := req.ptr.value
       pred_target_sram.io.ren(0) := true.B
@@ -270,7 +272,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
-    val next = io.redirect.bits.ftqIdx + 1.U
+    val next = idx + 1.U
     tailPtr := next
     val offset = Mux(io.flush, io.flushOffset, io.redirect.bits.ftqOffset)
     val notMisPredict = io.flush || (io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))

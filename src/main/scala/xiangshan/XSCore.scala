@@ -50,6 +50,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
   EnableSC: Boolean = false,
+  EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
@@ -78,9 +79,9 @@ case class XSCoreParameters
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
-    IntDqSize = 32,
-    FpDqSize = 32,
-    LsDqSize = 32,
+    IntDqSize = 16,
+    FpDqSize = 16,
+    LsDqSize = 16,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
@@ -102,10 +103,10 @@ case class XSCoreParameters
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
-  TlbL2EntrySize: Int = 256, // or 512
-  TlbL2SPEntrySize: Int = 16,
+  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
+  PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 256,
+  PtwL2EntrySize: Int = 2048,//(256 * 8)
   NumPerfCounters: Int = 16,
   NrExtIntr: Int = 1
 )
@@ -140,6 +141,7 @@ trait HasXSParameter {
   val EnableLB = core.EnableLB
   val EnableLoop = core.EnableLoop
   val EnableSC = core.EnableSC
+  val EnbaleTlbDebug = core.EnbaleTlbDebug
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
   // val BtbWays = 4
@@ -181,8 +183,8 @@ trait HasXSParameter {
   val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
   val TlbEntrySize = core.TlbEntrySize
   val TlbSPEntrySize = core.TlbSPEntrySize
-  val TlbL2EntrySize = core.TlbL2EntrySize
-  val TlbL2SPEntrySize = core.TlbL2SPEntrySize
+  val PtwL3EntrySize = core.PtwL3EntrySize
+  val PtwSPEntrySize = core.PtwSPEntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
@@ -468,10 +470,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
-  integerBlock.io.csrio.tlb <> memBlock.io.tlbCsr
   integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
 
   floatBlock.io.frm <> integerBlock.io.csrio.frm
 

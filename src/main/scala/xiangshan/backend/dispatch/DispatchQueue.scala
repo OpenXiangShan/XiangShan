@@ -81,7 +81,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     when (io.deq(i).fire() && !(io.redirect.valid || io.flush)) {
       stateEntries(headPtr(i).value) := s_invalid
 
-      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
+//      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
@@ -149,8 +149,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
         Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
         tailPtr(0) + numEnq))
   )
-  val lastCycleException = RegNext(io.flush)
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
+  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction && !io.flush)
   for (i <- 1 until enqnum) {
     tailPtr(i) := Mux(io.flush,
       i.U.asTypeOf(new CircularQueuePtr(size)),
@@ -203,6 +202,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   }
   XSDebug(false, true.B, "\n")
 
-  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
+//  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
   XSPerf("utilization", PopCount(stateEntries.map(_ =/= s_invalid)))
 }
