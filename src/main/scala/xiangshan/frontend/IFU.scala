@@ -151,7 +151,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   val npcGen = new PriorityMuxGenerator[UInt]
   npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
   val if2_bp = bpu.io.out(0)
-  
+
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
 
@@ -294,7 +294,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   def br_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
       Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)).asSInt,
-      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()  
+      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()
     )
   }
   val if4_instrs = if4_pd.instrs
@@ -331,7 +331,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   }
 
   prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI && HasCExtension.B
-  
+
   // // this is result of the last half RVI
   prevHalfInstrReq.bits.pc := if4_pd.pc(PredictWidth-1)
   prevHalfInstrReq.bits.npc := snpc(if4_pc)
@@ -406,7 +406,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 
   io.toFtq.valid := ftqEnqBuf_valid
   io.toFtq.bits  := ftqEnqBuf
-  
+
   toFtqBuf := DontCare
   toFtqBuf.ftqPC    := if4_pc
   toFtqBuf.lastPacketPC.valid := if4_pendingPrevHalfInstr
@@ -584,7 +584,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     XSDebug("[IF3][if3_prevHalfInstr] v=%d pc=%x npc=%x  instr=%x ipf=%d\n\n",
     if3_prevHalfInstr.valid, if3_prevHalfInstr.bits.pc, if3_prevHalfInstr.bits.npc, if3_prevHalfInstr.bits.instr, if3_prevHalfInstr.bits.ipf)
     if3_gh.debug("if3")
-    
+
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
     XSDebug("[IF4][snpc]: %x, realMask=%b\n", if4_snpc, if4_mask)
     XSDebug("[IF4][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
@@ -613,7 +613,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
       ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsRVC)
     XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x predHist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
       b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.predHist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
-    XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)  
+    XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)
   }
 
 }

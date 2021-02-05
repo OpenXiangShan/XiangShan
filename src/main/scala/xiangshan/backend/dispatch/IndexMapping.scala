@@ -76,7 +76,7 @@ object PriorityGen {
       }))
       priority(sortedIndex(i)) := i.U
     }
-    priority
+    (priority, sortedIndex)
   }
 }
 

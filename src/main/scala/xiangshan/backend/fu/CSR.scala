@@ -322,7 +322,7 @@ class CSR extends FunctionUnit with HasCSRConst
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
   val sipMask  = "h222".U & mideleg
-  val satp = RegInit(0.U(XLEN.W))
+  val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
   val sepc = RegInit(UInt(XLEN.W), 0.U)
@@ -845,7 +845,7 @@ class CSR extends FunctionUnit with HasCSRConst
     "s2Wrong"     -> (0x103d, "perfCntS2Wrong"),
     "s3Right"     -> (0x103e, "perfCntS3Right"),
     "s3Wrong"     -> (0x103f, "perfCntS3Wrong"),
-    "takenAndRight" -> (0x1040, "perfCntTakenAndRight"),
+    "loopExit" -> (0x1040, "perfCntLoopExit"),
     "takenButWrong" -> (0x1041, "perfCntTakenButWrong"),
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (

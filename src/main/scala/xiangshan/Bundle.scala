@@ -163,7 +163,7 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
   val predHist = new GlobalHistory
-  val specCnt = UInt(10.W)
+  val specCnt = Vec(PredictWidth, UInt(10.W))
   // need pipeline update
   val sawNotTakenBranch = Bool()
   val predTaken = Bool()
