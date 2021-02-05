@@ -184,8 +184,9 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
   val current = Reg(Valid(new RoqExceptionInfo))
 
   // orR the exceptionVec
-  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception))
-  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception)
+  val lastCycleFlush = RegNext(io.flush)
+  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
   // s0: compare wb(1),wb(2) and wb(3),wb(4)
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !bits.roqIdx.needFlush(io.redirect, io.flush) }
