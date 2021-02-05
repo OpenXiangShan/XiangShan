@@ -12,6 +12,10 @@ import "DPI-C" function longint ram_read_helper
   input  longint    rIdx
 );
 
+import "DPI-C" function void init_ram
+(
+);
+
 module RAMHelper(
   input         clk,
   input         en,
@@ -22,6 +26,10 @@ module RAMHelper(
   input  [63:0] wmask,
   input         wen
 );
+
+  initial begin
+    init_ram();
+  end
 
   assign rdata = ram_read_helper(en, rIdx);
 
