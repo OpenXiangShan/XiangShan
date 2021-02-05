@@ -76,7 +76,7 @@ class Dispatch2Fp extends XSModule {
   io.readRf(8)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc3, io.enqIQCtrl(4).bits.psrc3)
   io.readRf(9)  := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc1, io.enqIQCtrl(5).bits.psrc1)
   io.readRf(10) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc2, io.enqIQCtrl(5).bits.psrc2)
-  io.readRf(11) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc1, io.enqIQCtrl(5).bits.psrc1)
+  io.readRf(11) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc3, io.enqIQCtrl(5).bits.psrc3)
 
   /**
     * Part 3: dispatch to reservation stations

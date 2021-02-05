@@ -158,7 +158,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
-      val extIntrs = Input(Vec(NrExtIntr, Bool()))
+      val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
@@ -170,7 +170,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     val trapIO1 = IO(new xiangshan.TrapIO())
     val trapIO = Seq(trapIO0, trapIO1)
 
-    plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
+    plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
@@ -188,8 +188,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       trapIO1 <> xs_core(1).module.trapIO
     }
     // do not let dma AXI signals optimized out
-    chisel3.dontTouch(dma.out.head._1)
-    chisel3.dontTouch(extDev.out.head._1)
+    dontTouch(dma.out.head._1)
+    dontTouch(extDev.out.head._1)
+    dontTouch(io.extIntrs)
   }
 
 }
