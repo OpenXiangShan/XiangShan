@@ -84,7 +84,7 @@ class LTBColumn extends LTBModule {
     val repair = Input(Bool()) // roll back specCnts in the other 15 LTBs
   })
 
-  val ltb = SyncReadMem(nRows, new LoopEntry)
+  val ltb = Mem(nRows, new LoopEntry)
   val ltbAddr = new TableAddr(idxLen + 4, PredictWidth)
 
   val updateValid = RegNext(io.update.valid)
@@ -117,8 +117,8 @@ class LTBColumn extends LTBModule {
   when (io.if3_fire) { valid := true.B }
   when (redirectValid && redirect.mispred) { valid := false.B }
 
-  io.resp.specCnt := if4_entry.specCnt + 1.U
-  io.resp.exit := if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && if4_entry.isLearned
+  io.resp.specCnt := if4_entry.specCnt
+  io.resp.exit := if4_tag === if4_entry.tag && if4_entry.specCnt === if4_entry.tripCnt && valid && if4_entry.isLearned
 
   // Reset
   val doingReset = RegInit(true.B)
@@ -130,7 +130,7 @@ class LTBColumn extends LTBModule {
   val swen = valid && if4_entry.tag === if4_tag || doingReset
   val swEntry = WireInit(if4_entry)
   when (io.if4_fire && if4_entry.tag === if4_tag && io.outMask) {
-    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt && if4_entry.isLearned) {
+    when (if4_entry.specCnt === if4_entry.tripCnt && if4_entry.isLearned) {
       swEntry.age := 7.U
       swEntry.specCnt := 0.U
     }.otherwise {
@@ -164,16 +164,16 @@ class LTBColumn extends LTBModule {
     when(tagMatch && if4_rEntry.isLearned) {
       XSDebug("[redirect] 0\n")
       wEntry.conf := 0.U
-      wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
+      wEntry.specCnt := 0.U
     }.elsewhen(tagMatch && if4_rEntry.isConf) {
       when(cntMatch) {
         XSDebug("[redirect] 1\n")
         wEntry.conf := if4_rEntry.conf + 1.U
-        wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
+        wEntry.specCnt := 0.U
       }.otherwise {
         XSDebug("[redirect] 2\n")
         wEntry.conf := 0.U
-        wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
+        wEntry.specCnt := 0.U
         wEntry.tripCnt := redirect.specCnt
       }
     }.elsewhen(tagMatch && if4_rEntry.isUnconf) {
@@ -181,12 +181,12 @@ class LTBColumn extends LTBModule {
         XSDebug("[redirect] 3\n")
         wEntry.conf := 1.U
         wEntry.age := 7.U
-        wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
+        wEntry.specCnt := 0.U
       }.otherwise {
         XSDebug("[redirect] 4\n")
         wEntry.tripCnt := redirect.specCnt
         wEntry.age := 7.U
-        wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
+        wEntry.specCnt := 0.U
       }
     }.elsewhen(!tagMatch && if4_rEntry.isLearned) {
         XSDebug("[redirect] 5\n")
@@ -220,8 +220,9 @@ class LTBColumn extends LTBModule {
     wEntry.specCnt := redirect.specCnt
     wen := true.B
   }.elsewhen(redirectValid && redirect.mispred) {
-    wEntry.specCnt := if4_rEntry.specCnt - redirect.specCnt
-  } 
+    wEntry.specCnt := 0.U
+    wen := true.B
+  }
 
   // Bypass
   when(io.if3_fire) {
