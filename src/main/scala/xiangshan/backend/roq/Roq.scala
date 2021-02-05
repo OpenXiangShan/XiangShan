@@ -204,7 +204,7 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
   val s1_out_bits = RegNext(compare_bits)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
-  val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !RegNext(io.flush))
+  val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
   val enq_bits = RegNext(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)))
 
   // s2: compare the input exception with the current one
