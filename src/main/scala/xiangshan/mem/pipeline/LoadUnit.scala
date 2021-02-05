@@ -13,6 +13,7 @@ class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
+  val needReplayFromRS = Output(Bool())
   val forward = new MaskedLoadForwardQueryIO
 }
 
@@ -152,6 +153,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
+    val needReplayFromRS = Output(Bool())
   })
 
   val s2_uop = io.in.bits.uop
@@ -171,6 +173,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.needReplayFromRS := s2_cache_replay
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -246,6 +249,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
+    val needReplayFromRS = Output(Bool())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
@@ -279,7 +283,8 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
-  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid) && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush)
+  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  io.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
