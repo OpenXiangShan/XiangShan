@@ -234,7 +234,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       io.trap2 := trap(1)
     }
 
-    if (env.EnableDebug) {
+    if (env.EnableDebug || env.EnablePerfDebug) {
       val timer = GTimer()
       val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
       ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
