@@ -108,7 +108,7 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048,//(256 * 8)
   NumPerfCounters: Int = 16,
-  NrExtIntr: Int = 1
+  NrExtIntr: Int = 150
 )
 
 trait HasXSParameter {
