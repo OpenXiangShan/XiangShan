@@ -118,7 +118,7 @@ class LTBColumn extends LTBModule {
   when (redirectValid && redirect.mispred) { valid := false.B }
 
   io.resp.specCnt := if4_entry.specCnt
-  io.resp.exit := if4_tag === if4_entry.tag && if4_entry.specCnt === if4_entry.tripCnt && valid && if4_entry.isLearned
+  io.resp.exit := io.outMask && if4_tag === if4_entry.tag && if4_entry.specCnt === if4_entry.tripCnt && valid && if4_entry.isLearned
 
   // Reset
   val doingReset = RegInit(true.B)
