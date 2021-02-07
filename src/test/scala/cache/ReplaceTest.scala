@@ -78,7 +78,7 @@ class ReplaceTest extends AnyFlatSpec
             var tag = 0
 
             for(i <- 0 until testnumber){
-                if(i%5 == 0){ tag = randomGen.nextInt(maxTag + 1)  }
+                if(i%1 == 0){ tag = randomGen.nextInt(maxTag + 1)  }
                 c.io.req.valid.poke(true.B)
                 c.io.req.bits.tag.poke(tag.U)
                 if(c.io.resp.bits.hit.peek().litToBoolean){ hitCounter = hitCounter + 1}
