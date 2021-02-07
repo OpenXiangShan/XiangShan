@@ -157,7 +157,7 @@ void init_ram(const char *img) {
   #endif
   assert(dram == NULL);
   // dram = new ComplexCoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
-  dram = new SimpleCoDRAMsim3(10);
+  dram = new SimpleCoDRAMsim3(90);
 #endif
 
   pthread_mutex_init(&ram_mutex, 0);
