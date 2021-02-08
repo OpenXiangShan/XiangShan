@@ -249,7 +249,6 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val needReplayFromRS = Output(Bool())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
@@ -284,7 +283,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
   io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
-  io.needReplayFromRS := load_s2.io.needReplayFromRS
+  io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
