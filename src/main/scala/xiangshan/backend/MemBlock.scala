@@ -230,6 +230,7 @@ class MemBlockImp
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 
   // StoreUnit
