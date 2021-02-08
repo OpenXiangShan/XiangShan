@@ -150,7 +150,7 @@ class MemBlockImp
 
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, wakeupCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1, wakeupCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush    <> io.fromCtrlBlock.flush // TODO: remove it

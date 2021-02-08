@@ -82,6 +82,7 @@ class SingleSrcCAM[T <: Data](val gen: T, val set: Int, val readWidth: Int, rfZe
 class ReservationStation
 (
   val exuCfg: ExuConfig,
+  srcLen: Int,
   fastPortsCnt: Int,
   slowPortsCnt: Int,
   fixedDelay: Int,
@@ -98,13 +99,13 @@ class ReservationStation
     val numExist = Output(UInt(iqIdxWidth.W))
     val fromDispatch = Flipped(DecoupledIO(new MicroOp))
     val deq = DecoupledIO(new ExuInput)
-    val srcRegValue = Input(Vec(srcNum, UInt((XLEN + 1).W)))
+    val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
     val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
     val fastUopOut = ValidIO(new MicroOp)
     val fastUopsIn = Vec(fastPortsCnt, Flipped(ValidIO(new MicroOp)))
-    val fastDatas = Vec(fastPortsCnt, Input(UInt((XLEN+1).W)))
+    val fastDatas = Vec(fastPortsCnt, Input(UInt(srcLen.W)))
     val slowPorts = Vec(slowPortsCnt, Flipped(ValidIO(new ExuOutput)))
 
     val redirect = Flipped(ValidIO(new Redirect))
@@ -113,9 +114,9 @@ class ReservationStation
     val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
   })
 
-  val select = Module(new ReservationStationSelect(exuCfg, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
-  val ctrl   = Module(new ReservationStationCtrl(exuCfg, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
-  val data   = Module(new ReservationStationData(exuCfg, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
+  val select = Module(new ReservationStationSelect(exuCfg, srcLen, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
+  val ctrl   = Module(new ReservationStationCtrl(exuCfg, srcLen, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
+  val data   = Module(new ReservationStationData(exuCfg, srcLen, fastPortsCnt, slowPortsCnt, fixedDelay, fastWakeup, feedback))
 
   select.io.redirect := io.redirect
   select.io.flush := io.flush
@@ -178,6 +179,7 @@ class ReservationStation
 class ReservationStationSelect
 (
   val exuCfg: ExuConfig,
+  srcLen: Int,
   fastPortsCnt: Int,
   slowPortsCnt: Int,
   fixedDelay: Int,
@@ -366,6 +368,7 @@ class ReservationStationSelect
 class ReservationStationCtrl
 (
   val exuCfg: ExuConfig,
+  srcLen: Int,
   fastPortsCnt: Int,
   slowPortsCnt: Int,
   fixedDelay: Int,
@@ -489,6 +492,7 @@ class ReservationStationCtrl
     val asynIdxUop = (0 until iqSize).map(i => asynUop(io.indexVec(i)) )
     val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueue(io.indexVec(i))).andR )
     val fastAsynUop = ParallelPriorityMux(readyIdxVec zip asynIdxUop)
+    val fastRoqIdx = ParallelPriorityMux(readyIdxVec zip (0 until iqSize).map(i => roqIdx(io.indexVec(i))))
     val fastSentUop = Wire(new MicroOp)
     fastSentUop := DontCare
     fastSentUop.pdest := fastAsynUop.pdest
@@ -502,6 +506,7 @@ class ReservationStationCtrl
       val bpQueue = Module(new BypassQueue(fixedDelay))
       bpQueue.io.in.valid := selValid
       bpQueue.io.in.bits  := fastSentUop
+      bpQueue.io.in.bits.roqIdx := fastRoqIdx
       bpQueue.io.redirect := io.redirect
       bpQueue.io.flush    := io.flush
       io.fastUopOut.valid := bpQueue.io.out.valid
@@ -620,6 +625,7 @@ class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int) extends XSMo
 class ReservationStationData
 (
   val exuCfg: ExuConfig,
+  srcLen: Int,
   fastPortsCnt: Int,
   slowPortsCnt: Int,
   fixedDelay: Int,
@@ -633,7 +639,7 @@ class ReservationStationData
   require(nonBlocked==fastWakeup)
 
   val io = IO(new XSBundle {
-    val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
+    val srcRegValue = Vec(srcNum, Input(UInt(srcLen.W)))
     val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val in  = Input(new Bundle {
@@ -645,11 +651,11 @@ class ReservationStationData
 
     val listen = new Bundle {
       val wen = Input(Vec(srcNum, Vec(iqSize, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
-      val wdata = Input(Vec(fastPortsCnt + slowPortsCnt, UInt((XLEN + 1).W)))
+      val wdata = Input(Vec(fastPortsCnt + slowPortsCnt, UInt(srcLen.W)))
     }
 
     val sel = Input(UInt(iqIdxWidth.W))
-    val out = Output(Vec(srcNum, UInt((XLEN + 1).W)))
+    val out = Output(Vec(srcNum, UInt(srcLen.W)))
     val pc = if(exuCfg == Exu.jumpExeUnitCfg) Output(UInt(VAddrBits.W)) else null
   })
 
@@ -658,7 +664,7 @@ class ReservationStationData
   // Data : single read, multi write
   // ------------------------
   val data = (0 until srcNum).map{i =>
-    val d = Module(new RSDataSingleSrc(XLEN + 1, iqSize, fastPortsCnt + slowPortsCnt))
+    val d = Module(new RSDataSingleSrc(srcLen, iqSize, fastPortsCnt + slowPortsCnt))
     d.suggestName(s"${this.name}_data${i}")
     d.io
   }

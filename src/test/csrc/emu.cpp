@@ -277,7 +277,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit[NumCore];
-  uint64_t instr_left_last_cycle[NumCore];
   const int stuck_limit = 2000;
   const int firstCommit_limit = 10000;
   uint64_t core_max_instr[NumCore];
@@ -293,7 +292,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     diff[i].wdata = wdata[i];
     diff[i].wdst = wdst[i];
     lastcommit[i] = max_cycle;
-    instr_left_last_cycle[i] = max_cycle;
     core_max_instr[i] = max_instr;
   }
 
@@ -305,9 +303,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
-    if (!(max_cycle > 0 &&
-          core_max_instr[0] > 0 &&
-          instr_left_last_cycle[0] >= core_max_instr[0])) {
+    if (!(max_cycle > 0 && core_max_instr[0] > 0)) {
       trapCode = STATE_LIMIT_EXCEEDED;  /* handle overflow */
       break;
     }
@@ -381,8 +377,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         lastcommit[i] = max_cycle;
 
         // update instr_cnt
-        instr_left_last_cycle[i] = core_max_instr[i];
-        core_max_instr[i] -= diff[i].commit;
+        uint64_t commit_count = (core_max_instr[i] >= diff[i].commit) ? diff[i].commit : core_max_instr[i];
+        core_max_instr[i] -= commit_count;
       }
 
 #ifdef DIFFTEST_STORE_COMMIT
@@ -572,7 +568,7 @@ void Emulator::snapshot_load(const char *filename) {
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   stream.read(ref_r, sizeof(ref_r));
-  ref_difftest_setregs(&ref_r);
+  ref_difftest_setregs(&ref_r, 0);
 
   uint64_t nemu_this_pc;
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
@@ -585,11 +581,11 @@ void Emulator::snapshot_load(const char *filename) {
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
-  ref_difftest_set_mastatus(&sync_mastate);
+  ref_difftest_set_mastatus(&sync_mastate, 0);
 
   uint64_t csr_buf[4096];
   stream.read(&csr_buf, sizeof(csr_buf));
-  ref_difftest_set_csr(csr_buf);
+  ref_difftest_set_csr(csr_buf, 0);
 
   long sdcard_offset = 0;
   stream.read(&sdcard_offset, sizeof(sdcard_offset));

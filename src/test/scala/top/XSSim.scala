@@ -125,9 +125,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
     io.uart <> axiMMIO.module.io.uart
     val NumCores = top.Parameters.get.socParameters.NumCores
-    for (i <- 0 until NrExtIntr) {
-      soc.module.io.extIntrs(i) := false.B
-    }
+    soc.module.io.extIntrs := 0.U
 
     val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
     val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
@@ -236,7 +234,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       io.trap2 := trap(1)
     }
 
-    if (env.EnableDebug) {
+    if (env.EnableDebug || env.EnablePerfDebug) {
       val timer = GTimer()
       val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
       ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
