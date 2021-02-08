@@ -94,7 +94,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
-  val commit_exception = io.exception_state.valid && isAfter(deqPtrVec.last, io.exception_state.bits.roqIdx)
+  val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.roqIdx, deqPtrVec.last)
   val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg or there're possible exceptions in these instructions, only one instruction is allowed to commit
@@ -184,8 +184,9 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
   val current = Reg(Valid(new RoqExceptionInfo))
 
   // orR the exceptionVec
-  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception))
-  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception)
+  val lastCycleFlush = RegNext(io.flush)
+  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
   // s0: compare wb(1),wb(2) and wb(3),wb(4)
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !bits.roqIdx.needFlush(io.redirect, io.flush) }
@@ -203,7 +204,7 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
   val s1_out_bits = RegNext(compare_bits)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
-  val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !RegNext(io.flush))
+  val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
   val enq_bits = RegNext(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)))
 
   // s2: compare the input exception with the current one
@@ -482,7 +483,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
-  val commit_exception = exceptionDataRead.valid && isAfter(deqPtrVec.last, exceptionDataRead.bits.roqIdx)
+  val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.roqIdx, deqPtrVec.last)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
   val allowOnlyOneCommit = commit_exception || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
