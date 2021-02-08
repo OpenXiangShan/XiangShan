@@ -383,7 +383,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
 #ifdef DIFFTEST_STORE_COMMIT
       for (int core = 0; core < NumCore; core++) {
-        if (dut_ptr->io_difftest_storeCommit) {
+        if (dut_ptr->io_difftest_storeCommit && hascommit) {
           read_store_info(diff[core].store_addr, diff[core].store_data, diff[core].store_mask);
 
           for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
