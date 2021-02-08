@@ -627,15 +627,20 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
 #ifdef DIFFTEST_STORE_COMMIT
       for (int core = 0; core < NumCore; core++) {
-        if (dut_ptr->io_difftest_storeCommit) {
+#ifdef DUALCORE
+        int storeCommit = (core == 0) ? dut_ptr->io_difftest_storeCommit : dut_ptr->io_difftest2_storeCommit;
+#else
+        int storeCommit = dut_ptr->io_difftest_storeCommit;
+#endif
+        if (storeCommit) {
           read_store_info(diff[core].store_addr, diff[core].store_data, diff[core].store_mask);
 
-          for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
+          for (int i = 0; i < storeCommit; i++) {
             auto addr = diff[core].store_addr[i];
             auto data = diff[core].store_data[i];
             auto mask = diff[core].store_mask[i];
-            if (difftest_store_step(&addr, &data, &mask)) {
-              difftest_display(dut_ptr->io_difftest_priviledgeMode);
+            if (difftest_store_step(&addr, &data, &mask, core)) {
+              difftest_display(dut_ptr->io_difftest_priviledgeMode, core);
               printf("Mismatch for store commits: \n");
               printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
               printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
