@@ -143,23 +143,10 @@ void difftest_display(uint8_t mode, int coreid) {
 int difftest_step(DiffState *s, int coreid) {
 
   uint64_t ref_r[DIFFTEST_NR_REG];
-  uint64_t this_pc = s->reg_scala[DIFFTEST_THIS_PC];
+
   // ref_difftest_getregs() will get the next pc,
   // therefore we must keep track this one
-
-  // if (skip) {
-  //   // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
-  //   // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-  //   reg_scala[DIFFTEST_THIS_PC] += isRVC ? 2 : 4;
-  //   nemu_this_pc += isRVC ? 2 : 4;
-  //   // to skip the checking of an instruction, just copy the reg state to reference design
-  //   ref_difftest_setregs(reg_scala);
-  //   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
-  //   pc_retire_queue[pc_retire_pointer] = this_pc;
-  //   inst_retire_queue[pc_retire_pointer] = this_inst;
-  //   retire_cnt_queue[pc_retire_pointer] = commit;
-  //   return 0;
-  // }
+  uint64_t this_pc = s->reg_scala[DIFFTEST_THIS_PC];
 
   // sync lr/sc reg status
   if (s->scFailed) {
@@ -172,7 +159,6 @@ int difftest_step(DiffState *s, int coreid) {
   // single step difftest
   if (s->intrNO) {
     ref_difftest_raise_intr(s->intrNO, coreid);
-    // ref_difftest_exec(1);//TODO
   } else {
     assert(s->commit > 0 && s->commit <= DIFFTEST_WIDTH);
     for (int i = 0; i < s->commit; i++) {

@@ -50,7 +50,7 @@ class L1plusPrefetcher extends PrefetchModule {
     XSDebug(p"io.mem_acquire: v=${io.mem_acquire.valid} r=${io.mem_acquire.ready} ${io.mem_acquire.bits}\n")
     XSDebug(p"io.mem_grant:   v=${io.mem_grant.valid} r=${io.mem_grant.ready} ${io.mem_grant.bits}\n")
 
-    if (!env.FPGAPlatform) {
+    if (!env.FPGAPlatform && !env.DualCore) {
       ExcitingUtils.addSource(io.mem_acquire.fire(), "perfCntL1plusPrefetchReqCnt", Perf)
       def idWidth: Int = log2Up(l1plusPrefetcherParameters.nEntries)
       (0 until l1plusPrefetcherParameters.nEntries).foreach(i =>

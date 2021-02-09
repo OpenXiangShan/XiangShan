@@ -61,28 +61,6 @@ class Regfile
     }
 
     if (!env.FPGAPlatform) {
-      val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-      ExcitingUtils.addSink(
-        debugArchRat,
-        if(hasZero) "DEBUG_INI_ARCH_RAT" else "DEBUG_FP_ARCH_RAT",
-        ExcitingUtils.Debug
-      )
-
-      val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(
-        x => if(hasZero){
-          if(x._2 == 0) 0.U else mem(x._1)
-        } else {
-          ieee(mem(x._1))
-        }
-      )))
-      ExcitingUtils.addSource(
-        debugArchReg,
-        if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG",
-        ExcitingUtils.Debug
-      )
-    }
-
-    if (env.DualCoreDifftest) {
       val id = if (hasZero) hartIdRFInt() else hartIdRFFp()
       val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
       ExcitingUtils.addSink(

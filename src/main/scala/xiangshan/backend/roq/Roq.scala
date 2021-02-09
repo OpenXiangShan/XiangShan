@@ -866,39 +866,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform) {
-
-    val difftestIntrNO = WireInit(0.U(XLEN.W))
-    val difftestCause = WireInit(0.U(XLEN.W))
-    ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
-    XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
-
-    ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
-    ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst
-    ExcitingUtils.addSource(RegNext(skip.asUInt), "difftestSkip", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wen.asUInt), "difftestWen", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wpc), "difftestWpc", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdata), "difftestWdata", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdst), "difftestWdst", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
-
-    ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
-    ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
-    ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
-    ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
-    ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
-
-    if(EnableBPU){
-      ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
-    }
+  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
+    ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.commit := RegNext(retireCounterFix)
     difftestIO.thisPC := RegNext(retirePCFix)
     difftestIO.thisINST := RegNext(retireInstFix)

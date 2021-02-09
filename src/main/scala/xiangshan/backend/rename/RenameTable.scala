@@ -75,14 +75,6 @@ class RenameTable(float: Boolean) extends XSModule {
   }
 
   if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(
-      arch_table,
-      if(float) "DEBUG_FP_ARCH_RAT" else "DEBUG_INI_ARCH_RAT",
-      ExcitingUtils.Debug
-    )
-  }
-
-  if (env.DualCoreDifftest) {
     val id = if (float) hartIdRTFp() else hartIdRTInt()
     ExcitingUtils.addSource(
       arch_table,

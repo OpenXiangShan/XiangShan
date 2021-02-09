@@ -340,7 +340,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> flushReg
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromRoq <> roq.difftestIO
     trapIO <> roq.trapIO
   }
