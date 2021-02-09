@@ -306,7 +306,7 @@ case class EnviromentParameters
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = false,
-  DualCoreDifftest: Boolean = false
+  DualCore: Boolean = false
 )
 
 // object AddressSpace extends HasXSParameter {
