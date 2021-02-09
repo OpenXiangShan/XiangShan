@@ -553,6 +553,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
+#ifdef DUALCORE
+    if (dut_ptr->io_trap2_valid) trapCode = dut_ptr->io_trap2_code;
+#endif
     if (trapCode != STATE_RUNNING) break;
 
     for (int i = 0; i < NumCore; i++) {
