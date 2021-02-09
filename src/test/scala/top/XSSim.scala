@@ -58,6 +58,21 @@ class DiffTestIO extends XSBundle {
   val sbufferAddr = Output(UInt(64.W))
   val sbufferData = Output(Vec(64, UInt(8.W)))
   val sbufferMask = Output(UInt(64.W))
+
+  val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+  val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+  val lfu = Output(Vec(CommitWidth, UInt(4.W)))
+
+  val atomicResp = Output(Bool())
+  val atomicAddr = Output(UInt(64.W))
+  val atomicData = Output(UInt(64.W))
+  val atomicMask = Output(UInt(8.W))
+  val atomicFuop = Output(UInt(8.W))
+  val atomicOut  = Output(UInt(64.W))
+
+  val ptwResp = Output(Bool())
+  val ptwAddr = Output(UInt(64.W))
+  val ptwData = Output(Vec(4, UInt(64.W)))
 }
 
 class LogCtrlIO extends Bundle {
@@ -213,6 +228,21 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).sbufferAddr := soc.module.difftestIO(i).fromSbuffer.sbufferAddr
         difftest(i).sbufferData := soc.module.difftestIO(i).fromSbuffer.sbufferData
         difftest(i).sbufferMask := soc.module.difftestIO(i).fromSbuffer.sbufferMask
+
+        difftest(i).lpaddr := soc.module.difftestIO(i).fromRoq.lpaddr
+        difftest(i).ltype := soc.module.difftestIO(i).fromRoq.ltype
+        difftest(i).lfu := soc.module.difftestIO(i).fromRoq.lfu
+
+        difftest(i).atomicResp := soc.module.difftestIO(i).fromAtomic.atomicResp
+        difftest(i).atomicAddr := soc.module.difftestIO(i).fromAtomic.atomicAddr
+        difftest(i).atomicData := soc.module.difftestIO(i).fromAtomic.atomicData
+        difftest(i).atomicMask := soc.module.difftestIO(i).fromAtomic.atomicMask
+        difftest(i).atomicFuop := soc.module.difftestIO(i).fromAtomic.atomicFuop
+        difftest(i).atomicOut  := soc.module.difftestIO(i).fromAtomic.atomicOut
+
+        difftest(i).ptwResp := soc.module.difftestIO(i).fromPtw.ptwResp
+        difftest(i).ptwAddr := soc.module.difftestIO(i).fromPtw.ptwAddr
+        difftest(i).ptwData := soc.module.difftestIO(i).fromPtw.ptwData
       
         trap(i) <> soc.module.trapIO(i)
       }      

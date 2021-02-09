@@ -193,6 +193,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     out.debug <> DontCare
     out.debug.isMMIO := false.B
     out.debug.isPerfCnt := false.B
+    out.debug.paddr := DontCare
     out.redirect <> DontCare
     out.redirectValid := false.B
   }

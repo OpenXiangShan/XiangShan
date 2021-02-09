@@ -921,7 +921,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   if (env.DualCoreDifftest) {
     difftestIO.intrNO := RegNext(difftestIntrNO)
-    difftestIO.cause := RegNext(causeNO)
+    difftestIO.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
     difftestIO.priviledgeMode := priviledgeMode
     difftestIO.mstatus := mstatus
     difftestIO.sstatus := mstatus & sstatusRmask
