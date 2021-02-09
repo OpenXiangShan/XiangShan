@@ -135,7 +135,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
       //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
-        when((io.refill.fire() && io.meta_write.fire()) || needFlush || io.flush){
+        when((io.refill.fire() && io.meta_write.fire()) || needFlush){
           state := s_wait_resp
         }
       }
@@ -150,10 +150,10 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
     //refill write and meta write
     //WARNING: Maybe could not finish refill in 1 cycle
-    io.meta_write.valid := (state === s_write_back) && !needFlush && !io.flush
+    io.meta_write.valid := (state === s_write_back) && !needFlush
     io.meta_write.bits.apply(tag=req_tag, setIdx=req_idx, waymask=req_waymask)
    
-    io.refill.valid := (state === s_write_back) && !needFlush && !io.flush
+    io.refill.valid := (state === s_write_back) && !needFlush 
     io.refill.bits.apply(data=respDataReg.asUInt,
                         setIdx=req_idx,
                         waymask=req_waymask)

@@ -8,7 +8,6 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.Regfile
-import xiangshan.backend.roq.RoqExceptionInfo
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -76,7 +75,7 @@ class IntegerBlock
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
-      val exception = Flipped(ValidIO(new RoqExceptionInfo))
+      val exception = Flipped(ValidIO(new ExceptionInfo))
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
       val isXRet = Output(Bool())
       val interrupt = Output(Bool()) // to roq
@@ -141,7 +140,8 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
+  val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -162,7 +162,7 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
 
     rs.io.redirect <> redirect
     rs.io.flush <> flush // TODO: remove it
