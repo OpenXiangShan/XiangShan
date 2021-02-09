@@ -208,8 +208,8 @@ int difftest_step(DiffState *s, int coreid) {
           if (s->lfu[i] == 0xC || s->lfu[i] == 0xF) {  // Load instruction
             ref_difftest_getregs(&ref_r, coreid);
             if (ref_r[s->wdst[i]] != s->wdata[i] && selectBit(s->wen, i) != 0) {
-              printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
-              printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
+              // printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
+              // printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
               uint64_t golden;
               int len = 0;
               if (s->lfu[i] == 0xC) {
@@ -239,7 +239,7 @@ int difftest_step(DiffState *s, int coreid) {
                   case 2: golden = (int64_t)(int32_t)golden; break;
                 }
               }
-              printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
+              // printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[s->wdst[i]]);
               if (golden == s->wdata[i]) {
                 // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
                 ref_difftest_memcpy_from_dut(s->lpaddr[i], &golden, len, coreid);
@@ -253,9 +253,9 @@ int difftest_step(DiffState *s, int coreid) {
                   ref_r[s->wdst[i]] = s->wdata[i];
                   ref_difftest_setregs(ref_r, coreid);
                 }
-                printf("---    atomic instr carefully handled\n");
+                // printf("---    atomic instr carefully handled\n");
               } else {
-                printf("---    goldenmem check failed as well\n");
+                // printf("---    goldenmem check failed as well\n");
               }
             }
           }
