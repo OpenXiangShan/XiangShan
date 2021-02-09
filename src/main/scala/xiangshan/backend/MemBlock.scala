@@ -214,7 +214,7 @@ class MemBlockImp
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
   dtlb.io.csr    <> io.tlbCsr
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
     difftestIO.fromSQ <> lsq.difftestIO.fromSQ
     difftestIO.fromAtomic <> atomicsUnit.difftestIO

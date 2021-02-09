@@ -503,14 +503,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   l2Prefetcher.io.in <> l2PrefetcherIn
 
   if (!env.FPGAPlatform) {
-    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-    ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
-    ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
-    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
-  }
-
-  if (env.DualCoreDifftest) {
     val id = hartIdCore()
     difftestIO.fromSbuffer <> memBlock.difftestIO.fromSbuffer
     difftestIO.fromSQ <> memBlock.difftestIO.fromSQ

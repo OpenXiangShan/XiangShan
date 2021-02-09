@@ -146,46 +146,8 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
     val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
     val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
-    
-    if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(difftest(0).commit, "difftestCommit", Debug)
-      ExcitingUtils.addSink(difftest(0).thisPC, "difftestThisPC", Debug)
-      ExcitingUtils.addSink(difftest(0).thisINST, "difftestThisINST", Debug)
-      ExcitingUtils.addSink(difftest(0).skip, "difftestSkip", Debug)
-      ExcitingUtils.addSink(difftest(0).isRVC, "difftestIsRVC", Debug)
-      ExcitingUtils.addSink(difftest(0).wen, "difftestWen", Debug)
-      ExcitingUtils.addSink(difftest(0).wdata, "difftestWdata", Debug)
-      ExcitingUtils.addSink(difftest(0).wdst, "difftestWdst", Debug)
-      ExcitingUtils.addSink(difftest(0).wpc, "difftestWpc", Debug)
-      ExcitingUtils.addSink(difftest(0).intrNO, "difftestIntrNO", Debug)
-      ExcitingUtils.addSink(difftest(0).cause, "difftestCause", Debug)
-      ExcitingUtils.addSink(difftest(0).r, "difftestRegs", Debug)
-      ExcitingUtils.addSink(difftest(0).priviledgeMode, "difftestMode", Debug)
-      ExcitingUtils.addSink(difftest(0).mstatus, "difftestMstatus", Debug)
-      ExcitingUtils.addSink(difftest(0).sstatus, "difftestSstatus", Debug)
-      ExcitingUtils.addSink(difftest(0).mepc, "difftestMepc", Debug)
-      ExcitingUtils.addSink(difftest(0).sepc, "difftestSepc", Debug)
-      ExcitingUtils.addSink(difftest(0).mtval, "difftestMtval", Debug)
-      ExcitingUtils.addSink(difftest(0).stval, "difftestStval", Debug)
-      ExcitingUtils.addSink(difftest(0).mtvec, "difftestMtvec", Debug)
-      ExcitingUtils.addSink(difftest(0).stvec, "difftestStvec", Debug)
-      ExcitingUtils.addSink(difftest(0).mcause, "difftestMcause", Debug)
-      ExcitingUtils.addSink(difftest(0).scause, "difftestScause", Debug)
-      ExcitingUtils.addSink(difftest(0).satp, "difftestSatp", Debug)
-      ExcitingUtils.addSink(difftest(0).mip, "difftestMip", Debug)
-      ExcitingUtils.addSink(difftest(0).mie, "difftestMie", Debug)
-      ExcitingUtils.addSink(difftest(0).mscratch, "difftestMscratch", Debug)
-      ExcitingUtils.addSink(difftest(0).sscratch, "difftestSscratch", Debug)
-      ExcitingUtils.addSink(difftest(0).mideleg, "difftestMideleg", Debug)
-      ExcitingUtils.addSink(difftest(0).medeleg, "difftestMedeleg", Debug)
-      ExcitingUtils.addSink(difftest(0).scFailed, "difftestScFailed", Debug)
-      ExcitingUtils.addSink(difftest(0).storeCommit, "difftestStoreCommit", Debug)
-      ExcitingUtils.addSink(difftest(0).storeAddr, "difftestStoreAddr", Debug)
-      ExcitingUtils.addSink(difftest(0).storeData, "difftestStoreData", Debug)
-      ExcitingUtils.addSink(difftest(0).storeMask, "difftestStoreMask", Debug)
-    }
 
-    if (env.DualCoreDifftest) {
+    if (!env.FPGAPlatform) {
       for (i <- 0 until NumCores) {
         difftest(i).commit := soc.module.difftestIO(i).fromRoq.commit
         difftest(i).thisPC := soc.module.difftestIO(i).fromRoq.thisPC
@@ -249,19 +211,11 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         trap(i) <> soc.module.trapIO(i)
       }      
     }
-    
-    if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(trap(0).valid, "trapValid")
-      ExcitingUtils.addSink(trap(0).code, "trapCode")
-      ExcitingUtils.addSink(trap(0).pc, "trapPC")
-      ExcitingUtils.addSink(trap(0).cycleCnt, "trapCycleCnt")
-      ExcitingUtils.addSink(trap(0).instrCnt, "trapInstrCnt")
-    }
 
     io.difftest := difftest(0)
     io.trap := trap(0)
 
-    if (env.DualCoreDifftest) {
+    if (!env.FPGAPlatform && env.DualCore) {
       io.difftest2 := difftest(1)
       io.trap2 := trap(1)
     }
@@ -311,7 +265,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     io.logCtrl <> dut.module.io.logCtrl
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
-    if (env.DualCoreDifftest) {
+    if (!env.FPGAPlatform && env.DualCore) {
       io.difftest2 <> dut.module.io.difftest2
       io.trap2 <> dut.module.io.trap2
     }

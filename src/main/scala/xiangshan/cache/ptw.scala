@@ -530,7 +530,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val memAddrLatch = RegEnable(memAddr, mem.a.valid)
   memSelData := memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     val ptwAddr = Reg(UInt(64.W))
     when (memReqFire) {
       ptwAddr := Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W))
@@ -656,7 +656,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSource(validOneCycle, "perfCntPtwReqCnt", Perf)
     ExcitingUtils.addSource(valid, "perfCntPtwCycleCnt", Perf)
     ExcitingUtils.addSource(valid && tlbHit && state===state_req && level===0.U, "perfCntPtwL2TlbHit", Perf)

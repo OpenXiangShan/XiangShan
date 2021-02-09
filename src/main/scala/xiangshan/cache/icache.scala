@@ -628,8 +628,8 @@ class ICache extends ICacheModule
 
   dump_pipe_info()
 
-  //Performance Counter
-  if (!env.FPGAPlatform ) {
+  // Performance Counter
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
     ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
     ExcitingUtils.addSource( s3_mmio && blocking && io.resp.fire(), "perfCntIcacheMMIOCnt", Perf)

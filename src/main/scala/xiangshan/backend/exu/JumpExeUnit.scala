@@ -84,7 +84,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.externalInterrupt <> csrio.externalInterrupt
   csr.csrio.tlb <> csrio.tlb
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromCSR <> csr.difftestIO
   }
 

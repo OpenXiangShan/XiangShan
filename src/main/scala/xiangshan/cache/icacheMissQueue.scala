@@ -229,7 +229,7 @@ class IcacheMissQueue extends ICacheMissQueueModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    if (!env.FPGAPlatform) {
+    if (!env.FPGAPlatform && !env.DualCore) {
       ExcitingUtils.addSource(
         BoolStopWatch(
           start = entry.io.req.fire(),

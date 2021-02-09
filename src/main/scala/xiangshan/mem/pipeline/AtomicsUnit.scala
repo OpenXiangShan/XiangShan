@@ -254,7 +254,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     atom_override_xtval := false.B
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
     difftestIO.atomicAddr := WireInit(paddr_reg)
     difftestIO.atomicData := WireInit(data_reg)

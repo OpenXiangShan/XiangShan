@@ -179,12 +179,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       xs_core(i).module.io.l2ToPrefetcher <> l2cache(i).module.io
     }
-    difftestIO0 <> DontCare
+    difftestIO0 <> xs_core(0).module.difftestIO
     difftestIO1 <> DontCare
-    if (env.DualCoreDifftest) {
-      difftestIO0 <> xs_core(0).module.difftestIO
+    trapIO0 <> xs_core(0).module.trapIO
+    trapIO1 <> DontCare
+    
+    if (env.DualCore) {
       difftestIO1 <> xs_core(1).module.difftestIO
-      trapIO0 <> xs_core(0).module.trapIO
       trapIO1 <> xs_core(1).module.trapIO
     }
     // do not let dma AXI signals optimized out
