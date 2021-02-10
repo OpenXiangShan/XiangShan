@@ -132,10 +132,13 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
   
 EMU_VCS := simv
 
-VCS_VFILE = $(BUILD_DIR)/plusarg_reader.v \
-            $(BUILD_DIR)/SDHelper.v
+VCS_SRC_FILE = $(TOP_V) \
+               $(BUILD_DIR)/plusarg_reader.v \
+               $(BUILD_DIR)/SDHelper.v
 
-VCS_CFILE = $(shell find $(EMU_CSRC_DIR)/dpi-c -name "*.c")
+VCS_TB_DIR = $(abspath ./src/test/vcs)
+VCS_TB_FILE = $(shell find $(VCS_TB_DIR) -name "*.c") \
+              $(shell find $(VCS_TB_DIR) -name "*.v")
 
 VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
   -LDFLAGS -Wl,--no-as-needed \
@@ -148,11 +151,9 @@ VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
   +define+RANDOMIZE_MEM_INIT \
   +define+RANDOMIZE_DELAY=1
 
-$(EMU_VCS): $(SIM_TOP_V) $(EMU_VFILES) $(VCS_VFILE) $(VCS_CFILE)
+$(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
 	rm -rf csrc
-	date -R
-	vcs $(VCS_OPTS) $(SIM_TOP_V) $(EMU_VFILES) $(VCS_VFILE) $(VCS_CFILE)
-	date -R
+	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)
