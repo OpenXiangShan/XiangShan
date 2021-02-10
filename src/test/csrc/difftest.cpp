@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 #include <emu.h>
+#include "nemuproxy.h"
 
 #ifndef REF_SO
 # error Please define REF_SO to the path of NEMU shared object file
@@ -12,20 +13,6 @@
 #define selectBit(src, x) (src & (1 << x))
 #define DEBUG_RETIRE_TRACE_SIZE 16
 #define DEBUG_WB_TRACE_SIZE 16
-
-void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n, int coreid) = NULL;
-void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n, int coreid) = NULL;
-void (*ref_difftest_getregs)(void *c, int coreid) = NULL;
-void (*ref_difftest_setregs)(const void *c, int coreid) = NULL;
-void (*ref_difftest_get_mastatus)(void *s, int coreid) = NULL;
-void (*ref_difftest_set_mastatus)(const void *s, int coreid) = NULL;
-void (*ref_difftest_get_csr)(void *c, int coreid) = NULL;
-void (*ref_difftest_set_csr)(const void *c, int coreid) = NULL;
-vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para, int coreid) = NULL;
-int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid) = NULL;
-static void (*ref_difftest_exec)(uint64_t n, int coreid) = NULL;
-static void (*ref_difftest_raise_intr)(uint64_t NO, int coreid) = NULL;
-static void (*ref_isa_reg_display)(int coreid) = NULL;
 
 static const char *reg_name[DIFFTEST_NR_REG] = {
   "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
@@ -57,58 +44,7 @@ static int wb_pointer[NumCore] = {0};
 
 void init_difftest() {
 
-  void *handle;
-  handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
-  puts("Using " REF_SO " for difftest");
-  assert(handle);
-
-  ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t, int))dlsym(handle, "difftest_memcpy_from_dut");
-  assert(ref_difftest_memcpy_from_dut);
-
-  ref_difftest_memcpy_from_ref = (void (*)(void *, paddr_t, size_t, int))dlsym(handle, "difftest_memcpy_from_ref");
-  assert(ref_difftest_memcpy_from_ref);
-
-  ref_difftest_getregs = (void (*)(void *, int))dlsym(handle, "difftest_getregs");
-  assert(ref_difftest_getregs);
-
-  ref_difftest_setregs = (void (*)(const void *, int))dlsym(handle, "difftest_setregs");
-  assert(ref_difftest_setregs);
-
-  ref_difftest_get_mastatus = (void (*)(void *, int))dlsym(handle, "difftest_get_mastatus");
-  assert(ref_difftest_get_mastatus);
-
-  ref_difftest_set_mastatus = (void (*)(const void *, int))dlsym(handle, "difftest_set_mastatus");
-  assert(ref_difftest_set_mastatus);
-
-  ref_difftest_get_csr = (void (*)(void *, int))dlsym(handle, "difftest_get_csr");
-  assert(ref_difftest_get_csr);
-
-  ref_difftest_set_csr = (void (*)(const void *, int))dlsym(handle, "difftest_set_csr");
-  assert(ref_difftest_set_csr);
-
-  ref_disambiguate_exec = (vaddr_t (*)(void *, int))dlsym(handle, "disambiguate_exec");
-  assert(ref_disambiguate_exec);
-
-  ref_difftest_store_commit = (int (*)(uint64_t*, uint64_t*, uint8_t*, int))dlsym(handle, "difftest_store_commit");
-  assert(ref_difftest_store_commit);
-
-  ref_difftest_exec = (void (*)(uint64_t, int))dlsym(handle, "difftest_exec");
-  assert(ref_difftest_exec);
-
-  ref_difftest_raise_intr = (void (*)(uint64_t, int))dlsym(handle, "difftest_raise_intr");
-  assert(ref_difftest_raise_intr);
-
-  ref_isa_reg_display = (void (*)(int))dlsym(handle, "isa_reg_display");
-  assert(ref_isa_reg_display);
-
-  void (*ref_difftest_init)(int) = (void (*)(int))dlsym(handle, "difftest_init");
-  assert(ref_difftest_init);
-
-  void (*ref_misc_put_gmaddr)(void *) = (void (*)(void*))dlsym(handle, "misc_put_gmaddr");
-  
-  if (ref_misc_put_gmaddr) {
-    ref_misc_put_gmaddr(pmem);
-  }
+  ref_misc_put_gmaddr(pmem);
   
   for (int i = 0; i < NumCore; i++) {
     ref_difftest_init(i);

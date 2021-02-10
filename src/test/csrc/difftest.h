@@ -82,17 +82,6 @@ struct DisambiguationState {
   uint64_t stval;
 };
 
-extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n, int coreid);
-extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n, int coreid);
-extern void (*ref_difftest_getregs)(void *c, int coreid);
-extern void (*ref_difftest_setregs)(const void *c, int coreid);
-extern void (*ref_difftest_get_mastatus)(void *s, int coreid);
-extern void (*ref_difftest_set_mastatus)(const void *s, int coreid);
-extern void (*ref_difftest_get_csr)(void *c, int coreid);
-extern void (*ref_difftest_set_csr)(const void *c, int coreid);
-extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para, int coreid);
-extern int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);
-
 void init_difftest();
 int difftest_step(DiffState *s, int coreid);
 int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);

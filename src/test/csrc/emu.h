@@ -8,7 +8,6 @@
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
 #define DIFFTEST_STORE_COMMIT
-// #define DUALCORE
 
 #ifdef DUALCORE
   #define NumCore 2
