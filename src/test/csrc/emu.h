@@ -8,7 +8,12 @@
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
 #define DIFFTEST_STORE_COMMIT
-#define NumCore 1
+
+#ifdef DUALCORE
+  #define NumCore 2
+#else
+  #define NumCore 1
+#endif
 
 struct EmuArgs {
   uint32_t seed;
@@ -53,12 +58,24 @@ class Emulator {
 
   // emu control variable
   uint64_t cycles;
-  int hascommit;
+  int hascommit[NumCore];
   int trapCode;
 
   inline void read_emu_regs(uint64_t *r);
-  inline void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst);
+  inline void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu);
   inline void read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
+  inline void read_sbuffer_info(uint8_t *sbufferData);
+  inline void read_diff_info(void* diff);
+  
+  // TODO: dirty methods
+#ifdef DUALCORE
+  inline void read_emu_regs2(uint64_t *r);
+  inline void read_wb_info2(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, uint64_t *lpaddr, uint32_t *ltype, uint8_t *lfu);
+  inline void read_store_info2(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
+  inline void read_sbuffer_info2(uint8_t *sbufferData);
+  inline void read_diff_info2(void* diff);
+#endif
+
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
   void display_trapinfo();

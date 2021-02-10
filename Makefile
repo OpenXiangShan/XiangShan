@@ -102,6 +102,10 @@ EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/X
 EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
 endif
 
+ifeq ($(DUALCORE),1)
+EMU_CXXFLAGS += -DDUALCORE
+endif
+
 # --trace
 VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1 \

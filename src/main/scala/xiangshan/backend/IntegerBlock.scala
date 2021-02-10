@@ -241,7 +241,7 @@ class IntegerBlock
 
   jmpExeUnit.csrio <> io.csrio
   jmpExeUnit.fenceio <> io.fenceio
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     jmpExeUnit.difftestIO.fromCSR <> difftestIO.fromCSR
   }
 

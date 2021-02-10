@@ -127,7 +127,7 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
   bus.e.valid := false.B
   bus.e.bits := DontCare
 
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSource(bus.a.fire(), "perfCntL2PrefetchReqCnt", Perf)
     (0 until l2PrefetcherParameters.nEntries).foreach(i =>
       ExcitingUtils.addSource(

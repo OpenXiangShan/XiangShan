@@ -32,23 +32,22 @@ class SDHelper extends BlackBox with HasBlackBoxInline {
   setInline("SDHelper.v",
     s"""
        |import "DPI-C" function void sd_setaddr(input int addr);
-       |import "DPI-C" function int sd_read(input bit ren);
+       |import "DPI-C" function void sd_read(output int data);
        |
        |module SDHelper (
        |  input clk,
        |  input setAddr,
        |  input [31:0] addr,
        |  input ren,
-       |  output [31:0] data
+       |  output reg [31:0] data
        |);
        |
-       |  always @(posedge clk) begin
-       |    if (setAddr) begin
-       |      sd_setaddr(addr);
-       |    end
+       |  always @(negedge clk) begin
+       |    if (ren) sd_read(data);
        |  end
-       |
-       |  assign data = sd_read(ren);
+       |  always@(posedge clk) begin
+       |    if (setAddr) sd_setaddr(addr);
+       |  end
        |
        |endmodule
      """.stripMargin)

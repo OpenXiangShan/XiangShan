@@ -117,7 +117,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
 
   storeQueue.io.sqempty <> io.sqempty
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromSQ <> storeQueue.difftestIO
   }
 
