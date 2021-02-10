@@ -162,14 +162,7 @@ class L2NonInclusiveGetTest extends AnyFlatSpec with ChiselScalatestTester with 
           req.bits.addr.poke(addr.U)
           req.bits.data.poke(0.U)
           req.bits.mask.poke(FULL_MASK_64)
-          req.bits.meta.id.poke(0.U)
-          req.bits.meta.vaddr.poke(addr.U)
-          req.bits.meta.paddr.poke(addr.U)
-          // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
-          req.bits.meta.mmio.poke(true.B)
-          req.bits.meta.tlb_miss.poke(false.B)
-          req.bits.meta.mask.poke(FULL_MASK_64)
-          req.bits.meta.replay.poke(false.B)
+          req.bits.id.poke(0.U)
 
           while (!req.ready.peek().litToBoolean) {
             c.clock.step()
@@ -204,14 +197,7 @@ class L2NonInclusiveGetTest extends AnyFlatSpec with ChiselScalatestTester with 
           req.bits.addr.poke(addr.U)
           req.bits.data.poke(data.U)
           req.bits.mask.poke(FULL_MASK_64)
-          req.bits.meta.id.poke(0.U)
-          req.bits.meta.vaddr.poke(addr.U)
-          req.bits.meta.paddr.poke(addr.U)
-          // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
-          req.bits.meta.mmio.poke(true.B)
-          req.bits.meta.tlb_miss.poke(false.B)
-          req.bits.meta.mask.poke(FULL_MASK_64)
-          req.bits.meta.replay.poke(false.B)
+          req.bits.id.poke(0.U)
 
           while (!req.ready.peek().litToBoolean) {
             c.clock.step()

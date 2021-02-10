@@ -40,11 +40,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
   val instrUncache = outer.instrUncache.module
 
-  val needFlush = io.backend.redirect.valid
+  val needFlush = io.backend.redirect_cfiUpdate.valid
 
   // from backend
-  ifu.io.redirect <> io.backend.redirect
-  ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
+  ifu.io.redirect <> io.backend.redirect_cfiUpdate
+  ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
+  ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
+  ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
   // to icache
   val grantClientId = clientId(io.icacheMemGrant.bits.id)
   val grantEntryId = entryId(io.icacheMemGrant.bits.id)
@@ -86,6 +88,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   // ibuffer to backend
   io.backend.cfVec <> ibuffer.io.out
+  // ifu to backend
+  io.backend.fetchInfo <> ifu.io.toFtq
 
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),

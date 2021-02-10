@@ -82,6 +82,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
     val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
   })
@@ -106,13 +107,14 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     if (fuCfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if (fuCfg.srcCnt > 1) {
+    if (fuCfg.srcCnt > 1 || fuCfg == jmpCfg) { // jump is special for jalr target
       fu.io.in.bits.src(1) := src2
     }
     if (fuCfg.srcCnt > 2) {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
+    fu.io.flushIn := io.flush
   }
 
 
@@ -187,11 +189,11 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   def assignDontCares(out: ExuOutput) = {
-    out.brUpdate := DontCare
     out.fflags := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B
     out.debug.isPerfCnt := false.B
+    out.debug.paddr := DontCare
     out.redirect <> DontCare
     out.redirectValid := false.B
   }

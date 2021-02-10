@@ -7,7 +7,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.RoqLsqIO
 
 
 class SqPtr extends CircularQueuePtr(SqPtr.StoreQueueSize) { }
@@ -33,14 +33,14 @@ class SqEnqIO extends XSBundle {
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val enq = new SqEnqIO
-    val brqRedirect = Input(Valid(new Redirect))
+    val brqRedirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(new RoqCommitIO)
+    val roq = Flipped(new RoqLsqIO)
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
@@ -76,13 +76,18 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   require(StoreQueueSize > RenameWidth)
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
+  val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
+  val cmtPtr = cmtPtrExt(0).value
 
-  val tailMask = UIntToMask(deqPtr, StoreQueueSize)
-  val headMask = UIntToMask(enqPtr, StoreQueueSize)
+  val deqMask = UIntToMask(deqPtr, StoreQueueSize)
+  val enqMask = UIntToMask(enqPtr, StoreQueueSize)
+
+  val commitCount = RegNext(io.roq.scommit)
 
   // Read dataModule
   // deqPtrExtNext and deqPtrExtNext+1 entry will be read from dataModule
@@ -99,7 +104,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
     paddrModule.io.raddr(i) := deqPtrExtNext(i).value
   }
-  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.sqIdx.value
+  vaddrModule.io.raddr(0) := cmtPtr + commitCount
 
   /**
     * Enqueue at dispatch
@@ -111,7 +116,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !(io.brqRedirect.valid || io.flush)) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -199,7 +204,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     for (j <- 0 until StoreQueueSize) {
       storeWritebackedVec(j) := datavalid(j) && allocated(j) // all datavalid terms need to be checked
     }
-    val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask) & storeWritebackedVec.asUInt
+    val needForward1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask) & storeWritebackedVec.asUInt
     val needForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W)) & storeWritebackedVec.asUInt
 
     XSDebug(p"$i f1 ${Binary(needForward1)} f2 ${Binary(needForward2)} " +
@@ -227,24 +232,38 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
-  io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
-    io.commits.info(0).commitType === CommitType.STORE &&
-    io.roqDeqPtr === uop(deqPtr).roqIdx &&
-    !io.commits.isWalk
+  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val uncacheState = RegInit(s_idle)
+  switch(uncacheState) {
+    is(s_idle) {
+      when(io.roq.pendingst && pending(deqPtr) && allocated(deqPtr)) {
+        uncacheState := s_req
+      }
+    }
+    is(s_req) {
+      when(io.uncache.req.fire()) {
+        uncacheState := s_resp
+      }
+    }
+    is(s_resp) {
+      when(io.uncache.resp.fire()) {
+        uncacheState := s_wait
+      }
+    }
+    is(s_wait) {
+      when(io.roq.commit) {
+        uncacheState := s_idle // ready for next mmio
+      }
+    }
+  }
+  io.uncache.req.valid := uncacheState === s_req
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
   io.uncache.req.bits.data := dataModule.io.rdata(0).data
   io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
-  io.uncache.req.bits.meta.id       := DontCare
-  io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := paddrModule.io.rdata(0)
-  io.uncache.req.bits.meta.uop      := uop(deqPtr)
-  io.uncache.req.bits.meta.mmio     := true.B
-  io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(0).mask
-  io.uncache.req.bits.meta.replay   := false.B
+  io.uncache.req.bits.id   := DontCare
 
   when(io.uncache.req.fire()){
     pending(deqPtr) := false.B
@@ -271,8 +290,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
-  io.mmioStout.bits.brUpdate := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
+  io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
   when (io.mmioStout.fire()) {
@@ -287,12 +306,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (2) They will not be cancelled and can be sent to lower level.
     */
   for (i <- 0 until CommitWidth) {
-    val storeCommit = !io.commits.isWalk && io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE
-    when (storeCommit) {
-      commited(io.commits.info(i).sqIdx.value) := true.B
-      XSDebug("store commit %d: idx %d\n", i.U, io.commits.info(i).sqIdx.value)
+    when (commitCount > i.U) {
+      commited(cmtPtrExt(i).value) := true.B
     }
   }
+  cmtPtrExt := cmtPtrExt.map(_ + commitCount)
 
   // Commited stores will not be cancelled and can be sent to lower level.
   // remove retired insts from sq, add retired store to sbuffer
@@ -306,11 +324,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.addr := paddrModule.io.rdata(i)
     io.sbuffer(i).bits.data := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask := dataModule.io.rdata(i).mask
-    io.sbuffer(i).bits.meta          := DontCare
-    io.sbuffer(i).bits.meta.tlb_miss := false.B
-    io.sbuffer(i).bits.meta.uop      := DontCare
-    io.sbuffer(i).bits.meta.mmio     := false.B
-    io.sbuffer(i).bits.meta.mask     := io.sbuffer(i).bits.mask
+    io.sbuffer(i).bits.id   := DontCare
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
@@ -327,12 +341,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val wmask = VecInit(io.sbuffer.map(_.bits.mask))
 
   if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(RegNext(storeCommit), "difftestStoreCommit", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(waddr), "difftestStoreAddr", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdata), "difftestStoreData", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wmask), "difftestStoreMask", ExcitingUtils.Debug)
-  }
-  if (env.DualCoreDifftest) {
     difftestIO.storeCommit := RegNext(storeCommit)
     difftestIO.storeAddr   := RegNext(waddr)
     difftestIO.storeData   := RegNext(wdata)
@@ -346,7 +354,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // invalidate sq term using robIdx
   val needCancel = Wire(Vec(StoreQueueSize, Bool()))
   for (i <- 0 until StoreQueueSize) {
-    needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
+    needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect, io.flush) && allocated(i) && !commited(i)
     when (needCancel(i)) {
         allocated(i) := false.B
     }
@@ -356,10 +364,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * update pointers
     */
   val lastCycleRedirect = RegNext(io.brqRedirect.valid)
+  val lastCycleFlush = RegNext(io.flush)
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect) {
+  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
+  when (lastCycleRedirect || lastCycleFlush) {
     // we recover the pointers in the next cycle after redirect
     enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
   }.otherwise {
@@ -368,7 +377,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   deqPtrExt := deqPtrExtNext
 
-  val lastLastCycleRedirect = RegNext(lastCycleRedirect)
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
 

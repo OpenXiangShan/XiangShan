@@ -6,9 +6,9 @@ import chisel3.util._
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4UserYanker, AXI4Xbar, AXI4IdentityNode}
+import freechips.rocketchip.amba.axi4.{AXI4IdIndexer, AXI4IdentityNode, AXI4UserYanker, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLToAXI4}
+import freechips.rocketchip.tilelink.TLToAXI4
 import xiangshan._
 import utils._
 import ExcitingUtils.Debug
@@ -58,19 +58,26 @@ class DiffTestIO extends XSBundle {
   val sbufferAddr = Output(UInt(64.W))
   val sbufferData = Output(Vec(64, UInt(8.W)))
   val sbufferMask = Output(UInt(64.W))
+
+  val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+  val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+  val lfu = Output(Vec(CommitWidth, UInt(4.W)))
+
+  val atomicResp = Output(Bool())
+  val atomicAddr = Output(UInt(64.W))
+  val atomicData = Output(UInt(64.W))
+  val atomicMask = Output(UInt(8.W))
+  val atomicFuop = Output(UInt(8.W))
+  val atomicOut  = Output(UInt(64.W))
+
+  val ptwResp = Output(Bool())
+  val ptwAddr = Output(UInt(64.W))
+  val ptwData = Output(Vec(4, UInt(64.W)))
 }
 
 class LogCtrlIO extends Bundle {
   val log_begin, log_end = Input(UInt(64.W))
   val log_level = Input(UInt(64.W)) // a cpp uint
-}
-
-class TrapIO extends XSBundle {
-  val valid = Output(Bool())
-  val code = Output(UInt(3.W))
-  val pc = Output(UInt(VAddrBits.W))
-  val cycleCnt = Output(UInt(XLEN.W))
-  val instrCnt = Output(UInt(XLEN.W))
 }
 
 class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
@@ -108,7 +115,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     startAddr = 0x80000000L,
     nOp = 0,
     beatBytes = L3BusWidth / 8))
-  soc.dma := burst.node
+  soc.dma := AXI4IdIndexer(16) := burst.node
 
   // AXI MMIO
   // -----------------------------------
@@ -121,6 +128,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
+      val trap2 = new TrapIO
       val uart = new UARTIO
     })
     io.difftest2 <> DontCare
@@ -132,51 +140,12 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
     io.uart <> axiMMIO.module.io.uart
     val NumCores = top.Parameters.get.socParameters.NumCores
-    for (i <- 0 until NrExtIntr) {
-      soc.module.io.extIntrs(i) := false.B
-    }
+    soc.module.io.extIntrs := 0.U
 
     val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
-    
-    if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(difftest(0).commit, "difftestCommit", Debug)
-      ExcitingUtils.addSink(difftest(0).thisPC, "difftestThisPC", Debug)
-      ExcitingUtils.addSink(difftest(0).thisINST, "difftestThisINST", Debug)
-      ExcitingUtils.addSink(difftest(0).skip, "difftestSkip", Debug)
-      ExcitingUtils.addSink(difftest(0).isRVC, "difftestIsRVC", Debug)
-      ExcitingUtils.addSink(difftest(0).wen, "difftestWen", Debug)
-      ExcitingUtils.addSink(difftest(0).wdata, "difftestWdata", Debug)
-      ExcitingUtils.addSink(difftest(0).wdst, "difftestWdst", Debug)
-      ExcitingUtils.addSink(difftest(0).wpc, "difftestWpc", Debug)
-      ExcitingUtils.addSink(difftest(0).intrNO, "difftestIntrNO", Debug)
-      ExcitingUtils.addSink(difftest(0).cause, "difftestCause", Debug)
-      ExcitingUtils.addSink(difftest(0).r, "difftestRegs", Debug)
-      ExcitingUtils.addSink(difftest(0).priviledgeMode, "difftestMode", Debug)
-      ExcitingUtils.addSink(difftest(0).mstatus, "difftestMstatus", Debug)
-      ExcitingUtils.addSink(difftest(0).sstatus, "difftestSstatus", Debug)
-      ExcitingUtils.addSink(difftest(0).mepc, "difftestMepc", Debug)
-      ExcitingUtils.addSink(difftest(0).sepc, "difftestSepc", Debug)
-      ExcitingUtils.addSink(difftest(0).mtval, "difftestMtval", Debug)
-      ExcitingUtils.addSink(difftest(0).stval, "difftestStval", Debug)
-      ExcitingUtils.addSink(difftest(0).mtvec, "difftestMtvec", Debug)
-      ExcitingUtils.addSink(difftest(0).stvec, "difftestStvec", Debug)
-      ExcitingUtils.addSink(difftest(0).mcause, "difftestMcause", Debug)
-      ExcitingUtils.addSink(difftest(0).scause, "difftestScause", Debug)
-      ExcitingUtils.addSink(difftest(0).satp, "difftestSatp", Debug)
-      ExcitingUtils.addSink(difftest(0).mip, "difftestMip", Debug)
-      ExcitingUtils.addSink(difftest(0).mie, "difftestMie", Debug)
-      ExcitingUtils.addSink(difftest(0).mscratch, "difftestMscratch", Debug)
-      ExcitingUtils.addSink(difftest(0).sscratch, "difftestSscratch", Debug)
-      ExcitingUtils.addSink(difftest(0).mideleg, "difftestMideleg", Debug)
-      ExcitingUtils.addSink(difftest(0).medeleg, "difftestMedeleg", Debug)
-      ExcitingUtils.addSink(difftest(0).scFailed, "difftestScFailed", Debug)
-      ExcitingUtils.addSink(difftest(0).storeCommit, "difftestStoreCommit", Debug)
-      ExcitingUtils.addSink(difftest(0).storeAddr, "difftestStoreAddr", Debug)
-      ExcitingUtils.addSink(difftest(0).storeData, "difftestStoreData", Debug)
-      ExcitingUtils.addSink(difftest(0).storeMask, "difftestStoreMask", Debug)
-    }
+    val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
 
-    if (env.DualCoreDifftest) {
+    if (!env.FPGAPlatform) {
       for (i <- 0 until NumCores) {
         difftest(i).commit := soc.module.difftestIO(i).fromRoq.commit
         difftest(i).thisPC := soc.module.difftestIO(i).fromRoq.thisPC
@@ -221,25 +190,35 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
         difftest(i).sbufferAddr := soc.module.difftestIO(i).fromSbuffer.sbufferAddr
         difftest(i).sbufferData := soc.module.difftestIO(i).fromSbuffer.sbufferData
         difftest(i).sbufferMask := soc.module.difftestIO(i).fromSbuffer.sbufferMask
-      }
-      io.difftest2 := difftest(1)
+
+        difftest(i).lpaddr := soc.module.difftestIO(i).fromRoq.lpaddr
+        difftest(i).ltype := soc.module.difftestIO(i).fromRoq.ltype
+        difftest(i).lfu := soc.module.difftestIO(i).fromRoq.lfu
+
+        difftest(i).atomicResp := soc.module.difftestIO(i).fromAtomic.atomicResp
+        difftest(i).atomicAddr := soc.module.difftestIO(i).fromAtomic.atomicAddr
+        difftest(i).atomicData := soc.module.difftestIO(i).fromAtomic.atomicData
+        difftest(i).atomicMask := soc.module.difftestIO(i).fromAtomic.atomicMask
+        difftest(i).atomicFuop := soc.module.difftestIO(i).fromAtomic.atomicFuop
+        difftest(i).atomicOut  := soc.module.difftestIO(i).fromAtomic.atomicOut
+
+        difftest(i).ptwResp := soc.module.difftestIO(i).fromPtw.ptwResp
+        difftest(i).ptwAddr := soc.module.difftestIO(i).fromPtw.ptwAddr
+        difftest(i).ptwData := soc.module.difftestIO(i).fromPtw.ptwData
+      
+        trap(i) <> soc.module.trapIO(i)
+      }      
     }
 
-    // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest(0)
+    io.trap := trap(0)
 
-    val trap = WireInit(0.U.asTypeOf(new TrapIO))
-    if (!env.FPGAPlatform) {
-      ExcitingUtils.addSink(trap.valid, "trapValid")
-      ExcitingUtils.addSink(trap.code, "trapCode")
-      ExcitingUtils.addSink(trap.pc, "trapPC")
-      ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
-      ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+    if (!env.FPGAPlatform && env.DualCore) {
+      io.difftest2 := difftest(1)
+      io.trap2 := trap(1)
     }
 
-    io.trap := trap
-
-    if (env.EnableDebug) {
+    if (env.EnableDebug || env.EnablePerfDebug) {
       val timer = GTimer()
       val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
       ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
@@ -253,7 +232,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 }
 
 class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
-  println(axiSim)
+  println(s"axiSim:${axiSim}")
   val dut = LazyModule(new XSSimSoC(axiSim))
   val axiSimRam = {
     if (axiSim) LazyModule(new AXI4RAM(
@@ -274,18 +253,20 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
+      val trap2 = new TrapIO
       val uart = new UARTIO
       val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
     })
     io.difftest2 <> DontCare
 
     io.difftest  <> dut.module.io.difftest
-    if (env.DualCoreDifftest) {
-      io.difftest2 <> dut.module.io.difftest2
-    }
     io.logCtrl <> dut.module.io.logCtrl
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
+    if (!env.FPGAPlatform && env.DualCore) {
+      io.difftest2 <> dut.module.io.difftest2
+      io.trap2 <> dut.module.io.trap2
+    }
     if (axiSim) {
       io.memAXI <> axiSimRam.module.io
     }

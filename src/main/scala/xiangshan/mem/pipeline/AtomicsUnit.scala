@@ -13,11 +13,23 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
+    val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
+    val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
+
+  val difftestIO = IO(new Bundle() {
+    val atomicResp = Output(Bool())
+    val atomicAddr = Output(UInt(64.W))
+    val atomicData = Output(UInt(64.W))
+    val atomicMask = Output(UInt(8.W))
+    val atomicFuop = Output(UInt(8.W))
+    val atomicOut  = Output(UInt(64.W))
+  })
+  difftestIO <> DontCare
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
@@ -32,7 +44,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val is_mmio = Reg(Bool())
   // dcache response data
   val resp_data = Reg(UInt())
+  val resp_data_wire = WireInit(0.U)
   val is_lrsc_valid = Reg(Bool())
+
+  // Difftest signals
+  val paddr_reg = Reg(UInt(64.W))
+  val data_reg = Reg(UInt(64.W))
+  val mask_reg = Reg(UInt(8.W))
+  val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
   io.exceptionAddr.bits  := in.src1
@@ -68,7 +87,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // since we will continue polling tlb all by ourself
   io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
+  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -95,7 +114,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
-      val exception = !addrAligned || 
+      val exception = !addrAligned ||
         io.dtlb.resp.bits.excp.pf.st ||
         io.dtlb.resp.bits.excp.pf.ld ||
         io.dtlb.resp.bits.excp.af.st ||
@@ -157,20 +176,21 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
-    io.dcache.req.bits.meta.id       := DontCare
-    io.dcache.req.bits.meta.paddr    := paddr
-    io.dcache.req.bits.meta.tlb_miss := false.B
-    io.dcache.req.bits.meta.replay   := false.B
+    io.dcache.req.bits.id   := DontCare
 
     when(io.dcache.req.fire()){
       state := s_cache_resp
+      paddr_reg := io.dcache.req.bits.addr
+      data_reg := io.dcache.req.bits.data
+      mask_reg := io.dcache.req.bits.mask
+      fuop_reg := in.uop.ctrl.fuOpType
     }
   }
 
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
-      is_lrsc_valid := io.dcache.resp.bits.meta.id
+      is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
         "b000".U -> rdata(63, 0),
@@ -183,7 +203,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         "b111".U -> rdata(63, 56)
       ))
 
-      resp_data := LookupTree(in.uop.ctrl.fuOpType, List(
+      resp_data_wire := LookupTree(in.uop.ctrl.fuOpType, List(
         LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.sc_w      -> rdata,
         LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
@@ -209,6 +229,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
       ))
 
+      resp_data := resp_data_wire
       state := s_finish
     }
   }
@@ -221,15 +242,24 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
-    io.out.bits.brUpdate := DontCare
     io.out.bits.debug.isMMIO := is_mmio
+    io.out.bits.debug.paddr := paddr
     when (io.out.fire()) {
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
       state := s_invalid
     }
   }
 
-  when(io.redirect.valid){
+  when(io.redirect.valid || io.flush){
     atom_override_xtval := false.B
+  }
+
+  if (!env.FPGAPlatform) {
+    difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
+    difftestIO.atomicAddr := WireInit(paddr_reg)
+    difftestIO.atomicData := WireInit(data_reg)
+    difftestIO.atomicMask := WireInit(mask_reg)
+    difftestIO.atomicFuop := WireInit(fuop_reg)
+    difftestIO.atomicOut  := resp_data_wire
   }
 }

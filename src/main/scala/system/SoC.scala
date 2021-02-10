@@ -158,14 +158,19 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
-      val extIntrs = Input(Vec(NrExtIntr, Bool()))
+      val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
     val difftestIO0 = IO(new DifftestBundle())
     val difftestIO1 = IO(new DifftestBundle())
     val difftestIO = Seq(difftestIO0, difftestIO1)
-    plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
+
+    val trapIO0 = IO(new xiangshan.TrapIO())
+    val trapIO1 = IO(new xiangshan.TrapIO())
+    val trapIO = Seq(trapIO0, trapIO1)
+
+    plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
@@ -174,15 +179,19 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       xs_core(i).module.io.l2ToPrefetcher <> l2cache(i).module.io
     }
-    difftestIO0 <> DontCare
+    difftestIO0 <> xs_core(0).module.difftestIO
     difftestIO1 <> DontCare
-    if (env.DualCoreDifftest) {
-      difftestIO0 <> xs_core(0).module.difftestIO
+    trapIO0 <> xs_core(0).module.trapIO
+    trapIO1 <> DontCare
+    
+    if (env.DualCore) {
       difftestIO1 <> xs_core(1).module.difftestIO
+      trapIO1 <> xs_core(1).module.trapIO
     }
     // do not let dma AXI signals optimized out
-    chisel3.dontTouch(dma.out.head._1)
-    chisel3.dontTouch(extDev.out.head._1)
+    dontTouch(dma.out.head._1)
+    dontTouch(extDev.out.head._1)
+    dontTouch(io.extIntrs)
   }
 
 }

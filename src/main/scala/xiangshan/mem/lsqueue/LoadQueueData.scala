@@ -20,7 +20,7 @@ class LQDataEntry extends XSBundle {
 
 // Data module define
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
-class PaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
+class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
@@ -106,7 +106,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule 
   }
 }
 
-class Data8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
+class LQData8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     // read
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
@@ -135,11 +135,12 @@ class Data8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule
   }
 
   // masked write
-  for (i <- 0 until blockWords) {
-    for (j <- 0 until numEntries) {
-      when (io.mwmask(i)(j)) {
-        data(j) := io.mwdata(i)
-      }
+  for (j <- 0 until numEntries) {
+    val wen = VecInit((0 until blockWords).map(i => io.mwmask(i)(j))).asUInt.orR
+    when (wen) {
+      data(j) := VecInit((0 until blockWords).map(i => {
+        Mux(io.mwmask(i)(j), io.mwdata(i), 0.U)
+      })).reduce(_ | _)
     }
   }
 
@@ -176,7 +177,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
     val paddrWen = Input(Vec(numWrite, Bool()))
   })
 
-  val data8 = Seq.fill(8)(Module(new Data8Module(numEntries, numRead, numWrite)))
+  val data8 = Seq.fill(8)(Module(new LQData8Module(numEntries, numRead, numWrite)))
   val fwdMask = Reg(Vec(numEntries, UInt(8.W)))
   val wordIndex = Reg(Vec(numEntries, UInt((blockOffBits - wordOffBits).W)))
 
@@ -286,7 +287,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
 
   // val data = Reg(Vec(size, new LQDataEntry))
   // data module
-  val paddrModule = Module(new PaddrModule(size, numRead = 3, numWrite = 2))
+  val paddrModule = Module(new LQPaddrModule(size, numRead = 3, numWrite = 2))
   val maskModule = Module(new MaskModule(size, numRead = 3, numWrite = 2))
   val coredataModule = Module(new CoredataModule(size, numRead = 3, numWrite = 3))
 

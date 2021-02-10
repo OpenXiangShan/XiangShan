@@ -112,15 +112,13 @@ package object xiangshan {
   }
 
   object RedirectLevel {
-    def flushAfter = "b00".U
-    def flush      = "b01".U
-    def flushAll   = "b10".U
-    def exception  = "b11".U
+    def flushAfter = "b0".U
+    def flush      = "b1".U
 
-    def apply() = UInt(2.W)
-    def isUnconditional(level: UInt) = level(1)
+    def apply() = UInt(1.W)
+    // def isUnconditional(level: UInt) = level(1)
     def flushItself(level: UInt) = level(0)
-    def isException(level: UInt) = level(1) && level(0)
+    // def isException(level: UInt) = level(1) && level(0)
   }
 
   object ExceptionVec {
