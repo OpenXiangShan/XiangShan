@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <nemuproxy.h>
 #include <unistd.h>
 #include <dlfcn.h>

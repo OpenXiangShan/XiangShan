@@ -44,9 +44,7 @@ static int wb_pointer[NumCore] = {0};
 
 void init_difftest() {
 
-  if (ref_misc_put_gmaddr) {
-    ref_misc_put_gmaddr(pmem);
-  }
+  ref_misc_put_gmaddr(pmem);
   
   for (int i = 0; i < NumCore; i++) {
     ref_difftest_init(i);
