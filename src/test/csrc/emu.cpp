@@ -816,7 +816,7 @@ void Emulator::snapshot_save(const char *filename) {
   ref_difftest_getregs(&ref_r, 0);
   stream.unbuf_write(ref_r, sizeof(ref_r));
 
-  uint64_t nemu_this_pc = get_nemu_this_pc();
+  uint64_t nemu_this_pc = get_nemu_this_pc(0);
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
@@ -858,7 +858,7 @@ void Emulator::snapshot_load(const char *filename) {
 
   uint64_t nemu_this_pc;
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
-  set_nemu_this_pc(nemu_this_pc);
+  set_nemu_this_pc(nemu_this_pc, 0);
 
   char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
