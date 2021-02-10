@@ -69,12 +69,14 @@ void init_so(int coreid) {
   void (*nemu_difftest_set_mhartid)(int) = (void (*)(int))dlsym(handle, "difftest_set_mhartid");
 
   void (*nemu_misc_put_gmaddr)(void *) = (void (*)(void*))dlsym(handle, "misc_put_gmaddr");
-  if (nemu_misc_put_gmaddr) {
+  
+  if (nemu_misc_put_gmaddr)
     nemu_misc_put_gmaddr(goldenMem);
-  }
 
   nemu_difftest_init();
-  nemu_difftest_set_mhartid(coreid);
+
+  if (nemu_difftest_set_mhartid)
+    nemu_difftest_set_mhartid(coreid);
 }
 
 void ref_difftest_memcpy_from_dut(paddr_t dest, void *src, size_t n, int coreid) {
