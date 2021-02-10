@@ -424,7 +424,7 @@ inline void Emulator::single_cycle() {
 
 inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
   if (!(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff)) {
-    printf("Mask fucked: %lx\n", atomicMask);
+    printf("Mask f**ked: %lx\n", atomicMask);
   }
   assert(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff);
 
@@ -434,8 +434,8 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
     uint64_t ret;
     uint64_t mem;
     read_goldenmem(atomicAddr, &mem, 8);
-    if (mem != t && atomicFuop != 007) {
-      printf("Atomic instr fucked up, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", mem, t, atomicFuop, atomicAddr);
+    if (mem != t && atomicFuop != 007 && atomicFuop != 003) {
+      printf("Atomic instr f**ked up, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", mem, t, atomicFuop, atomicAddr);
       // assert(0);
     }
     switch (atomicFuop) {
@@ -469,8 +469,8 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
     else
       mem = (uint32_t)(mem_temp >> 32);
 
-    if (mem != t && atomicFuop != 006) {
-      printf("Atomic instr fucked up, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", mem_temp, mem, t, atomicFuop, atomicAddr);
+    if (mem != t && atomicFuop != 006 && atomicFuop != 002) {
+      printf("Atomic instr f**ked up, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", mem_temp, mem, t, atomicFuop, atomicAddr);
       // assert(0);
     }
     switch (atomicFuop) {
