@@ -1,6 +1,7 @@
 #include "emu.h"
 #include "sdcard.h"
 #include "difftest.h"
+#include "nemuproxy.h"
 #include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
