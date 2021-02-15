@@ -15,6 +15,7 @@ import top.XiangShanStage
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
+  val mmioXbar = TLXbar()
 }
 
 trait HaveAXI4MemPort {
@@ -33,15 +34,15 @@ trait HaveAXI4MemPort {
           interleavedId = Some(0)
         )
       ),
-      beatBytes = L3BlockSize
+      beatBytes = L3BusWidth / 8
     )
   })
 
   memAXI4SlaveNode :=*
     AXI4UserYanker() :=*
-    AXI4IdIndexer(idBits = 16) :=*
+    AXI4IdIndexer(idBits = 1) :=*
     TLToAXI4() :=*
-    TLWidthWidget(L3BlockSize) :=*
+    TLWidthWidget(L3BusWidth / 8) :=*
     TLCacheCork() :=*
     bankedNode
 
@@ -50,10 +51,40 @@ trait HaveAXI4MemPort {
   }
 }
 
-class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
+
+trait HaveAXI4MMIOPort { this: BaseXSSoc =>
+
+  val mmioAXI4SalveNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+    Seq(AXI4SlaveParameters(
+      address = AddressSet(0x0, 0x7fffffff).subtract(AddressSet(0x38000000L, 0x0000ffffL)),
+      regionType = RegionType.UNCACHED,
+      supportsRead = TransferSizes(1, 8),
+      supportsWrite = TransferSizes(1, 8),
+      interleavedId = Some(0)
+    )),
+    beatBytes = 8
+  )))
+
+  mmioAXI4SalveNode :=
+    AXI4UserYanker() :=
+    TLToAXI4() :=
+    mmioXbar
+
+  val mmioAXI4 = InModuleBody {
+    mmioAXI4SalveNode.makeIOs()
+  }
+
+}
+
+
+class MySoc()(implicit p: Parameters) extends BaseXSSoc()
+  with HaveAXI4MemPort
+  with HaveAXI4MMIOPort
+  {
+
+  println(s"My Soc cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
 
   val l3_xbar = TLXbar()
-  val mmio_xbar = TLXbar()
   for (i <- 0 until NumCores) {
     val core = LazyModule(new XSCore())
     val l2 = LazyModule(new InclusiveCache(
@@ -69,8 +100,8 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
         writeBytes = 32
       )
     ))
-    mmio_xbar := TLBuffer() := core.frontend.instrUncache.clientNode
-    mmio_xbar := TLBuffer() := core.memBlock.uncache.clientNode
+    mmioXbar := TLBuffer() := core.frontend.instrUncache.clientNode
+    mmioXbar := TLBuffer() := core.memBlock.uncache.clientNode
     val l2_xbar = TLXbar()
     l2_xbar := TLBuffer() := core.memBlock.dcache.clientNode
     l2_xbar := TLBuffer() := core.l1pluscache.clientNode
@@ -85,7 +116,7 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
     sim = !env.FPGAPlatform
   ))
 
-  clint.node := mmio_xbar
+  clint.node := mmioXbar
 
   val l3_node = LazyModule(new InclusiveCache(
     CacheParameters(
@@ -111,7 +142,7 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
 object MySoc extends App {
   override def main(args: Array[String]): Unit = {
     implicit val p = Parameters.empty
-    (new XiangShanStage).execute(args, Seq(
+    (new XiangShanStage).execute(Array(), Seq(
       ChiselGeneratorAnnotation(() => {
         val soc = LazyModule(new MySoc())
         soc.module
