@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.stage.ChiselGeneratorAnnotation
+import device.TLTimer
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
@@ -52,6 +53,7 @@ trait HaveAXI4MemPort {
 class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
 
   val l3_xbar = TLXbar()
+  val mmio_xbar = TLXbar()
   for (i <- 0 until NumCores) {
     val core = LazyModule(new XSCore())
     val l2 = LazyModule(new InclusiveCache(
@@ -67,6 +69,8 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
         writeBytes = 32
       )
     ))
+    mmio_xbar := TLBuffer() := core.frontend.instrUncache.clientNode
+    mmio_xbar := TLBuffer() := core.memBlock.uncache.clientNode
     val l2_xbar = TLXbar()
     l2_xbar := TLBuffer() := core.memBlock.dcache.clientNode
     l2_xbar := TLBuffer() := core.l1pluscache.clientNode
@@ -75,6 +79,13 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc() with HaveAXI4MemPort {
     l2.node := TLBuffer() := l2_xbar
     l3_xbar := TLBuffer() := l2.node
   }
+
+  private val clint = LazyModule(new TLTimer(
+    Seq(AddressSet(0x38000000L, 0x0000ffffL)),
+    sim = !env.FPGAPlatform
+  ))
+
+  clint.node := mmio_xbar
 
   val l3_node = LazyModule(new InclusiveCache(
     CacheParameters(
