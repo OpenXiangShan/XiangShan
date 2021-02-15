@@ -36,16 +36,16 @@ class BtbMetaEntry() extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
   val tag = UInt((VAddrBits - log2Ceil(nRows) - log2Ceil(PredictWidth) - instOffsetBits).W)
-  val btbType = UInt(2.W)
+  val isBr = Bool()
   val isRVC = Bool()
 }
 
 object BtbMetaEntry {
-  def apply(tag: UInt, btbType: UInt, isRVC: Bool) = {
+  def apply(tag: UInt, isBr: UInt, isRVC: Bool) = {
     val e = Wire(new BtbMetaEntry)
     e.valid := true.B
     e.tag := tag
-    e.btbType := btbType
+    e.isBr := isBr
     e.isRVC := isRVC
     e
   }
@@ -55,12 +55,11 @@ class BTB extends BasePredictor with BTBParams{
   class BTBResp extends Resp {
     val targets = Vec(PredictWidth, UInt(VAddrBits.W))
     val hits = Vec(PredictWidth, Bool())
-    val types = Vec(PredictWidth, UInt(2.W))
+    val isBrs = Vec(PredictWidth, Bool())
     val isRVC = Vec(PredictWidth, Bool())
   }
   class BTBMeta extends Meta {
     val writeWay =  Vec(PredictWidth, UInt(log2Up(BtbWays).W))
-    val hitJal = Vec(PredictWidth, Bool())
   }
   class BTBFromOthers extends FromOthers {}
 
@@ -157,10 +156,10 @@ class BTB extends BasePredictor with BTBParams{
     // Use real pc to calculate the target
     io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead, Cat(if2_pc(VAddrBits-1, lowerBitsSize+instOffsetBits), data_entry.lower, 0.U(instOffsetBits.W)))
     io.resp.hits(b)  := if2_bankHits(b)
-    io.resp.types(b) := meta_entry.btbType
+    io.resp.isBrs(b) := meta_entry.isBr
     io.resp.isRVC(b) := meta_entry.isRVC
     io.meta.writeWay(b) := writeWay(b)
-    io.meta.hitJal(b)   := if2_bankHits(b) && meta_entry.btbType === BTBtype.J
+    // io.meta.hitJal(b)   := if2_bankHits(b) && meta_entry.btbType === BTBtype.J
   }
 
   def pdInfoToBTBtype(pd: PreDecodeInfo) = {
@@ -173,30 +172,34 @@ class BTB extends BasePredictor with BTBParams{
   }
   val u = io.update.bits
 
-  val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
+  val cfi_pc = packetAligned(u.ftqPC) + (u.cfiIndex.bits << instOffsetBits)
+  val new_target = u.target
   val new_lower = new_target(lowerBitsSize+instOffsetBits-1, instOffsetBits)
-  val update_pc_higher     = u.pc(VAddrBits-1, lowerBitsSize+instOffsetBits)
+  val update_pc_higher     = cfi_pc(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val update_target_higher = new_target(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val higher_identical = update_pc_higher === update_target_higher
   val new_extended = !higher_identical
 
 
-  val updateWay = u.bpuMeta.btbWriteWay
-  val updateBankIdx = btbAddr.getBank(u.pc)
-  val updateRow = btbAddr.getBankIdx(u.pc)
-  val updateType = pdInfoToBTBtype(u.pd)
-  val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
+  val updateWay = u.metas(u.cfiIndex.bits).btbWriteWay
+  val updateBank = u.cfiIndex.bits
+  val updateRow = btbAddr.getBankIdx(cfi_pc)
+  val updateIsBr = u.br_mask(u.cfiIndex.bits)
+  val updateTaken = u.cfiIndex.valid
+  // TODO: remove isRVC
+  val metaWrite = BtbMetaEntry(btbAddr.getTag(cfi_pc), updateIsBr, u.cfiIsRVC)
   val dataWrite = BtbDataEntry(new_lower, new_extended)
+  
 
-  val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
-  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay
+  // val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
+  val updateValid = io.update.valid && updateTaken
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
-      meta(w)(b).io.w.req.valid := updateValid && b.U === updateBankIdx && w.U === updateWay
+      meta(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
       meta(w)(b).io.w.req.bits.setIdx := updateRow
       meta(w)(b).io.w.req.bits.data := metaWrite
-      data(w)(b).io.w.req.valid := updateValid && b.U === updateBankIdx && w.U === updateWay
+      data(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
       data(w)(b).io.w.req.bits.setIdx := updateRow
       data(w)(b).io.w.req.bits.data := dataWrite
     }
@@ -216,18 +219,18 @@ class BTB extends BasePredictor with BTBParams{
     if (debug_verbose) {
       for (i <- 0 until BtbBanks){
         for (j <- 0 until BtbWays) {
-          XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, lower=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-          j.U, i.U, if2_row, if2_metaRead(j)(i).valid, if2_mask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).lower, if2_metaRead(j)(i).btbType, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
+          XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, lower=0x%x, isBr=%d, isExtend=%d, isRVC=%d\n",
+          j.U, i.U, if2_row, if2_metaRead(j)(i).valid, if2_mask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).lower, if2_metaRead(j)(i).isBr, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
         }
       }
     }
 
     for (i <- 0 until BtbBanks) {
-      XSDebug(validLatch && if2_bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
-        i.U, i.U, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
+      XSDebug(validLatch && if2_bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, isBr=%d\n",
+        i.U, i.U, io.resp.targets(i), io.resp.isRVC(i), io.resp.isBrs(i))
     }
     XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, lower=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-      u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_lower, new_extended, updateWay, updateBankIdx, updateRow)
+      u.metas(u.cfiIndex.bits).debug_btb_cycle, cfi_pc, new_target, u.mispred(u.cfiIndex.bits), new_lower, new_extended, updateWay, updateBank, updateRow)
     for (i <- 0 until BtbBanks) {
       // Conflict when not hit and allocating a valid entry
       val conflict = if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i)

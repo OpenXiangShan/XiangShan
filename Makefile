@@ -28,7 +28,7 @@ help:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
-	$(MEM_GEN) $(@D)/$(@F).conf >> $@
+	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -102,6 +102,10 @@ EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/X
 EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
 endif
 
+ifeq ($(DUALCORE),1)
+EMU_CXXFLAGS += -DDUALCORE
+endif
+
 # --trace
 VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1 \
@@ -125,6 +129,31 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 	date -R
+  
+EMU_VCS := simv
+
+VCS_SRC_FILE = $(TOP_V) \
+               $(BUILD_DIR)/plusarg_reader.v \
+               $(BUILD_DIR)/SDHelper.v
+
+VCS_TB_DIR = $(abspath ./src/test/vcs)
+VCS_TB_FILE = $(shell find $(VCS_TB_DIR) -name "*.c") \
+              $(shell find $(VCS_TB_DIR) -name "*.v")
+
+VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
+  -LDFLAGS -Wl,--no-as-needed \
+  -sverilog \
+  +lint=TFIPC-L \
+  -debug_all +vcd+vcdpluson \
+  +define+RANDOMIZE_GARBAGE_ASSIGN \
+  +define+RANDOMIZE_INVALID_ASSIGN \
+  +define+RANDOMIZE_REG_INIT \
+  +define+RANDOMIZE_MEM_INIT \
+  +define+RANDOMIZE_DELAY=1
+
+$(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
+	rm -rf csrc
+	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)

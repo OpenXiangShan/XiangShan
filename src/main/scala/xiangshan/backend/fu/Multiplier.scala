@@ -47,7 +47,6 @@ class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len)
   override def latency = doReg.size
 
   val doRegSorted = doReg.sortWith(_ < _)
-  println(doRegSorted)
 
   val (a, b) = (io.in.bits.src(0), io.in.bits.src(1))
 

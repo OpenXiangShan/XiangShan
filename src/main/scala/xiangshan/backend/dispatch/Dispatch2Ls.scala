@@ -24,13 +24,13 @@ class Dispatch2Ls extends XSModule {
     */
   val loadIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.LduCnt, true))
   val loadCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.loadCanAccept(deq.bits.ctrl.fuType)))
-  val loadPriority = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
+  val (loadPriority, _) = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
   loadIndexGen.io.validBits := loadCanAccept
   loadIndexGen.io.priority := loadPriority
 
   val storeIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.StuCnt, true))
   val storeCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.storeCanAccept(deq.bits.ctrl.fuType)))
-  val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
+  val (storePriority, _) = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
   storeIndexGen.io.validBits := storeCanAccept
   storeIndexGen.io.priority := storePriority
 

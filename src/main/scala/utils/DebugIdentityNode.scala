@@ -26,7 +26,7 @@ class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
       val channels = Seq(t.a, t.b, t.c, t.d, t.e)
       channels.foreach(c =>
         when(fire(c)){
-          XSDebug(" ")
+          XSDebug(" isFire:%d ",c.fire())
           c.bits.dump
         }
       )
