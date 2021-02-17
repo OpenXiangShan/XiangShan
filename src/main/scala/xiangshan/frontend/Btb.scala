@@ -198,16 +198,16 @@ class BTB extends BasePredictor with BTBParams{
     for (b <- 0 until BtbBanks) {
       meta(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
       meta(w)(b).io.w.req.bits.setIdx := updateRow
-      meta(w)(b).io.w.req.bits.data := metaWrite
+      meta(w)(b).io.w.req.bits.data := VecInit(metaWrite)
       data(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
       data(w)(b).io.w.req.bits.setIdx := updateRow
-      data(w)(b).io.w.req.bits.data := dataWrite
+      data(w)(b).io.w.req.bits.data := VecInit(dataWrite)
     }
   }
 
   edata.io.w.req.valid := updateValid && new_extended
   edata.io.w.req.bits.setIdx := updateRow
-  edata.io.w.req.bits.data := u.target
+  edata.io.w.req.bits.data := VecInit(u.target)
 
 
   if (BPUDebug && debug) {

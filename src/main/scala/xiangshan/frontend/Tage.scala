@@ -218,7 +218,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   (0 until TageBanks).map(b => {
     table(b).io.w.req.valid := io.update.mask(b) || doing_reset
     table(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
-    table(b).io.w.req.bits.data := Mux(doing_reset, 0.U.asTypeOf(new TageEntry), update_wdata(b))
+    table(b).io.w.req.bits.data := VecInit(Mux(doing_reset, 0.U.asTypeOf(new TageEntry), update_wdata(b)))
   })
 
   val update_hi_wdata = Wire(Vec(TageBanks, Bool()))
