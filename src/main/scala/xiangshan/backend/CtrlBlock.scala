@@ -198,6 +198,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
       val isRVC = Output(UInt(32.W))
       val scFailed = Output(Bool())
+      val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+      val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+      val lfu = Output(Vec(CommitWidth, UInt(4.W)))
     }
   })
   difftestIO <> DontCare
@@ -337,7 +340,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> flushReg
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromRoq <> roq.difftestIO
     trapIO <> roq.trapIO
   }

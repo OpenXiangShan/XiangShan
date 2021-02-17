@@ -329,6 +329,7 @@ class ReplayPregReq extends XSBundle {
 class DebugBundle extends XSBundle {
   val isMMIO = Bool()
   val isPerfCnt = Bool()
+  val paddr = UInt(PAddrBits.W)
 }
 
 class ExuInput extends XSBundle {
@@ -487,8 +488,24 @@ class DifftestBundle extends XSBundle {
     val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
     val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
     val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+    val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+    val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+    val lfu = Output(Vec(CommitWidth, UInt(4.W)))
     val isRVC = Output(UInt(32.W))
     val scFailed = Output(Bool())
+  }
+  val fromAtomic = new Bundle() {
+    val atomicResp = Output(Bool())
+    val atomicAddr = Output(UInt(64.W))
+    val atomicData = Output(UInt(64.W))
+    val atomicMask = Output(UInt(8.W))
+    val atomicFuop = Output(UInt(8.W))
+    val atomicOut  = Output(UInt(64.W))
+  }
+  val fromPtw = new Bundle() {
+    val ptwResp = Output(Bool())
+    val ptwAddr = Output(UInt(64.W))
+    val ptwData = Output(Vec(4, UInt(64.W)))
   }
 }
 

@@ -108,7 +108,7 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048,//(256 * 8)
   NumPerfCounters: Int = 16,
-  NrExtIntr: Int = 1
+  NrExtIntr: Int = 150
 )
 
 trait HasXSParameter {
@@ -308,7 +308,7 @@ case class EnviromentParameters
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = false,
-  DualCoreDifftest: Boolean = false
+  DualCore: Boolean = false
 )
 
 // object AddressSpace extends HasXSParameter {
@@ -505,19 +505,13 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   l2Prefetcher.io.in <> l2PrefetcherIn
 
   if (!env.FPGAPlatform) {
-    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-    ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
-    ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
-    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
-  }
-
-  if (env.DualCoreDifftest) {
     val id = hartIdCore()
     difftestIO.fromSbuffer <> memBlock.difftestIO.fromSbuffer
     difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
     difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
     difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
+    difftestIO.fromAtomic <> memBlock.difftestIO.fromAtomic
+    difftestIO.fromPtw <> ptw.difftestIO
     trapIO <> ctrlBlock.trapIO
 
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))

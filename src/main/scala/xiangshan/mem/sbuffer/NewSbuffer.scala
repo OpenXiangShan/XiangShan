@@ -409,7 +409,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     XSDebug(p"recv cache resp: id=[$respId]\n")
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.sbufferResp := WireInit(io.dcache.resp.fire())
     difftestIO.sbufferAddr := WireInit(getAddr(tagRead(respId)))
     difftestIO.sbufferData := WireInit(bufferRead(respId).data.asTypeOf(Vec(CacheLineBytes, UInt(8.W))))

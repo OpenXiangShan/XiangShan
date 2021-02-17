@@ -880,7 +880,7 @@ class CSR extends FunctionUnit with HasCSRConst
   }
   
   val xstrap = WireInit(false.B)
-  if (!env.FPGAPlatform && EnableBPU) {
+  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
     ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
   }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
@@ -888,7 +888,6 @@ class CSR extends FunctionUnit with HasCSRConst
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
   
   if (!env.FPGAPlatform) {
-
     // display all perfcnt when nooptrap is executed
     when (xstrap) {
       printf("======== PerfCnt =========\n")
@@ -896,32 +895,11 @@ class CSR extends FunctionUnit with HasCSRConst
         printf("%d <- " + str + "\n", readWithScala(address))
       }
     }
-
-    ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSource(Mux(csrio.exception.valid, causeNO, 0.U), "difftestCausefromCSR")
-    ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
-    ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
-    ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
-    ExcitingUtils.addSource(mepc, "difftestMepc", Debug)
-    ExcitingUtils.addSource(sepc, "difftestSepc", Debug)
-    ExcitingUtils.addSource(mtval, "difftestMtval", Debug)
-    ExcitingUtils.addSource(stval, "difftestStval", Debug)
-    ExcitingUtils.addSource(mtvec, "difftestMtvec", Debug)
-    ExcitingUtils.addSource(stvec, "difftestStvec", Debug)
-    ExcitingUtils.addSource(mcause, "difftestMcause", Debug)
-    ExcitingUtils.addSource(scause, "difftestScause", Debug)
-    ExcitingUtils.addSource(satp, "difftestSatp", Debug)
-    ExcitingUtils.addSource(mipReg, "difftestMip", Debug)
-    ExcitingUtils.addSource(mie, "difftestMie", Debug)
-    ExcitingUtils.addSource(mscratch, "difftestMscratch", Debug)
-    ExcitingUtils.addSource(sscratch, "difftestSscratch", Debug)
-    ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
-    ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.intrNO := RegNext(difftestIntrNO)
-    difftestIO.cause := RegNext(causeNO)
+    difftestIO.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
     difftestIO.priviledgeMode := priviledgeMode
     difftestIO.mstatus := mstatus
     difftestIO.sstatus := mstatus & sstatusRmask

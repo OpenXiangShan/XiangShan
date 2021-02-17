@@ -281,7 +281,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
         s := s_invalid
       }
     })
-    commitStateQueue(next.value).foreach(_ := s_invalid)
+    when(next.value =/= headPtr.value){ // if next.value === headPtr.value, ftq is full
+      commitStateQueue(next.value).foreach(_ := s_invalid)
+    }
   }
 
   XSPerf("ftqEntries", validEntries)

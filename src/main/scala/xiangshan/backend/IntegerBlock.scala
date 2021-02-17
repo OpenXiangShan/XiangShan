@@ -162,7 +162,7 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
 
     rs.io.redirect <> redirect
     rs.io.flush <> flush // TODO: remove it
@@ -241,7 +241,7 @@ class IntegerBlock
 
   jmpExeUnit.csrio <> io.csrio
   jmpExeUnit.fenceio <> io.fenceio
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     jmpExeUnit.difftestIO.fromCSR <> difftestIO.fromCSR
   }
 

@@ -291,6 +291,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
+  io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
   when (io.mmioStout.fire()) {
@@ -340,12 +341,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val wmask = VecInit(io.sbuffer.map(_.bits.mask))
 
   if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(RegNext(storeCommit), "difftestStoreCommit", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(waddr), "difftestStoreAddr", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdata), "difftestStoreData", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wmask), "difftestStoreMask", ExcitingUtils.Debug)
-  }
-  if (env.DualCoreDifftest) {
     difftestIO.storeCommit := RegNext(storeCommit)
     difftestIO.storeAddr   := RegNext(waddr)
     difftestIO.storeData   := RegNext(wdata)
