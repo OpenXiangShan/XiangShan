@@ -53,13 +53,7 @@ class FakeSCTable extends BaseSCTable {
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   extends BaseSCTable(nRows, ctrBits, histLen) with HasFoldedHistory {
 
-  val table = List.fill(TageBanks) {
-    List.fill(2) {
-      Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, shouldReset=false, holdRead=true, singlePort=false))
-    }
-  }
-
-
+  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=false, holdRead=true, singlePort=false))
 
   def getIdx(hist: UInt, pc: UInt) = {
     (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits.U))(log2Ceil(nRows)-1,0)
@@ -76,31 +70,33 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   val if2_idx = getIdx(io.req.bits.hist, io.req.bits.pc)
   val if3_idx = RegEnable(if2_idx, enable=io.req.valid)
 
-  val table_r = WireInit(0.U.asTypeOf(Vec(TageBanks,Vec(2, SInt(ctrBits.W)))))
+  val table_r = 
+    VecInit((0 until TageBanks).map(b => VecInit((0 to 1).map(i => table.io.r.resp.data(b*2+i)))))
 
 
   val if2_mask = io.req.bits.mask
   val if3_mask = RegEnable(if2_mask, enable=io.req.valid)
 
   val update_idx = getIdx(io.update.hist, io.update.pc)
-  val update_wdatas = VecInit((0 until TageBanks).map(w =>
-                        ctrUpdate(io.update.oldCtrs(w), io.update.takens(w))))
+  val update_wdatas =
+    VecInit((0 until TageBanks).map(w =>
+      ctrUpdate(io.update.oldCtrs(w), io.update.takens(w))))
 
+  table.reset := reset.asBool
+  table.io.r.req.valid := io.req.valid
+  table.io.r.req.bits.setIdx := if2_idx
+                        
+  val updateWayMask = 
+    VecInit((0 until TageBanks).map(b =>
+      VecInit((0 to 1).map(i =>
+        (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt) || doing_reset)))).asUInt
 
-  for (b <- 0 until TageBanks) {
-    for (i <- 0 to 1) {
-      table(b)(i).reset := reset.asBool
-      table(b)(i).io.r.req.valid := io.req.valid && if2_mask(b)
-      table(b)(i).io.r.req.bits.setIdx := if2_idx
-
-      table_r(b)(i) := table(b)(i).io.r.resp.data(0)
-
-      table(b)(i).io.w.req.valid := (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt) || doing_reset
-      table(b)(i).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
-      table(b)(i).io.w.req.bits.data := VecInit(Mux(doing_reset, 0.S, update_wdatas(b)))
-    }
-    
-  }
+  table.io.w.apply(
+    valid = io.update.mask.asUInt.orR || doing_reset,
+    data = Mux(doing_reset, VecInit((0 until TageBanks*2).map(_ => 0.S(ctrBits.W))), VecInit((0 until TageBanks*2).map(i => update_wdatas(i/2)))),
+    setIdx = Mux(doing_reset, reset_idx, update_idx),
+    waymask = updateWayMask
+  )
 
   (0 until TageBanks).map(b => {
     io.resp(b).ctr := table_r(b)

@@ -139,62 +139,26 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val (if2_idx, if2_tag) = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
   val (if3_idx, if3_tag) = (RegEnable(if2_idx, io.req.valid), RegEnable(if2_tag, io.req.valid))
 
-  class HL_Bank (val nRows: Int = nRows) extends TageModule {
-    val io = IO(new Bundle {
-      val r = new Bundle {
-        val req = Flipped(ValidIO(new Bundle {
-          val setIdx = UInt(log2Ceil(nRows).W)
-        }))
-        val resp = new Bundle {
-          val data = Output(Bool())
-        }
-      }
-      val w = new Bundle {
-        val req = Flipped(ValidIO(new Bundle {
-          val setIdx = UInt(log2Ceil(nRows).W)
-          val data = Bool()
-        }))
-      }
-    })
+  val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
+  val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplate(new TageEntry, set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
 
-    val mem = Mem(nRows, Bool())
-    // 1-cycle latency just as SyncReadMem
-    io.r.resp.data := RegEnable(mem.read(io.r.req.bits.setIdx), enable=io.r.req.valid)
-    when (io.w.req.valid) {
-      mem.write(io.w.req.bits.setIdx, io.w.req.bits.data)
-    }
-  }
+  table.reset := reset.asBool
+  hi_us.reset := reset.asBool
+  lo_us.reset := reset.asBool
+  table.io.r.req.valid := io.req.valid
+  hi_us.io.r.req.valid := io.req.valid
+  lo_us.io.r.req.valid := io.req.valid
+  table.io.r.req.bits.setIdx := if2_idx
+  hi_us.io.r.req.bits.setIdx := if2_idx
+  lo_us.io.r.req.bits.setIdx := if2_idx
 
-  val hi_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
-  val lo_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
-  val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
-
-  val if3_hi_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
-  val if3_lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
-  val if3_table_r = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageEntry)))
+  val if3_hi_us_r = hi_us.io.r.resp.data
+  val if3_lo_us_r = lo_us.io.r.resp.data
+  val if3_table_r = table.io.r.resp.data
 
   val if2_mask = io.req.bits.mask
   val if3_mask = RegEnable(if2_mask, enable=io.req.valid)
-
-
-
-  (0 until TageBanks).map(
-    b => {
-      hi_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      hi_us(b).io.r.req.bits.setIdx := if2_idx
-
-      lo_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      lo_us(b).io.r.req.bits.setIdx := if2_idx
-
-      table(b).reset := reset.asBool
-      table(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      table(b).io.r.req.bits.setIdx := if2_idx
-
-      if3_hi_us_r(b) := hi_us(b).io.r.resp.data
-      if3_lo_us_r(b) := lo_us(b).io.r.resp.data
-      if3_table_r(b) := table(b).io.r.resp.data(0)
-    }
-  )
 
   val if3_req_rhits = VecInit((0 until TageBanks).map(b => {
     if3_table_r(b).valid && if3_table_r(b).tag === if3_tag
@@ -220,26 +184,28 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 
-
-  (0 until TageBanks).map(b => {
-    table(b).io.w.req.valid := io.update.mask(b) || doing_reset
-    table(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
-    table(b).io.w.req.bits.data := VecInit(Mux(doing_reset, 0.U.asTypeOf(new TageEntry), update_wdata(b)))
-  })
+  table.io.w.apply(
+    valid = io.update.mask.asUInt.orR || doing_reset,
+    data = Mux(doing_reset, 0.U.asTypeOf(Vec(TageBanks, new TageEntry)), update_wdata),
+    setIdx = Mux(doing_reset, reset_idx, update_idx),
+    waymask = io.update.mask.asUInt
+  )
 
   val update_hi_wdata = Wire(Vec(TageBanks, Bool()))
-  (0 until TageBanks).map(b => {
-    hi_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_hi
-    hi_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_hi, clear_u_idx, update_idx))
-    hi_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_hi, 0.U, update_hi_wdata(b))
-  })
+  hi_us.io.w.apply(
+    valid = io.update.uMask.asUInt.orR || doing_reset || doing_clear_u_hi,
+    data = Mux(doing_reset || doing_clear_u_hi, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_hi_wdata),
+    setIdx = Mux(doing_reset, reset_idx, Mux(doing_clear_u_hi, clear_u_idx, update_idx)),
+    waymask = Mux(doing_reset || doing_clear_u_hi, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
+  )
 
   val update_lo_wdata = Wire(Vec(TageBanks, Bool()))
-  (0 until TageBanks).map(b => {
-    lo_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_lo
-    lo_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_lo, clear_u_idx, update_idx))
-    lo_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_lo, 0.U, update_lo_wdata(b))
-  })
+  lo_us.io.w.apply(
+    valid = io.update.uMask.asUInt.orR || doing_reset || doing_clear_u_lo,
+    data = Mux(doing_reset || doing_clear_u_lo, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_lo_wdata),
+    setIdx = Mux(doing_reset, reset_idx, Mux(doing_clear_u_lo, clear_u_idx, update_idx)),
+    waymask = Mux(doing_reset || doing_clear_u_lo, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
+  )
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
