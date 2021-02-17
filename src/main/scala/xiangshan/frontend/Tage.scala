@@ -118,11 +118,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, TageCtrBits, taken)
 
-  val doing_reset = RegInit(true.B)
-  val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
-  reset_idx := reset_idx + doing_reset
-  when (reset_idx === (nRows-1).U) { doing_reset := false.B }
-
   class TageEntry() extends TageBundle {
     val valid = Bool()
     val tag = UInt(tagLen.W)
@@ -143,9 +138,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Module(new SRAMTemplate(new TageEntry, set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
-  table.reset := reset.asBool
-  hi_us.reset := reset.asBool
-  lo_us.reset := reset.asBool
   table.io.r.req.valid := io.req.valid
   hi_us.io.r.req.valid := io.req.valid
   lo_us.io.r.req.valid := io.req.valid
@@ -172,7 +164,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
 
   val clear_u_ctr = RegInit(0.U((log2Ceil(uBitPeriod) + log2Ceil(nRows) + 1).W))
-  when (doing_reset) { clear_u_ctr := 1.U } .otherwise { clear_u_ctr := clear_u_ctr + 1.U }
+  clear_u_ctr := clear_u_ctr + 1.U
 
   val doing_clear_u = clear_u_ctr(log2Ceil(uBitPeriod)-1,0) === 0.U
   val doing_clear_u_hi = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 1.U
@@ -185,7 +177,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 
   table.io.w.apply(
-    valid = io.update.mask.asUInt.orR || doing_reset,
+    valid = io.update.mask.asUInt.orR,
     data = update_wdata,
     setIdx = update_idx,
     waymask = io.update.mask.asUInt
@@ -216,7 +208,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
 
   val wrbypass_hits    = VecInit((0 until wrBypassEntries) map { i =>
-    !doing_reset &&
     wrbypass_tags(i) === update_tag &&
     wrbypass_idxs(i) === update_idx
   })
