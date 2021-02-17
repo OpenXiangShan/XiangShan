@@ -53,19 +53,13 @@ class FakeSCTable extends BaseSCTable {
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   extends BaseSCTable(nRows, ctrBits, histLen) with HasFoldedHistory {
 
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=false, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
   def getIdx(hist: UInt, pc: UInt) = {
     (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits.U))(log2Ceil(nRows)-1,0)
   }
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
-  
-  val doing_reset = RegInit(true.B)
-  val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
-  reset_idx := reset_idx + doing_reset
-  when (reset_idx === (nRows-1).U) { doing_reset := false.B }
-
 
   val if2_idx = getIdx(io.req.bits.hist, io.req.bits.pc)
   val if3_idx = RegEnable(if2_idx, enable=io.req.valid)
@@ -82,19 +76,18 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
     VecInit((0 until TageBanks).map(w =>
       ctrUpdate(io.update.oldCtrs(w), io.update.takens(w))))
 
-  table.reset := reset.asBool
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := if2_idx
                         
   val updateWayMask = 
     VecInit((0 until TageBanks).map(b =>
       VecInit((0 to 1).map(i =>
-        (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt) || doing_reset)))).asUInt
+        (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt))))).asUInt
 
   table.io.w.apply(
-    valid = io.update.mask.asUInt.orR || doing_reset,
-    data = Mux(doing_reset, VecInit((0 until TageBanks*2).map(_ => 0.S(ctrBits.W))), VecInit((0 until TageBanks*2).map(i => update_wdatas(i/2)))),
-    setIdx = Mux(doing_reset, reset_idx, update_idx),
+    valid = io.update.mask.asUInt.orR,
+    data = VecInit((0 until TageBanks*2).map(i => update_wdatas(i/2))),
+    setIdx = update_idx,
     waymask = updateWayMask
   )
 

@@ -139,9 +139,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val (if2_idx, if2_tag) = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
   val (if3_idx, if3_tag) = (RegEnable(if2_idx, io.req.valid), RegEnable(if2_tag, io.req.valid))
 
-  val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
-  val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
-  val table = Module(new SRAMTemplate(new TageEntry, set=nRows, way=TageBanks, shouldReset=false, holdRead=true, singlePort=false))
+  val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val table = Module(new SRAMTemplate(new TageEntry, set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
   table.reset := reset.asBool
   hi_us.reset := reset.asBool
@@ -186,25 +186,25 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   table.io.w.apply(
     valid = io.update.mask.asUInt.orR || doing_reset,
-    data = Mux(doing_reset, 0.U.asTypeOf(Vec(TageBanks, new TageEntry)), update_wdata),
-    setIdx = Mux(doing_reset, reset_idx, update_idx),
+    data = update_wdata,
+    setIdx = update_idx,
     waymask = io.update.mask.asUInt
   )
 
   val update_hi_wdata = Wire(Vec(TageBanks, Bool()))
   hi_us.io.w.apply(
-    valid = io.update.uMask.asUInt.orR || doing_reset || doing_clear_u_hi,
-    data = Mux(doing_reset || doing_clear_u_hi, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_hi_wdata),
-    setIdx = Mux(doing_reset, reset_idx, Mux(doing_clear_u_hi, clear_u_idx, update_idx)),
-    waymask = Mux(doing_reset || doing_clear_u_hi, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
+    valid = io.update.uMask.asUInt.orR || doing_clear_u_hi,
+    data = Mux(doing_clear_u_hi, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_hi_wdata),
+    setIdx = Mux(doing_clear_u_hi, clear_u_idx, update_idx),
+    waymask = Mux(doing_clear_u_hi, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
   )
 
   val update_lo_wdata = Wire(Vec(TageBanks, Bool()))
   lo_us.io.w.apply(
-    valid = io.update.uMask.asUInt.orR || doing_reset || doing_clear_u_lo,
-    data = Mux(doing_reset || doing_clear_u_lo, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_lo_wdata),
-    setIdx = Mux(doing_reset, reset_idx, Mux(doing_clear_u_lo, clear_u_idx, update_idx)),
-    waymask = Mux(doing_reset || doing_clear_u_lo, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
+    valid = io.update.uMask.asUInt.orR || doing_clear_u_lo,
+    data = Mux(doing_clear_u_lo, 0.U.asTypeOf(Vec(TageBanks, Bool())), update_lo_wdata),
+    setIdx = Mux(doing_clear_u_lo, clear_u_idx, update_idx),
+    waymask = Mux(doing_clear_u_lo, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
   )
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
