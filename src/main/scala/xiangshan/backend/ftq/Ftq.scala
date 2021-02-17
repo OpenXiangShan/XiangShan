@@ -53,7 +53,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
     io.rdata(i) := sram.io.r.resp.data(0)
     sram.io.w.req.valid := io.wen
     sram.io.w.req.bits.setIdx := io.waddr
-    sram.io.w.req.bits.data := io.wdata
+    sram.io.w.req.bits.data := VecInit(io.wdata)
   }
 
 }

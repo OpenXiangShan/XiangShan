@@ -96,7 +96,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
 
       table(b)(i).io.w.req.valid := (io.update.mask(b) && i.U === io.update.tagePred.asUInt) || doing_reset
       table(b)(i).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
-      table(b)(i).io.w.req.bits.data := Mux(doing_reset, 0.S, update_wdata)
+      table(b)(i).io.w.req.bits.data := VecInit(Mux(doing_reset, 0.S, update_wdata))
     }
     
   }
