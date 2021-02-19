@@ -29,13 +29,18 @@ class SRAMBundleA(val set: Int) extends Bundle {
 }
 
 class SRAMBundleAW[T <: Data](private val gen: T, set: Int, val way: Int = 1) extends SRAMBundleA(set) {
-  val data = Output(gen)
+  val data = Output(Vec(way, gen))
   val waymask = if (way > 1) Some(Output(UInt(way.W))) else None
 
-  def apply(data: T, setIdx: UInt, waymask: UInt) = {
+  def apply(data: Vec[T], setIdx: UInt, waymask: UInt): SRAMBundleAW[T] = {
     super.apply(setIdx)
     this.data := data
     this.waymask.map(_ := waymask)
+    this
+  }
+  // this could only be used when waymask is onehot or nway is 1
+  def apply(data: T, setIdx: UInt, waymask: UInt): SRAMBundleAW[T] = {
+    apply(VecInit(Seq.fill(way)(data)), setIdx, waymask)
     this
   }
 }
@@ -58,9 +63,13 @@ class SRAMReadBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1)
 class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleAW(gen, set, way))
 
-  def apply(valid: Bool, data: T, setIdx: UInt, waymask: UInt) = {
+  def apply(valid: Bool, data: Vec[T], setIdx: UInt, waymask: UInt): SRAMWriteBus[T] = {
     this.req.bits.apply(data = data, setIdx = setIdx, waymask = waymask)
     this.req.valid := valid
+    this
+  }
+  def apply(valid: Bool, data: T, setIdx: UInt, waymask: UInt): SRAMWriteBus[T] = {
+    apply(valid, VecInit(Seq.fill(way)(data)), setIdx, waymask)
     this
   }
 }
@@ -89,9 +98,8 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val realRen = (if (singlePort) ren && !wen else ren)
 
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
-  val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
+  val wdata = VecInit(Mux(resetState, 0.U.asTypeOf(Vec(way, gen)), io.w.req.bits.data).map(_.asTypeOf(wordType)))
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
-  val wdata = VecInit(Seq.fill(way)(wdataword))
   when (wen) { array.write(setIdx, wdata, waymask.asBools) }
 
   val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.setIdx, realRen)

@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
-import xiangshan.backend.roq.RoqExceptionInfo
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
@@ -15,7 +14,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val fflags = Flipped(ValidIO(UInt(5.W)))
     val dirty_fs = Input(Bool())
     val frm = Output(UInt(3.W))
-    val exception = Flipped(ValidIO(new RoqExceptionInfo))
+    val exception = Flipped(ValidIO(new ExceptionInfo))
     val trapTarget = Output(UInt(VAddrBits.W))
     val isXRet = Output(Bool())
     val interrupt = Output(Bool())
@@ -84,7 +83,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   csr.csrio.externalInterrupt <> csrio.externalInterrupt
   csr.csrio.tlb <> csrio.tlb
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromCSR <> csr.difftestIO
   }
 

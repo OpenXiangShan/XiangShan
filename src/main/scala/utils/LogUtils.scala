@@ -107,7 +107,7 @@ object XSPerf {
     val counter = RegInit(0.U(64.W))
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))
-    val enableDebug = Parameters.get.envParameters.EnableDebug
+    val enableDebug = Parameters.get.envParameters.EnablePerfDebug
     next_counter := counter + perfCnt
     counter := next_counter
 

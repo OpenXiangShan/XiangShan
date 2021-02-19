@@ -390,11 +390,11 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     XSDebug(p"recv cache resp: id=[$respId]\n")
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.sbufferResp := WireInit(io.dcache.resp.fire())
     difftestIO.sbufferAddr := WireInit(getAddr(tag(respId)))
     difftestIO.sbufferData := WireInit(data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
-    difftestIO.sbufferMask := WireInit(mask(respId))
+    difftestIO.sbufferMask := WireInit(mask(respId).asUInt)
   }
 
   val needSpace = (io.in(0).fire && !canMerge(0)) +& (io.in(1).fire && !canMerge(1) && !sameTag)
