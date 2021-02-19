@@ -33,9 +33,7 @@ class BIM extends BasePredictor with BimParams {
 
   val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
 
-  val bim = List.fill(BimBanks) {
-    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = false, holdRead = true))
-  }
+  val bim = Module(new SRAMTemplate(UInt(2.W), set = nRows, way=BimBanks, shouldReset = false, holdRead = true))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(nRows).W))
@@ -48,17 +46,12 @@ class BIM extends BasePredictor with BimParams {
   val if1_mask = io.inMask
   val if1_row  = bimAddr.getBankIdx(if1_packetAlignedPC)
 
-  for (b <- 0 until BimBanks) {
-    bim(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-    bim(b).io.r.req.bits.setIdx := if1_row
-  }
+  bim.io.r.req.valid := io.pc.valid
+  bim.io.r.req.bits.setIdx := if1_row
 
-  val if2_bimRead = VecInit(bim.map(_.io.r.resp.data(0)))
-
-  for (b <- 0 until BimBanks) {
-    io.resp.ctrs(b)  := if2_bimRead(b)
-    io.meta.ctrs(b)  := if2_bimRead(b)
-  }
+  val if2_bimRead = bim.io.r.resp.data
+  io.resp.ctrs  := if2_bimRead
+  io.meta.ctrs  := if2_bimRead
 
   val u = io.update.bits
 
@@ -102,11 +95,12 @@ class BIM extends BasePredictor with BimParams {
     }
   }
 
-  for (b <- 0 until BimBanks) {
-    bim(b).io.w.req.valid := needToUpdate(b) || doing_reset
-    bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
-    bim(b).io.w.req.bits.data := VecInit(Mux(doing_reset, 2.U(2.W), newCtrs(b)))
-  }
+  bim.io.w.apply(
+    valid = needToUpdate.asUInt.orR || doing_reset,
+    data = Mux(doing_reset, VecInit(Seq.fill(BimBanks)(2.U(2.W))), newCtrs),
+    setIdx = Mux(doing_reset, resetRow, updateRow),
+    waymask = Mux(doing_reset, Fill(BimBanks, "b1".U).asUInt, needToUpdate.asUInt)
+  )
 
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
