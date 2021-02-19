@@ -244,12 +244,12 @@ trait HasSC extends HasSCParameter { this: Tage =>
       }
     }
     for (i <- 0 until SCNTables) {
-      scTables(i).io.update.mask := scUpdateMask(i)
-      scTables(i).io.update.tagePreds := scUpdateTagePreds
-      scTables(i).io.update.takens    := scUpdateTakens
-      scTables(i).io.update.oldCtrs   := VecInit(scUpdateOldCtrs.map(_(i)))
-      scTables(i).io.update.pc := u.ftqPC
-      scTables(i).io.update.hist := updateHist
+      scTables(i).io.update.mask := RegNext(scUpdateMask(i))
+      scTables(i).io.update.tagePreds := RegNext(scUpdateTagePreds)
+      scTables(i).io.update.takens    := RegNext(scUpdateTakens)
+      scTables(i).io.update.oldCtrs   := RegNext(VecInit(scUpdateOldCtrs.map(_(i))))
+      scTables(i).io.update.pc := RegNext(u.ftqPC)
+      scTables(i).io.update.hist := RegNext(updateHist)
     }
   }
 }
