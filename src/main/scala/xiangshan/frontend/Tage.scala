@@ -495,17 +495,17 @@ class Tage extends BaseTage {
 
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
-      tables(i).io.update.mask(w) := updateMask(i)(w)
-      tables(i).io.update.taken(w) := updateTaken(i)(w)
-      tables(i).io.update.alloc(w) := updateAlloc(i)(w)
-      tables(i).io.update.oldCtr(w) := updateOldCtr(i)(w)
+      tables(i).io.update.mask(w) := RegNext(updateMask(i)(w))
+      tables(i).io.update.taken(w) := RegNext(updateTaken(i)(w))
+      tables(i).io.update.alloc(w) := RegNext(updateAlloc(i)(w))
+      tables(i).io.update.oldCtr(w) := RegNext(updateOldCtr(i)(w))
 
-      tables(i).io.update.uMask(w) := updateUMask(i)(w)
-      tables(i).io.update.u(w) := updateU(i)(w)
-      tables(i).io.update.pc := packetAligned(u.ftqPC) + (w << instOffsetBits).U
+      tables(i).io.update.uMask(w) := RegNext(updateUMask(i)(w))
+      tables(i).io.update.u(w) := RegNext(updateU(i)(w))
+      tables(i).io.update.pc := RegNext(packetAligned(u.ftqPC) + (w << instOffsetBits).U)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.hist := updateHist
+    tables(i).io.update.hist := RegNext(updateHist)
   }
 
 
