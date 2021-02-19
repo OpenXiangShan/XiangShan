@@ -432,6 +432,7 @@ class Tage extends BaseTage {
 
     io.resp.hits(w) := if4_provideds(w)
     io.resp.takens(w) := if4_tageTakens(w)
+    io.meta(w) := DontCare
     io.meta(w).provider.valid := if4_provideds(w)
     io.meta(w).provider.bits := if4_providers(w)
     io.meta(w).altDiffers := if4_finalAltPreds(w) =/= io.resp.takens(w)
