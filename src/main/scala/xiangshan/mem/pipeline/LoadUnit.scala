@@ -241,7 +241,6 @@ class LoadUnit extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
-    val fpout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
@@ -298,46 +297,27 @@ class LoadUnit extends XSModule with HasLoadHelper {
 
   // write to rob and writeback bus
   val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss
-  val refillFpLoad = io.lsq.ldout.bits.uop.ctrl.fpWen
 
   // Int load, if hit, will be writebacked at s2
-  val intHitLoadOut = Wire(Valid(new ExuOutput))
-  intHitLoadOut.valid := s2_wb_valid && !load_s2.io.out.bits.uop.ctrl.fpWen
-  intHitLoadOut.bits.uop := load_s2.io.out.bits.uop
-  intHitLoadOut.bits.data := load_s2.io.out.bits.data
-  intHitLoadOut.bits.redirectValid := false.B
-  intHitLoadOut.bits.redirect := DontCare
-  intHitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
-  intHitLoadOut.bits.debug.isPerfCnt := false.B
-  intHitLoadOut.bits.debug.paddr := load_s2.io.out.bits.paddr
-  intHitLoadOut.bits.fflags := DontCare
+  val hitLoadOut = Wire(Valid(new ExuOutput))
+  hitLoadOut.valid := s2_wb_valid
+  hitLoadOut.bits.uop := load_s2.io.out.bits.uop
+  hitLoadOut.bits.data := load_s2.io.out.bits.data
+  hitLoadOut.bits.redirectValid := false.B
+  hitLoadOut.bits.redirect := DontCare
+  hitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  hitLoadOut.bits.debug.isPerfCnt := false.B
+  hitLoadOut.bits.debug.paddr := load_s2.io.out.bits.paddr
+  hitLoadOut.bits.fflags := DontCare
 
   load_s2.io.out.ready := true.B
 
-  io.ldout.bits := Mux(intHitLoadOut.valid, intHitLoadOut.bits, io.lsq.ldout.bits)
-  io.ldout.valid := intHitLoadOut.valid || io.lsq.ldout.valid && !refillFpLoad
+  io.ldout.bits := Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits)
+  io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
-  // Fp load, if hit, will be send to recoder at s2, then it will be recoded & writebacked at s3
-  val fpHitLoadOut = Wire(Valid(new ExuOutput))
-  fpHitLoadOut.valid := s2_wb_valid && load_s2.io.out.bits.uop.ctrl.fpWen
-  fpHitLoadOut.bits := intHitLoadOut.bits
-
-  val fpLoadOut = Wire(Valid(new ExuOutput))
-  fpLoadOut.bits := Mux(fpHitLoadOut.valid, fpHitLoadOut.bits, io.lsq.ldout.bits)
-  fpLoadOut.valid := fpHitLoadOut.valid || io.lsq.ldout.valid && refillFpLoad
-
-  val fpLoadOutReg = RegNext(fpLoadOut)
-  io.fpout.bits := fpLoadOutReg.bits
-  io.fpout.bits.data := fpRdataHelper(fpLoadOutReg.bits.uop, fpLoadOutReg.bits.data) // recode
-  io.fpout.valid := RegNext(fpLoadOut.valid)
-
-  io.lsq.ldout.ready := Mux(refillFpLoad, !fpHitLoadOut.valid, !intHitLoadOut.valid)
+  io.lsq.ldout.ready := !hitLoadOut.valid
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
-  }
-
-  when(io.fpout.fire()){
-    XSDebug("fpout %x\n", io.fpout.bits.uop.cf.pc)
   }
 }

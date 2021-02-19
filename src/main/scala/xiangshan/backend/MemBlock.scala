@@ -118,8 +118,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val intExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  val fpExeWbReqs = loadUnits.map(_.io.fpout)
+  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
 
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
@@ -139,8 +138,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       .map(_._2.bits.data)
     val wakeupCnt = fastDatas.length
 
-    val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
-    val slowPorts = inBlockListenPorts ++
+    val slowPorts = exeWbReqs ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map(_._2)
@@ -191,12 +189,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.wakeUpIn.fast.foreach(_.ready := true.B)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
 
-  // TODO: connect this
-  io.wakeUpOut.slow <> DontCare
+  io.wakeUpOut.slow <> exeWbReqs
 
   // load always ready
-  fpExeWbReqs.foreach(_.ready := true.B)
-  intExeWbReqs.foreach(_.ready := true.B)
+  exeWbReqs.foreach(_.ready := true.B)
 
   val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
