@@ -273,6 +273,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
     val isRVC = Output(UInt(32.W))
     val scFailed = Output(Bool())
+    val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
+    val ltype = Output(Vec(CommitWidth, UInt(32.W)))
+    val lfu = Output(Vec(CommitWidth, UInt(4.W)))
   })
   difftestIO <> DontCare
 
@@ -817,6 +820,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val skip = Wire(Vec(CommitWidth, Bool()))
   val wen = Wire(Vec(CommitWidth, Bool()))
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+  val lpaddr = Wire(Vec(CommitWidth, UInt(PAddrBits.W)))
+  val ltype = Wire(Vec(CommitWidth, UInt(32.W)))
+  val lfu = Wire(Vec(CommitWidth, UInt(4.W)))
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
   val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
   val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
@@ -839,6 +845,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     }
     wen(i) := io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
     wdata(i) := debug_exuData(idx)
+    lpaddr(i) := debug_exuDebug(idx).paddr
+    lfu(i) := uop.ctrl.fuType
+    ltype(i) := uop.ctrl.fuOpType
     wdst(i) := uop.ctrl.ldest
     diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
     wpc(i) := SignExt(uop.cf.pc, XLEN)
@@ -857,39 +866,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform) {
-
-    val difftestIntrNO = WireInit(0.U(XLEN.W))
-    val difftestCause = WireInit(0.U(XLEN.W))
-    ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
-    XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
-
-    ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
-    ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst
-    ExcitingUtils.addSource(RegNext(skip.asUInt), "difftestSkip", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wen.asUInt), "difftestWen", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wpc), "difftestWpc", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdata), "difftestWdata", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(wdst), "difftestWdst", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
-    ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
-
-    ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
-    ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
-    ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
-    ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
-    ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
-
-    if(EnableBPU){
-      ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
-    }
+  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
+    ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
   }
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.commit := RegNext(retireCounterFix)
     difftestIO.thisPC := RegNext(retirePCFix)
     difftestIO.thisINST := RegNext(retireInstFix)
@@ -900,6 +881,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     difftestIO.wpc := RegNext(wpc)
     difftestIO.isRVC := RegNext(isRVC.asUInt)
     difftestIO.scFailed := RegNext(scFailed)
+    difftestIO.lpaddr := RegNext(lpaddr)
+    difftestIO.ltype := RegNext(ltype)
+    difftestIO.lfu := RegNext(lfu)
 
     trapIO.valid := RegNext(hitTrap)
     trapIO.code := RegNext(trapCode)

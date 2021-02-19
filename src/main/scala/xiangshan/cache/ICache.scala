@@ -261,7 +261,7 @@ class ICacheDataArray extends ICachArray
     for(b <- 0 until nBanks){
       dataArray(w)(b).io.w.req.valid := io.write.valid && w.U === write_way
       dataArray(w)(b).io.w.req.bits.setIdx := write.virIdx
-      dataArray(w)(b).io.w.req.bits.data := write_bank_data(b)
+      dataArray(w)(b).io.w.req.bits.data := VecInit(write_bank_data(b))
     }
   }
 
@@ -628,8 +628,8 @@ class ICache extends ICacheModule
 
   dump_pipe_info()
 
-  //Performance Counter
-  if (!env.FPGAPlatform ) {
+  // Performance Counter
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
     ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
     ExcitingUtils.addSource( s3_mmio && blocking && io.resp.fire(), "perfCntIcacheMMIOCnt", Perf)

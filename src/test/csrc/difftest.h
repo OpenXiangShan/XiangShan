@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include <goldenmem.h>
 
 #define DIFFTEST_WIDTH 6
 
@@ -40,10 +41,6 @@ enum {
   DIFFTEST_NR_REG
 };
 
-struct SyncChannel {
-  uint64_t scFailed; // sc inst commited, it failed beacuse lr_valid === 0
-};
-
 struct SyncState {
   uint64_t lrscValid;
   uint64_t lrscAddr;
@@ -53,19 +50,22 @@ struct DiffState {
   // Regs and mode for single step difftest
   int commit;
   uint64_t *reg_scala;
-  uint32_t this_inst;
+  uint32_t thisINST;
   int skip;
   int isRVC;
   uint64_t *wpc;
   uint64_t *wdata;
   uint32_t *wdst;
+  uint64_t *lpaddr;
+  uint32_t *ltype;
+  uint8_t  *lfu;
   int wen;
   uint64_t intrNO;
   uint64_t cause; // for disambiguate_exec
   int priviledgeMode;
 
   // Microarchitucural signal needed to sync status
-  struct SyncChannel sync;
+  uint64_t scFailed;  // sc inst commited, it failed beacuse lr_valid === 0
   // lrscValid needs to be synced as nemu does not know 
   // how many cycles were used to finish a lr/sc pair, 
   // this will lead to different sc results.
@@ -82,23 +82,12 @@ struct DisambiguationState {
   uint64_t stval;
 };
 
-extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n, int coreid);
-extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n, int coreid);
-extern void (*ref_difftest_getregs)(void *c, int coreid);
-extern void (*ref_difftest_setregs)(const void *c, int coreid);
-extern void (*ref_difftest_get_mastatus)(void *s, int coreid);
-extern void (*ref_difftest_set_mastatus)(const void *s, int coreid);
-extern void (*ref_difftest_get_csr)(void *c, int coreid);
-extern void (*ref_difftest_set_csr)(const void *c, int coreid);
-extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para, int coreid);
-extern int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);
-
 void init_difftest();
-int difftest_step(DiffState *s);
-int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
-void difftest_display(uint8_t mode);
+int difftest_step(DiffState *s, int coreid);
+int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask, int coreid);
+void difftest_display(uint8_t mode, int coreid);
 
-uint64_t get_nemu_this_pc();
-void set_nemu_this_pc(uint64_t pc);
+uint64_t get_nemu_this_pc(int coreid);
+void set_nemu_this_pc(uint64_t pc, int coreid);
 
 #endif

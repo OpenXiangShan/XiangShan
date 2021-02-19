@@ -105,7 +105,7 @@ class BIM extends BasePredictor with BimParams {
   for (b <- 0 until BimBanks) {
     bim(b).io.w.req.valid := needToUpdate(b) || doing_reset
     bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
-    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtrs(b))
+    bim(b).io.w.req.bits.data := VecInit(Mux(doing_reset, 2.U(2.W), newCtrs(b)))
   }
 
   if (BPUDebug && debug) {

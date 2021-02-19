@@ -95,6 +95,14 @@ class MemBlockImp
       val storeData   = Output(Vec(2, UInt(64.W)))
       val storeMask   = Output(Vec(2, UInt(8.W)))
     }
+    val fromAtomic = new Bundle() {
+      val atomicResp = Output(Bool())
+      val atomicAddr = Output(UInt(64.W))
+      val atomicData = Output(UInt(64.W))
+      val atomicMask = Output(UInt(8.W))
+      val atomicFuop = Output(UInt(8.W))
+      val atomicOut  = Output(UInt(64.W))
+    }
   })
   difftestIO <> DontCare
 
@@ -206,9 +214,10 @@ class MemBlockImp
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
   dtlb.io.csr    <> io.tlbCsr
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
     difftestIO.fromSQ <> lsq.difftestIO.fromSQ
+    difftestIO.fromAtomic <> atomicsUnit.difftestIO
   }
 
   // LoadUnit

@@ -297,6 +297,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
+  val difftestIO = IO(new Bundle() {
+    val ptwResp = Output(Bool())
+    val ptwAddr = Output(UInt(64.W))
+    val ptwData = Output(Vec(4, UInt(64.W)))
+  })
+
+  difftestIO <> DontCare
+
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
   arb.io.in <> VecInit(io.tlb.map(_.req))
   val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
