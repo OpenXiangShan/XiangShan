@@ -30,35 +30,30 @@ class FpBlockToMemBlockIO extends XSBundle {
 }
 
 class MemBlock(
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
-  fastFpOut: Seq[ExuConfig],
-  slowFpOut: Seq[ExuConfig],
-  fastIntOut: Seq[ExuConfig],
-  slowIntOut: Seq[ExuConfig]
+  val fastWakeUpIn: Seq[ExuConfig],
+  val slowWakeUpIn: Seq[ExuConfig],
+  val fastWakeUpOut: Seq[ExuConfig],
+  val slowWakeUpOut: Seq[ExuConfig]
 )(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
 
-  lazy val module = new MemBlockImp(fastWakeUpIn, slowWakeUpIn, fastFpOut, slowFpOut, fastIntOut, slowIntOut)(this)
+  lazy val module = new MemBlockImp(this)
 }
 
-class MemBlockImp
-(
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
-  fastFpOut: Seq[ExuConfig],
-  slowFpOut: Seq[ExuConfig],
-  fastIntOut: Seq[ExuConfig],
-  slowIntOut: Seq[ExuConfig]
-) (outer: MemBlock) extends LazyModuleImp(outer)
+class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
   with HasFPUParameters
   with HasExeBlockHelper
 {
+
+  val fastWakeUpIn = outer.fastWakeUpIn
+  val slowWakeUpIn = outer.slowWakeUpIn
+  val fastWakeUpOut = outer.fastWakeUpOut
+  val slowWakeUpOut = outer.slowWakeUpOut
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -67,8 +62,7 @@ class MemBlockImp
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
-    val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
-    val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
+    val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
@@ -197,8 +191,8 @@ class MemBlockImp
   io.wakeUpIn.fast.foreach(_.ready := true.B)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
 
-  io.wakeUpFpOut.slow  <> fpExeWbReqs
-  io.wakeUpIntOut.slow <> intExeWbReqs
+  // TODO: connect this
+  io.wakeUpOut.slow <> DontCare
 
   // load always ready
   fpExeWbReqs.foreach(_.ready := true.B)

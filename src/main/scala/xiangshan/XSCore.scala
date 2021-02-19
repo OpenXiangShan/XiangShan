@@ -339,10 +339,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
   val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
 
-  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
-  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
-  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
-  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(_.writeFpRf)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(_.writeIntRf)
 
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
@@ -350,12 +348,10 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
-    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
+    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp,
     slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
-    fastFpOut = Seq(),
-    slowFpOut = loadExuConfigs,
-    fastIntOut = Seq(),
-    slowIntOut = loadExuConfigs
+    fastWakeUpOut = Seq(),
+    slowWakeUpOut = loadExuConfigs
   ))
 
   lazy val module = new XSCoreImp(this)
@@ -385,14 +381,12 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
   val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
 
-  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
-  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
-  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
-  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(_.writeFpRf)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(_.writeIntRf)
 
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
-    fastWakeUpIn = fpBlockFastWakeUpInt,
+    fastWakeUpIn = Seq(),
     slowWakeUpIn = fpBlockSlowWakeUpInt ++ loadExuConfigs,
     fastFpOut = intBlockFastWakeUpFp,
     slowFpOut = intBlockSlowWakeUpFp,
@@ -402,9 +396,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val floatBlock = Module(new FloatBlock(
     fastWakeUpIn = intBlockFastWakeUpFp,
     slowWakeUpIn = intBlockSlowWakeUpFp ++ loadExuConfigs,
-    fastFpOut = fpBlockFastWakeUpFp,
+    fastFpOut = Seq(),
     slowFpOut = fpBlockSlowWakeUpFp,
-    fastIntOut = fpBlockFastWakeUpInt,
+    fastIntOut = Seq(),
     slowIntOut = fpBlockSlowWakeUpInt
   ))
 
@@ -430,14 +424,24 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
+  val memBlockWakeUpInt = memBlock.io.wakeUpOut.slow.map(raw => {
+    val n = WireInit(raw)
+    n.valid := raw.valid && raw.bits.uop.ctrl.rfWen
+    n
+  })
+  val memBlockWakeUpFp = memBlock.io.wakeUpOut.slow.map(raw => {
+    val n = WireInit(raw)
+    n.valid := raw.valid && raw.bits.uop.ctrl.fpWen
+    n
+  })
   integerBlock.io.wakeUpIn.fastUops <> floatBlock.io.wakeUpIntOut.fastUops
   integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
-  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
+  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
 
   floatBlock.io.wakeUpIn.fastUops <> integerBlock.io.wakeUpFpOut.fastUops
   floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
-  floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
+  floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlockWakeUpFp
   floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
 
 

@@ -6,7 +6,8 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.{ReservationStation}
+import xiangshan.backend.issue.ReservationStation
+import xiangshan.mem.HasLoadHelper
 
 
 class FpBlockToCtrlIO extends XSBundle {
@@ -22,7 +23,7 @@ class FloatBlock
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
   slowIntOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper {
+) extends XSModule with HasExeBlockHelper with HasLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
@@ -38,6 +39,19 @@ class FloatBlock
 
   val redirect = io.fromCtrlBlock.redirect
   val flush = io.fromCtrlBlock.flush
+
+  require(fastWakeUpIn.isEmpty)
+  val wakeUpInReg = Wire(Flipped(new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)))
+  for((in, inReg) <- io.wakeUpIn.slow.zip(wakeUpInReg.slow)){
+    inReg.ready := true.B
+    PipelineConnect(in, inReg, inReg.fire(), in.bits.uop.roqIdx.needFlush(redirect, flush))
+  }
+  val wakeUpInRecode = WireInit(wakeUpInReg)
+  for(i <- wakeUpInReg.slow.indices){
+    if(i != 0){
+      wakeUpInRecode.slow(i).bits.data := fpRdataHelper(wakeUpInReg.slow(i).bits.uop, wakeUpInReg.slow(i).bits.data)
+    }
+  }
 
   val fpRf = Module(new Regfile(
     numReadPorts = NRFpReadPorts,
@@ -71,11 +85,10 @@ class FloatBlock
     val readFpRf = cfg.readFpRf
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readFpRf).map(_.io.toFp.bits.data)
-    val writeBackData = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
-    val fastPortsCnt = writeBackData.length
+    val fastPortsCnt = inBlockWbData.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readFpRf).map(_.io.toFp)
-    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow
+    val slowPorts = inBlockListenPorts ++ wakeUpInRecode.slow
     val slowPortsCnt = slowPorts.length
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
@@ -99,7 +112,7 @@ class FloatBlock
     rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
     if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
 
-    rs.io.fastDatas <> writeBackData
+    rs.io.fastDatas <> inBlockWbData
     for ((x, y) <- rs.io.slowPorts.zip(slowPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
@@ -123,32 +136,21 @@ class FloatBlock
       raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.fpWen
       raw
     })
-    rs.io.fastUopsIn <> inBlockUops ++  io.wakeUpIn.fastUops
+    rs.io.fastUopsIn <> inBlockUops
   }
 
-  io.wakeUpFpOut.fastUops <> reservedStations.filter(
-    rs => fpFastFilter(rs.exuCfg)
-  ).map(_.io.fastUopOut).map(fpValid)
+  def connectAndConvertToIEEE(in: DecoupledIO[ExuOutput]) = {
+    val outReg = Wire(DecoupledIO(new ExuOutput))
+    outReg.ready := true.B
+    PipelineConnect(in, outReg, outReg.fire(), in.bits.uop.roqIdx.needFlush(redirect, flush))
+    val outIeee = WireInit(outReg)
+    outIeee.bits.data := ieee(outReg.bits.data)
+    outIeee
+  }
 
-  io.wakeUpFpOut.fast <> exeUnits.filter(
-    x => fpFastFilter(x.config)
-  ).map(_.io.toFp)
+  io.wakeUpFpOut.slow <> exeUnits.filter(_.config.writeFpRf).map(_.io.toFp).map(connectAndConvertToIEEE)
 
-  io.wakeUpFpOut.slow <> exeUnits.filter(
-    x => fpSlowFilter(x.config)
-  ).map(_.io.toFp)
-
-  io.wakeUpIntOut.fastUops <> reservedStations.filter(
-    rs => intFastFilter(rs.exuCfg)
-  ).map(_.io.fastUopOut).map(intValid)
-
-  io.wakeUpIntOut.fast <> exeUnits.filter(
-    x => intFastFilter(x.config)
-  ).map(_.io.toInt)
-
-  io.wakeUpIntOut.slow <> exeUnits.filter(
-    x => intSlowFilter(x.config)
-  ).map(_.io.toInt)
+  io.wakeUpIntOut.slow <> exeUnits.filter(_.config.writeIntRf).map(_.io.toInt)
 
 
   // read fp rf from ctrl block
@@ -160,7 +162,7 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in <> exeUnits.map(_.io.toFp) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
+  fpWbArbiter.io.in <> exeUnits.map(_.io.toFp) ++ wakeUpInRecode.slow
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out
