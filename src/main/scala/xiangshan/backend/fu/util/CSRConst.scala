@@ -80,6 +80,11 @@ trait HasCSRConst {
   val Pmpcfg3       = 0x3A3
   val PmpaddrBase   = 0x3B0
 
+  // Debug Mode
+  val Dcsr          = 0x7B0
+  val Dpc           = 0x7B1
+  val Dscratch      = 0x7B2
+
   // Machine Counter/Timers
   // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers
   // 0xB80 - 0x89F are also used as perfcnt csr
@@ -156,6 +161,7 @@ trait HasCSRConst {
   def privMret   = 0x302.U
   def privSret   = 0x102.U
   def privUret   = 0x002.U
+  def privDret   = 0x7b2.U
 
   def ModeM     = 0x3.U
   def ModeH     = 0x2.U

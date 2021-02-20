@@ -82,6 +82,8 @@ object DebugAbstractCommandType extends scala.Enumeration {
   val AccessRegister, QuickAccess  = Value
 }
 
+// Configs for XS
+
 /** Parameters exposed to the top-level design, set based on
   * external requirements, etc.
   *

@@ -319,6 +319,7 @@ class ExternalInterruptIO extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val debug_int = Input(Bool())
 }
 
 class CSRSpecialIO extends XSBundle {

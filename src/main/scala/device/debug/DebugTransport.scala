@@ -67,7 +67,7 @@ class DTMInfo extends Bundle {
 /** A wrapper around JTAG providing a reset signal and manufacturer id. */
 class SystemJTAGIO extends Bundle {
   val jtag = Flipped(new JTAGIO(hasTRSTn = false))
-  val reset = Input(Reset())
+  val reset = Input(Bool())
   val mfr_id = Input(UInt(11.W))
   val part_number = Input(UInt(16.W))
   val version = Input(UInt(4.W))

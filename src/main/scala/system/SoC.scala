@@ -14,6 +14,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
 import devices.debug.{TLDebugModule, SystemJTAGIO, DebugTransportModuleJTAG, DebugModuleKey}
+import freechips.rocketchip.jtag.JTAGIO
 
 case class SoCParameters
 (
@@ -176,6 +177,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+      xs_core(i).module.io.externalInterrupt.debug_int := DM.module.io.debug_int(i)
     }
 
     val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize))
@@ -185,6 +187,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     dtm.io.jtag_mfr_id := io.sj.mfr_id
     dtm.io.jtag_part_number := io.sj.part_number
     dtm.io.jtag_version := io.sj.version
+    dtm.io.jtag <> io.sj.jtag
     dtm.rf_reset := io.sj.reset
 
     DM.module.io.dmi.get.dmi <> dtm.io.dmi

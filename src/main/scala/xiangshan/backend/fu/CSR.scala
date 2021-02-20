@@ -169,6 +169,23 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val csrNotImplemented = RegInit(UInt(XLEN.W), 0.U)
 
+  class DcsrStruct extends Bundle {
+    val xdebugver = Output(UInt(2.W))
+    val zero4 = Output(UInt(2.W))
+    val zero3 = Output(UInt(12.W))
+    val ebreakm = Output(Bool())
+    val ebreakh = Output(Bool())
+    val ebreaks = Output(Bool())
+    val ebreaku = Output(Bool())
+    val zero2 = Output(Bool())
+    val stopcycle = Output(Bool())
+    val stoptime = Output(Bool())
+    val cause = Output(UInt(3.W))
+    val zero1 = Output(UInt(3.W))
+    val step = Output(Bool())
+    val prv = Output(UInt(2.W))
+  }
+
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
 
@@ -203,7 +220,26 @@ class CSR extends FunctionUnit with HasCSRConst
     val e = new Priv
     val t = new Priv
     val s = new Priv
+    val d = Output(Bool())
   }
+
+  // Debug CSRs
+
+  val debugMode = RegInit(false.B)
+  val dcsrReg = RegInit(0.U(32.W)) // TODO reset value
+  val dpc = Reg(UInt(64.W))
+  val dscratch = Reg(UInt(64.W))
+
+  val dcsrOld = dcsrReg.asTypeOf(new DcsrStruct)
+
+  val reg_singleStepped = RegInit(false.B)
+  val debugInt = Wire(Bool())
+  val dtvec = 0x800.U
+
+  debugInt := csrio.externalInterrupt.debug_int
+
+  val singleStep = dcsrOld.step && !debugMode
+  reg_singleStepped := false.B // && input single_step
 
   // Machine-Level CSRs
 
@@ -457,6 +493,11 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
+
+    //--- Debug Mode ---
+    MaskedRegMap(Dcsr, dcsrReg),
+    MaskedRegMap(Dpc, dpc),
+    MaskedRegMap(Dscratch, dscratch),
   )
 
   // PMP is unimplemented yet
@@ -547,6 +588,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val isMret   = addr === privMret   && func === CSROpType.jmp
   val isSret   = addr === privSret   && func === CSROpType.jmp
   val isUret   = addr === privUret   && func === CSROpType.jmp
+  val isDret   = addr === privDret   && func === CSROpType.jmp
 
   XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", cfIn.pc, addr, rdata, wdata, func)
   XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
@@ -598,6 +640,17 @@ class CSR extends FunctionUnit with HasCSRConst
 
   retTarget := DontCare
   // val illegalEret = TODO
+
+  when (valid && isDret) {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val dcsrNew = WireInit(dcsrReg.asTypeOf(new DcsrStruct))
+    mstatusNew.mprv := 0.U
+    mstatus := mstatusNew.asUInt
+    priviledgeMode := dcsrNew.prv
+    retTarget := dpc(VAddrBits-1, 0)
+    debugMode := false.B
+  }
 
   when (valid && isMret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -732,13 +785,22 @@ class CSR extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  csrio.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  csrio.trapTarget := Mux(debugInt, dtvec, Mux(delegS, stvec, mtvec))(VAddrBits-1, 0)
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val dcsrNew = WireInit(dcsrReg.asTypeOf(new DcsrStruct))
 
-    when (delegS) {
+    when (debugInt) {
+      debugMode := true.B
+      dpc := SignExt(csrio.exception.bits.cf.pc, XLEN)
+      dcsrNew.cause := Mux(reg_singleStepped, 4.U, 3.U)
+      dcsrNew.prv := priviledgeMode // TODO
+      priviledgeMode := ModeM
+      mstatusNew.mprv := false.B
+      dcsrReg := dcsrNew.asUInt
+    }.elsewhen (delegS) {
       scause := causeNO
       sepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
       mstatusNew.spp := priviledgeMode
