@@ -155,7 +155,9 @@ class FloatBlock
 
   // read fp rf from ctrl block
   fpRf.io.readPorts.zipWithIndex.map{ case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
-  (0 until exuParameters.StuCnt).foreach(i => io.toMemBlock.readFpRf(i).data := fpRf.io.readPorts(i + 12).data)
+  (0 until exuParameters.StuCnt).foreach(i =>
+    io.toMemBlock.readFpRf(i).data := RegNext(ieee(fpRf.io.readPorts(i + 12).data))
+  )
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
     (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
