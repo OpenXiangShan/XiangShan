@@ -37,6 +37,7 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
+  val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
 }
@@ -269,6 +270,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.ftqLeftOne := ftq.io.leftOne
 
   decode.io.in <> io.frontend.cfVec
+  decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))

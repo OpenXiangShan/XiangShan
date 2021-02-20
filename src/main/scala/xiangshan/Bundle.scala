@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.{ImmUnion, XDecode}
+import xiangshan.backend.decode.{ImmUnion, XDecode, WaitTableParameters}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
@@ -181,6 +181,7 @@ class CtrlFlow extends XSBundle {
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
+  val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
@@ -439,6 +440,12 @@ class SfenceBundle extends XSBundle {
   override def toPrintable: Printable = {
     p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
   }
+}
+
+class WaitTableUpdateReq extends XSBundle with WaitTableParameters {
+  val valid = Bool()
+  val waddr = UInt(WaitTableAddrWidth.W)
+  val wdata = Bool() // true.B by default
 }
 
 class DifftestBundle extends XSBundle {

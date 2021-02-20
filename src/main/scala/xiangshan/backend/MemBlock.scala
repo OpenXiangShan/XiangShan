@@ -239,6 +239,10 @@ class MemBlockImp
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+
+    // update waittable
+    // TODO: read pc
+    io.fromCtrlBlock.waitTableUpdate(i) := DontCare
   }
 
   // StoreUnit
@@ -250,7 +254,7 @@ class MemBlockImp
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.memfeedback
-    stu.io.rsIdx       := rs.io.rsIdx
+    stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
