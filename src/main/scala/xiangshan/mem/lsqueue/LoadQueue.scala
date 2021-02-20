@@ -636,12 +636,12 @@ class LoadQueue extends XSModule
 
   // perf counter
   XSPerf("lqRollback", io.rollback.valid, acc = true) // rollback redirect generated
-  XSPerf("lqFull", !io.allowEnqueue, acc = true)
+  XSPerf("lqFull", !allowEnqueue, acc = true)
   XSPerf("lqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
   XSPerf("lqMmioCnt", io.uncache.req.fire(), acc = true)
   XSPerf("lqRefill", io.dcache.valid, acc = true)
-  XSPerf("lqWriteback", PopCount(VecInit(0 until LoadPipelineWidth).map(_ => io.ldout(_).fire())), acc = true)
-  XSPerf("lqWbBlocked", PopCount(VecInit(0 until LoadPipelineWidth).map(_ => io.ldout(_).valid && !io.ldout(_).ready), acc = true)
+  XSPerf("lqWriteback", PopCount(VecInit(io.ldout.map(i => i.fire()))), acc = true)
+  XSPerf("lqWbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))), acc = true)
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
