@@ -89,9 +89,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
 
   if (BPUDebug && debug) {
     val u = io.update
-    val b = PriorityEncoder(u.mask)
-    XSDebug(io.req.valid, p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}" +
-                          p"if2_idx=${if2_idx}, hist=${Hexadecimal(io.req.bits.hist)}," +
+    XSDebug(io.req.valid, p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+                          p"if2_idx=${if2_idx}, hist=${Hexadecimal(io.req.bits.hist)}, " +
                           p"if2_mask=${Binary(if2_mask)}\n")
     for (i <- 0 until TageBanks) {
       XSDebug(RegNext(io.req.valid), 
@@ -99,7 +98,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
               p"ctr:${io.resp(i).ctr}, if3_mask=${Binary(if3_mask)}\n")
       XSDebug(io.update.mask(i),
               p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}," +
-              p"bank:${b}%d, tageTaken:${u.tagePreds(i)}%d, taken:${u.takens(i)}%d, oldCtr:${u.oldCtrs(i)}%d\n")
+              p"bank:${i}, tageTaken:${u.tagePreds(i)}, taken:${u.takens(i)}, oldCtr:${u.oldCtrs(i)}\n")
     }
   }
 
@@ -204,9 +203,12 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
     when (if4_provideds(w)) {
       // Use prediction from Statistical Corrector
+      XSDebug(p"---------tage${w} provided so that sc used---------\n")
+      XSDebug(p"scCtrs:$if4_scCtrs, prdrCtr:${if4_providerCtrs(w)}, sumAbs:$if4_sumAbs, tageTaken:${if4_chooseBit}\n")
       when (!if4_sumBelowThresholds(if4_chooseBit)) {
         val pred = if4_scPreds(if4_chooseBit)
-        XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${pred}\n")
+        val debug_pc = Cat(packetIdx(debug_pc_s3), w.U, 0.U(instOffsetBits.W))
+        XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         io.resp.takens(w) := pred
       }
     }
@@ -219,7 +221,8 @@ trait HasSC extends HasSCParameter { this: Tage =>
       val taken = u.takens(w)
       val scOldCtrs = updateSCMeta.ctrs
       val pvdrCtr = updateTageMeta.providerCtr
-      val sumAbs = (scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)).abs.asUInt
+      val sum = scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)
+      val sumAbs = sum.abs.asUInt
       scUpdateTagePreds(w) := tagePred
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
@@ -231,8 +234,15 @@ trait HasSC extends HasSCParameter { this: Tage =>
       }
       when (scPred =/= taken || sumAbs < updateThreshold) {
         scUpdateMask.foreach(t => t(w) := true.B)
-        XSDebug(p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPreds(w)})\n")
-        XSDebug(p"update: sc: ${updateSCMeta}\n")
+        XSDebug(sum < 0.S,
+          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
+        )
+        XSDebug(sum >= 0.S,
+          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
+        )
+        XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
       }
     }
 
