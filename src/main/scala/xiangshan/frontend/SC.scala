@@ -42,7 +42,6 @@ class SCTableIO extends SCBundle {
 
 abstract class BaseSCTable(val r: Int = 1024, val cb: Int = 6, val h: Int = 0) extends SCModule {
   val io = IO(new SCTableIO)
-  def getCenteredValue(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
 }
 
 class FakeSCTable extends BaseSCTable {
@@ -174,6 +173,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
   val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
 
+  // for sc ctrs
+  def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
+  // for tage ctrs
+  def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext - 4.S) << 1).asSInt + 1.S) << 3).asSInt
+
   for (w <- 0 until TageBanks) {
     val scMeta = io.meta(w).scMeta
     scMeta := DontCare
@@ -182,15 +186,15 @@ trait HasSC extends HasSCParameter { this: Tage =>
       (0 to 1) map { i => {
           if (EnableSC) {
             (0 until SCNTables) map { j => 
-              scTables(j).getCenteredValue(if3_scResps(j)(w).ctr(i))
+              getCentered(if3_scResps(j)(w).ctr(i))
             } reduce (_+_) // TODO: rewrite with adder tree
           }
           else 0.S
         }
       }
     )
-    val providerCtr = if3_providerCtrs(w).zext()
-    val if3_pvdrCtrCentered = ((((providerCtr - 4.S) << 1).asSInt + 1.S) << 3).asSInt
+    val providerCtr = if3_providerCtrs(w)
+    val if3_pvdrCtrCentered = getPvdrCentered(providerCtr)
     val if3_totalSums = VecInit(if3_scTableSums.map(_  + if3_pvdrCtrCentered))
     val if3_sumAbs = VecInit(if3_totalSums.map(_.abs.asUInt))
     val if3_sumBelowThresholds = VecInit(if3_sumAbs.map(_ < useThreshold))
@@ -205,7 +209,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
     scMeta.tageTaken := if4_tageTakens(w)
     scMeta.scUsed := if4_provideds(w)
     scMeta.scPred := if4_scPreds(if4_chooseBit)
-    scMeta.sumAbs := if4_sumAbs(if4_chooseBit)
     scMeta.ctrs   := if4_scCtrs
 
     
@@ -221,12 +224,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
     }
     if (EnableSC) {
       val updateSCMeta = updateSCMetas(w)
+      val updateTageMeta = updateMetas(w)
       when (updateValids(w) && updateSCMeta.scUsed.asBool && updateBrMask(w)) {
         val scPred = updateSCMeta.scPred
         val tagePred = updateSCMeta.tageTaken
         val taken = u.takens(w)
-        val sumAbs = updateSCMeta.sumAbs.asUInt
         val scOldCtrs = updateSCMeta.ctrs
+        val pvdrCtr = updateTageMeta.providerCtr
+        val sumAbs = (scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)).abs.asUInt
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
