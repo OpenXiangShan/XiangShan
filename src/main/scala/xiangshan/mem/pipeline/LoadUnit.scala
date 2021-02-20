@@ -13,7 +13,7 @@ class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
-  val forward = new LoadForwardQueryIO
+  val forward = new MaskedLoadForwardQueryIO
 }
 
 // Load Pipeline Stage 0
@@ -28,17 +28,15 @@ class LoadUnit_S0 extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  val s0_vaddr_old = io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN)
+  // val s0_vaddr = io.in.bits.src1 + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
   val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi = Mux(imm12(11),
-    Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
-    Mux((s0_vaddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
+  val s0_vaddr_hi = Mux(s0_vaddr_lo(12), 
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
   )
   val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
-  when(io.in.fire() && s0_vaddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.I.toImm32(s0_uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
-    printf("s0_vaddr %x s0_vaddr_old %x\n", s0_vaddr, s0_vaddr_old(VAddrBits-1,0))
-  }
   val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
@@ -92,7 +90,7 @@ class LoadUnit_S1 extends XSModule {
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
-    val lsq = new LoadForwardQueryIO
+    val lsq = new MaskedLoadForwardQueryIO
   })
 
   val s1_uop = io.in.bits.uop
@@ -122,6 +120,7 @@ class LoadUnit_S1 extends XSModule {
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
+  io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
@@ -169,9 +168,20 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
 
-  val forwardMask = io.out.bits.forwardMask
-  val forwardData = io.out.bits.forwardData
+  // merge forward result
+  // lsq has higher priority than sbuffer
+  val forwardMask = Wire(Vec(8, Bool()))
+  val forwardData = Wire(Vec(8, UInt(8.W)))
+
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U
+  io.lsq := DontCare
+  io.sbuffer := DontCare
+
+  // generate XLEN/8 Muxs
+  for (i <- 0 until XLEN / 8) {
+    forwardMask(i) := io.lsq.forwardMask(i) || io.sbuffer.forwardMask(i)
+    forwardData(i) := Mux(io.lsq.forwardMask(i), io.lsq.forwardData(i), io.sbuffer.forwardData(i))
+  }
 
   XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
     s2_uop.cf.pc,
@@ -180,8 +190,9 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   )
 
   // data merge
-  val rdata = VecInit((0 until XLEN / 8).map(j =>
-    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j)))).asUInt
+  val rdataVec = VecInit((0 until XLEN / 8).map(j =>
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j))))
+  val rdata = rdataVec.asUInt
   val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),
     "b001".U -> rdata(63, 8),
@@ -193,8 +204,6 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     "b111".U -> rdata(63, 56)
   ))
   val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
-
-  // TODO: ECC check
 
   io.out.valid := io.in.valid && !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
   // Inst will be canceled in store queue / lsq,
@@ -212,28 +221,16 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // and dcache query is no longer needed.
   // Such inst will be writebacked from load queue.
   io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
+  // io.out.bits.forwardX will be send to lq
+  io.out.bits.forwardMask := forwardMask 
+  // data retbrived from dcache is also included in io.out.bits.forwardData
+  io.out.bits.forwardData := rdataVec
 
   io.in.ready := io.out.ready || !io.in.valid
 
-  // merge forward result
-  // lsq has higher priority than sbuffer
-  io.lsq := DontCare
-  io.sbuffer := DontCare
-  // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
-    when (io.sbuffer.forwardMask(i)) {
-      io.out.bits.forwardMask(i) := true.B
-      io.out.bits.forwardData(i) := io.sbuffer.forwardData(i)
-    }
-    when (io.lsq.forwardMask(i)) {
-      io.out.bits.forwardMask(i) := true.B
-      io.out.bits.forwardData(i) := io.lsq.forwardData(i)
-    }
-  }
-
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
-    io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
+    forwardData.asUInt, forwardMask.asUInt
   )
 }
 
@@ -279,6 +276,10 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
 
+  // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
+  val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
+  io.lsq.forward.sqIdxMask := sqIdxMaskReg
+
   // use s2_hit_way to select data received in s1
   load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
   assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
@@ -317,19 +318,26 @@ class LoadUnit extends XSModule with HasLoadHelper {
   io.ldout.bits := Mux(intHitLoadOut.valid, intHitLoadOut.bits, io.lsq.ldout.bits)
   io.ldout.valid := intHitLoadOut.valid || io.lsq.ldout.valid && !refillFpLoad
 
-  // Fp load, if hit, will be send to recoder at s2, then it will be recoded & writebacked at s3
+  // Fp load, if hit, will be stored to reg at s2, then it will be recoded at s3, writebacked at s4
   val fpHitLoadOut = Wire(Valid(new ExuOutput))
   fpHitLoadOut.valid := s2_wb_valid && load_s2.io.out.bits.uop.ctrl.fpWen
   fpHitLoadOut.bits := intHitLoadOut.bits
 
-  val fpLoadOut = Wire(Valid(new ExuOutput))
-  fpLoadOut.bits := Mux(fpHitLoadOut.valid, fpHitLoadOut.bits, io.lsq.ldout.bits)
-  fpLoadOut.valid := fpHitLoadOut.valid || io.lsq.ldout.valid && refillFpLoad
+  val fpLoadUnRecodedReg = Reg(Valid(new ExuOutput))
+  fpLoadUnRecodedReg.valid := fpHitLoadOut.valid || io.lsq.ldout.valid && refillFpLoad
+  when(fpHitLoadOut.valid || io.lsq.ldout.valid && refillFpLoad){
+    fpLoadUnRecodedReg.bits := Mux(fpHitLoadOut.valid, fpHitLoadOut.bits, io.lsq.ldout.bits)
+  }
 
-  val fpLoadOutReg = RegNext(fpLoadOut)
-  io.fpout.bits := fpLoadOutReg.bits
-  io.fpout.bits.data := fpRdataHelper(fpLoadOutReg.bits.uop, fpLoadOutReg.bits.data) // recode
-  io.fpout.valid := RegNext(fpLoadOut.valid)
+  val fpLoadRecodedReg = Reg(Valid(new ExuOutput))
+  when(fpLoadUnRecodedReg.valid){
+    fpLoadRecodedReg := fpLoadUnRecodedReg
+    fpLoadRecodedReg.bits.data := fpRdataHelper(fpLoadUnRecodedReg.bits.uop, fpLoadUnRecodedReg.bits.data) // recode
+  }
+  fpLoadRecodedReg.valid := fpLoadUnRecodedReg.valid
+  
+  io.fpout.bits := fpLoadRecodedReg.bits
+  io.fpout.valid := fpLoadRecodedReg.valid
 
   io.lsq.ldout.ready := Mux(refillFpLoad, !fpHitLoadOut.valid, !intHitLoadOut.valid)
 

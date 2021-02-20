@@ -60,3 +60,18 @@ class LoadForwardQueryIO extends XSBundle {
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
 }
+
+class MaskedLoadForwardQueryIO extends XSBundle {
+  val paddr = Output(UInt(PAddrBits.W))
+  val mask = Output(UInt(8.W))
+  val uop = Output(new MicroOp) // for replay
+  val pc = Output(UInt(VAddrBits.W)) //for debug
+  val valid = Output(Bool()) //for debug
+
+  val forwardMask = Input(Vec(8, Bool()))
+  val forwardData = Input(Vec(8, UInt(8.W)))
+
+  val sqIdx = Output(new SqPtr) // for debug
+  // sqIdxMask is calcuated in earlier stage for better timing
+  val sqIdxMask = Output(UInt(StoreQueueSize.W))
+}
