@@ -40,17 +40,10 @@ class SCTableIO extends SCBundle {
   val update = Input(new SCUpdate)
 }
 
-abstract class BaseSCTable(val r: Int = 1024, val cb: Int = 6, val h: Int = 0) extends SCModule {
-  val io = IO(new SCTableIO)
-}
-
-class FakeSCTable extends BaseSCTable {
-  io.resp := 0.U.asTypeOf(Vec(TageBanks, new SCResp))
-}
-
 @chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
-  extends BaseSCTable(nRows, ctrBits, histLen) with HasFoldedHistory {
+  extends SCModule with HasFoldedHistory {
+  val io = IO(new SCTableIO)
 
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
@@ -146,7 +139,7 @@ object SCThreshold {
 trait HasSC extends HasSCParameter { this: Tage =>
   val scTables = SCTableInfo.map {
     case (nRows, ctrBits, histLen) => {
-      val t = if (EnableSC) Module(new SCTable(nRows/TageBanks, ctrBits, histLen)) else Module(new FakeSCTable)
+      val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen))
       val req = t.io.req
       req.valid := io.pc.valid
       req.bits.pc := io.pc.bits
@@ -184,15 +177,13 @@ trait HasSC extends HasSCParameter { this: Tage =>
     // do summation in if3
     val if3_scTableSums = VecInit(
       (0 to 1) map { i => {
-          if (EnableSC) {
-            (0 until SCNTables) map { j => 
-              getCentered(if3_scResps(j)(w).ctr(i))
-            } reduce (_+_) // TODO: rewrite with adder tree
-          }
-          else 0.S
+          (0 until SCNTables) map { j => 
+            getCentered(if3_scResps(j)(w).ctr(i))
+          } reduce (_+_) // TODO: rewrite with adder tree
         }
       }
     )
+
     val providerCtr = if3_providerCtrs(w)
     val if3_pvdrCtrCentered = getPvdrCentered(providerCtr)
     val if3_totalSums = VecInit(if3_scTableSums.map(_  + if3_pvdrCtrCentered))
@@ -211,43 +202,40 @@ trait HasSC extends HasSCParameter { this: Tage =>
     scMeta.scPred := if4_scPreds(if4_chooseBit)
     scMeta.ctrs   := if4_scCtrs
 
-    
-    if (EnableSC) {
-      when (if4_provideds(w)) {
-        // Use prediction from Statistical Corrector
-        when (!if4_sumBelowThresholds(if4_chooseBit)) {
-          val pred = if4_scPreds(if4_chooseBit)
-          XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${pred}\n")
-          io.resp.takens(w) := pred
-        }
+    when (if4_provideds(w)) {
+      // Use prediction from Statistical Corrector
+      when (!if4_sumBelowThresholds(if4_chooseBit)) {
+        val pred = if4_scPreds(if4_chooseBit)
+        XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${pred}\n")
+        io.resp.takens(w) := pred
       }
     }
-    if (EnableSC) {
-      val updateSCMeta = updateSCMetas(w)
-      val updateTageMeta = updateMetas(w)
-      when (updateValids(w) && updateSCMeta.scUsed.asBool && updateBrMask(w)) {
-        val scPred = updateSCMeta.scPred
-        val tagePred = updateSCMeta.tageTaken
-        val taken = u.takens(w)
-        val scOldCtrs = updateSCMeta.ctrs
-        val pvdrCtr = updateTageMeta.providerCtr
-        val sumAbs = (scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)).abs.asUInt
-        scUpdateTagePreds(w) := tagePred
-        scUpdateTakens(w) := taken
-        (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
 
-        when (scPred =/= tagePred && sumAbs < useThreshold - 2.U) {
-          val newThres = scThreshold.update(scPred =/= taken)
-          scThreshold := newThres
-          XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
-        }
-        when (scPred =/= taken || sumAbs < updateThreshold) {
-          scUpdateMask.foreach(t => t(w) := true.B)
-          XSDebug(p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPreds(w)})\n")
-          XSDebug(p"update: sc: ${updateSCMeta}\n")
-        }
+    val updateSCMeta = updateSCMetas(w)
+    val updateTageMeta = updateMetas(w)
+    when (updateValids(w) && updateSCMeta.scUsed.asBool && updateBrMask(w)) {
+      val scPred = updateSCMeta.scPred
+      val tagePred = updateSCMeta.tageTaken
+      val taken = u.takens(w)
+      val scOldCtrs = updateSCMeta.ctrs
+      val pvdrCtr = updateTageMeta.providerCtr
+      val sumAbs = (scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)).abs.asUInt
+      scUpdateTagePreds(w) := tagePred
+      scUpdateTakens(w) := taken
+      (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
+
+      when (scPred =/= tagePred && sumAbs < useThreshold - 2.U) {
+        val newThres = scThreshold.update(scPred =/= taken)
+        scThreshold := newThres
+        XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
+      }
+      when (scPred =/= taken || sumAbs < updateThreshold) {
+        scUpdateMask.foreach(t => t(w) := true.B)
+        XSDebug(p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), scSumAbs(${sumAbs}), mispred: sc(${updateMisPred}), tage(${updateTageMisPreds(w)})\n")
+        XSDebug(p"update: sc: ${updateSCMeta}\n")
       }
     }
+
     for (i <- 0 until SCNTables) {
       scTables(i).io.update.mask := RegNext(scUpdateMask(i))
       scTables(i).io.update.tagePreds := RegNext(scUpdateTagePreds)
