@@ -519,8 +519,8 @@ class ICache extends ICacheModule
       }
     }
     val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
-    val insLenLog = log2Ceil(insLen)
-    val start = (pc >> insLenLog.U)(log2Ceil(mmioBeats * mmioBusBytes/instBytes) -1, 0)
+    val insLenLog = log2Ceil(insLen/8)
+    val start = Cat(0.U(2.W),(pc >> insLenLog.U)(log2Ceil(mmioBusBytes/instBytes) -1, 0))    //4bit
     val outMask = mask >> start
     (0 until PredictWidth ).foreach{ i =>
       cutPacket(i) := Mux(outMask(i).asBool,sourceVec_inst(start + i.U),0.U)
@@ -590,7 +590,7 @@ class ICache extends ICacheModule
   io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
   //To icache Uncache
-  io.mmio_acquire.valid := s3_mmio && s3_valid
+  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking 
   io.mmio_acquire.bits.addr := mmioBusAligned(s3_tlb_resp.paddr)
   io.mmio_acquire.bits.id := cacheID.U
 
