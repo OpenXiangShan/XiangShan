@@ -157,11 +157,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
     rs.io.fromDispatch  <> io.fromCtrlBlock.enqIqCtrl(i)
 
-    val src2IsFp = RegNext(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.src2Type === SrcType.fp)
-    rs.io.srcRegValue := DontCare
     rs.io.srcRegValue(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
     if (i >= exuParameters.LduCnt) {
-      rs.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
+      rs.io.srcRegValue(1) := io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data
+      rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 
     rs.io.fastDatas <> fastDatas
