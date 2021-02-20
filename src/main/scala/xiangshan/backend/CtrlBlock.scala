@@ -50,6 +50,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
+    val waitTableUpdate = Output(new WaitTableUpdateReq) // generated in stage2
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
@@ -150,6 +151,12 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
       snpc
     )
   )
+
+  // update waittable if laod violation redirect triggered
+  io.waitTableUpdate.valid := isReplay
+  io.waitTableUpdate.waddr := real_pc(VAddrBits-1, 1)
+  io.waitTableUpdate.wdata := true.B
+
   io.stage3Redirect.valid := s2_redirect_valid_reg
   io.stage3Redirect.bits := s2_redirect_bits_reg
   val stage3CfiUpdate = io.stage3Redirect.bits.cfiUpdate
@@ -270,7 +277,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.ftqLeftOne := ftq.io.leftOne
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
+  // currently, we only update wait table when isReplay
+  decode.io.waitTableUpdate(0) <> RegNext(redirectGen.io.waitTableUpdate)
+  decode.io.waitTableUpdate(1) := DontCare
+  decode.io.waitTableUpdate(1).valid := false.B
+  // decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))
