@@ -26,10 +26,11 @@ object XSLog {
     val logTimestamp = WireInit(0.U(64.W))
     val enableDebug = Parameters.get.envParameters.EnableDebug && debugLevel != XSLogLevel.PERF
     val enablePerf = Parameters.get.envParameters.EnablePerfDebug && debugLevel == XSLogLevel.PERF
-    if (enableDebug || enablePerf) {
+    if (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR) {
       ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      when (cond && logEnable) {
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
+      when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {
@@ -102,37 +103,23 @@ object XSWarn extends LogHelper(XSLogLevel.WARN)
 object XSError extends LogHelper(XSLogLevel.ERROR)
 
 object XSPerf {
-  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
-    val reset = true
-    val print_per_cycle = false
-    val print_gap_bits = 15
-
+  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false, intervalBits: Int = 15)(implicit name: String) = {
     val counter = RegInit(0.U(64.W))
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))
-    val enableDebug = Parameters.get.envParameters.EnableDebug
-    val logEnable = WireInit(false.B)
+    val enableDebug = Parameters.get.envParameters.EnablePerfDebug
+    next_counter := counter + perfCnt
+    counter := next_counter
 
     if (enableDebug) {
-      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
-
-      if(!print_per_cycle) {
-        ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-
-        next_counter := counter + perfCnt
-
-        when(logEnable && logTimestamp(print_gap_bits-1, 0) === 0.U) { // TODO: Need print when program exit?
-          if(reset) {
-            next_counter := perfCnt
-            XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $counter\n")
-          }else{
-            XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
-          }
-        }
-
-        counter := next_counter
-      }else{
-        when(logEnable) {
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      val printCond =
+        if(intervalBits == 0) true.B
+        else (logTimestamp(intervalBits - 1, 0) === 0.U)
+      when(printCond) { // TODO: Need print when program exit?
+        if(acc) {
+          XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
+        }else{
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
         }
       }

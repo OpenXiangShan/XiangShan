@@ -38,7 +38,8 @@ class LsqEnqIO extends XSBundle {
 class LsqWrappper extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val enq = new LsqEnqIO
-    val brqRedirect = Input(Valid(new Redirect))
+    val brqRedirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
@@ -89,6 +90,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
 
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect
+  loadQueue.io.flush <> io.flush
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.loadDataForwarded <> io.loadDataForwarded
@@ -102,6 +104,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   // store queue wiring
   // storeQueue.io <> DontCare
   storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.flush <> io.flush
   storeQueue.io.storeIn <> io.storeIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
@@ -114,7 +117,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
 
   storeQueue.io.sqempty <> io.sqempty
 
-  if (env.DualCoreDifftest) {
+  if (!env.FPGAPlatform) {
     difftestIO.fromSQ <> storeQueue.difftestIO
   }
 

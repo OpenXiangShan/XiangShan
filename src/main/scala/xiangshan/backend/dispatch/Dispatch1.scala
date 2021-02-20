@@ -48,7 +48,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val isInt    = VecInit(io.fromRename.map(req => FuType.isIntExu(req.bits.ctrl.fuType)))
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
-    !req.bits.cf.brUpdate.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
+    !req.bits.cf.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
   ))
   val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
   val isMem    = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
@@ -102,7 +102,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update roqIdx, lqIdx, sqIdx
     // updatedUop(i).roqIdx := io.enqRoq.resp(i)
-    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
+//    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
   }
