@@ -171,7 +171,9 @@ class LoadQueue extends XSModule
         io.loadIn(i).bits.forwardMask.asUInt,
         io.loadIn(i).bits.mmio
       )}
-      datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) && !io.loadIn(i).bits.mmio
+      datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) && 
+        !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
+        !io.needReplayFromRS(i) // do not writeback if that inst will be resend from rs
       writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
 
       val loadWbData = Wire(new LQDataEntry)
