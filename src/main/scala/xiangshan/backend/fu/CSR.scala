@@ -880,7 +880,7 @@ class CSR extends FunctionUnit with HasCSRConst
   }
   
   val xstrap = WireInit(false.B)
-  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
   }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
