@@ -4,6 +4,7 @@ import chisel3._
 import top.Parameters
 import xiangshan.HasXSParameter
 import utils.XSLogLevel.XSLogLevel
+import chisel3.ExcitingUtils.ConnectionType
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
@@ -113,13 +114,13 @@ object XSPerf {
 
     if (enableDebug) {
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      val printCond =
-        if(intervalBits == 0) true.B
-        else (logTimestamp(intervalBits - 1, 0) === 0.U)
-      when(printCond) { // TODO: Need print when program exit?
-        if(acc) {
+      val printCond = if (intervalBits == 0) true.B else (logTimestamp(intervalBits - 1, 0) === 0.U)
+      val xstrap = WireInit(false.B)
+      ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)  // enableDebug guarantees existence of XSTRAP
+      when (printCond || xstrap) {
+        if (acc) {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
-        }else{
+        } else {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
         }
       }
