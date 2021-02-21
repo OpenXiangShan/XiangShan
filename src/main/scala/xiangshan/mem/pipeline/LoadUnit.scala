@@ -13,6 +13,7 @@ class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
+  val needReplayFromRS = Output(Bool())
   val forward = new MaskedLoadForwardQueryIO
 }
 
@@ -148,6 +149,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
+    val needReplayFromRS = Output(Bool())
   })
 
   val s2_uop = io.in.bits.uop
@@ -167,6 +169,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.needReplayFromRS := s2_cache_replay
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -205,7 +208,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   ))
   val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
+  io.out.valid := io.in.valid && !s2_tlb_miss
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
@@ -268,13 +271,15 @@ class LoadUnit extends XSModule with HasLoadHelper {
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  load_s2.io.tlbFeedback <> io.tlbFeedback
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
+  io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
+  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
