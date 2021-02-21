@@ -75,16 +75,10 @@ class BTB extends BasePredictor with BTBParams{
 
   val if2_pc = RegEnable(if1_packetAlignedPC, io.pc.valid)
 
-  val data = List.fill(BtbWays) {
-    List.fill(BtbBanks) {
-      Module(new SRAMTemplate(new BtbDataEntry, set = nRows, shouldReset = true, holdRead = true))
-    }
-  }
-  val meta = List.fill(BtbWays) {
-    List.fill(BtbBanks) {
-      Module(new SRAMTemplate(new BtbMetaEntry, set = nRows, shouldReset = true, holdRead = true))
-    }
-  }
+  // layout: way 0 bank 0, way 0 bank 1, ..., way 0 bank BtbBanks-1, way 1 bank 0, ..., way 1 bank BtbBanks-1
+  val data = Module(new SRAMTemplate(new BtbDataEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true))
+  val meta = Module(new SRAMTemplate(new BtbMetaEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true))
+
   val edata = Module(new SRAMTemplate(UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
 
   val if1_mask = io.inMask
@@ -93,20 +87,23 @@ class BTB extends BasePredictor with BTBParams{
   val if2_row = RegEnable(if1_row, io.pc.valid)
   
   // BTB read requests
-  for (w <- 0 until BtbWays) {
-    for (b <- 0 until BtbBanks) {
-      meta(w)(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-      meta(w)(b).io.r.req.bits.setIdx := if1_row
-      data(w)(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-      data(w)(b).io.r.req.bits.setIdx := if1_row
-    }
-  }
-  edata.io.r.req.valid       := io.pc.valid
+  meta.io.r.req.valid  := io.pc.valid
+  data.io.r.req.valid  := io.pc.valid
+  edata.io.r.req.valid := io.pc.valid
+  meta.io.r.req.bits.setIdx  := if1_row
+  data.io.r.req.bits.setIdx  := if1_row
   edata.io.r.req.bits.setIdx := if1_row
+  
 
   // Entries read from SRAM
-  val if2_metaRead = VecInit((0 until BtbWays).map(w => VecInit((0 until BtbBanks).map( b => meta(w)(b).io.r.resp.data(0)))))
-  val if2_dataRead = VecInit((0 until BtbWays).map(w => VecInit((0 until BtbBanks).map( b => data(w)(b).io.r.resp.data(0)))))
+  val if2_metaRead =
+    VecInit((0 until BtbWays).map(
+      w => VecInit((0 until BtbBanks).map(
+        b => meta.io.r.resp.data(w*BtbBanks+b)))))
+  val if2_dataRead =
+    VecInit((0 until BtbWays).map(
+      w => VecInit((0 until BtbBanks).map(
+        b => data.io.r.resp.data(w*BtbBanks+b)))))
   val if2_edataRead = edata.io.r.resp.data(0)
 
   val if2_tag = btbAddr.getTag(if2_pc)
@@ -191,24 +188,14 @@ class BTB extends BasePredictor with BTBParams{
   val dataWrite = BtbDataEntry(new_lower, new_extended)
   
 
-  // val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
   val updateValid = io.update.valid && updateTaken
   // Update btb
-  for (w <- 0 until BtbWays) {
-    for (b <- 0 until BtbBanks) {
-      meta(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
-      meta(w)(b).io.w.req.bits.setIdx := updateRow
-      meta(w)(b).io.w.req.bits.data := VecInit(metaWrite)
-      data(w)(b).io.w.req.valid := updateValid && b.U === updateBank && w.U === updateWay
-      data(w)(b).io.w.req.bits.setIdx := updateRow
-      data(w)(b).io.w.req.bits.data := VecInit(dataWrite)
-    }
-  }
-
-  edata.io.w.req.valid := updateValid && new_extended
-  edata.io.w.req.bits.setIdx := updateRow
-  edata.io.w.req.bits.data := VecInit(u.target)
-
+  require(isPow2(BtbBanks))
+  // this is one hot, since each fetch bundle has at most 1 taken instruction
+  val updateWayMask = UIntToOH(Cat(updateWay, updateBank))
+  meta.io.w.apply(updateValid, metaWrite, updateRow, updateWayMask)
+  data.io.w.apply(updateValid, dataWrite, updateRow, updateWayMask)
+  edata.io.w.apply(updateValid && new_extended, u.target, updateRow, "b1".U)
 
   if (BPUDebug && debug) {
     val debug_verbose = true

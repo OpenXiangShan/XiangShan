@@ -361,10 +361,11 @@ trait BranchPredictorComponents extends HasXSParameter {
   val ubtb = Module(new MicroBTB)
   val btb = Module(new BTB)
   val bim = Module(new BIM)
-  val tage = (if(EnableBPD) { Module(new Tage) } 
+  val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC) 
+                              else          Module(new Tage) } 
               else          { Module(new FakeTage) })
-  // val loop = Module(new LoopPredictor)
-  val preds = Seq(ubtb, btb, bim, tage/* , loop */)
+  val loop = Module(new LoopPredictor)
+  val preds = Seq(ubtb, btb, bim, tage, loop)
   preds.map(_.io := DontCare)
 }
 
@@ -523,19 +524,20 @@ class BPU extends BaseBPU {
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
 
-  // loop.io.pc.valid := s2_fire
-  // loop.io.if3_fire := s3_fire
-  // loop.io.pc.bits := s2.io.in.pc
-  // loop.io.inMask := io.predecode.mask
-  // loop.io.respIn.taken := s3.io.pred.taken
-  // loop.io.respIn.jmpIdx := s3.io.pred.jmpIdx
+  loop.io.pc.valid := s2_fire
+  loop.io.if3_fire := s3_fire
+  loop.io.pc.bits := s2.io.in.pc
+  loop.io.inMask := io.predecode.mask
+  loop.io.respIn.taken := s3.io.pred.taken
+  loop.io.respIn.jmpIdx := s3.io.pred.jmpIdx
+  loop.io.redirect := s3.s3IO.redirect
 
 
   s3.io.in.resp.tage <> tage.io.resp
-  // s3.io.in.resp.loop <> loop.io.resp
+  s3.io.in.resp.loop <> loop.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.brInfo.metas(i).tageMeta := tage.io.meta(i)
-    // s3.io.in.brInfo.specCnt(i) := loop.io.meta.specCnts(i)
+    s3.io.in.brInfo.specCnt(i) := loop.io.meta.specCnts(i)
   }
 
   s3.s3IO.predecode <> io.predecode
