@@ -17,7 +17,25 @@ object MemMap {
 }
 
 object AddressSpace {
-  def MemMapList = List(
+  def SimpleMemMapList = List(
+    //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
+    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
+    MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
+    MemMap("h00_3001_0000", "h00_3004_FFFF",   "h0", "GPU",         "RWC"),
+    MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
+    MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
+    MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
+    MemMap("h00_3801_0000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
+    MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
+    MemMap("h00_8000_0000", "h1F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
+  )
+
+  def FullMemMapList = List(
     //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
     MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
@@ -55,16 +73,42 @@ object AddressSpace {
     MemMap("h00_8000_0000", "h1F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
   )
 
+  def MemMapList = SimpleMemMapList
+
   def printMemmap(){
     println("-------------------- memory map --------------------")
     for(i <- MemMapList){
-      println(i._1._1 + "->" + i._1._2 + " width " + (if(i._2.get("width").get == "0") "unlimited" else i._2.get("width").get) + " " + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
+      println("[" + i._1._1 + " -> " + i._1._2 + "] Width:" + (if(i._2.get("width").get == "h0") "unlimited" else i._2.get("width").get) + " Description:" + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
     }
     println("----------------------------------------------------")
   }
 
+  def checkMemmap(){
+    for(i <- MemMapList){
+      // pma mode check
+      val s = i._2.get("mode").get
+      if(
+        s.toUpperCase.indexOf("A") >= 0 && 
+        !(s.toUpperCase.indexOf("R") >= 0 && s.toUpperCase.indexOf("W") >= 0)
+      ){
+        println("[error] pma atomicable area must be both readable and writeable")
+        throw new IllegalArgumentException
+      }
+      // pma area size check
+      if(!i._1._1.endsWith("000") || !i._1._2.endsWith("FFF")){
+        println("[error] pma area must be larger than 4KB")
+        throw new IllegalArgumentException()
+      }
+    }
+  }
+
   def genMemmapMatchVec(addr: UInt): UInt = {
     VecInit(MemMapList.map(i => {
+      // calculate addr tag and compare mask
+      // val mask = i._1._2.U - i._1._1.U
+      // (~(i._1._1.U ^ addr) | mask).andR
+
+      // pma is not current critical path, use simple compare for now
       i._1._1.U <= addr && addr < i._1._2.U
     }).toSeq).asUInt
   }
@@ -75,6 +119,30 @@ object AddressSpace {
     }).toSeq))
   }
 
+  // TODO: FIXME
+  def queryModeFast(matchVec: UInt): UInt = {
+    var r = WireInit(false.B)
+    var w = WireInit(false.B)
+    var x = WireInit(false.B)
+    var i = WireInit(false.B)
+    var d = WireInit(false.B)
+    var s = WireInit(false.B)
+    var a = WireInit(false.B)
+    var c = WireInit(false.B)
+    for((j, idx) <- MemMapList.zipWithIndex){
+      val modes = j._2.get("mode").get
+      if (modes.toUpperCase.indexOf("R") >= 0) r = r || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("W") >= 0) w = w || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("X") >= 0) x = x || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("I") >= 0) i = i || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("D") >= 0) d = d || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("S") >= 0) s = s || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("A") >= 0) a = a || matchVec(idx).asBool
+      if (modes.toUpperCase.indexOf("C") >= 0) c = c || matchVec(idx).asBool
+    }
+    VecInit(Seq(r, w, x, i, d, s, a, c)).asUInt
+  }
+
   def queryWidth(matchVec: UInt): UInt = {
     Mux1H(matchVec, VecInit(MemMapList.map(i => {
       i._2.get("width").get.U
@@ -83,7 +151,11 @@ object AddressSpace {
 
   def memmapAddrMatch(addr: UInt): (UInt, UInt) = {
     val matchVec = genMemmapMatchVec(addr)
-    (queryMode(matchVec), queryWidth(matchVec))
+    // when(queryMode(matchVec) =/= queryModeFast(matchVec)){
+    //   printf("pma fail: right %b wrong %b\n", queryMode(matchVec), queryModeFast(matchVec))
+    // }
+    assert(queryMode(matchVec) === queryModeFast(matchVec))
+    (queryModeFast(matchVec), queryWidth(matchVec))
   }
 
   def isDMMIO(addr: UInt): Bool = !PMAMode.dcache(memmapAddrMatch(addr)._1)
