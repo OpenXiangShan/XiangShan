@@ -509,8 +509,8 @@ class LoadQueue extends XSModule
   val rollbackValidVecChecked = Wire(Vec(3, Bool()))
   for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopVec).zipWithIndex) {
     rollbackValidVecChecked(idx) := v && 
-      (!lastCycleRedirect.valid || !isAfter(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
-      (!lastlastCycleRedirect.valid || !isAfter(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx))
+      (!lastCycleRedirect.valid || isBefore(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
+      (!lastlastCycleRedirect.valid || isBefore(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx))
   }
 
   io.rollback.bits.roqIdx := rollbackUop.roqIdx
