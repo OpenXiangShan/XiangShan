@@ -259,6 +259,10 @@ class MemBlockImp
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
+    // sync issue info to rs 
+    lsq.io.storeIssue(i).valid := rs.io.deq.valid
+    lsq.io.storeIssue(i).bits := rs.io.deq.bits
+
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
     stu.io.stout.ready := true.B
@@ -280,6 +284,9 @@ class MemBlockImp
   io.toCtrlBlock.replay <> lsq.io.rollback
   lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
+
+  // LSQ to rs
+  lsq.io.issuePtrExt
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in

@@ -44,6 +44,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
+    val issuePtrExt = Output(new SqPtr)
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
 
   val difftestIO = IO(new Bundle() {
@@ -68,6 +70,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio data is valid
   val writebacked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been writebacked to CDB
+  val issued = Reg(Vec(StoreQueueSize, Bool())) // inst has been issued by rs
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
@@ -77,6 +80,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
@@ -121,12 +125,35 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
+      issued(index) := false.B
       commited(index) := false.B
       pending(index) := false.B
     }
     io.enq.resp(i) := sqIdx
   }
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
+
+  /**
+    * Update issuePtr when issue from rs
+    */
+
+  // update state bit issued
+  for (i <- 0 until StorePipelineWidth) {
+    when (io.storeIssue(i).valid) {
+      issued(io.storeIssue(i).bits.uop.sqIdx.value) := true.B
+    }
+  }
+  // update issuePtr
+  issuePtrExt := issuePtrExt + PopCount(VecInit((0 until 4).map(i => {
+    val lookUpPtr = issuePtrExt.value + i.U
+    allocated(lookUpPtr) && issued(lookUpPtr)
+  })))
+  when(io.brqRedirect.valid || io.flush){
+    issuePtrExt := cmtPtrExt(0)
+  }
+  // send issuePtrExt to rs
+  // io.issuePtrExt := cmtPtrExt(0)
+  io.issuePtrExt := issuePtrExt
 
   /**
     * Writeback store from store units
