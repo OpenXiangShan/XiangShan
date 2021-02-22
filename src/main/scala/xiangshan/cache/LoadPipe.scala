@@ -179,7 +179,8 @@ class LoadPipe extends DCacheModule
     resp.bits.dump()
   }
 
-  io.lsu.s2_hit_way := s2_tag_match_way
+  io.lsu.s1_hit_way := s1_tag_match_way
+  // io.lsu.s2_hit_way := s2_tag_match_way
 
   // -------
   // Debug logging functions
