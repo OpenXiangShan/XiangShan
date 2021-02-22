@@ -60,9 +60,9 @@ class BIM extends BasePredictor with BimParams {
   val updateRow = bimAddr.getBankIdx(u.ftqPC)
 
 
-  val wrbypass_ctrs       = Reg(Vec(bypassEntries, Vec(BimBanks, UInt(2.W))))
-  val wrbypass_ctr_valids = Reg(Vec(bypassEntries, Vec(BimBanks, Bool())))
-  val wrbypass_rows     = Reg(Vec(bypassEntries, UInt(log2Up(nRows).W)))
+  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, UInt(2.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, Bool()))))
+  val wrbypass_rows     = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(nRows).W))))
   val wrbypass_enq_idx  = RegInit(0.U(log2Up(bypassEntries).W))
 
   val wrbypass_hits = VecInit((0 until bypassEntries).map( i => 
