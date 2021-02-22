@@ -138,7 +138,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       .map(_._2.bits.data)
     val wakeupCnt = fastDatas.length
 
-    val slowPorts = exeWbReqs ++
+    val slowPorts = exeWbReqs.map(decoupledIOToValidIO) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map(_._2)
@@ -165,10 +165,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     rs.io.fastDatas <> fastDatas
-    for ((x, y) <- rs.io.slowPorts.zip(slowPorts)) {
-      x.valid := y.fire()
-      x.bits  := y.bits
-    }
+    rs.io.slowPorts <> slowPorts
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
@@ -185,11 +182,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       .map(_._2)
   }
 
-  // TODO: make this better
-  io.wakeUpIn.fast.foreach(_.ready := true.B)
-  io.wakeUpIn.slow.foreach(_.ready := true.B)
-
-  io.wakeUpOut.slow <> exeWbReqs
+  io.wakeUpOut.slow <> exeWbReqs.map(decoupledIOToValidIO)
 
   // load always ready
   exeWbReqs.foreach(_.ready := true.B)

@@ -20,8 +20,8 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg)
 
   fma.io.redirectIn := io.redirect
   fma.io.flushIn := io.flush
-  fma.io.out.ready := io.toFp.ready
+  fma.io.out.ready := io.out.ready
 
-  io.toFp.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
-  io.toFp.bits.fflags := fma.fflags
+  io.out.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
+  io.out.bits.fflags := fma.fflags
 }
