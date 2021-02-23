@@ -179,11 +179,12 @@ class RAS extends BasePredictor
     spec_push := !spec_is_full && io.callIdx.valid && io.pc.valid
     spec_pop  := !spec_is_empty && io.is_ret && io.pc.valid
 
-    val copy_valid = io.redirect.valid
-    val recover_cfi = io.redirect.bits.cfiUpdate
+    val redirect = RegNext(io.redirect)
+    val copy_valid = redirect.valid
+    val recover_cfi = redirect.bits.cfiUpdate
 
-    val retMissPred  = copy_valid && io.redirect.bits.level === 0.U && recover_cfi.pd.isRet
-    val callMissPred = copy_valid && io.redirect.bits.level === 0.U && recover_cfi.pd.isCall
+    val retMissPred  = copy_valid && redirect.bits.level === 0.U && recover_cfi.pd.isRet
+    val callMissPred = copy_valid && redirect.bits.level === 0.U && recover_cfi.pd.isCall
     // when we mispredict a call, we must redo a push operation
     // similarly, when we mispredict a return, we should redo a pop
     spec_ras.recover_valid := copy_valid
@@ -215,7 +216,7 @@ class RAS extends BasePredictor
         XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
             spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
         XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        val redirectUpdate = io.redirect.bits.cfiUpdate
+        val redirectUpdate = redirect.bits.cfiUpdate
         XSDebug("copyValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
             copy_valid,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
     }

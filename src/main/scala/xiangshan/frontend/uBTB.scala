@@ -161,7 +161,8 @@ class MicroBTB extends BasePredictor
 
     //uBTB update 
     //backend should send fetch pc to update
-    val u = io.update.bits
+    val u = RegNext(io.update.bits)
+    val update_valid = RegNext(io.update.valid)
     val update_packet_pc = packetAligned(u.ftqPC)
     val update_write_ways = VecInit(u.metas.map(_.ubtbWriteWay))
     val update_hits = u.metas.map(_.ubtbHits)
@@ -173,10 +174,10 @@ class MicroBTB extends BasePredictor
     // only when taken should we update target
     val data_write_valids = 
         VecInit((0 until PredictWidth).map(i =>
-            io.update.valid && u.valids(i) && u.takens(i)))
+            update_valid && u.valids(i) && u.takens(i)))
     val meta_write_valids = 
         VecInit((0 until PredictWidth).map(i =>
-            io.update.valid && u.valids(i) && (u.br_mask(i) || u.takens(i))))
+            update_valid && u.valids(i) && (u.br_mask(i) || u.takens(i))))
         
     val new_preds =
         VecInit((0 until PredictWidth).map(i => 
