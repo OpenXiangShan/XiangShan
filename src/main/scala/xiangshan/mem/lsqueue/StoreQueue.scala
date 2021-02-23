@@ -234,7 +234,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
-  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
@@ -249,6 +249,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
     is(s_resp) {
       when(io.uncache.resp.fire()) {
+        uncacheState := s_wb
+      }
+    }
+    is(s_wb) {
+      when (io.mmioStout.fire()) {
         uncacheState := s_wait
       }
     }
@@ -286,7 +291,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // (4) writeback to ROB (and other units): mark as writebacked
-  io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
+  io.mmioStout.valid := uncacheState === s_wb // allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
