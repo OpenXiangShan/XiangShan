@@ -195,7 +195,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       req := io.req
     }
 
-    should_refill_data := io.req.source === LOAD_SOURCE.U
+    should_refill_data := should_refill_data || io.req.source === LOAD_SOURCE.U
   }
 
 
