@@ -130,7 +130,7 @@ class ReservationStation
     select.io.memfeedback := io.memfeedback
   }
 
-  ctrl.io.in.valid := select.io.enq.fire() && !(io.redirect.valid || io.flush) // NOTE: same as select
+  ctrl.io.in.valid := select.io.enq.fire()// && !(io.redirect.valid || io.flush) // NOTE: same as select
   ctrl.io.flush := io.flush
   ctrl.io.in.bits.addr := select.io.enq.bits
   ctrl.io.in.bits.uop := io.fromDispatch.bits
