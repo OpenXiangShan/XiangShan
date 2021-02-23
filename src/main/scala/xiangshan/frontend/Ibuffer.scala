@@ -122,6 +122,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     io.out(i).bits.ftqOffset := outWire.ftqOffset
 
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
+    io.out(i).bits.loadWaitBit := DontCare
   }
   val next_head_vec = VecInit(head_vec.map(_ + numDeq))
   ibuf.io.raddr := VecInit(next_head_vec.map(_.value))
