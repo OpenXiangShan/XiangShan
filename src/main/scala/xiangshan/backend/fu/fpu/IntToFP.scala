@@ -10,7 +10,7 @@ import utils.{SignExt, ZeroExt}
 
 class IntToFP extends FPUSubModule {
 
-  val s_idle :: s_cvt :: s_finish :: Nil = Enum(3)
+  val s_idle :: s_cvt :: s_ieee :: s_finish :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   io.in.ready := state === s_idle
@@ -27,6 +27,9 @@ class IntToFP extends FPUSubModule {
       }
     }
     is(s_cvt){
+      state := s_ieee
+    }
+    is(s_ieee){
       state := s_finish
     }
     is(s_finish){
@@ -73,9 +76,14 @@ class IntToFP extends FPUSubModule {
     mux.exc := VecInit(exc)(tag)
   }
 
-  val muxReg = RegEnable(mux, enable = state === s_cvt)
+  val muxReg = Reg(mux.cloneType)
+  when(state === s_cvt){
+    muxReg := mux
+  }.elsewhen(state === s_ieee){
+    muxReg.data := ieee(box(muxReg.data, ctrl.typeTagOut))
+  }
 
   fflags := muxReg.exc
   io.out.bits.uop := uopReg
-  io.out.bits.data := box(muxReg.data, ctrl.typeTagOut)
+  io.out.bits.data := muxReg.data
 }

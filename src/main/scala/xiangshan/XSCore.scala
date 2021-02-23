@@ -406,25 +406,26 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOut.slow.map(intOutValid)
-  val memBlockWakeUpFp = memBlock.io.wakeUpOut.slow.map(fpOutValid)
+  val memBlockWakeUpInt = memBlock.io.wakeUpOut.slow.map(x => intOutValid(x))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOut.slow.map(x => fpOutValid(x))
+  memBlock.io.wakeUpOut.slow.foreach(_.ready := true.B)
 
+  fpExuConfigs.zip(floatBlock.io.wakeUpOut.slow).filterNot(_._1.writeIntRf).map(_._2.ready := true.B)
   val fpBlockWakeUpInt = fpExuConfigs
     .zip(floatBlock.io.wakeUpOut.slow)
     .filter(_._1.writeIntRf)
-    .map(_._2).map(intOutValid)
+    .map(_._2).map(x => intOutValid(x, connectReady = true))
 
+  intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
     .zip(integerBlock.io.wakeUpOut.slow)
     .filter(_._1.writeFpRf)
-    .map(_._2).map(fpOutValid)
+    .map(_._2).map(x => fpOutValid(x, connectReady = true))
 
   integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
-  integerBlock.io.outWriteIntRf <> floatBlock.io.fpWriteIntRf ++ memBlockWakeUpInt.map(validIOToDecoupledIO)
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
 
   floatBlock.io.wakeUpIn.slow <> intBlockWakeUpFp ++ memBlockWakeUpFp
-  floatBlock.io.outWriteFpRf <> integerBlock.io.intWriteFpRf ++ memBlockWakeUpFp.map(validIOToDecoupledIO)
   floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
 
   val wakeUpMem = Seq(
@@ -433,7 +434,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   )
   memBlock.io.wakeUpIn.fastUops <> wakeUpMem.flatMap(_.fastUops)
   memBlock.io.wakeUpIn.fast <> wakeUpMem.flatMap(_.fast)
-  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow)
+  // Note: 'WireInit' is used to block 'ready's from memBlock,
+  // we don't need 'ready's from memBlock
+  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
 
   integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs

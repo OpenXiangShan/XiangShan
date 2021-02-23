@@ -12,7 +12,7 @@ import xiangshan.backend.regfile.Regfile
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
   val fast = Vec(numFast, Flipped(ValidIO(new ExuOutput))) //one cycle later than fastUops
-  val slow = Vec(numSlow, Flipped(ValidIO(new ExuOutput)))
+  val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
 
   override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
 
@@ -38,8 +38,9 @@ trait HasExeBlockHelper {
     out.valid := x.valid && x.bits.uop.ctrl.fpWen
     out
   }
-  def fpOutValid(x: DecoupledIO[ExuOutput]): DecoupledIO[ExuOutput] = {
+  def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
     out.valid := x.valid && x.bits.uop.ctrl.fpWen
     out
   }
@@ -53,8 +54,9 @@ trait HasExeBlockHelper {
     out.valid := x.valid && x.bits.uop.ctrl.rfWen
     out
   }
-  def intOutValid(x: DecoupledIO[ExuOutput]): DecoupledIO[ExuOutput] = {
+  def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
+    if(connectReady) x.ready := out.ready
     out.valid := x.valid && x.bits.uop.ctrl.rfWen
     out
   }
@@ -88,10 +90,6 @@ class IntegerBlock
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
-    // load and fmisc will write int rf
-    val outWriteIntRf = Vec(slowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
-    // i2f unit will write fp rf
-    val intWriteFpRf = Vec(slowWakeUpOut.count(_.writeFpRf), DecoupledIO(new ExuOutput))
 
     val csrio = new Bundle {
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
@@ -176,10 +174,8 @@ class IntegerBlock
     val fastDatas = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
     val wakeupCnt = fastDatas.length
 
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency)
-      .map(_.io.out)
-      .map(decoupledIOToValidIO)
-    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow
+    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(_.io.out)
+    val slowPorts = (inBlockListenPorts ++ io.wakeUpIn.slow).map(decoupledIOToValidIO)
     val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
@@ -237,9 +233,7 @@ class IntegerBlock
 
   io.wakeUpOut.slow <> exeUnits.filter(
     x => x.config.hasUncertainlatency
-  ).map(x => x.io.out).map(decoupledIOToValidIO)
-
-  io.intWriteFpRf <> exeUnits.filter(_.config.writeFpRf).map(_.io.out).map(fpOutValid)
+  ).map(x => WireInit(x.io.out))
 
   // send misprediction to brq
   io.toCtrlBlock.exuRedirect.zip(
@@ -267,9 +261,9 @@ class IntegerBlock
   ))
   intWbArbiter.io.in <> exeUnits.map(e => {
     if(e.config.writeFpRf) WireInit(e.io.out) else e.io.out
-  }) ++ io.outWriteIntRf
+  }) ++ io.wakeUpIn.slow
 
-  exeUnits.zip(intWbArbiter.io.in).filter(_._1.config.writeFpRf).zip(io.intWriteFpRf).foreach{
+  exeUnits.zip(intWbArbiter.io.in).filter(_._1.config.writeFpRf).zip(io.wakeUpIn.slow).foreach{
     case ((exu, wInt), wFp) =>
       exu.io.out.ready := wFp.fire() || wInt.fire()
   }
