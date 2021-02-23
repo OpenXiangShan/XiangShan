@@ -35,10 +35,12 @@ class RightShiftModule extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
     val srlSrc, sraSrc = Input(UInt(XLEN.W))
-    val srl, sra = Output(UInt(XLEN.W))
+    val srl_l, srl_w, sra_l, sra_w = Output(UInt(XLEN.W))
   })
-  io.srl := io.srlSrc >> io.shamt
-  io.sra := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.srl_l := io.srlSrc >> io.shamt
+  io.srl_w := io.srlSrc(31, 0) >> io.shamt
+  io.sra_l := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.sra_w := Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)) >> io.shamt
 }
 
 class MiscResultSelect extends XSModule {
@@ -108,18 +110,12 @@ class AluDataModule extends XSModule {
 
   val rightShiftModule = Module(new RightShiftModule)
   rightShiftModule.io.shamt := shamt
-  rightShiftModule.io.srlSrc := Cat(
-    Mux(isW, 0.U(32.W), src1(63, 32)),
-    src1(31, 0)
-  )
-  rightShiftModule.io.sraSrc := Cat(
-    Mux(isW, Fill(32, src1(31)), src1(63, 32)),
-    src1(31, 0)
-  )
+  rightShiftModule.io.srlSrc := src1
+  rightShiftModule.io.sraSrc := src1
 
   val sll = leftShiftModule.io.sll
-  val srl = rightShiftModule.io.srl
-  val sra = rightShiftModule.io.sra
+  val srl = Mux(isW, rightShiftModule.io.srl_w, rightShiftModule.io.srl_l)
+  val sra = Mux(isW, rightShiftModule.io.sra_w, rightShiftModule.io.sra_l)
 
   val miscResSel = Module(new MiscResultSelect)
   miscResSel.io.func := func(3, 0)
