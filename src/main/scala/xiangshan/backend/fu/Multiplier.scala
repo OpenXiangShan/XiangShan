@@ -45,6 +45,7 @@ class NaiveMultiplier(len: Int, val latency: Int)
 class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends XSModule {
   val io = IO(new Bundle() {
     val a, b = Input(UInt(len.W))
+    val regEnables = Input(Vec(doReg.size, Bool()))
     val result = Output(UInt((2 * len).W))
   })
   val (a, b) = (io.a, io.b)
@@ -149,7 +150,7 @@ class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends XSModule {
 
       val needReg = doRegSorted.contains(depth)
       val toNextLayer = if(needReg)
-        columns_next.map(_.map(RegNext(_)))
+        columns_next.map(_.map(x => RegEnable(x, io.regEnables(doRegSorted.indexOf(depth)))))
       else
         columns_next
 
@@ -168,6 +169,7 @@ class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len)
   val mulDataModule = Module(new ArrayMulDataModule(len, doReg))
   mulDataModule.io.a := io.in.bits.src(0)
   mulDataModule.io.b := io.in.bits.src(1)
+  mulDataModule.io.regEnables := VecInit((1 to doReg.size) map (i => regEnable(i)))
   val result = mulDataModule.io.result
 
   var ctrlVec = Seq(ctrl)

@@ -17,7 +17,7 @@ trait HasRedirectOut { this: RawModule =>
 class JumpDataModule extends XSModule {
   val io = IO(new Bundle() {
     val src1 = Input(UInt(XLEN.W))
-    val pc = Input(UInt(VAddrBits.W))
+    val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
     val immMin = Input(UInt(ImmUnion.maxLen.W))
     val func = Input(FuOpType())
     val isRVC = Input(Bool())
