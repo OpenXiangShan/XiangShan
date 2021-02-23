@@ -38,7 +38,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val uncache = new DCacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
@@ -61,7 +61,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   dataModule.io := DontCare
   val paddrModule = Module(new SQPaddrModule(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
   paddrModule.io := DontCare
-  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
 
   // state & misc
@@ -104,7 +104,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
     paddrModule.io.raddr(i) := deqPtrExtNext(i).value
   }
-  vaddrModule.io.raddr(0) := cmtPtr + commitCount
+
+  // Note that both io.roq.scommit and RegNext(io.roq.scommit) should be take into consideration
+  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount + io.roq.scommit).value
 
   /**
     * Enqueue at dispatch
@@ -144,9 +146,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.wen(i) := false.B
     paddrModule.io.wen(i) := false.B
-    vaddrModule.io.wen(i) := false.B
+    val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
-      val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
       writebacked(stWbIndex) := !io.storeIn(i).bits.mmio
       pending(stWbIndex) := io.storeIn(i).bits.mmio
@@ -164,9 +165,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wen(i) := true.B
 
-      vaddrModule.io.waddr(i) := stWbIndex
-      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
-      vaddrModule.io.wen(i) := true.B
 
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
@@ -179,6 +177,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
         io.storeIn(i).bits.mmio
         )
     }
+    // vaddrModule write is delayed, as vaddrModule will not be read right after write
+    vaddrModule.io.waddr(i) := RegNext(stWbIndex)
+    vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
+    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
   }
 
   /**
@@ -199,7 +201,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
-    val forwardMask = UIntToMask(io.forward(i).sqIdx.value, StoreQueueSize)
+    val forwardMask = io.forward(i).sqIdxMask
     val storeWritebackedVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
     for (j <- 0 until StoreQueueSize) {
       storeWritebackedVec(j) := datavalid(j) && allocated(j) // all datavalid terms need to be checked
@@ -387,6 +389,16 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
+
+  // perf counter
+  XSPerf("sqFull", !allowEnqueue, acc = true)
+  XSPerf("sqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
+  XSPerf("sqMmioCnt", io.uncache.req.fire(), acc = true)
+  XSPerf("sqWriteback", io.mmioStout.fire(), acc = true)
+  XSPerf("sqWbBlocked", io.mmioStout.valid && !io.mmioStout.ready, acc = true)
+  XSPerf("sqValidEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
+  XSPerf("sqCmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
+  XSPerf("sqNCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)

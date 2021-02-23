@@ -845,7 +845,7 @@ class CSR extends FunctionUnit with HasCSRConst
     "s2Wrong"     -> (0x103d, "perfCntS2Wrong"),
     "s3Right"     -> (0x103e, "perfCntS3Right"),
     "s3Wrong"     -> (0x103f, "perfCntS3Wrong"),
-    "takenAndRight" -> (0x1040, "perfCntTakenAndRight"),
+    "loopExit" -> (0x1040, "perfCntLoopExit"),
     "takenButWrong" -> (0x1041, "perfCntTakenButWrong"),
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
