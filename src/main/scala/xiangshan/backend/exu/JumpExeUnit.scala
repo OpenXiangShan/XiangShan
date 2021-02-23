@@ -99,6 +99,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   val isDouble = !uop.ctrl.isRVF
 
 
-  io.toInt.bits.redirectValid := jmp.redirectOutValid
-  io.toInt.bits.redirect := jmp.redirectOut
+  io.out.bits.redirectValid := jmp.redirectOutValid
+  io.out.bits.redirect := jmp.redirectOut
 }

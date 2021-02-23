@@ -30,35 +30,30 @@ class FpBlockToMemBlockIO extends XSBundle {
 }
 
 class MemBlock(
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
-  fastFpOut: Seq[ExuConfig],
-  slowFpOut: Seq[ExuConfig],
-  fastIntOut: Seq[ExuConfig],
-  slowIntOut: Seq[ExuConfig]
+  val fastWakeUpIn: Seq[ExuConfig],
+  val slowWakeUpIn: Seq[ExuConfig],
+  val fastWakeUpOut: Seq[ExuConfig],
+  val slowWakeUpOut: Seq[ExuConfig]
 )(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
 
-  lazy val module = new MemBlockImp(fastWakeUpIn, slowWakeUpIn, fastFpOut, slowFpOut, fastIntOut, slowIntOut)(this)
+  lazy val module = new MemBlockImp(this)
 }
 
-class MemBlockImp
-(
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
-  fastFpOut: Seq[ExuConfig],
-  slowFpOut: Seq[ExuConfig],
-  fastIntOut: Seq[ExuConfig],
-  slowIntOut: Seq[ExuConfig]
-) (outer: MemBlock) extends LazyModuleImp(outer)
+class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
   with HasFPUParameters
   with HasExeBlockHelper
 {
+
+  val fastWakeUpIn = outer.fastWakeUpIn
+  val slowWakeUpIn = outer.slowWakeUpIn
+  val fastWakeUpOut = outer.fastWakeUpOut
+  val slowWakeUpOut = outer.slowWakeUpOut
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -67,8 +62,7 @@ class MemBlockImp
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
-    val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
-    val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
+    val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
@@ -124,8 +118,7 @@ class MemBlockImp
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val intExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  val fpExeWbReqs = loadUnits.map(_.io.fpout)
+  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
 
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
@@ -145,11 +138,10 @@ class MemBlockImp
       .map(_._2.bits.data)
     val wakeupCnt = fastDatas.length
 
-    val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
-    val slowPorts = inBlockListenPorts ++
+    val slowPorts = (exeWbReqs ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-        .map(_._2)
+        .map(_._2)).map(decoupledIOToValidIO)
 
     val slowPortsCnt = slowPorts.length
 
@@ -165,18 +157,14 @@ class MemBlockImp
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
     rs.io.fromDispatch  <> io.fromCtrlBlock.enqIqCtrl(i)
 
-    val src2IsFp = RegNext(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.src2Type === SrcType.fp)
-    rs.io.srcRegValue := DontCare
     rs.io.srcRegValue(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
     if (i >= exuParameters.LduCnt) {
-      rs.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
+      rs.io.srcRegValue(1) := io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data
+      rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 
     rs.io.fastDatas <> fastDatas
-    for ((x, y) <- rs.io.slowPorts.zip(slowPorts)) {
-      x.valid := y.fire()
-      x.bits  := y.bits
-    }
+    rs.io.slowPorts <> slowPorts
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
@@ -193,16 +181,8 @@ class MemBlockImp
       .map(_._2)
   }
 
-  // TODO: make this better
-  io.wakeUpIn.fast.foreach(_.ready := true.B)
+  io.wakeUpOut.slow <> exeWbReqs
   io.wakeUpIn.slow.foreach(_.ready := true.B)
-
-  io.wakeUpFpOut.slow  <> fpExeWbReqs
-  io.wakeUpIntOut.slow <> intExeWbReqs
-
-  // load always ready
-  fpExeWbReqs.foreach(_.ready := true.B)
-  intExeWbReqs.foreach(_.ready := true.B)
 
   val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
