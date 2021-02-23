@@ -239,6 +239,7 @@ class MemBlockImp
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+    lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 
   // StoreUnit
@@ -274,8 +275,11 @@ class MemBlockImp
   lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
   lsq.io.flush          <> io.fromCtrlBlock.flush
   io.toCtrlBlock.replay <> lsq.io.rollback
-  lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
+  // delay dcache refill for 1 cycle for better timing
+  // TODO: remove RegNext after fixing refill paddr timing
+  // lsq.io.dcache         <> dcache.io.lsu.lsq 
+  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq) 
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
@@ -283,6 +287,9 @@ class MemBlockImp
 
   // Sbuffer
   sbuffer.io.dcache     <> dcache.io.lsu.store
+  sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
+  sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
+  assert(sbuffer.io.dcache.resp.ready === true.B)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
