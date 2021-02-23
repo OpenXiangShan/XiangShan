@@ -12,8 +12,6 @@ trait MicroBTBPatameter{
     val nWays = 16
     val lowerBitsSize = 20
     val tagSize = 20
-
-    val extended_stat = false
 }
 
 @chiselName
@@ -62,15 +60,9 @@ class MicroBTB extends BasePredictor
         val tag = UInt(tagSize.W)
     }
 
-    class MicroBTBEntry extends XSBundle
+    class MicroBTBData extends XSBundle
     {
         val lower = UInt(lowerBitsSize.W)
-    }
-
-    class MetaOutput extends XSBundle {
-        val is_Br = Bool()
-        val is_RVC = Bool()
-        val pred = UInt(2.W)
     }
 
     class ReadResp extends XSBundle
@@ -93,10 +85,10 @@ class MicroBTB extends BasePredictor
             val update_read_pred = Output(UInt(2.W))
 
             val update_write_meta = Flipped(Valid(new MicroBTBMeta))
-            val update_write_data = Flipped(Valid(new MicroBTBEntry))
+            val update_write_data = Flipped(Valid(new MicroBTBData))
         })
         val meta = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays, 1))
-        val data = Module(new AsyncDataModuleTemplate(new MicroBTBEntry, nWays, nWays, 1))
+        val data = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays, nWays, 1))
 
         for (w <- 0 until nWays) {
             meta.io.raddr(w) := w.U
@@ -192,7 +184,7 @@ class MicroBTB extends BasePredictor
                 satUpdate(banks(i).update_read_pred,2,update_takens(i)))))
 
     val update_write_metas = Wire(Vec(PredictWidth, new MicroBTBMeta))
-    val update_write_datas = Wire(Vec(PredictWidth, new MicroBTBEntry))
+    val update_write_datas = Wire(Vec(PredictWidth, new MicroBTBData))
     for (i <- 0 until PredictWidth) {
         update_write_metas(i).is_Br  := u.br_mask(i)
         update_write_metas(i).is_RVC := u.rvc_mask(i)
@@ -210,7 +202,7 @@ class MicroBTB extends BasePredictor
             Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_metas(b))
         banks(b).update_write_data.valid := do_reset || data_write_valids(b)
         banks(b).update_write_data.bits := 
-            Mux(do_reset, 0.U.asTypeOf(new MicroBTBEntry), update_write_datas(b))
+            Mux(do_reset, 0.U.asTypeOf(new MicroBTBData), update_write_datas(b))
     }
     
     if (BPUDebug && debug) {
@@ -233,23 +225,4 @@ class MicroBTB extends BasePredictor
                 i.U, update_takens(i), banks(i).update_read_pred, new_preds(i), u.br_mask(i), u.rvc_mask(i), update_tag)
         }
     }
-
-    if (extended_stat) {
-        val update_target = u.target
-        val high_identical = update_target(VAddrBits-1, lowerBitsSize) =/= update_packet_pc(VAddrBits-1, lowerBitsSize)
-        XSDebug(io.update.valid, "extended_stat: identical %d\n", high_identical)
-    }
-   
-   //bypass:read-after-write 
-//    for( b <- 0 until PredictWidth) {
-//         when(update_bank === b.U && meta_write_valid && read_valid
-//             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
-//         {
-//             io.out.targets(b) := u.target
-//             io.out.takens(b) := u.taken
-//             io.out.is_RVC(b) := u.pd.isRVC
-//             io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
-//             XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+(b<<1).asUInt(),b.U, io.out.targets(b))
-//         }
-//     }
 }
