@@ -353,6 +353,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExeBlockHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
     val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
   })
@@ -439,6 +440,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // we don't need 'ready's from memBlock
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
 
+  integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
