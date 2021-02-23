@@ -143,11 +143,25 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       issued(io.storeIssue(i).bits.uop.sqIdx.value) := true.B
     }
   }
+
   // update issuePtr
-  issuePtrExt := issuePtrExt + PopCount(VecInit((0 until 4).map(i => {
+  val IssuePtrMoveStride = 4
+  require(IssuePtrMoveStride >= 2)
+
+  val issueLookup = Wire(Vec(IssuePtrMoveStride, Bool()))
+  for (i <- 0 until IssuePtrMoveStride) {
     val lookUpPtr = issuePtrExt.value + i.U
-    allocated(lookUpPtr) && issued(lookUpPtr)
-  })))
+    if(i == 0){
+      issueLookup(i) := allocated(lookUpPtr) && issued(lookUpPtr)
+    }else{
+      issueLookup(i) := allocated(lookUpPtr) && issued(lookUpPtr) && issueLookup(i-1)
+    }
+
+    when(issueLookup(i)){
+      issuePtrExt := issuePtrExt + (i+1).U
+    }
+  }
+  
   when(io.brqRedirect.valid || io.flush){
     issuePtrExt := cmtPtrExt(0)
   }
