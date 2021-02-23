@@ -131,7 +131,7 @@ class ReservationStation
     select.io.memfeedback := io.memfeedback
   }
 
-  ctrl.io.in.valid := select.io.enq.fire() && !(io.redirect.valid || io.flush) // NOTE: same as select
+  ctrl.io.in.valid := select.io.enq.fire()// && !(io.redirect.valid || io.flush) // NOTE: same as select
   ctrl.io.flush := io.flush
   ctrl.io.in.bits.addr := select.io.enq.bits
   ctrl.io.in.bits.uop := io.fromDispatch.bits
@@ -349,7 +349,8 @@ class ReservationStationSelect
   val enqueue = io.enq.fire() && !(io.redirect.valid || io.flush)
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
-  tailPtr := Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
+  val nextTailPtr = Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
+  tailPtr := nextTailPtr
 
   val enqPtr = Mux(tailPtr.flag, deqPtr, tailPtr.value)
   val enqIdx = indexQueue(enqPtr)
@@ -366,7 +367,7 @@ class ReservationStationSelect
   io.deq.valid := selectValid
   io.deq.bits  := selectIndex
 
-  io.numExist := Mux(tailPtr.flag, (iqSize-1).U, tailPtr.value)
+  io.numExist := RegNext(Mux(nextTailPtr.flag, (iqSize-1).U, nextTailPtr.value))
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 }
