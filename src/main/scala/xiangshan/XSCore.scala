@@ -49,7 +49,7 @@ case class XSCoreParameters
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
-  EnableLoop: Boolean = false,
+  EnableLoop: Boolean = true,
   EnableSC: Boolean = false,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
@@ -364,6 +364,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   trapIO <> DontCare
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.checkMemmap()
   AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs

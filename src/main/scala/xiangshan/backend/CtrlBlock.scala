@@ -158,7 +158,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   stage3CfiUpdate.rasEntry := ftqRead.rasTop
   stage3CfiUpdate.hist := ftqRead.hist
   stage3CfiUpdate.predHist := ftqRead.predHist
-  stage3CfiUpdate.specCnt := ftqRead.specCnt(s2_redirect_bits_reg.ftqOffset)
+  stage3CfiUpdate.specCnt := ftqRead.specCnt
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
   stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
     if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
@@ -292,6 +292,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
+  rename.io.dispatchInfo <> dispatch.io.preDpInfo
 
   dispatch.io.redirect <> backendRedirect
   dispatch.io.flush := flushReg
