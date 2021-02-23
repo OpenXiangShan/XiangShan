@@ -379,9 +379,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 
-  if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
-  }
+  XSPerf("LoopExit", io.resp.exit.reduce(_||_))
 
   if (BPUDebug && debug) {
     // debug info

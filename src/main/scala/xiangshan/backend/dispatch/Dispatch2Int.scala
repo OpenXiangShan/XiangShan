@@ -153,6 +153,6 @@ class Dispatch2Int extends XSModule {
 //        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
 
-  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+  XSPerf("dp2int_in", PopCount(io.fromDq.map(_.valid)))
 
 }
