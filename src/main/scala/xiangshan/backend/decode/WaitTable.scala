@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 
 trait WaitTableParameters {
-  val isSync = true
+  val isSync = false // fixed
   val WaitTableSize = 1024
   val WaitTableAddrWidth = log2Up(WaitTableSize)
   val ResetTime2Pow = 14 //16384
