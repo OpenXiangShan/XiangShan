@@ -40,7 +40,7 @@ class RightShiftModule extends XSModule {
   io.srl_l := io.srlSrc >> io.shamt
   io.srl_w := io.srlSrc(31, 0) >> io.shamt
   io.sra_l := (io.sraSrc.asSInt() >> io.shamt).asUInt()
-  io.sra_w := Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)) >> io.shamt
+  io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt() >> io.shamt).asUInt()
 }
 
 class MiscResultSelect extends XSModule {
