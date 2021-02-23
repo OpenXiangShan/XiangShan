@@ -163,7 +163,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
   
   when(io.brqRedirect.valid || io.flush){
-    issuePtrExt := cmtPtrExt(0)
+    issuePtrExt := Mux(
+      isAfter(cmtPtrExt(0), deqPtrExt(0)),
+      cmtPtrExt(0),
+      deqPtrExt(0)
+    )
   }
   // send issuePtrExt to rs
   // io.issuePtrExt := cmtPtrExt(0)

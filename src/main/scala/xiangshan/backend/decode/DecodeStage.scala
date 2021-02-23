@@ -32,4 +32,7 @@ class DecodeStage extends XSModule {
   for (i <- 0 until StorePipelineWidth) {
     waittable.io.update(i) <> RegNext(io.waitTableUpdate(i))
   }
+
+  val loadWaitBitSet = PopCount(VecInit((0 until DecodeWidth).map(i => waittable.io.rdata(i) && io.out(i).fire())))
+  XSPerf("loadWaitBitSet", loadWaitBitSet, acc = true) // rollback redirect generated
 }
