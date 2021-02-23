@@ -106,51 +106,51 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule 
   }
 }
 
-class LQData8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
-  val io = IO(new Bundle {
-    // read
-    val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
-    val rdata = Output(Vec(numRead, UInt(8.W)))
-    // address indexed write
-    val wen   = Input(Vec(numWrite, Bool()))
-    val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
-    val wdata = Input(Vec(numWrite, UInt(8.W)))
-    // masked write
-    val mwmask = Input(Vec(blockWords, Vec(numEntries, Bool())))
-    val mwdata = Input(Vec(blockWords, UInt(8.W)))
-  })
+// class LQData8Module(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
+//   val io = IO(new Bundle {
+//     // read
+//     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
+//     val rdata = Output(Vec(numRead, UInt(8.W)))
+//     // address indexed write
+//     val wen   = Input(Vec(numWrite, Bool()))
+//     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
+//     val wdata = Input(Vec(numWrite, UInt(8.W)))
+//     // masked write
+//     val mwmask = Input(Vec(blockWords, Vec(numEntries, Bool())))
+//     val mwdata = Input(Vec(blockWords, UInt(8.W)))
+//   })
 
-  val data = Reg(Vec(numEntries, UInt(8.W)))
+//   val data = Reg(Vec(numEntries, UInt(8.W)))
 
-  // read ports
-  for (i <- 0 until numRead) {
-    io.rdata(i) := data(RegNext(io.raddr(i)))
-  }
+//   // read ports
+//   for (i <- 0 until numRead) {
+//     io.rdata(i) := data(RegNext(io.raddr(i)))
+//   }
 
-  // below is the write ports (with priorities)
-  for (i <- 0 until numWrite) {
-    when (io.wen(i)) {
-      data(io.waddr(i)) := io.wdata(i)
-    }
-  }
+//   // below is the write ports (with priorities)
+//   for (i <- 0 until numWrite) {
+//     when (io.wen(i)) {
+//       data(io.waddr(i)) := io.wdata(i)
+//     }
+//   }
 
-  // masked write
-  for (j <- 0 until numEntries) {
-    val wen = VecInit((0 until blockWords).map(i => io.mwmask(i)(j))).asUInt.orR
-    when (wen) {
-      data(j) := VecInit((0 until blockWords).map(i => {
-        Mux(io.mwmask(i)(j), io.mwdata(i), 0.U)
-      })).reduce(_ | _)
-    }
-  }
+//   // masked write
+//   for (j <- 0 until numEntries) {
+//     val wen = VecInit((0 until blockWords).map(i => io.mwmask(i)(j))).asUInt.orR
+//     when (wen) {
+//       data(j) := VecInit((0 until blockWords).map(i => {
+//         Mux(io.mwmask(i)(j), io.mwdata(i), 0.U)
+//       })).reduce(_ | _)
+//     }
+//   }
 
-  // DataModuleTemplate should not be used when there're any write conflicts
-  for (i <- 0 until numWrite) {
-    for (j <- i+1 until numWrite) {
-      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
-    }
-  }
-}
+//   // DataModuleTemplate should not be used when there're any write conflicts
+//   for (i <- 0 until numWrite) {
+//     for (j <- i+1 until numWrite) {
+//       assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+//     }
+//   }
+// }
 
 class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
@@ -177,7 +177,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
     val paddrWen = Input(Vec(numWrite, Bool()))
   })
 
-  val data8 = Seq.fill(8)(Module(new LQData8Module(numEntries, numRead, numWrite)))
+  val data8 = Seq.fill(8)(Module(new MaskedSyncDataModuleTemplate(UInt(8.W), numEntries, numRead, numWrite, numMWrite = blockWords)))
   val fwdMask = Reg(Vec(numEntries, UInt(8.W)))
   val wordIndex = Reg(Vec(numEntries, UInt((blockOffBits - wordOffBits).W)))
 

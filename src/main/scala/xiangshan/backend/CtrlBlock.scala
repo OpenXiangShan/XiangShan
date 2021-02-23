@@ -305,6 +305,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
+  rename.io.dispatchInfo <> dispatch.io.preDpInfo
 
   dispatch.io.redirect <> backendRedirect
   dispatch.io.flush := flushReg
