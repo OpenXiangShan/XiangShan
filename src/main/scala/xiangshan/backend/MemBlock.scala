@@ -234,6 +234,9 @@ class MemBlockImp
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+ 
+    // Lsq to load unit's rs
+    reservationStations(i).io.stIssuePtr := lsq.io.issuePtrExt
 
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
@@ -284,9 +287,6 @@ class MemBlockImp
   io.toCtrlBlock.replay <> lsq.io.rollback
   lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.uncache        <> uncache.io.lsq
-
-  // LSQ to rs
-  lsq.io.issuePtrExt
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in

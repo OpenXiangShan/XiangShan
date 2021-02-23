@@ -9,6 +9,7 @@ import xiangshan.backend.decode.{ImmUnion, Imm_U}
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.mem.{SqPtr}
 
 import scala.math.max
 
@@ -100,6 +101,9 @@ class ReservationStation
     val fromDispatch = Flipped(DecoupledIO(new MicroOp))
     val deq = DecoupledIO(new ExuInput)
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
+
+    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg) Input(new SqPtr()) else null
+
     val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
@@ -110,6 +114,7 @@ class ReservationStation
 
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
+
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
     val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
   })
@@ -144,6 +149,9 @@ class ReservationStation
   ctrl.io.slowUops.zip(io.slowPorts).map{ case (c, i) =>
     c.valid := i.valid
     c.bits  := i.bits.uop
+  }
+  if (exuCfg == Exu.ldExeUnitCfg) {
+    ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
 
   data.io.in.valid := ctrl.io.in.valid
@@ -374,7 +382,7 @@ class ReservationStationCtrl
   fixedDelay: Int,
   fastWakeup: Boolean,
   feedback: Boolean,
-) extends XSModule {
+) extends XSModule with HasCircularQueuePtrHelper {
 
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
@@ -405,6 +413,8 @@ class ReservationStationCtrl
 
     val listen = Output(Vec(srcNum, Vec(iqSize, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
     val enqSrcReady = Output(Vec(srcNum, Bool()))
+
+    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg) Input(new SqPtr()) else null
   })
 
   val selValid = io.sel.valid
@@ -444,7 +454,6 @@ class ReservationStationCtrl
   }
 
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, Bool())))
-  io.readyVec := srcQueue.map(Cat(_).andR)
   when (enqEn) {
     srcQueue(enqPtr).zip(enqSrcReady).map{ case (s, e) => s := e }
   }
@@ -452,6 +461,23 @@ class ReservationStationCtrl
     for (j <- 0 until srcNum) {
       when (srcUpdate(i)(j)) { srcQueue(i)(j) := true.B }
     }
+  }
+  // load wait store
+  io.readyVec := srcQueue.map(Cat(_).andR)
+  if (exuCfg == Exu.ldExeUnitCfg) {
+    val ldWait = Reg(Vec(iqSize, Bool()))
+    val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
+    ldWait.zip(sqIdx).map{ case (lw, sq) =>
+      when (!isAfter(sq, io.stIssuePtr)) {
+        lw := true.B
+      }
+    } 
+    when (enqEn) {
+      ldWait(enqPtr) := !enqUop.cf.loadWaitBit
+      sqIdx(enqPtr)  := enqUop.sqIdx
+    }
+    ldWait.suggestName(s"${this.name}_ldWait")
+    io.readyVec := srcQueue.map(Cat(_).andR).zip(ldWait).map{ case (s, l) => s&l }
   }
 
   val redirectHit = io.redirectVec(selPtr)
