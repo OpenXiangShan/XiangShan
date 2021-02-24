@@ -253,10 +253,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
+  missQueue.io.probe_req := bus.b.bits.address
 
   //----------------------------------------
   // probe
-  probeQueue.io.mem_probe <> bus.b
+  // probeQueue.io.mem_probe <> bus.b
+  block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
 
   //----------------------------------------
   // mainPipe
@@ -272,7 +274,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
   mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
 
-  mainPipe.io.req <> mainPipeReqArb.io.out
+  // add a stage to break the Arbiter bits.addr to ready path
+  val mainPipeReq_valid = RegInit(false.B)
+  val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
+  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
+
+  mainPipeReqArb.io.out.ready := mainPipe.io.req.ready
+  mainPipe.io.req.valid := mainPipeReq_valid
+  mainPipe.io.req.bits  := mainPipeReq_req
+
+  when (mainPipeReqArb.io.out.fire()) { mainPipeReq_valid := true.B }
+  when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
 
   missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
   storeReplayUnit.io.pipe_resp   <> mainPipe.io.store_resp
