@@ -70,6 +70,8 @@ class MemBlockImp
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
+    val ldWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, exuParameters.LduCnt))
+
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -142,11 +144,11 @@ class MemBlockImp
     // load has uncertain latency, so only use external wake up data
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-      .map(_._2.bits.data)
+      .map(_._2.bits.data) ++ loadUnits.map(_.io.ldout.bits.data)
     val wakeupCnt = fastDatas.length
 
     val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
-    val slowPorts = inBlockListenPorts ++
+    val slowPorts = (if (cfg == Exu.ldExeUnitCfg) fpExeWbReqs else inBlockListenPorts) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map(_._2)
@@ -190,7 +192,7 @@ class MemBlockImp
   for(rs <- reservationStations){
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
-      .map(_._2)
+      .map(_._2) ++ loadUnits.map(_.io.fastUop)
   }
 
   // TODO: make this better
@@ -199,6 +201,10 @@ class MemBlockImp
 
   io.wakeUpFpOut.slow  <> fpExeWbReqs
   io.wakeUpIntOut.slow <> intExeWbReqs
+
+  io.ldWakeUpInt.fastUops <> loadUnits.map(_.io.fastUop)
+  io.ldWakeUpInt.fast <> loadUnits.map(_.io.ldout)
+  io.ldWakeUpInt.slow <> loadUnits.map(_.io.ldout)
 
   // load always ready
   fpExeWbReqs.foreach(_.ready := true.B)

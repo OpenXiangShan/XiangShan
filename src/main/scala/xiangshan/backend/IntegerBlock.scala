@@ -56,6 +56,7 @@ class IntegerBlock
 (
   fastWakeUpIn: Seq[ExuConfig],
   slowWakeUpIn: Seq[ExuConfig],
+  memWakeUpIn: Seq[ExuConfig],
   fastFpOut: Seq[ExuConfig],
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
@@ -70,6 +71,7 @@ class IntegerBlock
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
+    val memWakeUp = new WakeUpBundle(exuParameters.LduCnt, exuParameters.LduCnt)
 
     val csrio = new Bundle {
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
@@ -151,11 +153,12 @@ class IntegerBlock
     val readIntRf = cfg.readIntRf
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(_.io.toInt.bits.data)
-    val fastDatas = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
+    val fastDatas = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data) ++ 
+      (if (cfg == Exu.aluExeUnitCfg) io.memWakeUp.fast.map(_.bits.data) else Seq())
     val wakeupCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(_.io.toInt)
-    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow
+    val slowPorts = inBlockListenPorts ++ io.wakeUpIn.slow ++ io.memWakeUp.slow
     val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
@@ -203,8 +206,12 @@ class IntegerBlock
       raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.rfWen
       raw
     })
-    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops
+    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops ++ 
+      (if (rs.exuCfg == Exu.aluExeUnitCfg) io.memWakeUp.fastUops else Seq())
   }
+
+  io.memWakeUp.fast.map(_.ready := true.B )
+  io.memWakeUp.slow.map(_.ready := true.B )
 
   io.wakeUpFpOut.fastUops <> reservationStations.filter(
     rs => fpFastFilter(rs.exuCfg)
@@ -250,11 +257,11 @@ class IntegerBlock
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn ++ memWakeUpIn),
     NRIntWritePorts,
     isFp = false
   ))
-  intWbArbiter.io.in <> exeUnits.map(_.io.toInt) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
+  intWbArbiter.io.in <> exeUnits.map(_.io.toInt) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow ++ io.memWakeUp.slow // memWakeUp is load
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> intWbArbiter.io.out

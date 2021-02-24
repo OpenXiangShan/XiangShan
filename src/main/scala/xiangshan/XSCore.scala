@@ -394,7 +394,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
     fastWakeUpIn = fpBlockFastWakeUpInt,
-    slowWakeUpIn = fpBlockSlowWakeUpInt ++ loadExuConfigs,
+    slowWakeUpIn = fpBlockSlowWakeUpInt,// ++ loadExuConfigs,
+    memWakeUpIn  = loadExuConfigs,
     fastFpOut = intBlockFastWakeUpFp,
     slowFpOut = intBlockSlowWakeUpFp,
     fastIntOut = intBlockFastWakeUpInt,
@@ -433,8 +434,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   integerBlock.io.wakeUpIn.fastUops <> floatBlock.io.wakeUpIntOut.fastUops
   integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
-  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
+  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow// ++ memBlock.io.wakeUpIntOut.slow
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
+  integerBlock.io.memWakeUp <> memBlock.io.ldWakeUpInt
 
   floatBlock.io.wakeUpIn.fastUops <> integerBlock.io.wakeUpFpOut.fastUops
   floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
