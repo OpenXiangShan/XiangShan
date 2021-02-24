@@ -78,7 +78,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   // new MSHR:
   // send finish to end the transaction before sending pipe_req
-  val s_invalid :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_main_pipe_req :: s_main_pipe_resp :: Nil = Enum(6)
+  val s_invalid :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_main_pipe_req :: s_main_pipe_resp :: s_release_entry :: Nil = Enum(7)
 
   val state = RegInit(s_invalid)
 
@@ -325,7 +325,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   when (state === s_main_pipe_resp) {
     when (io.pipe_resp.fire()) {
-      state := s_invalid
+      state := s_release_entry
     }
   }
 
@@ -337,6 +337,10 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       grantack.valid := false.B
       state := s_main_pipe_req
     }
+  }
+
+  when (state === s_release_entry) {
+    state := s_invalid
   }
 }
 
