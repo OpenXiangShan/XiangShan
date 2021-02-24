@@ -166,7 +166,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     issuePtrExt := Mux(
       isAfter(cmtPtrExt(0), deqPtrExt(0)),
       cmtPtrExt(0),
-      deqPtrExt(0)
+      deqPtrExtNext(0) // for mmio insts, deqPtr may be ahead of cmtPtr
     )
   }
   // send issuePtrExt to rs
