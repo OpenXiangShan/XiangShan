@@ -167,7 +167,9 @@ class BTB extends BasePredictor with BTBParams{
     when (pd.isBr)   { t := BTBtype.B}
     t
   }
-  val u = io.update.bits
+  
+  val do_update = RegNext(io.update)
+  val u = do_update.bits
 
   val cfi_pc = packetAligned(u.ftqPC) + (u.cfiIndex.bits << instOffsetBits)
   val new_target = u.target
@@ -188,7 +190,7 @@ class BTB extends BasePredictor with BTBParams{
   val dataWrite = BtbDataEntry(new_lower, new_extended)
   
 
-  val updateValid = io.update.valid && updateTaken
+  val updateValid = do_update.valid && updateTaken
   // Update btb
   require(isPow2(BtbBanks))
   // this is one hot, since each fetch bundle has at most 1 taken instruction
