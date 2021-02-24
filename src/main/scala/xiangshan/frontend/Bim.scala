@@ -53,7 +53,8 @@ class BIM extends BasePredictor with BimParams {
   io.resp.ctrs  := if2_bimRead
   io.meta.ctrs  := if2_bimRead
 
-  val u = io.update.bits
+  val updateValid = RegNext(io.update.valid)
+  val u = RegNext(io.update.bits)
 
   val updateRow = bimAddr.getBankIdx(u.ftqPC)
 
@@ -76,7 +77,7 @@ class BIM extends BasePredictor with BimParams {
   val newCtrs = VecInit((0 until BimBanks).map(b => satUpdate(oldCtrs(b), 2, newTakens(b))))
   // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = VecInit((0 until PredictWidth).map(i => io.update.valid && u.br_mask(i) && u.valids(i)))
+  val needToUpdate = VecInit((0 until PredictWidth).map(i => updateValid && u.br_mask(i) && u.valids(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
@@ -104,7 +105,7 @@ class BIM extends BasePredictor with BimParams {
 
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
-    XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", io.update.valid, u.ftqPC, u.valids.asUInt, u.target)
+    XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", updateValid, u.ftqPC, u.valids.asUInt, u.target)
     
     XSDebug("[update] brMask=%b, taken=%b isMisPred=%b\n", u.br_mask.asUInt, newTakens.asUInt, u.mispred.asUInt)
     for (i <- 0 until BimBanks) {
