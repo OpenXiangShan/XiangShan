@@ -294,10 +294,11 @@ class L1plusCacheReq extends L1plusCacheBundle
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
+  val eccWrong = Bool()
   val id   = UInt(idWidth.W)
 
   override def toPrintable: Printable = {
-    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+    p"id=${Binary(id)} data=${Hexadecimal(data)} eccWrong=${Binary(eccWrong)}"
   }
 }
 
@@ -532,15 +533,24 @@ class L1plusCachePipe extends L1plusCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
+
+  //TODO: only detect error but not correct it
   val s2_data_decoded = Cat((0 until blockRows).reverse map { r =>
       val data = s2_data(r)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
-      decoded.corrected
+      decoded.uncorrected
+    })
+
+  val s2_data_wrong =  Cat((0 until blockRows).reverse map { r =>
+      val data = s2_data(r)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && s2_hit && decoded.error))
+      decoded.error
     })
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
+  io.resp.bits.eccWrong := s2_data_wrong.asUInt.orR
   io.resp.bits.id   := s2_req.id
 
   // replacement policy
