@@ -9,7 +9,7 @@ trait WaitTableParameters {
   val isSync = false // fixed
   val WaitTableSize = 1024
   val WaitTableAddrWidth = log2Up(WaitTableSize)
-  val ResetTime2Pow = 14 //16384
+  val ResetTime2Pow = 17 //131072
 }
 
 // 21264-like wait table
@@ -30,15 +30,13 @@ class WaitTable extends XSModule with WaitTableParameters {
     io.rdata(i) := data(raddr(i))
   }
 
-  // write ports (without priority)
-  for (j <- 0 until WaitTableSize) {
-    val wen = VecInit((0 until StorePipelineWidth).map(i => io.update(i).valid)).asUInt.orR
-    when (wen) {
-      data(j) := VecInit((0 until StorePipelineWidth).map(i => {
-        Mux(io.update(i).waddr === j.U, io.update(i).wdata, false.B).asUInt
-      })).reduce(_ | _)
+  // write ports (with priority)
+  (0 until StorePipelineWidth).map(i => {
+    when(io.update(i).valid){
+      data(io.update(i).waddr) := io.update(i).wdata
     }
-  }
+  })
+
 
   // reset period: ResetTime2Pow
   when(resetCounter === 0.U) {
@@ -50,7 +48,7 @@ class WaitTable extends XSModule with WaitTableParameters {
   // debug
   for (i <- 0 until StorePipelineWidth) {
     when (io.update(i).valid) {
-      XSDebug("waittable update: pc %x data: %x\n", io.update(i).waddr, io.update(i).wdata)
+      printf("%d: waittable update: pc %x data: %x\n", GTimer(), io.update(i).waddr, io.update(i).wdata)
     }
   }
 }
