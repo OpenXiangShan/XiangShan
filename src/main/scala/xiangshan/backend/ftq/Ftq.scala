@@ -234,14 +234,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
   commitEntry.br_mask := RegNext(ftq_2r_sram.io.rdata(0).br_mask)
   // from 1r sram
-<<<<<<< HEAD
-  commitEntry.metas := ftq_1r_sram.io.rdata(0).metas
-  commitEntry.rvc_mask := ftq_1r_sram.io.rdata(0).rvc_mask
-  commitEntry.pd := ftq_1r_sram.io.rdata(0).pd
-=======
+  commitEntry.pd := RegNext(ftq_1r_sram.io.rdata(0).pd)
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
   commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
->>>>>>> master
   // from regs
   commitEntry.valids := RegNext(RegNext(commit_valids))
   commitEntry.mispred := RegNext(RegNext(mispredict_vec(headPtr.value)))
