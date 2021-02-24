@@ -104,7 +104,7 @@ object XSWarn extends LogHelper(XSLogLevel.WARN)
 object XSError extends LogHelper(XSLogLevel.ERROR)
 
 object XSPerf {
-  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false, intervalEnable: Boolean = false, intervalBits: Int = 15)(implicit name: String) = {
+  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false, realtime: Boolean = false, intervalBits: Int = 15)(implicit name: String) = {
     val counter = RegInit(0.U(64.W))
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))
@@ -115,7 +115,7 @@ object XSPerf {
     if (env.EnablePerfDebug) {
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
       val printCond = if (intervalBits == 0) true.B else (logTimestamp(intervalBits - 1, 0) === 0.U)
-      val printEnable = if (intervalEnable) printCond else false.B
+      val printEnable = if (realtime) printCond else false.B
       val xstrap = WireInit(false.B)
       if (!env.FPGAPlatform && !env.DualCore) {
         ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
