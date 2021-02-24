@@ -44,7 +44,7 @@ case class XSCoreParameters
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
-  FectchWidth: Int = 8,
+  FetchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -136,7 +136,7 @@ trait HasXSParameter {
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = core.HasFPU
-  val FetchWidth = core.FectchWidth
+  val FetchWidth = core.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = core.EnableBPU
   val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3

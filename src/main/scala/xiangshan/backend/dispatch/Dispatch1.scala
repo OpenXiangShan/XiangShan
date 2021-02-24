@@ -206,6 +206,6 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
-  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
-  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
+  XSPerf("dp1_in", PopCount(io.fromRename.map(_.valid)))
+  XSPerf("dp1_waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
 }
