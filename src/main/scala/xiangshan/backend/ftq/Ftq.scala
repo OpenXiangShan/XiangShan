@@ -221,28 +221,28 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
   })
   // from 4r sram
-  commitEntry.ftqPC := ftq_4r_sram.io.rdata(0).ftqPC
-  commitEntry.lastPacketPC := ftq_4r_sram.io.rdata(0).lastPacketPC
+  commitEntry.ftqPC := RegNext(ftq_4r_sram.io.rdata(0).ftqPC)
+  commitEntry.lastPacketPC := RegNext(ftq_4r_sram.io.rdata(0).lastPacketPC)
   // from 2r sram
-  commitEntry.rasSp := ftq_2r_sram.io.rdata(0).rasSp
-  commitEntry.rasTop := ftq_2r_sram.io.rdata(0).rasEntry
-  commitEntry.hist := ftq_2r_sram.io.rdata(0).hist
-  commitEntry.predHist := ftq_2r_sram.io.rdata(0).predHist
-  commitEntry.specCnt := ftq_2r_sram.io.rdata(0).specCnt
-  commitEntry.br_mask := ftq_2r_sram.io.rdata(0).br_mask
+  commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
+  commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
+  commitEntry.hist := RegNext(ftq_2r_sram.io.rdata(0).hist)
+  commitEntry.predHist := RegNext(ftq_2r_sram.io.rdata(0).predHist)
+  commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
+  commitEntry.br_mask := RegNext(ftq_2r_sram.io.rdata(0).br_mask)
   // from 1r sram
-  commitEntry.metas := ftq_1r_sram.io.rdata(0).metas
-  commitEntry.rvc_mask := ftq_1r_sram.io.rdata(0).rvc_mask
+  commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
+  commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
   // from regs
-  commitEntry.valids := RegNext(commit_valids)
-  commitEntry.mispred := RegNext(mispredict_vec(headPtr.value))
-  commitEntry.cfiIndex := RegNext(cfiIndex_vec(headPtr.value))
-  commitEntry.cfiIsCall := RegNext(cfiIsCall(headPtr.value))
-  commitEntry.cfiIsRet := RegNext(cfiIsRet(headPtr.value))
-  commitEntry.cfiIsRVC := RegNext(cfiIsRVC(headPtr.value))
-  commitEntry.target := RegNext(update_target(headPtr.value))
+  commitEntry.valids := RegNext(RegNext(commit_valids))
+  commitEntry.mispred := RegNext(RegNext(mispredict_vec(headPtr.value)))
+  commitEntry.cfiIndex := RegNext(RegNext(cfiIndex_vec(headPtr.value)))
+  commitEntry.cfiIsCall := RegNext(RegNext(cfiIsCall(headPtr.value)))
+  commitEntry.cfiIsRet := RegNext(RegNext(cfiIsRet(headPtr.value)))
+  commitEntry.cfiIsRVC := RegNext(RegNext(cfiIsRVC(headPtr.value)))
+  commitEntry.target := RegNext(RegNext(update_target(headPtr.value)))
 
-  io.commit_ftqEntry.valid := RegNext(Cat(commit_valids).orR()) //TODO: do we need this?
+  io.commit_ftqEntry.valid := RegNext(RegNext(Cat(commit_valids).orR())) //TODO: do we need this?
   io.commit_ftqEntry.bits := commitEntry
 
   // read logic
@@ -286,10 +286,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  XSPerf("ftqEntries", validEntries)
-  XSPerf("ftqStallAcc", io.enq.valid && !io.enq.ready, acc = true)
-  XSPerf("mispredictRedirectAcc", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
-  XSPerf("replayRedirectAcc", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
+  XSPerf("ftq_entries", validEntries)
+  XSPerf("ftq_stall", io.enq.valid && !io.enq.ready, acc = true)
+  XSPerf("ftq_mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
+  XSPerf("ftq_replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")

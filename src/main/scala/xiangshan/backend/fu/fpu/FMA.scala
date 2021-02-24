@@ -1,19 +1,22 @@
 package xiangshan.backend.fu.fpu
 
 import chisel3._
+import chisel3.util.RegEnable
 import freechips.rocketchip.tile.FType
 import hardfloat.{MulAddRecFN_pipeline_stage1, MulAddRecFN_pipeline_stage2, MulAddRecFN_pipeline_stage3, MulAddRecFN_pipeline_stage4, RoundAnyRawFNToRecFN}
 import xiangshan.backend.fu.FunctionUnit
 
-class FMA extends FPUPipelineModule {
-  override def latency: Int = FunctionUnit.fmacCfg.latency.latencyVal.get
+class FMADataModule(latency: Int) extends FPUDataModule {
 
-  val fpCtrl = io.in.bits.uop.ctrl.fpu
+  val regEnables = IO(Input(Vec(latency, Bool())))
+  val typeTagOut = IO(Input(UInt(2.W)))
+
+  val fpCtrl = io.in.fpCtrl
   val typeTagIn = fpCtrl.typeTagIn
 
-  val src1 = unbox(io.in.bits.src(0), typeTagIn, None)
-  val src2 = unbox(io.in.bits.src(1), typeTagIn, None)
-  val src3 = unbox(io.in.bits.src(2), typeTagIn, None)
+  val src1 = unbox(io.in.src(0), typeTagIn, None)
+  val src2 = unbox(io.in.src(1), typeTagIn, None)
+  val src3 = unbox(io.in.src(2), typeTagIn, None)
   val (in1, in2, in3) = (
     WireInit(src1), WireInit(src2), WireInit(Mux(fpCtrl.isAddSub, src2, src3))
   )
@@ -34,7 +37,7 @@ class FMA extends FPUPipelineModule {
   ))
   mul.io.a := stage1.io.mulAddA
   mul.io.b := stage1.io.mulAddB
-  mul.io.reg_en := regEnable(1)
+  mul.io.reg_en := regEnables(0)
   stage2.io.mulSum := mul.io.sum
   stage2.io.mulCarry := mul.io.carry
 
@@ -54,10 +57,10 @@ class FMA extends FPUPipelineModule {
   stage1.io.in.bits.roundingMode := rm
   stage1.io.in.bits.detectTininess := hardfloat.consts.tininess_afterRounding
 
-  stage2.io.fromStage1.bits <> S1Reg(stage1.io.toStage2.bits)
-  stage3.io.fromStage2.bits <> S2Reg(stage2.io.toStage3.bits)
-  stage4.io.fromStage3.bits <> S3Reg(stage3.io.toStage4.bits)
-  val stage4toStage5 = S4Reg(stage4.io.toStage5.bits)
+  stage2.io.fromStage1.bits <> RegEnable(stage1.io.toStage2.bits, regEnables(0))
+  stage3.io.fromStage2.bits <> RegEnable(stage2.io.toStage3.bits, regEnables(1))
+  stage4.io.fromStage3.bits <> RegEnable(stage3.io.toStage4.bits, regEnables(2))
+  val stage4toStage5 = RegEnable(stage4.io.toStage5.bits, regEnables(3))
 
   val rounders = Seq(FType.S, FType.D).map(t => {
     val rounder = Module(new RoundAnyRawFNToRecFN(FType.D.exp, FType.D.sig+2, t.exp, t.sig, 0))
@@ -69,8 +72,8 @@ class FMA extends FPUPipelineModule {
     rounder
   })
 
-  val singleOut = io.out.bits.uop.ctrl.fpu.typeTagOut === S
-  io.out.bits.data := Mux(singleOut,
+  val singleOut = typeTagOut === S
+  io.out.data := Mux(singleOut,
     sanitizeNaN(rounders(0).io.out, FType.S),
     sanitizeNaN(rounders(1).io.out, FType.D)
   )
@@ -78,4 +81,13 @@ class FMA extends FPUPipelineModule {
     rounders(0).io.exceptionFlags,
     rounders(1).io.exceptionFlags
   )
+}
+
+class FMA extends FPUPipelineModule {
+  override def latency: Int = FunctionUnit.fmacCfg.latency.latencyVal.get
+
+  override val dataModule = Module(new FMADataModule(latency))
+  connectDataModule
+  dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
+  dataModule.typeTagOut := io.out.bits.uop.ctrl.fpu.typeTagOut
 }
