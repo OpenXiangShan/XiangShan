@@ -617,7 +617,7 @@ class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int) extends XSMo
   for (i <- 0 until numEntries) {
     when (Cat(wen(i)).orR) {
       value(i) := ParallelMux(wen(i) zip data)
-      assert(RegNext(PopCount(wen(i))===0.U || PopCount(wen(i))===1.U), s"${i}")
+      // assert(RegNext(PopCount(wen(i))===0.U || PopCount(wen(i))===1.U), s"${i}")
     }
   }
 
