@@ -107,7 +107,7 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
-  val prefetch = DecoupledIO(new MissReq)
+  // val prefetch = DecoupledIO(new MissReq)
 }
 
 
@@ -325,8 +325,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     assert(bus.c.bits.address >= 0x80000000L.U)
   }
 
-  io.prefetch.valid := missQueue.io.req.fire()
-  io.prefetch.bits := missQueue.io.req.bits
+  // io.prefetch.valid := missQueue.io.req.fire()
+  // io.prefetch.bits := missQueue.io.req.bits
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
     sink.valid   := source.valid && !block_signal
