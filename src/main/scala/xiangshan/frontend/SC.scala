@@ -87,18 +87,71 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
     io.resp(b).ctr := table_r(b)
   })
 
+  val wrBypassEntries = 4
+  
+  val wrbypass_idxs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
+  val wrbypass_ctrs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, SInt(ctrBits.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool()))))
+  val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
+
+  when (reset.asBool) {
+    wrbypass_ctr_valids := 0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool())))
+  }
+
+  val wrbypass_hits = VecInit((0 until wrBypassEntries) map (i => wrbypass_idxs(i) === update_idx))
+  val wrbypass_hit = wrbypass_hits.asUInt.orR
+  val wrbypass_hit_idx = ParallelPriorityEncoder(wrbypass_hits)
+
+  for (w <- 0 until TageBanks) {
+    val ctrPos = (w << 1).U | io.update.tagePreds(w).asUInt
+    val altPos = (w << 1).U | ~io.update.tagePreds(w).asUInt
+    val bypass_ctr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
+    val hit_and_valid = wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos)
+    val oldCtr = Mux(hit_and_valid, wrbypass_ctrs(wrbypass_hit_idx)(ctrPos), io.update.oldCtrs(w))
+    update_wdatas(w) := ctrUpdate(oldCtr, io.update.takens(w))
+
+    when (io.update.mask.reduce(_||_)) {
+      when (wrbypass_hit) {
+        when (io.update.mask(w)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(ctrPos) := update_wdatas(w)
+          wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos) := true.B
+        }
+      }.otherwise {
+        // reset valid bit first
+        wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := false.B
+        wrbypass_ctr_valids(wrbypass_enq_idx)(altPos) := false.B
+        when (io.update.mask(w)) {
+          wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := true.B
+          wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdatas(w)
+          wrbypass_idxs(wrbypass_enq_idx) := update_idx
+        }
+      }
+    }
+  }
+
+  when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+  }
+
+
   if (BPUDebug && debug) {
     val u = io.update
-    XSDebug(io.req.valid, p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-                          p"if2_idx=${if2_idx}, hist=${Hexadecimal(io.req.bits.hist)}, " +
-                          p"if2_mask=${Binary(if2_mask)}\n")
+    XSDebug(io.req.valid,
+      p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+      p"if2_idx=${if2_idx}, hist=${Hexadecimal(io.req.bits.hist)}, " +
+      p"if2_mask=${Binary(if2_mask)}\n")
     for (i <- 0 until TageBanks) {
       XSDebug(RegNext(io.req.valid), 
-              p"scTableResp[${i.U}]: if3_idx=${if3_idx}," + 
-              p"ctr:${io.resp(i).ctr}, if3_mask=${Binary(if3_mask)}\n")
+        p"scTableResp[${i.U}]: if3_idx=${if3_idx}," + 
+        p"ctr:${io.resp(i).ctr}, if3_mask=${Binary(if3_mask)}\n")
       XSDebug(io.update.mask(i),
-              p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}," +
-              p"bank:${i}, tageTaken:${u.tagePreds(i)}, taken:${u.takens(i)}, oldCtr:${u.oldCtrs(i)}\n")
+        p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+        p"bank:${i}, tageTaken:${u.tagePreds(i)}, taken:${u.takens(i)}, oldCtr:${u.oldCtrs(i)}\n")
+      val ctrPos = (i << 1).U | io.update.tagePreds(i).asUInt
+      val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
+      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos) && io.update.mask(i),
+        p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, ctr:$hitCtr" +
+        p"taken:${io.update.takens(i)} newCtr:${update_wdatas(i)}\n")
     }
   }
 
