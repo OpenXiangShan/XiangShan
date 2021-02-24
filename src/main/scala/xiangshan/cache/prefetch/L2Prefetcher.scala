@@ -56,7 +56,7 @@ class L2Prefetcher()(implicit p: Parameters) extends LazyModule with HasPrefetch
 
 class L2PrefetcherIO extends XSBundle with HasPrefetchParameters {
   // val in = Flipped(DecoupledIO(new MissReq))
-  val in = Flipped(new PrefetcherIO)
+  val in = Flipped(new PrefetcherIO(PAddrBits))
   val enable = Input(Bool())
 }
 

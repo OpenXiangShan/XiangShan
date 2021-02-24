@@ -73,8 +73,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val exceptionAddr = new ExceptionAddrIO // to csr
       val roq = Flipped(new RoqLsqIO) // roq to lsq
     }
-
-    // val toDCachePrefetch = DecoupledIO(new MissReq)
   })
   val difftestIO = IO(new Bundle() {
     val fromSbuffer = new Bundle() {
@@ -348,6 +346,5 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
-
-  // io.toDCachePrefetch <> dcache.io.prefetch
 }
+

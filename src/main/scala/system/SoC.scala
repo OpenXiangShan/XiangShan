@@ -102,9 +102,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-    // l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := l2prefetcher(i).clientNode
-    l2prefetcher(i).module.io.in <> l2cache(i).module.io
 
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
@@ -185,7 +183,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       l2prefetcher(i).module.io.enable := xs_core(i).module.io.l2_pf_enable
+      l2prefetcher(i).module.io.in <> l2cache(i).module.io
     }
+
     difftestIO0 <> xs_core(0).module.difftestIO
     difftestIO1 <> DontCare
     trapIO0 <> xs_core(0).module.trapIO

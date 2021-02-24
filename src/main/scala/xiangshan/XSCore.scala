@@ -11,7 +11,7 @@ import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{DCache, InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, Uncache, MemoryOpConstants, MissReq}
-// import xiangshan.cache.prefetch._
+import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
@@ -19,7 +19,7 @@ import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
 import freechips.rocketchip.tile.HasFPUParameters
-// import sifive.blocks.inclusivecache.PrefetcherIO
+import sifive.blocks.inclusivecache.PrefetcherIO
 import utils._
 
 object hartIdCore extends (() => Int) {
@@ -338,7 +338,6 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
-  // val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
@@ -390,7 +389,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  // val l2Prefetcher = outer.l2Prefetcher.module
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
@@ -474,7 +472,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.tlb(1) <> itlbRepester.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
-  
+
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
