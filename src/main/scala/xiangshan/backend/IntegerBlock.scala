@@ -92,6 +92,7 @@ class IntegerBlock
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     val csrio = new Bundle {
+      val hartId = Input(UInt(64.W))
       val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
