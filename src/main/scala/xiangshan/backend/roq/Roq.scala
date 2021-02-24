@@ -473,9 +473,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
     io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).bits.redirectValid
   ))).orR()
-  val misPredBlockCounter = Reg(UInt(2.W))
+  val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
-    "b11".U,
+    "b111".U,
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
