@@ -8,14 +8,6 @@ import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.util._
 
-object hartId extends (() => Int) {
-  var x = 0
-  def apply(): Int = {
-    x = x + 1
-    x-1
-  }
-}
-
 trait HasExceptionNO {
   def instrAddrMisaligned = 0
   def instrAccessFault    = 1
@@ -125,6 +117,7 @@ class PerfCounterIO extends XSBundle {
 class CSR extends FunctionUnit with HasCSRConst
 {
   val csrio = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     // output (for func === CSROpType.jmp)
     val perf = new PerfCounterIO
     val isPerfCnt = Output(Bool())
@@ -255,8 +248,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
-  val mhartNo = hartId()
-  val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
+  val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), 0.U)
 
   // mstatus Value Table

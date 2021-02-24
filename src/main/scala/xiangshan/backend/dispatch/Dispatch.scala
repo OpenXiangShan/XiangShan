@@ -28,6 +28,7 @@ class Dispatch extends XSModule {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val renameBypass = Input(new RenameBypassInfo)
+    val preDpInfo = Input(new PreDispatchInfo)
     // to busytable: set pdest to busy (not ready) when they are dispatched
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // enq Roq
@@ -66,6 +67,7 @@ class Dispatch extends XSModule {
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   // dispatch1.io.redirect <> io.redirect
   dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
+  dispatch1.io.preDpInfo := RegEnable(io.preDpInfo, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
   dispatch1.io.toIntDq <> intDq.io.enq

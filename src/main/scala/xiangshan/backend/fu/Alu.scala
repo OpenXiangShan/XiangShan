@@ -35,21 +35,12 @@ class RightShiftModule extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
     val srlSrc, sraSrc = Input(UInt(XLEN.W))
-    val srl, sra = Output(UInt(XLEN.W))
+    val srl_l, srl_w, sra_l, sra_w = Output(UInt(XLEN.W))
   })
-  io.srl := io.srlSrc >> io.shamt
-  io.sra := (io.sraSrc.asSInt() >> io.shamt).asUInt()
-}
-
-class ShiftModule extends XSModule {
-  val io = IO(new Bundle() {
-    val shamt = Input(UInt(6.W))
-    val shsrc1 = Input(UInt(XLEN.W))
-    val sll, srl, sra = Output(UInt(XLEN.W))
-  })
-  io.sll := (io.shsrc1 << io.shamt)(XLEN-1, 0)
-  io.srl := io.shsrc1 >> io.shamt
-  io.sra := (io.shsrc1.asSInt >> io.shamt).asUInt
+  io.srl_l := io.srlSrc >> io.shamt
+  io.srl_w := io.srlSrc(31, 0) >> io.shamt
+  io.sra_l := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt() >> io.shamt).asUInt()
 }
 
 class MiscResultSelect extends XSModule {
@@ -87,17 +78,15 @@ class AluResSel extends XSModule {
   io.aluRes := Cat(h32, res(31, 0))
 }
 
-class Alu extends FunctionUnit with HasRedirectOut {
-
-  val (src1, src2, func, pc, uop) = (
-    io.in.bits.src(0),
-    io.in.bits.src(1),
-    io.in.bits.uop.ctrl.fuOpType,
-    SignExt(io.in.bits.uop.cf.pc, AddrBits),
-    io.in.bits.uop
-  )
-
-  val valid = io.in.valid
+class AluDataModule extends XSModule {
+  val io = IO(new Bundle() {
+    val src1, src2 = Input(UInt(XLEN.W))
+    val func = Input(FuOpType())
+    val pred_taken, isBranch = Input(Bool())
+    val result = Output(UInt(XLEN.W))
+    val taken, mispredict = Output(Bool())
+  })
+  val (src1, src2, func) = (io.src1, io.src2, io.func)
 
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw)
   val addModule = Module(new AddModule)
@@ -121,18 +110,12 @@ class Alu extends FunctionUnit with HasRedirectOut {
 
   val rightShiftModule = Module(new RightShiftModule)
   rightShiftModule.io.shamt := shamt
-  rightShiftModule.io.srlSrc := Cat(
-    Mux(isW, 0.U(32.W), src1(63, 32)),
-    src1(31, 0)
-  )
-  rightShiftModule.io.sraSrc := Cat(
-    Mux(isW, Fill(32, src1(31)), src1(63, 32)),
-    src1(31, 0)
-  )
+  rightShiftModule.io.srlSrc := src1
+  rightShiftModule.io.sraSrc := src1
 
   val sll = leftShiftModule.io.sll
-  val srl = rightShiftModule.io.srl
-  val sra = rightShiftModule.io.sra
+  val srl = Mux(isW, rightShiftModule.io.srl_w, rightShiftModule.io.srl_l)
+  val sra = Mux(isW, rightShiftModule.io.sra_w, rightShiftModule.io.sra_l)
 
   val miscResSel = Module(new MiscResultSelect)
   miscResSel.io.func := func(3, 0)
@@ -160,9 +143,32 @@ class Alu extends FunctionUnit with HasRedirectOut {
     ALUOpType.getBranchType(ALUOpType.blt)  -> slt,
     ALUOpType.getBranchType(ALUOpType.bltu) -> sltu
   )
-
-  val isBranch = ALUOpType.isBranch(func)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
+
+  io.result := aluRes
+  io.taken := taken
+  io.mispredict := (io.pred_taken ^ taken) && io.isBranch
+}
+
+class Alu extends FunctionUnit with HasRedirectOut {
+
+  val (src1, src2, func, pc, uop) = (
+    io.in.bits.src(0),
+    io.in.bits.src(1),
+    io.in.bits.uop.ctrl.fuOpType,
+    SignExt(io.in.bits.uop.cf.pc, AddrBits),
+    io.in.bits.uop
+  )
+
+  val valid = io.in.valid
+  val isBranch = ALUOpType.isBranch(func)
+  val dataModule = Module(new AluDataModule)
+
+  dataModule.io.src1 := src1
+  dataModule.io.src2 := src2
+  dataModule.io.func := func
+  dataModule.io.pred_taken := uop.cf.pred_taken
+  dataModule.io.isBranch := isBranch
 
   redirectOutValid := io.out.valid && isBranch
   redirectOut := DontCare
@@ -170,12 +176,12 @@ class Alu extends FunctionUnit with HasRedirectOut {
   redirectOut.roqIdx := uop.roqIdx
   redirectOut.ftqIdx := uop.cf.ftqPtr
   redirectOut.ftqOffset := uop.cf.ftqOffset
-  redirectOut.cfiUpdate.isMisPred := (uop.cf.pred_taken ^ taken) && isBranch
-  redirectOut.cfiUpdate.taken := taken
+  redirectOut.cfiUpdate.isMisPred := dataModule.io.mispredict
+  redirectOut.cfiUpdate.taken := dataModule.io.taken
   redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
 
   io.in.ready := io.out.ready
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := aluRes
+  io.out.bits.data := dataModule.io.result
 }
