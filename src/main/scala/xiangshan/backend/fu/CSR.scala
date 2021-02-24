@@ -122,27 +122,37 @@ class PerfCounterIO extends XSBundle {
   val value = Input(UInt(XLEN.W))
 }
 
+class CustomCSRCtrlIO extends XSBundle {
+  val l1plus_pf_enable = Output(Bool())
+  val l2_pf_enable = Output(Bool())
+  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+}
+
+class CSRFileIO extends XSBundle {
+  // output (for func === CSROpType.jmp)
+  val perf = new PerfCounterIO
+  val isPerfCnt = Output(Bool())
+  // to FPU
+  val fpu = Flipped(new FpuCsrIO)
+  // from rob
+  val exception = Flipped(ValidIO(new ExceptionInfo))
+  // to ROB
+  val isXRet = Output(Bool())
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val interrupt = Output(Bool())
+  // from LSQ
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  // from outside cpu,externalInterrupt
+  val externalInterrupt = new ExternalInterruptIO
+  // TLB
+  val tlb = Output(new TlbCsrBundle)
+  // Prefetcher
+  val customCtrl = Output(new CustomCSRCtrlIO)
+}
+
 class CSR extends FunctionUnit with HasCSRConst
 {
-  val csrio = IO(new Bundle {
-    // output (for func === CSROpType.jmp)
-    val perf = new PerfCounterIO
-    val isPerfCnt = Output(Bool())
-    // to FPU
-    val fpu = Flipped(new FpuCsrIO)
-    // from rob
-    val exception = Flipped(ValidIO(new ExceptionInfo))
-    // to ROB
-    val isXRet = Output(Bool())
-    val trapTarget = Output(UInt(VAddrBits.W))
-    val interrupt = Output(Bool())
-    // from LSQ
-    val memExceptionVAddr = Input(UInt(VAddrBits.W))
-    // from outside cpu,externalInterrupt
-    val externalInterrupt = new ExternalInterruptIO
-    // TLB
-    val tlb = Output(new TlbCsrBundle)
-  })
+  val csrio = IO(new CSRFileIO)
   val difftestIO = IO(new Bundle() {
     val intrNO = Output(UInt(64.W))
     val cause = Output(UInt(64.W))
@@ -331,9 +341,19 @@ class CSR extends FunctionUnit with HasCSRConst
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
+  // spfctl Bit 0: L1plusCache Prefetcher Enable
+  // spfctl Bit 1: L2Cache Prefetcher Enable
+  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
+  // sdsid: Differentiated Services ID
+  val sdsid = RegInit(UInt(XLEN.W), 0.U)
+
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   csrio.tlb := tlbBundle
+
+  csrio.customCtrl.l1plus_pf_enable := spfctl(0)
+  csrio.customCtrl.l2_pf_enable := spfctl(1)
+  csrio.customCtrl.dsid := sdsid
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -456,6 +476,10 @@ class CSR extends FunctionUnit with HasCSRConst
 
     //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
+
+    //--- Supervisor Custom Read/Write Registers
+    MaskedRegMap(Spfctl, spfctl),
+    MaskedRegMap(Sdsid, sdsid),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),

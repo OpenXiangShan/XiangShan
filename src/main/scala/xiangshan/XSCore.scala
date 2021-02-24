@@ -418,6 +418,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
   frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
+  frontend.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
@@ -463,21 +464,23 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 	raw
   }))
 
-  integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
-  integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.perf <> DontCare
+  integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  integerBlock.io.csrio.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  integerBlock.io.csrio.fpu.isIllegal := false.B
+  integerBlock.io.csrio.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.fpu.frm <> floatBlock.io.frm
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
+  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
-  integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
+
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+
   memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
-
-  floatBlock.io.frm <> integerBlock.io.csrio.frm
-
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -504,6 +507,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     l2PrefetcherIn <> memBlock.io.toDCachePrefetch
   }
   l2Prefetcher.io.in <> l2PrefetcherIn
+  l2Prefetcher.io.enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()

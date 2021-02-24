@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
-import xiangshan.backend.fu.FenceToSbuffer
+import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
 import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.Regfile
 
@@ -71,21 +71,7 @@ class IntegerBlock
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
-    val csrio = new Bundle {
-      val fflags = Flipped(Valid(UInt(5.W))) // from roq
-      val dirty_fs = Input(Bool()) // from roq
-      val frm = Output(UInt(3.W)) // to float
-      val exception = Flipped(ValidIO(new ExceptionInfo))
-      val trapTarget = Output(UInt(VAddrBits.W)) // to roq
-      val isXRet = Output(Bool())
-      val interrupt = Output(Bool()) // to roq
-      val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
-      val externalInterrupt = new ExternalInterruptIO  // from outside
-      val tlb = Output(new TlbCsrBundle) // from tlb
-      val perfinfo = new Bundle {
-        val retiredInstr = Input(UInt(3.W))
-      }
-    }
+    val csrio = new CSRFileIO
     val fenceio = new Bundle {
       val sfence = Output(new SfenceBundle) // to front,mem
       val fencei = Output(Bool())           // to icache
