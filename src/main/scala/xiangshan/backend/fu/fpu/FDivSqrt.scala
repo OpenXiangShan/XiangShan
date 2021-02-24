@@ -5,7 +5,15 @@ import chisel3.util._
 import freechips.rocketchip.tile.FType
 import hardfloat.{DivSqrtRecFNToRaw_small, RoundAnyRawFNToRecFN}
 
-class FDivSqrt extends FPUSubModule {
+class FDivSqrtDataModule extends FPUDataModule {
+  val in_valid, out_ready = IO(Input(Bool()))
+  val in_ready, out_valid = IO(Output(Bool()))
+  val kill_w = IO(Input(Bool()))
+  val kill_r = IO(Input(Bool()))
+
+  val in_fire = in_valid && in_ready
+  val out_fire = out_valid && out_ready
+  val killReg = RegInit(false.B)
 
   val s_idle :: s_div :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -13,47 +21,41 @@ class FDivSqrt extends FPUSubModule {
   val divSqrt = Module(new DivSqrtRecFNToRaw_small(FType.D.exp, FType.D.sig, 0))
   val divSqrtRawValid = divSqrt.io.rawOutValid_sqrt || divSqrt.io.rawOutValid_div
 
-  val fpCtrl = io.in.bits.uop.ctrl.fpu
+  val fpCtrl = io.in.fpCtrl
   val tag = fpCtrl.typeTagIn
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  val single = RegEnable(tag === S, io.in.fire())
-  val rmReg = RegEnable(rm, io.in.fire())
-  val kill = uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
-  val killReg = RegInit(false.B)
+  val single = RegEnable(tag === S, in_fire)
+  val rmReg = RegEnable(rm, in_fire)
 
   switch(state){
     is(s_idle){
-      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)){ state := s_div }
+      when(in_fire && !kill_w){ state := s_div }
     }
     is(s_div){
       when(divSqrtRawValid){
-        when(kill || killReg){
+        when(kill_r || killReg){
           state := s_idle
           killReg := false.B
         }.otherwise({
           state := s_finish
         })
-      }.elsewhen(kill){
+      }.elsewhen(kill_r){
         killReg := true.B
       }
     }
     is(s_finish){
-      when(io.out.fire() || kill){
+      when(out_fire || kill_r){
         state := s_idle
       }
     }
   }
 
-
-  val src1 = unbox(io.in.bits.src(0), tag, None)
-  val src2 = unbox(io.in.bits.src(1), tag, None)
-  divSqrt.io.inValid := io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  val src1 = unbox(io.in.src(0), tag, None)
+  val src2 = unbox(io.in.src(1), tag, None)
+  divSqrt.io.inValid := in_fire && !kill_w
   divSqrt.io.sqrtOp := fpCtrl.sqrt
   divSqrt.io.a := src1
   divSqrt.io.b := src2
   divSqrt.io.roundingMode := rm
-
-
 
   val round32 = Module(new RoundAnyRawFNToRecFN(
     FType.D.exp, FType.D.sig+2, FType.S.exp, FType.S.sig, 0
@@ -73,9 +75,25 @@ class FDivSqrt extends FPUSubModule {
   val data = Mux(single, round32.io.out, round64.io.out)
   val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
 
-  io.in.ready := state===s_idle
-  io.out.valid := state===s_finish && !killReg
-  io.out.bits.uop := uopReg
-  io.out.bits.data := RegNext(data, divSqrtRawValid)
+  in_ready := state===s_idle
+  out_valid := state===s_finish && !killReg
+  io.out.data := RegNext(data, divSqrtRawValid)
   fflags := RegNext(flags, divSqrtRawValid)
+}
+
+
+class FDivSqrt extends FPUSubModule {
+
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val kill_r = uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
+
+  override val dataModule = Module(new FDivSqrtDataModule)
+  connectDataModule
+  dataModule.in_valid := io.in.valid
+  dataModule.out_ready := io.out.ready
+  dataModule.kill_w := io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  dataModule.kill_r := kill_r
+  io.in.ready := dataModule.in_ready
+  io.out.valid := dataModule.out_valid
+  io.out.bits.uop := uopReg
 }

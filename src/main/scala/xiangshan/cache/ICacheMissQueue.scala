@@ -233,16 +233,13 @@ class IcacheMissQueue extends ICacheMissQueueModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    if (!env.FPGAPlatform && !env.DualCore) {
-      ExcitingUtils.addSource(
-        BoolStopWatch(
-          start = entry.io.req.fire(),
-          stop = entry.io.resp.fire() || entry.io.flush,
-          startHighPriority = true),
-        "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
-        Perf
-      )
-    }
+    XSPerf(
+      "ICacheMissQueue_PenaltyEntry" + Integer.toString(i, 10),
+      BoolStopWatch(
+        start = entry.io.req.fire(),
+        stop = entry.io.resp.fire() || entry.io.flush,
+        startHighPriority = true)
+    )
 
     entry
   }

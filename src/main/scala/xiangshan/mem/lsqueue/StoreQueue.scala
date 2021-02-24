@@ -104,7 +104,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
     paddrModule.io.raddr(i) := deqPtrExtNext(i).value
   }
-  vaddrModule.io.raddr(0) := cmtPtr + io.roq.scommit
+
+  // Note that both io.roq.scommit and RegNext(io.roq.scommit) should be take into consideration
+  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount + io.roq.scommit).value
 
   /**
     * Enqueue at dispatch

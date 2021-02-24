@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
-import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot}
+import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
 
 class MissReq extends DCacheBundle
 {
@@ -413,16 +413,13 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     }
 
     /*
-    if (!env.FPGAPlatform && !env.DualCore) {
-      ExcitingUtils.addSource(
-        BoolStopWatch(
-          start = entry.io.req.fire(), 
-          stop = entry.io.resp.fire(),
-          startHighPriority = true),
-        "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
-        Perf
-      )
-    }
+    XSPerf(
+      "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
+      BoolStopWatch(
+        start = entry.io.req.fire(), 
+        stop = entry.io.resp.fire(),
+        startHighPriority = true)
+    )
     */
 
     entry
@@ -492,7 +489,5 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     io.mem_finish.bits.dump
   }
 
-  if (!env.FPGAPlatform && !env.DualCore) {
-    ExcitingUtils.addSource(io.req.fire(), "perfCntDCacheMiss", Perf)
-  }
+  XSPerf("dcache_miss", io.req.fire())
 }
