@@ -11,6 +11,7 @@ import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
   val csrio = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val fflags = Flipped(ValidIO(UInt(5.W)))
     val dirty_fs = Input(Bool())
     val frm = Output(UInt(3.W))
@@ -69,6 +70,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     case i: IntToFP => i
   }.get
 
+  csr.csrio.hartId <> csrio.hartId
   csr.csrio.perf <> DontCare
   csr.csrio.perf.retiredInstr <> csrio.perfinfo.retiredInstr
   csr.csrio.fpu.fflags <> csrio.fflags
@@ -99,6 +101,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   val isDouble = !uop.ctrl.isRVF
 
 
-  io.toInt.bits.redirectValid := jmp.redirectOutValid
-  io.toInt.bits.redirect := jmp.redirectOut
+  io.out.bits.redirectValid := jmp.redirectOutValid
+  io.out.bits.redirect := jmp.redirectOut
 }

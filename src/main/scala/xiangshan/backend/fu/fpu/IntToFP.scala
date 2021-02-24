@@ -8,41 +8,50 @@ import chisel3.util._
 import hardfloat.INToRecFN
 import utils.{SignExt, ZeroExt}
 
-class IntToFP extends FPUSubModule {
+class IntToFPDataModule extends FPUDataModule {
 
-  val s_idle :: s_cvt :: s_finish :: Nil = Enum(3)
+  val in_valid, out_ready = IO(Input(Bool()))
+  val in_ready, out_valid = IO(Output(Bool()))
+  val kill_w, kill_r = IO(Input(Bool()))
+
+  val s_idle :: s_cvt :: s_ieee :: s_finish :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
-  io.in.ready := state === s_idle
-  io.out.valid := state === s_finish
 
-  val src1 = RegEnable(io.in.bits.src(0)(XLEN-1, 0), io.in.fire())
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  val rmReg = RegEnable(rm, io.in.fire())
+  val in_fire = in_valid && in_ready
+  val out_fire = out_valid && out_ready
+  in_ready := state === s_idle
+  out_valid := state === s_finish
+
+  val src1 = RegEnable(io.in.src(0)(XLEN-1, 0), in_fire)
+  val rmReg = RegEnable(rm, in_fire)
+  val ctrl = RegEnable(io.in.fpCtrl, in_fire)
 
   switch(state){
     is(s_idle){
-      when(io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)){
+      when(in_fire && !kill_w){
         state := s_cvt
       }
     }
     is(s_cvt){
+      state := s_ieee
+    }
+    is(s_ieee){
       state := s_finish
     }
     is(s_finish){
-      when(io.out.fire()){
+      when(out_fire){
         state := s_idle
       }
     }
   }
-  when(state =/= s_idle && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)){
+  when(state =/= s_idle && kill_r){
     state := s_idle
   }
 
   /*
       s_cvt
    */
-  val ctrl = uopReg.ctrl.fpu
   val tag = ctrl.typeTagIn
   val typ = ctrl.typ
   val wflags = ctrl.wflags
@@ -73,9 +82,26 @@ class IntToFP extends FPUSubModule {
     mux.exc := VecInit(exc)(tag)
   }
 
-  val muxReg = RegEnable(mux, enable = state === s_cvt)
+  val muxReg = Reg(mux.cloneType)
+  when(state === s_cvt){
+    muxReg := mux
+  }.elsewhen(state === s_ieee){
+    muxReg.data := ieee(box(muxReg.data, ctrl.typeTagOut))
+  }
 
   fflags := muxReg.exc
+  io.out.data := muxReg.data
+}
+
+class IntToFP extends FPUSubModule {
+  override val dataModule = Module(new IntToFPDataModule)
+  dataModule.in_valid := io.in.valid
+  dataModule.out_ready := io.out.ready
+  connectDataModule
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  dataModule.kill_w := io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  dataModule.kill_r := uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  io.in.ready := dataModule.in_ready
+  io.out.valid := dataModule.out_valid
   io.out.bits.uop := uopReg
-  io.out.bits.data := box(muxReg.data, ctrl.typeTagOut)
 }

@@ -30,7 +30,7 @@ trait HasLoadHelper { this: XSModule =>
     LookupTree(uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, rdata, SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.lw   -> Mux(fpWen, Cat(Fill(32, 1.U(1.W)), rdata(31, 0)), SignExt(rdata(31, 0), XLEN)),
       LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
