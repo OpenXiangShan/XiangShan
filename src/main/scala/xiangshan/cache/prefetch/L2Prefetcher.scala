@@ -128,19 +128,16 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
   bus.e.valid := false.B
   bus.e.bits := DontCare
 
-  if (!env.FPGAPlatform && !env.DualCore) {
-    ExcitingUtils.addSource(bus.a.fire(), "perfCntL2PrefetchReqCnt", Perf)
-    (0 until l2PrefetcherParameters.nEntries).foreach(i =>
-      ExcitingUtils.addSource(
-        BoolStopWatch(
-          start = bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
-          stop = bus.d.fire() && bus.d.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
-          startHighPriority = true
-        ),
-        "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10),
-        Perf
+  XSPerf("L2Prefetch_reqCnt", bus.a.fire())
+  (0 until l2PrefetcherParameters.nEntries).foreach(i =>
+    XSPerf(
+      "L2Prefetch_penaltyEntry" + Integer.toString(i, 10),
+      BoolStopWatch(
+        start = bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
+        stop = bus.d.fire() && bus.d.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
+        startHighPriority = true
       )
     )
-  }
+  )
 }
 

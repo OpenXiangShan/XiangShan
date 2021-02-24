@@ -10,19 +10,18 @@ import hardfloat.RecFNToIN
 import utils.SignExt
 import xiangshan.backend.fu.FunctionUnit
 
-class FPToInt extends FPUPipelineModule {
 
-  override def latency = FunctionUnit.f2iCfg.latency.latencyVal.get
+class FPToIntDataModule(latency: Int) extends FPUDataModule {
+  val regEnables = IO(Input(Vec(latency, Bool())))
+  val (src1, src2) = (io.in.src(0), io.in.src(1))
 
-  val (src1, src2) = (io.in.bits.src(0), io.in.bits.src(1))
-
-  val ctrl = io.in.bits.uop.ctrl.fpu
+  val ctrl = io.in.fpCtrl
 
   // stage 1: unbox inputs
-  val src1_d = S1Reg(unbox(src1, ctrl.typeTagIn, None))
-  val src2_d = S1Reg(unbox(src2, ctrl.typeTagIn, None))
-  val ctrl_reg = S1Reg(ctrl)
-  val rm_reg = S1Reg(rm)
+  val src1_d = RegEnable(unbox(src1, ctrl.typeTagIn, None), regEnables(0))
+  val src2_d = RegEnable(unbox(src2, ctrl.typeTagIn, None), regEnables(0))
+  val ctrl_reg = RegEnable(ctrl, regEnables(0))
+  val rm_reg = RegEnable(rm, regEnables(0))
 
   // stage2
 
@@ -79,13 +78,22 @@ class FPToInt extends FPUPipelineModule {
     Mux(rm_reg(0), classify_out, move_out)
   )
   val doubleOut = Mux(ctrl_reg.fcvt, ctrl_reg.typ(1), ctrl_reg.fmt(0))
-  val intValue = S2Reg(Mux(doubleOut,
+  val intValue = RegEnable(Mux(doubleOut,
     SignExt(intData, XLEN),
     SignExt(intData(31, 0), XLEN)
-  ))
+  ), regEnables(1))
 
-  val exc = S2Reg(Mux(ctrl_reg.fcvt, conv_exc, dcmp_exc))
+  val exc = RegEnable(Mux(ctrl_reg.fcvt, conv_exc, dcmp_exc), regEnables(1))
 
-  io.out.bits.data := intValue
+  io.out.data := intValue
   fflags := exc
+}
+
+class FPToInt extends FPUPipelineModule {
+
+  override def latency = FunctionUnit.f2iCfg.latency.latencyVal.get
+
+  override val dataModule = Module(new FPToIntDataModule(latency))
+  connectDataModule
+  dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
 }

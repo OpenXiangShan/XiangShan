@@ -173,6 +173,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
+      xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
