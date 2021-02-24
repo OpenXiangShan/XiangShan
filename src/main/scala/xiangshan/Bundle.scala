@@ -207,6 +207,9 @@ class FtqEntry extends XSBundle {
   val mispred = Vec(PredictWidth, Bool())
   val target = UInt(VAddrBits.W)
 
+  // For perf counters
+  val pd = Vec(PredictWidth, new PreDecodeInfo)
+
   def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
   def hasLastPrev = lastPacketPC.valid
 
@@ -376,6 +379,9 @@ class RoqCommitInfo extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+
+  // For perf counters
+  val pd = new PreDecodeInfo
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
