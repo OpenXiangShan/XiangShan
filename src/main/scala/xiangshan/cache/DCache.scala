@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate}
+import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate, ParallelOR}
 
 import scala.math.max
 
@@ -165,6 +165,62 @@ abstract class AbstractDataArray extends DCacheModule {
   }
 }
 
+abstract class TransposeAbstractDataArray extends DCacheModule {
+  val io = IO(new DCacheBundle {
+    val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
+    val write = Flipped(DecoupledIO(new L1DataWriteReq))
+    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(encRowBits.W))))
+    val nacks = Output(Vec(LoadPipelineWidth, Bool()))
+  })
+
+  def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
+
+  def dumpRead() = {
+    (0 until LoadPipelineWidth) map { w =>
+      when (io.read(w).valid) {
+        XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
+          io.read(w).bits.way_en, io.read(w).bits.addr)
+      }
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.valid) {
+      XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
+        io.write.bits.way_en, io.write.bits.addr)
+
+      (0 until blockRows) map { r =>
+        XSDebug(s"cycle: $r data: %x wmask: %x\n",
+          io.write.bits.data(r), io.write.bits.wmask(r))
+      }
+    }
+  }
+
+  def dumpResp() = {
+    (0 until LoadPipelineWidth) map { w =>
+      XSDebug(s"DataArray ReadResp channel: $w\n")
+      (0 until blockRows) map { r =>
+        XSDebug(s"cycle: $r data: %x\n", io.resp(w)(r))
+      }
+    }
+  }
+
+  def dumpNack() = {
+    (0 until LoadPipelineWidth) map { w =>
+      when (io.nacks(w)) {
+        XSDebug(s"DataArray NACK channel: $w\n")
+      }
+    }
+  }
+
+  def dump() = {
+    dumpRead
+    dumpWrite
+    dumpNack
+    dumpResp
+  }
+}
+
 class DuplicatedDataArray extends AbstractDataArray
 {
   val singlePort = true
@@ -209,6 +265,62 @@ class DuplicatedDataArray extends AbstractDataArray
           resp(k) := array.io.r.resp.data(0)
         }
       }
+    }
+    io.nacks(j) := false.B
+  }
+}
+
+class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
+  val singlePort = true
+  // write is always ready
+  io.write.ready := true.B
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
+  for (j <- 0 until LoadPipelineWidth) {
+    // only one way could be read
+    assert(RegNext(!io.read(j).fire() || PopCount(io.read(j).bits.way_en) === 1.U))
+
+    val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
+
+    // for single port SRAM, do not allow read and write in the same cycle
+    // for dual port SRAM, raddr === waddr is undefined behavior
+    val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
+    io.read(j).ready := !rwhazard
+
+    for (r <- 0 until blockRows) {
+      // val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
+      // io.resp(j)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
+      val resp = Wire(Vec(rowWords, Vec(nWays, Bits(encWordBits.W))))
+      val resp_chosen = Wire(Vec(rowWords, Bits(encWordBits.W)))
+
+      for (k <- 0 until rowWords) {
+        for (w <- 0 until nWays) {
+          val array = Module(new SRAMTemplate(
+            Bits(encWordBits.W),
+            set = nSets,
+            way = 1,
+            shouldReset = false,
+            holdRead = false,
+            singlePort = singlePort
+          ))
+
+          // data write
+          val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
+          array.io.w.req.valid := wen
+          array.io.w.req.bits.apply(
+            setIdx = waddr,
+            data = io.write.bits.data(r)(encWordBits*(k+1)-1, encWordBits*k),
+            waymask = 1.U
+          )
+
+          // data read
+          val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
+          array.io.r.req.valid := ren
+          array.io.r.req.bits.apply(setIdx = raddr)
+          resp(k)(w) := array.io.r.resp.data(0) & Mux(RegNext(ren), (-1).S(encWordBits.W).asUInt, 0.U(encWordBits.W))
+        }
+        resp_chosen(k) := ParallelOR(resp(k))
+      }
+      io.resp(j)(r) := Cat(resp_chosen)
     }
     io.nacks(j) := false.B
   }
