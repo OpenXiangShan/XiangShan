@@ -516,3 +516,8 @@ class TrapIO extends XSBundle {
   val cycleCnt = Output(UInt(XLEN.W))
   val instrCnt = Output(UInt(XLEN.W))
 }
+
+class PerfInfoIO extends XSBundle {
+  val clean = Input(Bool())
+  val dump = Input(Bool())
+}

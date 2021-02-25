@@ -72,6 +72,7 @@ void difftest_display(uint8_t mode, int coreid) {
         j, pc_wb_queue[coreid][j], wen_wb_queue[coreid][j]!=0, wdst_wb_queue[coreid][j], wdata_wb_queue[coreid][j], (j==((wb_pointer[coreid]-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
   }
   printf("\n==============  Reg Diff  ==============\n");
+  fflush(stdout);
   ref_isa_reg_display(coreid);
   printf("priviledgeMode: %d\n", mode);
 }
