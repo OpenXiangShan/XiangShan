@@ -722,9 +722,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     wdata.ftqOffset := req.cf.ftqOffset
     wdata.pc := req.cf.pc
     wdata.crossPageIPFFix := req.cf.crossPageIPFFix
-
-    // For perf counters
-    wdata.pd := req.cf.pd
     // wdata.exceptionVec := req.cf.exceptionVec
   }
   dispatchData.io.raddr := commitReadAddr_next

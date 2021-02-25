@@ -6,6 +6,7 @@ import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
@@ -208,7 +209,7 @@ class FtqEntry extends XSBundle {
   val target = UInt(VAddrBits.W)
 
   // For perf counters
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
+  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 
   def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
   def hasLastPrev = lastPacketPC.valid
@@ -379,9 +380,6 @@ class RoqCommitInfo extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-
-  // For perf counters
-  val pd = new PreDecodeInfo
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)

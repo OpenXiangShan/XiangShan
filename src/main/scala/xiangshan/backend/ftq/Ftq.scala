@@ -5,7 +5,7 @@ import chisel3.util._
 import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, XSDebug, XSPerf}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
-import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.PreDecodeInfoForDebug
 
 class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
 
@@ -77,7 +77,8 @@ class Ftq_2R_SRAMEntry extends XSBundle {
 class Ftq_1R_Commit_SRAMEntry extends XSBundle {
   val metas = Vec(PredictWidth, new BpuMeta)
   val rvc_mask = Vec(PredictWidth, Bool())
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
+
+  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 }
 
 class FtqRead extends Bundle {
@@ -234,9 +235,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
   commitEntry.br_mask := RegNext(ftq_2r_sram.io.rdata(0).br_mask)
   // from 1r sram
-  commitEntry.pd := RegNext(ftq_1r_sram.io.rdata(0).pd)
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
   commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
+  commitEntry.pd := RegNext(ftq_1r_sram.io.rdata(0).pd)
   // from regs
   commitEntry.valids := RegNext(RegNext(commit_valids))
   commitEntry.mispred := RegNext(RegNext(mispredict_vec(headPtr.value)))
@@ -291,27 +292,29 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // Branch Predictor Perf counters
-  val perfCountsMap = Map(
-    "BpInstr" -> PopCount(io.roq_commits.map{case c => c.valid && !c.bits.pd.notCFI}),
-    "BpBInstr" -> PopCount(io.roq_commits.map{case c => c.valid && c.bits.pd.isBr}),
-    // "BpRight" -> PopCount((0 until PredictWidth).map{i => !mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-    "BpRight"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-    // "BpWrong" -> PopCount((0 until PredictWidth).map{i => mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-    "BpWrong"  -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-    "BpBRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-    "BpBWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-    "BpJRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-    "BpJWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-    "BpIRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-    "BpIWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-    "BpCRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isCall && commitEntry.valids(i)}),
-    "BpCWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isCall && commitEntry.valids(i)}),
-    "BpRRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isRet && commitEntry.valids(i)}),
-    "BpRWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isRet && commitEntry.valids(i)}),
-  )
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val perfCountsMap = Map(
+      "BpInstr"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      "BpBInstr" -> PopCount((0 until PredictWidth).map{i => commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      // "BpRight" -> PopCount((0 until PredictWidth).map{i => !mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
+      "BpRight"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      // "BpWrong" -> PopCount((0 until PredictWidth).map{i => mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
+      "BpWrong"  -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      "BpBRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      "BpBWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      "BpJRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
+      "BpJWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
+      "BpIRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
+      "BpIWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
+      "BpCRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
+      "BpCWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
+      "BpRRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
+      "BpRWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
+    )
 
-  for((key, value) <- perfCountsMap) {
-    XSPerf(key, value, acc = true, intervalBits = 0)
+    for((key, value) <- perfCountsMap) {
+      XSPerf(key, value)
+    }
   }
 
   XSPerf("ftq_entries", validEntries)
