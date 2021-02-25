@@ -131,11 +131,11 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
 
   val ftqRead = io.stage2FtqRead.entry
-  val cfiUpdate_pc = 
+  val cfiUpdate_pc =
     Cat(ftqRead.ftqPC.head(VAddrBits - s2_redirect_bits_reg.ftqOffset.getWidth - instOffsetBits),
         s2_redirect_bits_reg.ftqOffset,
         0.U(instOffsetBits.W))
-  val real_pc = 
+  val real_pc =
     GetPcByFtq(ftqRead.ftqPC, s2_redirect_bits_reg.ftqOffset,
                ftqRead.lastPacketPC.valid,
                ftqRead.lastPacketPC.bits)
@@ -227,7 +227,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   redirectGen.io.exuMispredict.zip(io.fromIntBlock.exuRedirect).map({case (x, y) =>
     val misPred = y.valid && y.bits.redirect.cfiUpdate.isMisPred
-    val killedByOlder = y.bits.uop.roqIdx.needFlush(backendRedirect, flush)
+    val killedByOlder = y.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
     x.valid := RegNext(misPred && !killedByOlder, init = false.B)
     x.bits := RegEnable(y.bits, y.valid)
   })
