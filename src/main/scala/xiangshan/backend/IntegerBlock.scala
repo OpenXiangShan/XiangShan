@@ -22,7 +22,6 @@ class IntBlockToCtrlIO extends XSBundle {
   // write back regfile signals after arbiter
   // used to update busytable and roq state
   val wbRegs = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
-  val toRoq = Vec(Exu.intExuConfigs.size, ValidIO(new ExuOutput))
   // write back to brq
   val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
@@ -262,7 +261,10 @@ class IntegerBlock
     isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(e => {
-    intOutValid(WireInit(e.io.out), connectReady = true)
+    val w = WireInit(e.io.out)
+    val fpWen = if(e.config.writeFpRf) e.io.out.bits.uop.ctrl.fpWen else false.B
+    w.valid := e.io.out.valid && !fpWen
+    w
   }) ++ io.wakeUpIn.slow
 
   exeUnits.zip(intWbArbiter.io.in).foreach{
@@ -270,28 +272,18 @@ class IntegerBlock
       if(exu.config.writeFpRf){
         val wakeUpOut = io.wakeUpOut.slow(0) // jmpExeUnit
         val writeFpReady = wakeUpOut.fire() && wakeUpOut.bits.uop.ctrl.fpWen
-        val dontWriteRf = (exu.io.out.valid &&
-          !exu.io.out.bits.uop.ctrl.rfWen &&
-          !exu.io.out.bits.uop.ctrl.fpWen) || !exu.io.out.valid
-        exu.io.out.ready := wInt.fire() || writeFpReady || dontWriteRf
+        exu.io.out.ready := wInt.fire() || writeFpReady || !exu.io.out.valid
       } else {
-        // some insts do not have 'rfWen', their output should be always ready
-        exu.io.out.ready := wInt.fire() || !(wInt.valid && !wInt.bits.uop.ctrl.rfWen)
+        exu.io.out.ready := wInt.fire() || !exu.io.out.valid
       }
   }
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> intWbArbiter.io.out
-  io.toCtrlBlock.toRoq <> exeUnits.map(_.io.out).map(o => {
-    val v = Wire(Valid(new ExuOutput))
-    v.valid := o.fire()
-    v.bits := o.bits
-    v
-  })
 
   intRf.io.writePorts.zip(intWbArbiter.io.out).foreach {
     case (rf, wb) =>
-      rf.wen := wb.valid
+      rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }

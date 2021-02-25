@@ -736,10 +736,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
   }
 
-  val csr_wb_idx = Exu.exuConfigs.indexOf(Exu.jumpExeUnitCfg)
-  val atomic_wb_idx = Exu.exuConfigs.indexOf(Exu.ldExeUnitCfg)
-  val load_wb_idxes = Exu.exuConfigs.zipWithIndex.filter(_._1 == Exu.ldExeUnitCfg).drop(1).map(_._2)
-  val store_wb_idxes = Exu.exuConfigs.zipWithIndex.filter(_._1 == Exu.stExeUnitCfg).map(_._2)
+  // TODO: don't hard code these idxes
+  def csr_wb_idx = 6
+  def atomic_wb_idx = 4
+  def load_wb_idxes = Seq(5)
+  def store_wb_idxes = Seq(16, 17)
   val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
   all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
@@ -756,11 +757,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
   }
 
-  val fflags_wb = io.exeWbResults.zip(Exu.exuConfigs).filter(_._2 match {
-    case Exu.fmacExeUnitCfg => true
-    case Exu.fmiscExeUnitCfg => true
-    case Exu.jumpExeUnitCfg => true
-    case _ => false
+  // 4 fmac + 2 fmisc + 1 i2f
+  val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
+    (Seq(8, 9, 10, 11) ++ Seq(14, 15) ++ Seq(7)).contains(w._2)
   }).map(_._1)
   val fflagsDataModule = Module(new SyncDataModuleTemplate(
     UInt(5.W), RoqSize, CommitWidth, fflags_wb.size)
