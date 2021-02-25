@@ -127,6 +127,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val difftest  = new DiffTestIO
       val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
+      val perfInfo = new PerfInfoIO
       val trap = new TrapIO
       val trap2 = new TrapIO
       val uart = new UARTIO
@@ -135,6 +136,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
     dontTouch(io.difftest)
     dontTouch(io.logCtrl)
+    dontTouch(io.perfInfo)
     dontTouch(io.trap)
     dontTouch(io.uart)
 
@@ -225,6 +227,13 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       ExcitingUtils.addSource(timer, "logTimestamp")
     }
 
+    if (env.EnablePerfDebug) {
+      val clean = io.perfInfo.clean
+      val dump = io.perfInfo.dump
+      ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
+      ExcitingUtils.addSource(dump, "XSPERF_DUMP")
+    }
+
     // Check and dispaly all source and sink connections
     ExcitingUtils.fixConnections()
     ExcitingUtils.checkAndDisplay()
@@ -252,6 +261,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val difftest  = new DiffTestIO
       val difftest2 = new DiffTestIO
       val logCtrl = new LogCtrlIO
+      val perfInfo = new PerfInfoIO
       val trap = new TrapIO
       val trap2 = new TrapIO
       val uart = new UARTIO
@@ -261,6 +271,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
 
     io.difftest  <> dut.module.io.difftest
     io.logCtrl <> dut.module.io.logCtrl
+    io.perfInfo <> dut.module.io.perfInfo
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
     if (!env.FPGAPlatform && env.DualCore) {
@@ -269,8 +280,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     }
     if (axiSim) {
       io.memAXI <> axiSimRam.module.io
-    }
-    else {
+    } else {
       io.memAXI <> DontCare
     }
   }

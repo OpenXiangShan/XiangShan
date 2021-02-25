@@ -120,6 +120,13 @@ object XSPerf extends HasXSParameter {
       if (!env.FPGAPlatform && !env.DualCore) {
         ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
       }
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+      when (perfClean) {
+        counter := 0.U
+      }
       when (printEnable) {  // interval print
         if (acc) {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
@@ -127,7 +134,7 @@ object XSPerf extends HasXSParameter {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
         }
       }
-      when (xstrap) {  // summary print
+      when (xstrap || perfDump) {  // summary print
         // dump acc counter by default
         XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
       }
