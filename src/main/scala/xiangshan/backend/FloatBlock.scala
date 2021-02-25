@@ -12,6 +12,7 @@ import xiangshan.mem.HasLoadHelper
 
 class FpBlockToCtrlIO extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
+  val toRoq = Vec(Exu.fpExuConfigs.size, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
 }
 
@@ -167,20 +168,30 @@ class FloatBlock
     isFp = true
   ))
   fpWbArbiter.io.in <> exeUnits.map(e =>
-    if(e.config.writeIntRf) WireInit(e.io.out) else e.io.out
+    fpOutValid(WireInit(e.io.out), connectReady = true)
   ) ++ wakeUpInRecode.slow
 
-  exeUnits.zip(recodeOut).zip(fpWbArbiter.io.in).filter(_._1._1.config.writeIntRf).foreach {
-    case ((exu, wInt), wFp) =>
-      exu.io.out.ready := wInt.fire() || wFp.fire()
-  }
+ for(((exu, rec), wFp) <- exeUnits.zip(recodeOut).zip(fpWbArbiter.io.in)) {
+   if(exu.config.writeIntRf){
+     val wIntFire = rec.fire() && rec.bits.uop.ctrl.rfWen
+     exu.io.out.ready := wIntFire || wFp.fire() || !exu.io.out.valid
+   } else {
+     exu.io.out.ready := wFp.fire() || !exu.io.out.valid
+   }
+ }
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out
+  io.toCtrlBlock.toRoq <> exeUnits.map(_.io.out).map(o => {
+    val v = Wire(Valid(new ExuOutput))
+    v.valid := o.fire()
+    v.bits := o.bits
+    v
+  })
 
   fpRf.io.writePorts.zip(fpWbArbiter.io.out).foreach{
     case (rf, wb) =>
-      rf.wen := wb.valid && wb.bits.uop.ctrl.fpWen
+      rf.wen := wb.valid
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }

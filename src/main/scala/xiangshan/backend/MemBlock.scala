@@ -16,7 +16,7 @@ import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
-  val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
+  val toRoq = Vec(exuParameters.LsExuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
 }
@@ -119,6 +119,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
   val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  for((toRoq, ldOut) <- io.toCtrlBlock.toRoq.take(exuParameters.LduCnt).zip(exeWbReqs)){
+    toRoq.valid := ldOut.fire()
+    toRoq.bits := ldOut.bits
+  }
 
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
@@ -236,17 +240,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
-    io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
-    io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
+    io.toCtrlBlock.toRoq(i + exuParameters.LduCnt).valid := stu.io.stout.valid
+    io.toCtrlBlock.toRoq(i + exuParameters.LduCnt).bits  := stu.io.stout.bits
     stu.io.stout.ready := true.B
   }
 
   // mmio store writeback will use store writeback port 0
   lsq.io.mmioStout.ready := false.B
   when (lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
-    io.toCtrlBlock.stOut(0).valid := true.B
+    io.toCtrlBlock.toRoq(0 + exuParameters.LduCnt).valid := true.B
+    io.toCtrlBlock.toRoq(0 + exuParameters.LduCnt).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
-    io.toCtrlBlock.stOut(0).bits  := lsq.io.mmioStout.bits
   }
 
   // Lsq
