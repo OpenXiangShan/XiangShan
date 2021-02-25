@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.exu.Exu
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 
@@ -734,39 +735,41 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     exceptionGen.io.enq(i).bits.exceptionVec := selectFrontend(io.enq.req(i).bits.cf.exceptionVec, false, true)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
   }
+
+  val csr_wb_idx = Exu.exuConfigs.indexOf(Exu.jumpExeUnitCfg)
+  val atomic_wb_idx = Exu.exuConfigs.indexOf(Exu.ldExeUnitCfg)
+  val load_wb_idxes = Exu.exuConfigs.zipWithIndex.filter(_._1 == Exu.ldExeUnitCfg).drop(1).map(_._2)
+  val store_wb_idxes = Exu.exuConfigs.zipWithIndex.filter(_._1 == Exu.stExeUnitCfg).map(_._2)
+  val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
+  all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
     exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
     exceptionGen.io.wb(index).bits.roqIdx       := io.exeWbResults(wb_index).bits.uop.roqIdx
-    val selectFunc = (if (wb_index == 6) selectCSR(_, _, _)
-    else if (wb_index == 4) selectAtomics(_, _, _)
-    else if (wb_index == 5) selectLoad(_, _, _)
-    else selectStore(_, _, _))
+    val selectFunc = if (wb_index == csr_wb_idx) selectCSR _
+    else if (wb_index == atomic_wb_idx) selectAtomics _
+    else if (load_wb_idxes.contains(wb_index)) selectLoad _
+    else {
+      assert(store_wb_idxes.contains(wb_index))
+      selectStore _
+    }
     exceptionGen.io.wb(index).bits.exceptionVec := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
     exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
   }
-  val all_exception_possibilities = Seq(6, 4, 5, 16, 17)
-  all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
 
-  val fflagsDataModule = Module(new SyncDataModuleTemplate(UInt(5.W), RoqSize, CommitWidth, 7))
-  var wPortIdx = 0
-  // 4 FMACs
-  for (i <- 0 until 4) {
-    fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(8+i).valid
-    fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(8+i).bits.uop.roqIdx.value
-    fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(8+i).bits.fflags
-    wPortIdx = wPortIdx + 1
+  val fflags_wb = io.exeWbResults.zip(Exu.exuConfigs).filter(_._2 match {
+    case Exu.fmacExeUnitCfg => true
+    case Exu.fmiscExeUnitCfg => true
+    case Exu.jumpExeUnitCfg => true
+    case _ => false
+  }).map(_._1)
+  val fflagsDataModule = Module(new SyncDataModuleTemplate(
+    UInt(5.W), RoqSize, CommitWidth, fflags_wb.size)
+  )
+  for(i <- fflags_wb.indices){
+    fflagsDataModule.io.wen  (i) := fflags_wb(i).valid
+    fflagsDataModule.io.waddr(i) := fflags_wb(i).bits.uop.roqIdx.value
+    fflagsDataModule.io.wdata(i) := fflags_wb(i).bits.fflags
   }
-  // 2 FMISCs (the first one includes I2F from JumpUnit)
-  for (i <- 0 until 2) {
-    fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(14+i).valid
-    fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(14+i).bits.uop.roqIdx.value
-    fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(14+i).bits.fflags
-    wPortIdx = wPortIdx + 1
-  }
-  // 1 FMISC (Int Wb)
-  fflagsDataModule.io.wen  (wPortIdx) := io.exeWbResults(7).valid
-  fflagsDataModule.io.waddr(wPortIdx) := io.exeWbResults(7).bits.uop.roqIdx.value
-  fflagsDataModule.io.wdata(wPortIdx) := io.exeWbResults(7).bits.fflags
   fflagsDataModule.io.raddr := VecInit(deqPtrVec_next.map(_.value))
   fflagsDataRead := fflagsDataModule.io.rdata
 

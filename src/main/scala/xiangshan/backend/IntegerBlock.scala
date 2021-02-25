@@ -3,10 +3,10 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
+import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.backend.issue.{ReservationStation}
+import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.Regfile
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
@@ -22,6 +22,7 @@ class IntBlockToCtrlIO extends XSBundle {
   // write back regfile signals after arbiter
   // used to update busytable and roq state
   val wbRegs = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
+  val toRoq = Vec(Exu.intExuConfigs.size, ValidIO(new ExuOutput))
   // write back to brq
   val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
@@ -261,20 +262,36 @@ class IntegerBlock
     isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(e => {
-    if(e.config.writeFpRf) WireInit(e.io.out) else e.io.out
+    intOutValid(WireInit(e.io.out), connectReady = true)
   }) ++ io.wakeUpIn.slow
 
-  exeUnits.zip(intWbArbiter.io.in).filter(_._1.config.writeFpRf).zip(io.wakeUpIn.slow).foreach{
-    case ((exu, wInt), wFp) =>
-      exu.io.out.ready := wFp.fire() || wInt.fire()
+  exeUnits.zip(intWbArbiter.io.in).foreach{
+    case (exu, wInt) =>
+      if(exu.config.writeFpRf){
+        val wakeUpOut = io.wakeUpOut.slow(0) // jmpExeUnit
+        val writeFpReady = wakeUpOut.fire() && wakeUpOut.bits.uop.ctrl.fpWen
+        val dontWriteRf = (exu.io.out.valid &&
+          !exu.io.out.bits.uop.ctrl.rfWen &&
+          !exu.io.out.bits.uop.ctrl.fpWen) || !exu.io.out.valid
+        exu.io.out.ready := wInt.fire() || writeFpReady || dontWriteRf
+      } else {
+        // some insts do not have 'rfWen', their output should be always ready
+        exu.io.out.ready := wInt.fire() || !(wInt.valid && !wInt.bits.uop.ctrl.rfWen)
+      }
   }
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> intWbArbiter.io.out
+  io.toCtrlBlock.toRoq <> exeUnits.map(_.io.out).map(o => {
+    val v = Wire(Valid(new ExuOutput))
+    v.valid := o.fire()
+    v.bits := o.bits
+    v
+  })
 
   intRf.io.writePorts.zip(intWbArbiter.io.out).foreach {
     case (rf, wb) =>
-      rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
+      rf.wen := wb.valid
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
