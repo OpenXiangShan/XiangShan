@@ -48,7 +48,7 @@ class WaitTable extends XSModule with WaitTableParameters {
   // debug
   for (i <- 0 until StorePipelineWidth) {
     when (io.update(i).valid) {
-      printf("%d: waittable update: pc %x data: %x\n", GTimer(), io.update(i).waddr, io.update(i).wdata)
+      XSDebug("%d: waittable update: pc %x data: %x\n", GTimer(), io.update(i).waddr, io.update(i).wdata)
     }
   }
 }

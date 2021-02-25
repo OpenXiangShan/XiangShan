@@ -152,7 +152,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     )
   )
 
-  // update waittable if laod violation redirect triggered
+  // update waittable if load violation redirect triggered
   io.waitTableUpdate.valid := isReplay && s2_redirect_valid_reg
   io.waitTableUpdate.waddr := real_pc(VAddrBits-1, 1)
   io.waitTableUpdate.wdata := true.B
