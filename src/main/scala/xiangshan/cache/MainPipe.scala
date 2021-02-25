@@ -60,6 +60,186 @@ class MainPipeResp extends DCacheBundle
   }
 }
 
+class NewMainPipe extends DCacheModule {
+  val io = IO(new DCacheBundle {
+    // req and resp
+    val req        = Flipped(DecoupledIO(new MainPipeReq))
+    val miss_req   = DecoupledIO(new MissReq)
+    val miss_resp  = ValidIO(new MainPipeResp)
+    val store_resp = ValidIO(new MainPipeResp)
+    val amo_resp   = ValidIO(new MainPipeResp)
+
+    // meta/data read/write
+    val data_read  = DecoupledIO(new L1DataReadReq)
+    val data_resp  = Input(Vec(blockRows, Bits(encRowBits.W)))
+    val data_write = DecoupledIO(new L1DataWriteReq)
+
+    val meta_read  = DecoupledIO(new L1MetaReadReq)
+    val meta_resp  = Input(Vec(nWays, new L1Metadata))
+    val meta_write = DecoupledIO(new L1MetaWriteReq)
+
+    // write back
+    val wb_req     = DecoupledIO(new WritebackReq)
+
+    // lrsc locked block should block probe
+    val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
+  })
+
+  // assign default value to output signals
+  io.req.ready := false.B
+  io.miss_req.valid := false.B
+  io.miss_resp.valid := false.B
+  io.store_resp.valid := false.B
+  io.amo_resp.valid := false.B
+
+  io.data_read.valid := false.B
+  io.data_write.valid := false.B
+  io.data_write.bits := DontCare
+  io.meta_read.valid := false.B
+  io.meta_write.valid := false.B
+  io.meta_write.bits := DontCare
+
+  io.wb_req.valid := false.B
+  io.wb_req.bits := DontCare
+
+  io.lrsc_locked_block.valid := false.B
+  io.lrsc_locked_block.bits := DontCare
+
+  // Pipeline
+  val s1_s0_set_conflict, s2_s0_set_conflict, s3_s0_set_conflict = Wire(Bool())
+  val set_conflict = s1_s0_set_conflict || s2_s0_set_conflict || s3_s0_set_conflict
+  val s1_ready, s2_ready, s3_ready = Wire(Bool())
+
+  // --------------------------------------------------------------------------------
+  // stage 0
+  // read meta
+  val s0_valid = io.req.valid
+  val s0_fire = s0_valid && s1_ready
+  val s0_req = io.req.bits
+
+  val word_mask = Wire(Vec(blockRows, Vec(rowWords, Bits(wordBytes.W))))
+  for (i <- 0 until blockRows) {
+    for (w <- 0 until rowWords) {
+      word_mask(i)(w) := s0_req.store_mask((i + 1) * rowBytes - 1, i * rowBytes)((w + 1) * wordBytes - 1, w * wordBytes)
+    }
+  }
+
+  val word_full_overwrite = Wire(Vec(blockRows, Bits(rowWords.W)))
+  val word_write = Wire(Vec(blockRows, Bits(rowWords.W)))
+  for (i <- 0 until blockRows) {
+    word_full_overwrite(i) := VecInit((0 until rowWords).map { w => word_mask(i)(w).andR }).asUInt
+    word_write(i) := VecInit((0 until rowWords).map { w => word_mask(i)(w).orR }).asUInt
+  }
+  val row_full_overwrite = VecInit(word_full_overwrite.map(_.andR)).asUInt
+  val row_write = VecInit(word_write.map(_.orR)).asUInt
+  val full_overwrite = row_full_overwrite.andR
+
+  // sanity check
+  when (s0_fire) {
+    when (s0_req.miss) {
+      assert(RegNext(full_overwrite), "miss req should full overwrite")
+    }
+    OneHot.checkOneHot(Seq(s0_req.miss, s0_req.probe))
+  }
+
+  val meta_ready = io.meta_read.ready
+  val data_ready = io.data_read.ready
+  io.req.ready := meta_ready && !set_conflict && s1_ready
+
+  io.meta_read.valid := io.req.valid && !set_conflict && s1_ready
+  val meta_read = io.meta_read.bits
+  meta_read.idx := get_idx(s0_req.addr)
+  meta_read.way_en := ~0.U(nWays.W)
+  meta_read.tag := DontCare
+
+  // generata rmask here and use it in stage 1
+  // If req comes form MissQueue, it must be a full overwrite,
+  //   but we still need to read data array
+  //   since we may do replacement
+  // If it's a store(not from MissQueue):
+  //   If it's full mask, no need to read data array;
+  //   If it's partial mask, no need to read full masked words.
+  // If it's a AMO(not from MissQueue), only need to read the specific word.
+  // If it's probe, read it all.
+  val miss_need_data = s0_req.miss
+  val store_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === STORE_SOURCE.U && !full_overwrite
+  val amo_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === AMO_SOURCE.U
+  val probe_need_data = s0_req.probe
+  
+  val need_data = miss_need_data || store_need_data || amo_need_data || probe_need_data
+
+  def rowWordBits = log2Floor(rowWords)
+  val amo_row = s0_req.word_idx >> rowWordBits
+  val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
+  val amo_word_addr = s0_req.addr + (s0_req.word_idx << wordOffBits)
+
+  val store_rmask = row_write & ~row_full_overwrite
+  val amo_rmask = UIntToOH(amo_row)
+  val full_rmask = ~0.U(blockRows.W)
+  val none_rmask = 0.U(blockRows.W)
+
+  val s0_rmask = Mux(store_need_data, store_rmask,
+    Mux(amo_need_data, amo_rmask,
+    Mux(probe_need_data || miss_need_data, full_rmask, none_rmask)))
+
+  // generate wmask here and use it in stage 2
+  val store_wmask = word_write
+  val amo_wmask = WireInit(VecInit((0 until blockRows).map(i => 0.U(rowWords.W))))
+  amo_wmask(amo_row) := VecInit((0 until rowWords).map(w => w.U === amo_word)).asUInt
+  val full_wmask = VecInit((0 until blockRows).map(i => ~0.U(rowWords.W)))
+  val none_wmask = VecInit((0 until blockRows).map(i => 0.U(rowWords.W)))
+
+  dump_pipeline_reqs("MainPipe s0", s0_valid, s0_req)
+
+  // --------------------------------------------------------------------------------
+  // stage 1
+  // read data, get meta, check hit or miss
+  val s1_valid = RegInit(false.B)
+  val s1_fire = s1_valid && s2_ready && data_ready
+  val s1_req = RegEnable(s0_req, s0_fire)
+
+  val s1_need_data = RegEnable(need_data, s0_fire)
+  val s1_rmask = RegEnable(s0_rmask, s0_fire)
+  val s1_store_wmask = RegEnable(store_wmask, s0_fire)
+  val s1_amo_wmask = RegEnable(amo_wmask, s0_fire)
+
+  val s1_amo_row = RegEnable(amo_row, s0_fire)
+  val s1_amo_word = RegEnable(amo_word, s0_fire)
+  val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
+
+  s1_s0_set_conflict := s1_valid && get_idx(s1_req.addr) === get_idx(s0_req.addr)
+
+  when (s0_fire) {
+    s1_valid := true.B
+  }.elsewhen (s1_fire) {
+    s1_valid := false.B
+  }
+  s1_ready := !s1_valid || s1_fire
+
+  // tag match
+  val meta_resp = WireInit(VecInit(nWays, 0.U.asTypeOf(new L1Metadata)))
+  meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(meta_resp))
+
+  def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
+  val s1_tag_eq_way = 
+
+
+
+  // read data
+  io.data_read.valid := s1_valid && s2_ready
+  val data_read = io.data_read.bits
+  data_read.rmask := s1_rmask
+  // data_read.way_en :=
+  // data_read.addr
+
+  dump_pipeline_reqs("MainPipe s1", s1_valid, s1_req)
+
+  // TODO: assign s2_s0_set_conflict, s3_s0_set_conflict
+  // TODO: assign s2_ready, s3_ready
+
+
+}
+
 class MainPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle {
