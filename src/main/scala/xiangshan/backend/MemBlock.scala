@@ -144,11 +144,12 @@ class MemBlockImp
     // load has uncertain latency, so only use external wake up data
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-      .map(_._2.bits.data) ++ loadUnits.map(_.io.ldout.bits.data)
+      .map(_._2.bits.data) ++ 
+      (if (cfg == Exu.ldExeUnitCfg) loadUnits.map(_.io.ldout.bits.data) else Seq())
     val wakeupCnt = fastDatas.length
 
     val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
-    val slowPorts = (if (cfg == Exu.ldExeUnitCfg) fpExeWbReqs else inBlockListenPorts) ++
+    val slowPorts = inBlockListenPorts ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map(_._2)
@@ -192,7 +193,8 @@ class MemBlockImp
   for(rs <- reservationStations){
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
-      .map(_._2) ++ loadUnits.map(_.io.fastUop)
+      .map(_._2) ++ 
+      (if (rs.exuCfg == Exu.ldExeUnitCfg) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   // TODO: make this better
