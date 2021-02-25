@@ -253,10 +253,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
+  missQueue.io.probe_req := bus.b.bits.address
 
   //----------------------------------------
   // probe
-  probeQueue.io.mem_probe <> bus.b
+  // probeQueue.io.mem_probe <> bus.b
+  block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
 
   //----------------------------------------
   // mainPipe
