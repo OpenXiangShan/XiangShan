@@ -272,19 +272,29 @@ class DuplicatedDataArray extends AbstractDataArray
 
 class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   val singlePort = true
-  // write is always ready
-  io.write.ready := true.B
+  val readHighPriority = true
+  
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
+  val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
+  io.write.ready := if (readHighPriority) {
+    if (singlePort) {
+      !io.read.map(_.valid).orR
+    } else {
+      !(io.read.zipWithIndex.map { case (r, i) => r.valid && raddrs(i) === waddr }.orR)
+    }
+  } else {
+    true.B
+  }
   for (j <- 0 until LoadPipelineWidth) {
     // only one way could be read
     assert(RegNext(!io.read(j).fire() || PopCount(io.read(j).bits.way_en) === 1.U))
 
-    val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
+    val raddr = raddrs(j)
 
     // for single port SRAM, do not allow read and write in the same cycle
     // for dual port SRAM, raddr === waddr is undefined behavior
     val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
-    io.read(j).ready := !rwhazard
+    io.read(j).ready := if (readHighPriority) true.B else !rwhazard
 
     for (r <- 0 until blockRows) {
       // val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
@@ -348,7 +358,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     shouldReset=false, holdRead=false, singlePort=true))
 
   // tag write
-  val wen = rst || io.write.valid
+  val wen = rst || io.write.fire()
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx=waddr,
@@ -356,13 +366,16 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     waymask=VecInit(wmask).asUInt)
 
   // tag read
-  tag_array.io.r.req.valid := io.read.fire()
+  val ren = io.read.fire()
+  tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
 
-  io.read.ready := !wen
-  io.write.ready := !rst
+  // io.read.ready := !wen
+  // io.write.ready := !rst
+  io.write.ready := !ren
+  io.read.ready := !rst
 
   def dumpRead() = {
     when (io.read.fire()) {

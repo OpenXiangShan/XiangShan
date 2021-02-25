@@ -6,6 +6,60 @@ import freechips.rocketchip.tilelink.ClientMetadata
 
 import utils.XSDebug
 
+// class NewLoadPipe extends DCacheModule {
+//   val io = IO(new DCacheBundle {
+//     // incoming requests
+//     val lsu       = Flipped(new DCacheLoadIO)
+//     // req got nacked in stage 0?
+//     val nack      = Input(Bool())
+
+//     // meta and data array read port
+//     val data_read = DecoupledIO(new L1DataReadReq)
+//     val data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
+//     val meta_read = DecoupledIO(new L1MetaReadReq)
+//     val meta_resp = Input(Vec(nWays, new L1Metadata))
+
+//     // send miss request to miss queue
+//     val miss_req    = DecoupledIO(new MissReq)
+//   })
+
+//   // LSU requests
+//   // it you got nacked, you can directly passdown
+//   val not_nacked_ready = io.meta_read.ready && s1_ready
+//   val nacked_ready     = true.B
+
+//   // ready can wait for valid
+//   io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
+//   io.meta_read.valid := io.lsu.req.fire() && !io.nack
+
+//   val meta_read = io.meta_read.bits
+
+//   // Tag read for new requests
+//   meta_read.idx := get_idx(io.lsu.req.bits.addr)
+//   meta_read.way_en := ~0.U(nWays.W)
+//   meta_read.tag := DontCare
+
+//   // Pipeline
+//   // --------------------------------------------------------------------------------
+//   // stage 0
+//   val s0_valid = io.lsu.req.fire()
+//   val s0_req = io.lsu.req.bits
+//   val s0_fire = s0_valid// && s1_ready
+
+//   assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD), "LoadPipe only accepts load req")
+
+//   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
+
+//   // --------------------------------------------------------------------------------
+//   // stage 1
+//   val s1_valid = RegEnable(s0_valid, s0_fire)
+//   val s1_req = RegEnable(s0_req, s0_fire)
+//   // in stage 1, load unit gets the physical address
+//   val s1_addr = io.lsu.s1_paddr
+
+//   // TODO: s1_ready, and define it earlier
+// }
+
 class LoadPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
