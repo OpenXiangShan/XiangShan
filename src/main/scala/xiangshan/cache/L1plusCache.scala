@@ -685,7 +685,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
   // not encoded data
   val refill_data_raw = Reg(Vec(blockRows, UInt(rowBits.W)))
   when (state === s_refill_resp) {
@@ -696,7 +695,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-          refill_data((refill_ctr << log2Floor(beatRows)) + i.U) := cacheParams.dataCode.encode(row)
           refill_data_raw((refill_ctr << log2Floor(beatRows)) + i.U) := row
         }
 
@@ -729,7 +727,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.refill.bits.way_en  := req.way_en
     io.refill.bits.wmask   := ~0.U(blockRows.W)
     io.refill.bits.rmask   := DontCare
-    io.refill.bits.data    := refill_data
+    io.refill.bits.data    := refill_data_raw.map(row => cacheParams.dataCode.encode(row))
 
     when (io.refill.fire()) {
       state := s_meta_write_req
