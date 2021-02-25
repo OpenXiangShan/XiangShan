@@ -183,5 +183,5 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   //   )
   // }
 
-  XSPerf("utilization", validEntries)
+  XSPerf("ibuf_utilization", validEntries)
 }

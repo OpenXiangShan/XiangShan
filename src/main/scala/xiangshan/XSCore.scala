@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, Uncache, MemoryOpConstants, MissReq}
+import xiangshan.cache.{DCache, InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, Uncache, MemoryOpConstants, MissReq}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -24,9 +24,10 @@ import utils._
 
 object hartIdCore extends (() => Int) {
   var x = 0
+
   def apply(): Int = {
     x = x + 1
-    x-1
+    x - 1
   }
 }
 
@@ -43,7 +44,7 @@ case class XSCoreParameters
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
-  FectchWidth: Int = 8,
+  FetchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -106,9 +107,11 @@ case class XSCoreParameters
   PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 2048,//(256 * 8)
+  PtwL2EntrySize: Int = 2048, //(256 * 8)
   NumPerfCounters: Int = 16,
-  NrExtIntr: Int = 150
+  NrExtIntr: Int = 150,
+  PerfRealTime: Boolean = false,
+  PerfIntervalBits: Int = 15
 )
 
 trait HasXSParameter {
@@ -119,7 +122,9 @@ trait HasXSParameter {
   val XLEN = 64
   val minFLen = 32
   val fLen = 64
+
   def xLen = 64
+
   val HasMExtension = core.HasMExtension
   val HasCExtension = core.HasCExtension
   val HasDiv = core.HasDiv
@@ -133,7 +138,7 @@ trait HasXSParameter {
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = core.HasFPU
-  val FetchWidth = core.FectchWidth
+  val FetchWidth = core.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = core.EnableBPU
   val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
@@ -173,7 +178,7 @@ trait HasXSParameter {
   val exuParameters = core.exuParameters
   val NRIntReadPorts = core.NRIntReadPorts
   val NRIntWritePorts = core.NRIntWritePorts
-  val NRMemReadPorts = exuParameters.LduCnt + 2*exuParameters.StuCnt
+  val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
   val NRFpReadPorts = core.NRFpReadPorts
   val NRFpWritePorts = core.NRFpWritePorts
   val LoadPipelineWidth = core.LoadPipelineWidth
@@ -189,6 +194,8 @@ trait HasXSParameter {
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
   val NrExtIntr = core.NrExtIntr
+  val PerfRealTime = core.PerfRealTime
+  val PerfIntervalBits = core.PerfIntervalBits
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -256,7 +263,7 @@ trait HasXSParameter {
   // dcache prefetcher
   val l2PrefetcherParameters = L2PrefetcherParameters(
     enable = true,
-    _type = "bop",// "stream" or "bop"
+    _type = "bop", // "stream" or "bop"
     streamParams = StreamPrefetchParameters(
       streamCnt = 4,
       streamSize = 4,
@@ -277,7 +284,8 @@ trait HasXSParameter {
   )
 }
 
-trait HasXSLog { this: RawModule =>
+trait HasXSLog {
+  this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
@@ -285,13 +293,13 @@ abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
-  with HasFPUParameters
-{
+  with HasFPUParameters {
   def io: Record
 }
 
 //remove this trait after impl module logic
-trait NeedImpl { this: RawModule =>
+trait NeedImpl {
+  this: RawModule =>
   override protected def IO[T <: Data](iodef: T): T = {
     println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
@@ -327,35 +335,18 @@ case class EnviromentParameters
 // }
 
 
-
 class XSCore()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
-  with HasExeBlockHelper
-{
-
-  // to fast wake up fp, mem rs
-  val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
-  val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
-  val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
-  val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
-
-  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
-  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
-  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
-  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
-
+  with HasExeBlockHelper {
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
-  val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
-    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
-    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
-    fastFpOut = Seq(),
-    slowFpOut = loadExuConfigs,
-    fastIntOut = Seq(),
-    slowIntOut = loadExuConfigs
+    fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
+    slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
+    fastWakeUpOut = Seq(),
+    slowWakeUpOut = loadExuConfigs
   ))
 
   lazy val module = new XSCoreImp(this)
@@ -363,11 +354,11 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
 
 class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasExeBlockHelper
-{
+  with HasExeBlockHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
-    val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
+    val l2_pf_enable = Output(Bool())
   })
 
   val difftestIO = IO(new DifftestBundle())
@@ -381,43 +372,32 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs
-  val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
-  val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
-  val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
-  val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
-
-  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
-  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
-  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
-  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
+  val intBlockFastWakeUp = intExuConfigs.filter(_.hasCertainLatency)
+  val intBlockSlowWakeUp = intExuConfigs.filter(_.hasUncertainlatency)
 
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
-    fastWakeUpIn = fpBlockFastWakeUpInt,
-    slowWakeUpIn = fpBlockSlowWakeUpInt ++ loadExuConfigs,
-    fastFpOut = intBlockFastWakeUpFp,
-    slowFpOut = intBlockSlowWakeUpFp,
-    fastIntOut = intBlockFastWakeUpInt,
-    slowIntOut = intBlockSlowWakeUpInt
+    fastWakeUpIn = Seq(),
+    slowWakeUpIn = fpExuConfigs.filter(_.writeIntRf) ++ loadExuConfigs,
+    fastWakeUpOut = intBlockFastWakeUp,
+    slowWakeUpOut = intBlockSlowWakeUp
   ))
   val floatBlock = Module(new FloatBlock(
-    fastWakeUpIn = intBlockFastWakeUpFp,
-    slowWakeUpIn = intBlockSlowWakeUpFp ++ loadExuConfigs,
-    fastFpOut = fpBlockFastWakeUpFp,
-    slowFpOut = fpBlockSlowWakeUpFp,
-    fastIntOut = fpBlockFastWakeUpInt,
-    slowIntOut = fpBlockSlowWakeUpInt
+    fastWakeUpIn = Seq(),
+    slowWakeUpIn = intExuConfigs.filter(_.writeFpRf) ++ loadExuConfigs,
+    fastWakeUpOut = Seq(),
+    slowWakeUpOut = fpExuConfigs
   ))
 
   val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  val l2Prefetcher = outer.l2Prefetcher.module
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
   frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
+  frontend.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
@@ -431,53 +411,56 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
-  integerBlock.io.wakeUpIn.fastUops <> floatBlock.io.wakeUpIntOut.fastUops
-  integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
-  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
+  val memBlockWakeUpInt = memBlock.io.wakeUpOut.slow.map(x => intOutValid(x))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOut.slow.map(x => fpOutValid(x))
+  memBlock.io.wakeUpOut.slow.foreach(_.ready := true.B)
+
+  fpExuConfigs.zip(floatBlock.io.wakeUpOut.slow).filterNot(_._1.writeIntRf).map(_._2.ready := true.B)
+  val fpBlockWakeUpInt = fpExuConfigs
+    .zip(floatBlock.io.wakeUpOut.slow)
+    .filter(_._1.writeIntRf)
+    .map(_._2).map(x => intOutValid(x, connectReady = true))
+
+  intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
+  val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
+    .zip(integerBlock.io.wakeUpOut.slow)
+    .filter(_._1.writeFpRf)
+    .map(_._2).map(x => fpOutValid(x, connectReady = true))
+
+  integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
 
-  floatBlock.io.wakeUpIn.fastUops <> integerBlock.io.wakeUpFpOut.fastUops
-  floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
-  floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
+  floatBlock.io.wakeUpIn.slow <> intBlockWakeUpFp ++ memBlockWakeUpFp
   floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
 
-
-  integerBlock.io.wakeUpIntOut.fast.map(_.ready := true.B)
-  integerBlock.io.wakeUpIntOut.slow.map(_.ready := true.B)
-  floatBlock.io.wakeUpFpOut.fast.map(_.ready := true.B)
-  floatBlock.io.wakeUpFpOut.slow.map(_.ready := true.B)
-
   val wakeUpMem = Seq(
-    integerBlock.io.wakeUpIntOut,
-    integerBlock.io.wakeUpFpOut,
-    floatBlock.io.wakeUpIntOut,
-    floatBlock.io.wakeUpFpOut
+    integerBlock.io.wakeUpOut,
+    floatBlock.io.wakeUpOut,
   )
   memBlock.io.wakeUpIn.fastUops <> wakeUpMem.flatMap(_.fastUops)
-  memBlock.io.wakeUpIn.fast <> wakeUpMem.flatMap(w => w.fast.map(f => {
-	val raw = WireInit(f)
-	raw
-  }))
-  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(w => w.slow.map(s => {
-	val raw = WireInit(s)
-	raw
-  }))
+  memBlock.io.wakeUpIn.fast <> wakeUpMem.flatMap(_.fast)
+  // Note: 'WireInit' is used to block 'ready's from memBlock,
+  // we don't need 'ready's from memBlock
+  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
 
-  integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
-  integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.hartId <> io.hartId
+  integerBlock.io.csrio.perf <> DontCare
+  integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  integerBlock.io.csrio.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  integerBlock.io.csrio.fpu.isIllegal := false.B
+  integerBlock.io.csrio.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.fpu.frm <> floatBlock.io.frm
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
+  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
-  integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
+
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+
   memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
-
-  floatBlock.io.frm <> integerBlock.io.csrio.frm
-
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -492,18 +475,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.tlb(0) <> dtlbRepester.io.ptw
   ptw.io.tlb(1) <> itlbRepester.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.csr    <> integerBlock.io.csrio.tlb
+  ptw.io.csr <> integerBlock.io.csrio.tlb
 
-  val l2PrefetcherIn = Wire(Decoupled(new MissReq))
-  if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "bop") {
-    l2PrefetcherIn.valid := io.l2ToPrefetcher.acquire.valid
-    l2PrefetcherIn.bits := DontCare
-    l2PrefetcherIn.bits.addr := io.l2ToPrefetcher.acquire.bits.address
-    l2PrefetcherIn.bits.cmd := Mux(io.l2ToPrefetcher.acquire.bits.write, MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
-  } else {
-    l2PrefetcherIn <> memBlock.io.toDCachePrefetch
-  }
-  l2Prefetcher.io.in <> l2PrefetcherIn
+  // if l2 prefetcher use stream prefetch, it should be placed in XSCore
+  assert(l2PrefetcherParameters._type == "bop")
+  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()

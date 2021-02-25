@@ -37,9 +37,6 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits.vaddr := saddr
 
   io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-    io.out.bits.data := io.in.bits.src2
-  } // not not touch fp store raw data
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx
@@ -64,7 +61,6 @@ class StoreUnit_S1 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    // val fp_out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
@@ -92,7 +88,7 @@ class StoreUnit_S1 extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.lsq.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
+  io.lsq.valid := io.in.valid && !s1_tlb_miss
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
@@ -103,12 +99,6 @@ class StoreUnit_S1 extends XSModule {
   // mmio inst with exception will be writebacked immediately
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
-
-  // encode data for fp store
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-	  io.lsq.bits.data := genWdata(ieee(io.in.bits.data), io.in.bits.uop.ctrl.fuOpType(1,0))
-	}
-
 }
 
 class StoreUnit_S2 extends XSModule {

@@ -334,8 +334,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val updateValid = io.update.valid
   val update = io.update.bits
 
-  val redirectValid = io.redirect.valid
-  val redirect = io.redirect.bits.cfiUpdate
+  val do_redirect = RegNext(io.redirect)
+  val redirectValid = do_redirect.valid
+  val redirect = do_redirect.bits.cfiUpdate
   val redirectPC = redirect.pc
   val redirectBank = ltbAddr.getBank(redirectPC)
  
@@ -358,7 +359,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.redirect.bits.specCnt := redirect.specCnt(i)
     ltbs(i).io.redirect.bits.mispred := redirect.isMisPred
     ltbs(i).io.redirect.bits.taken := redirect.taken
-    ltbs(i).io.redirect.bits.isReplay := io.redirect.bits.flushItself
+    ltbs(i).io.redirect.bits.isReplay := do_redirect.bits.flushItself
 
     ltbs(i).io.repair := redirectValid && redirectBank =/= i.U
   }
@@ -379,9 +380,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 
-  if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
-  }
+  XSPerf("LoopExit", io.resp.exit.reduce(_||_))
 
   if (BPUDebug && debug) {
     // debug info
@@ -391,7 +390,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
     XSDebug("[IF4][req] updatePC=%x, updateValid=%d, isBr=%b\n", update.ftqPC, updateValid, update.br_mask.asUInt)
-    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, io.redirect.bits.flushItself)
+    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, do_redirect.bits.flushItself)
     XSDebug("[IF4][req] isMisPred=%d\n", redirect.isMisPred)
 
     XSDebug(redirectValid, "[redirect SpecCnt] ")

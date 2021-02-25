@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
-import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot}
+import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
 
 class MissReq extends DCacheBundle
 {
@@ -58,9 +58,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
+
+    // block probe
+    val block_addr = ValidIO(UInt(PAddrBits.W))
   })
 
-  // MSHR:
+  // old MSHR:
   // 1. receive req
   // 2. send acquire req
   // 3. receive grant resp
@@ -72,7 +75,10 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   //    See Tilelink spec 1.8.1 page 69
   //    A slave should not issue a Probe if there is a pending GrantAck on the block. Once the Probe is
   //    issued, the slave should not issue further Probes on that block until it receives a ProbeAck.
-  val s_invalid :: s_refill_req :: s_refill_resp :: s_main_pipe_req :: s_main_pipe_resp :: s_mem_finish :: Nil = Enum(6)
+
+  // new MSHR:
+  // send finish to end the transaction before sending pipe_req
+  val s_invalid :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_main_pipe_req :: s_main_pipe_resp :: s_release_entry :: Nil = Enum(7)
 
   val state = RegInit(s_invalid)
 
@@ -146,6 +152,9 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   io.pipe_req.valid := false.B
   io.pipe_req.bits  := DontCare
+
+  io.block_addr.valid := state === s_mem_finish || state === s_main_pipe_req || state === s_main_pipe_resp
+  io.block_addr.bits := req.addr
 
   when (state =/= s_invalid) {
     XSDebug("entry: %d state: %d\n", io.id, state)
@@ -277,7 +286,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       grantack.bits := edge.GrantAck(io.mem_grant.bits)
       grant_param := io.mem_grant.bits.param
 
-      state := s_main_pipe_req
+      state := s_mem_finish
     }
   }
 
@@ -316,7 +325,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   when (state === s_main_pipe_resp) {
     when (io.pipe_resp.fire()) {
-      state := s_mem_finish
+      state := s_release_entry
     }
   }
 
@@ -326,8 +335,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     when (io.mem_finish.fire()) {
       grantack.valid := false.B
-      state := s_invalid
+      state := s_main_pipe_req
     }
+  }
+
+  when (state === s_release_entry) {
+    state := s_invalid
   }
 }
 
@@ -344,6 +357,10 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
+
+    // block probe
+    val probe_req = Input(UInt(PAddrBits.W))
+    val probe_block = Output(Bool())
   })
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
@@ -353,6 +370,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   val primary_ready  = Wire(Vec(cfg.nMissEntries, Bool()))
   val secondary_ready  = Wire(Vec(cfg.nMissEntries, Bool()))
   val secondary_reject  = Wire(Vec(cfg.nMissEntries, Bool()))
+  val probe_block_vec = Wire(Vec(cfg.nMissEntries, Bool()))
 
   // try merging with existing reqs
   val merge = secondary_ready.asUInt.orR
@@ -390,6 +408,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     primary_ready(i)    := entry.io.primary_ready
     secondary_ready(i)  := entry.io.secondary_ready
     secondary_reject(i) := entry.io.secondary_reject
+    probe_block_vec(i)  := entry.io.block_addr.valid && entry.io.block_addr.bits === io.probe_req
     entry.io.req        := io.req.bits
 
     // entry refill
@@ -413,16 +432,13 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     }
 
     /*
-    if (!env.FPGAPlatform && !env.DualCore) {
-      ExcitingUtils.addSource(
-        BoolStopWatch(
-          start = entry.io.req.fire(), 
-          stop = entry.io.resp.fire(),
-          startHighPriority = true),
-        "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
-        Perf
-      )
-    }
+    XSPerf(
+      "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
+      BoolStopWatch(
+        start = entry.io.req.fire(), 
+        stop = entry.io.resp.fire(),
+        startHighPriority = true)
+    )
     */
 
     entry
@@ -440,6 +456,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
   io.pipe_req <> pipe_req_arb.io.out
 
+  io.probe_block := probe_block_vec.asUInt.orR
 
   // print all input/output requests for debug purpose
 
@@ -492,7 +509,9 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     io.mem_finish.bits.dump
   }
 
-  if (!env.FPGAPlatform && !env.DualCore) {
-    ExcitingUtils.addSource(io.req.fire(), "perfCntDCacheMiss", Perf)
+  when (io.probe_block) {
+    XSDebug(p"block probe req ${Hexadecimal(io.probe_req)}\n")
   }
+
+  XSPerf("dcache_miss", io.req.fire())
 }

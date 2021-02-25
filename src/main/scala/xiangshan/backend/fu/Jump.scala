@@ -14,6 +14,34 @@ trait HasRedirectOut { this: RawModule =>
   val redirectOut = IO(Output(new Redirect))
 }
 
+class JumpDataModule extends XSModule {
+  val io = IO(new Bundle() {
+    val src1 = Input(UInt(XLEN.W))
+    val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
+    val immMin = Input(UInt(ImmUnion.maxLen.W))
+    val func = Input(FuOpType())
+    val isRVC = Input(Bool())
+    val result, target = Output(UInt(XLEN.W))
+    val isAuipc = Output(Bool())
+  })
+  val (src1, pc, immMin, func, isRVC) = (io.src1, io.pc, io.immMin, io.func, io.isRVC)
+
+  val isJalr = JumpOpType.jumpOpisJalr(func)
+  val isAuipc = JumpOpType.jumpOpisAuipc(func)
+  val offset = SignExt(ParallelMux(Seq(
+    isJalr -> ImmUnion.I.toImm32(immMin),
+    isAuipc -> ImmUnion.U.toImm32(immMin),
+    !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
+  )), XLEN)
+
+  val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
+  val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+
+  io.target := target
+  io.result := Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
+  io.isAuipc := isAuipc
+}
+
 class Jump extends FunctionUnit with HasRedirectOut {
 
   val (src1, jalr_target, pc, immMin, func, uop) = (
@@ -25,41 +53,33 @@ class Jump extends FunctionUnit with HasRedirectOut {
     io.in.bits.uop
   )
 
-  val isJalr = JumpOpType.jumpOpisJalr(func)
-  val isAuipc = JumpOpType.jumpOpisAuipc(func)
-  val offset = SignExt(ParallelMux(Seq(
-    isJalr -> ImmUnion.I.toImm32(immMin),
-    isAuipc -> ImmUnion.U.toImm32(immMin),
-    !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
-  )), XLEN)
-
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
   val valid = io.in.valid
-
   val isRVC = uop.cf.pd.isRVC
-  val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
-  val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
-  redirectOutValid := valid && !isAuipc
+  val jumpDataModule = Module(new JumpDataModule)
+  jumpDataModule.io.src1 := src1
+  jumpDataModule.io.pc := pc
+  jumpDataModule.io.immMin := immMin
+  jumpDataModule.io.func := func
+  jumpDataModule.io.isRVC := isRVC
+
+  redirectOutValid := valid && !jumpDataModule.io.isAuipc
   redirectOut := DontCare
-  redirectOut.cfiUpdate.target := target
+  redirectOut.cfiUpdate.target := jumpDataModule.io.target
   redirectOut.level := RedirectLevel.flushAfter
   redirectOut.roqIdx := uop.roqIdx
   redirectOut.ftqIdx := uop.cf.ftqPtr
   redirectOut.ftqOffset := uop.cf.ftqOffset
   redirectOut.cfiUpdate.predTaken := true.B
   redirectOut.cfiUpdate.taken := true.B
-  redirectOut.cfiUpdate.target := target
-  redirectOut.cfiUpdate.isMisPred := target =/= jalr_target || !uop.cf.pred_taken
-
-
-  // Output
-  val res = Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
+  redirectOut.cfiUpdate.target := jumpDataModule.io.target
+  redirectOut.cfiUpdate.isMisPred := jumpDataModule.io.target =/= jalr_target || !uop.cf.pred_taken
 
   io.in.ready := io.out.ready
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := res
+  io.out.bits.data := jumpDataModule.io.result
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
   XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d)\n",
@@ -71,5 +91,4 @@ class Jump extends FunctionUnit with HasRedirectOut {
     io.redirectIn.bits.level,
     redirectHit
   )
-  XSDebug(io.in.valid, "src1:%x offset:%x func:%b type:JUMP pc:%x res:%x\n", src1, offset, func, pc, res)
 }

@@ -13,11 +13,11 @@ class AluExeUnit extends Exu(aluExeUnitCfg)
     case a: Alu => a
   }.get
 
-  io.toInt.bits.redirectValid := alu.redirectOutValid
-  io.toInt.bits.redirect := alu.redirectOut
+  io.out.bits.redirectValid := alu.redirectOutValid
+  io.out.bits.redirect := alu.redirectOut
 
   XSDebug(io.fromInt.valid || io.redirect.valid,
-    p"fromInt(${io.fromInt.valid} ${io.fromInt.ready}) toInt(${io.toInt.valid} ${io.toInt.ready})" +
+    p"fromInt(${io.fromInt.valid} ${io.fromInt.ready}) toInt(${io.out.valid} ${io.out.ready})" +
       p"Redirect:(${io.redirect.valid}) roqIdx:${io.redirect.bits.roqIdx}\n",
   )
   XSDebug(io.fromInt.valid,
@@ -25,7 +25,7 @@ class AluExeUnit extends Exu(aluExeUnitCfg)
       p"src3:${Hexadecimal(io.fromInt.bits.src3)} func:${Binary(io.fromInt.bits.uop.ctrl.fuOpType)} " +
       p"pc:${Hexadecimal(io.fromInt.bits.uop.cf.pc)} roqIdx:${io.fromInt.bits.uop.roqIdx}\n"
   )
-  XSDebug(io.toInt.valid,
-    p"res:${Hexadecimal(io.toInt.bits.data)}\n"
+  XSDebug(io.out.valid,
+    p"res:${Hexadecimal(io.out.bits.data)}\n"
   )
 }

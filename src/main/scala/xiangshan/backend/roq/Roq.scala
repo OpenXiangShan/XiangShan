@@ -473,9 +473,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val misPredWb = Cat(VecInit((0 until numWbPorts).map(i =>
     io.exeWbResults(i).bits.redirect.cfiUpdate.isMisPred && io.exeWbResults(i).bits.redirectValid
   ))).orR()
-  val misPredBlockCounter = Reg(UInt(2.W))
+  val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
-    "b11".U,
+    "b111".U,
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
@@ -792,22 +792,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
-  XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
-  XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
-  XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))
-  XSPerf("commitInstrStore", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.STORE})))
-  XSPerf("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
+  XSPerf("roq_utilization", PopCount((0 until RoqSize).map(valid(_))))
+  XSPerf("roq_commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
+  XSPerf("roq_commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))
+  XSPerf("roq_commitInstrStore", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.STORE})))
+  XSPerf("roq_writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
   // XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
   // XSPerf("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
-  XSPerf("walkInstrAcc", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U), acc = true)
-  XSPerf("walkCycleAcc", state === s_walk || state === s_extrawalk, acc = true)
+  XSPerf("roq_walkInstrAcc", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U), acc = true)
+  XSPerf("roq_walkCycleAcc", state === s_walk || state === s_extrawalk, acc = true)
   val deqNotWritebacked = valid(deqPtr.value) && !writebacked(deqPtr.value)
   val deqUopCommitType = io.commits.info(0).commitType
-  XSPerf("waitNormalCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL, acc = true)
-  XSPerf("waitBranchCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.BRANCH, acc = true)
-  XSPerf("waitLoadCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.LOAD, acc = true)
-  XSPerf("waitStoreCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.STORE, acc = true)
-  XSPerf("roqHeadPC", io.commits.info(0).pc)
+  XSPerf("roq_waitNormalCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL, acc = true)
+  XSPerf("roq_waitBranchCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.BRANCH, acc = true)
+  XSPerf("roq_waitLoadCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.LOAD, acc = true)
+  XSPerf("roq_waitStoreCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.STORE, acc = true)
+  XSPerf("roq_roqHeadPC", io.commits.info(0).pc)
 
   val instrCnt = RegInit(0.U(64.W))
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
@@ -866,7 +866,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
+  if (!env.FPGAPlatform && !env.DualCore) {
     ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
   }
 

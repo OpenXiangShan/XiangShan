@@ -484,5 +484,5 @@ class Sbuffer extends XSModule with HasSBufferConst {
     XSDebug(line.valid, "[#%d line] Tag: %x, data: %x, mask: %x\n", i.U, line.tag, line.data.asUInt(), line.mask.asUInt())
   }}
 
-  XSPerf("waitResp", waitingCacheLine.valid)
+  XSPerf("sbuf_waitResp", waitingCacheLine.valid)
 }

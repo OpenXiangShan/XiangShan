@@ -8,14 +8,6 @@ import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.util._
 
-object hartId extends (() => Int) {
-  var x = 0
-  def apply(): Int = {
-    x = x + 1
-    x-1
-  }
-}
-
 trait HasExceptionNO {
   def instrAddrMisaligned = 0
   def instrAccessFault    = 1
@@ -122,27 +114,38 @@ class PerfCounterIO extends XSBundle {
   val value = Input(UInt(XLEN.W))
 }
 
+class CustomCSRCtrlIO extends XSBundle {
+  val l1plus_pf_enable = Output(Bool())
+  val l2_pf_enable = Output(Bool())
+  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+}
+
+class CSRFileIO extends XSBundle {
+  val hartId = Input(UInt(64.W))
+  // output (for func === CSROpType.jmp)
+  val perf = new PerfCounterIO
+  val isPerfCnt = Output(Bool())
+  // to FPU
+  val fpu = Flipped(new FpuCsrIO)
+  // from rob
+  val exception = Flipped(ValidIO(new ExceptionInfo))
+  // to ROB
+  val isXRet = Output(Bool())
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val interrupt = Output(Bool())
+  // from LSQ
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  // from outside cpu,externalInterrupt
+  val externalInterrupt = new ExternalInterruptIO
+  // TLB
+  val tlb = Output(new TlbCsrBundle)
+  // Prefetcher
+  val customCtrl = Output(new CustomCSRCtrlIO)
+}
+
 class CSR extends FunctionUnit with HasCSRConst
 {
-  val csrio = IO(new Bundle {
-    // output (for func === CSROpType.jmp)
-    val perf = new PerfCounterIO
-    val isPerfCnt = Output(Bool())
-    // to FPU
-    val fpu = Flipped(new FpuCsrIO)
-    // from rob
-    val exception = Flipped(ValidIO(new ExceptionInfo))
-    // to ROB
-    val isXRet = Output(Bool())
-    val trapTarget = Output(UInt(VAddrBits.W))
-    val interrupt = Output(Bool())
-    // from LSQ
-    val memExceptionVAddr = Input(UInt(VAddrBits.W))
-    // from outside cpu,externalInterrupt
-    val externalInterrupt = new ExternalInterruptIO
-    // TLB
-    val tlb = Output(new TlbCsrBundle)
-  })
+  val csrio = IO(new CSRFileIO)
   val difftestIO = IO(new Bundle() {
     val intrNO = Output(UInt(64.W))
     val cause = Output(UInt(64.W))
@@ -255,8 +258,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
-  val mhartNo = hartId()
-  val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
+  val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), 0.U)
 
   // mstatus Value Table
@@ -331,9 +333,19 @@ class CSR extends FunctionUnit with HasCSRConst
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
+  // spfctl Bit 0: L1plusCache Prefetcher Enable
+  // spfctl Bit 1: L2Cache Prefetcher Enable
+  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
+  // sdsid: Differentiated Services ID
+  val sdsid = RegInit(UInt(XLEN.W), 0.U)
+
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   csrio.tlb := tlbBundle
+
+  csrio.customCtrl.l1plus_pf_enable := spfctl(0)
+  csrio.customCtrl.l2_pf_enable := spfctl(1)
+  csrio.customCtrl.dsid := sdsid
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -456,6 +468,10 @@ class CSR extends FunctionUnit with HasCSRConst
 
     //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
+
+    //--- Supervisor Custom Read/Write Registers
+    MaskedRegMap(Spfctl, spfctl),
+    MaskedRegMap(Sdsid, sdsid),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
@@ -789,113 +805,9 @@ class CSR extends FunctionUnit with HasCSRConst
 
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
 
-
-  /**
-    * Emu Performance counters
-    */
-  val emuPerfCntList = Map(
-    // "Mcycle"    -> (0x1000, "perfCntCondMcycle"     ),
-    // "Minstret"  -> (0x1002, "perfCntCondMinstret"   ),
-    "BpInstr"     -> (0x1003, "perfCntCondBpInstr" ),
-    "BpRight"     -> (0x1004, "perfCntCondBpRight" ),
-    "BpWrong"     -> (0x1005, "perfCntCondBpWrong" ),
-    "BpBRight"    -> (0x1006, "perfCntCondBpBRight"),
-    "BpBWrong"    -> (0x1007, "perfCntCondBpBWrong"),
-    "BpJRight"    -> (0x1008, "perfCntCondBpJRight"),
-    "BpJWrong"    -> (0x1009, "perfCntCondBpJWrong"),
-    "BpIRight"    -> (0x100a, "perfCntCondBpIRight"),
-    "BpIWrong"    -> (0x100b, "perfCntCondBpIWrong"),
-    "BpRRight"    -> (0x100c, "perfCntCondBpRRight"),
-    "BpRWrong"    -> (0x100d, "perfCntCondBpRWrong"),
-    "RoqWalk"     -> (0x100f, "perfCntCondRoqWalk"  ),
-    "DTlbReqCnt0" -> (0x1015, "perfCntDtlbReqCnt0"  ),
-    "DTlbReqCnt1" -> (0x1016, "perfCntDtlbReqCnt1"  ),
-    "DTlbReqCnt2" -> (0x1017, "perfCntDtlbReqCnt2"  ),
-    "DTlbReqCnt3" -> (0x1018, "perfCntDtlbReqCnt3"  ),
-    "DTlbMissCnt0"-> (0x1019, "perfCntDtlbMissCnt0" ),
-    "DTlbMissCnt1"-> (0x1020, "perfCntDtlbMissCnt1" ),
-    "DTlbMissCnt2"-> (0x1021, "perfCntDtlbMissCnt2" ),
-    "DTlbMissCnt3"-> (0x1022, "perfCntDtlbMissCnt3" ),
-    "ITlbReqCnt0" -> (0x1023, "perfCntItlbReqCnt0"  ),
-    "ITlbMissCnt0"-> (0x1024, "perfCntItlbMissCnt0" ),
-    "PtwReqCnt"   -> (0x1025, "perfCntPtwReqCnt"    ),
-    "PtwCycleCnt" -> (0x1026, "perfCntPtwCycleCnt"  ),
-    "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
-    "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
-    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
-    "ICacheMMIO" -> (0x102a, "perfCntIcacheMMIOCnt"),
-    // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
-    // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
-    // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
-    // "ExitLoop3" -> (0x102e, "CntExitLoop3")
-
-    "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
-    "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),
-    "btbRight"    -> (0x1032, "perfCntbtbRight"),
-    "btbWrong"    -> (0x1033, "perfCntbtbWrong"),
-    "tageRight"   -> (0x1034, "perfCnttageRight"),
-    "tageWrong"   -> (0x1035, "perfCnttageWrong"),
-    "rasRight"    -> (0x1036, "perfCntrasRight"),
-    "rasWrong"    -> (0x1037, "perfCntrasWrong"),
-    "loopRight"   -> (0x1038, "perfCntloopRight"),
-    "loopWrong"   -> (0x1039, "perfCntloopWrong"),
-    "s1Right"     -> (0x103a, "perfCntS1Right"),
-    "s1Wrong"     -> (0x103b, "perfCntS1Wrong"),
-    "s2Right"     -> (0x103c, "perfCntS2Right"),
-    "s2Wrong"     -> (0x103d, "perfCntS2Wrong"),
-    "s3Right"     -> (0x103e, "perfCntS3Right"),
-    "s3Wrong"     -> (0x103f, "perfCntS3Wrong"),
-    "loopExit" -> (0x1040, "perfCntLoopExit"),
-    "takenButWrong" -> (0x1041, "perfCntTakenButWrong"),
-    // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
-  ) ++ (
-    (0 until dcacheParameters.nMissEntries).map(i => 
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x1042 + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
-    ).toMap
-  ) ++ (
-    (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
-    ).toMap
-  ) ++ (
-    (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
-    ).toMap
-  ) ++ (
-    (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x1042 + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
-    ).toMap
-  )
-
-  emuPerfCntList.foreach {
-    case (_, (address, boringId)) =>
-      if (hasEmuPerfCnt) {
-        ExcitingUtils.addSink(emuPerfCntCond(address & 0x7f), boringId, ConnectionType.Perf)
-      }
-      // if (!hasEmuPerfCnt) {
-      //   // do not enable perfcnts except for Mcycle and Minstret
-      //   if (address != emuPerfCntList("Mcycle")._1 && address != emuPerfCntList("Minstret")._1) {
-      //     perfCntCond(address & 0x7f) := false.B
-      //   }
-      // }
-  }
-  
-  val xstrap = WireInit(false.B)
-  if (!env.FPGAPlatform && EnableBPU && !env.DualCore) {
-    ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
-  }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-  
-  if (!env.FPGAPlatform) {
-    // display all perfcnt when nooptrap is executed
-    when (xstrap) {
-      printf("======== PerfCnt =========\n")
-      emuPerfCntList.toSeq.sortBy(_._2._1).foreach { case (str, (address, _)) =>
-        printf("%d <- " + str + "\n", readWithScala(address))
-      }
-    }
-  }
 
   if (!env.FPGAPlatform) {
     difftestIO.intrNO := RegNext(difftestIntrNO)
