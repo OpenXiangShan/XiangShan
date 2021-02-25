@@ -783,6 +783,10 @@ inline void Emulator::save_coverage(time_t t) {
 }
 #endif
 
+void Emulator::trigger_perfDump() {
+  dut_ptr->io_perfInfo_dump = 1;
+  single_cycle();
+}
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
@@ -797,15 +801,19 @@ void Emulator::display_trapinfo() {
       eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_ABORT:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_LIMIT_EXCEEDED:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_SIG:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
   }
 

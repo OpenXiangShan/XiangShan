@@ -78,6 +78,7 @@ class Emulator {
 
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
+  void trigger_perfDump();
   void display_trapinfo();
   inline char* timestamp_filename(time_t t, char *buf);
   inline char* snapshot_filename(time_t t);
