@@ -243,18 +243,19 @@ class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam
   addResource("/csrc/remote_bitbang.cc")
 }
 
-object Debug {
+object OuterDebug {
   def connectDebug(
       debugOpt: Option[DebugIO],
       resetctrlOpt: Option[ResetCtrlIO],
-      psdio: PSDIO,
+      //psdio: PSDIO,
       c: Clock,
       r: Bool,
       out: Bool,
       tckHalfPeriod: Int = 2,
       cmdDelay: Int = 2,
-      psd: PSDTestMode = 0.U.asTypeOf(new PSDTestMode()))
-      (implicit p: Parameters): Unit =  {
+      // psd: PSDTestMode = 0.U.asTypeOf(new PSDTestMode()))
+  )
+    (implicit p: Parameters): Unit =  {
     connectDebugClockAndReset(debugOpt, c)
     resetctrlOpt.map { rcio => rcio.hartIsInReset.map { _ := r }}
     debugOpt.map { debug =>
@@ -263,7 +264,7 @@ object Debug {
       }
       debug.systemjtag.foreach { sj =>
         val jtag = Module(new SimJTAG(tickDelay=3)).connect(sj.jtag, c, r, ~r, out)
-        sj.reset := r.asAsyncReset
+        sj.reset := r//.asAsyncReset
         sj.mfr_id := p(JtagDTMKey).idcodeManufId.U(11.W)
         sj.part_number := p(JtagDTMKey).idcodePartNum.U(16.W)
         sj.version := p(JtagDTMKey).idcodeVersion.U(4.W)
@@ -271,7 +272,7 @@ object Debug {
       debug.apb.foreach { apb =>
         require(false, "No support for connectDebug for an APB debug connection.")
       }
-      psdio.psd.foreach { _ <> psd }
+      // psdio.psd.foreach { _ <> psd }
       debug.disableDebug.foreach { x => x := false.B }
     }
   }

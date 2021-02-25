@@ -13,6 +13,8 @@ import xiangshan._
 import utils._
 import ExcitingUtils.Debug
 import devices.debug.SystemJTAGIO
+import devices.debug.{SimJTAG, DebugIO, OuterDebug}
+import freechips.rocketchip.util.AsyncResetReg
 
 class DiffTestIO extends XSBundle {
   val r = Output(Vec(64, UInt(XLEN.W)))
@@ -117,8 +119,6 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
       val uart = new UARTIO
-
-      val sj = new SystemJTAGIO
     })
 
     dontTouch(io.difftest)
@@ -132,7 +132,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       soc.module.io.extIntrs(i) := false.B
     }
 
-    soc.module.io.sj <> io.sj
+    val success = Wire(Bool())
+    soc.module.reset := (reset.asBool | soc.module.debug.map { debug => AsyncResetReg(debug.ndreset) }.getOrElse(false.B)).asBool
+    OuterDebug.connectDebug(soc.module.debug, soc.module.resetctrl, clock, reset.asBool, success)
+
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {
@@ -223,8 +226,6 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val trap = new TrapIO
       val uart = new UARTIO
       val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
-
-      val sj = new SystemJTAGIO
     })
 
     io.difftest <> dut.module.io.difftest
@@ -232,7 +233,6 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
 
-    io.sj <> dut.module.io.sj
     if (axiSim) {
       io.memAXI <> axiSimRam.module.io
     }

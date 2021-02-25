@@ -13,8 +13,9 @@ import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveC
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
-import devices.debug.{TLDebugModule, SystemJTAGIO, DebugTransportModuleJTAG, DebugModuleKey}
+import devices.debug.{TLDebugModule, DebugIO, ResetCtrlIO, SystemJTAGIO, DebugTransportModuleJTAG, DebugModuleKey}
 import freechips.rocketchip.jtag.JTAGIO
+import chisel3.experimental.{IntParam, noPrefix}
 
 case class SoCParameters
 (
@@ -160,14 +161,14 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   // DM
   val DM = LazyModule(new TLDebugModule(beatBytes = 8))
-  DM.dmInner.dmInner.tlNode := mmioXbar
+  DM.node := mmioXbar
   
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
       val extIntrs = Input(Vec(NrExtIntr, Bool()))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
-      val sj = new SystemJTAGIO
+      // debug io is below, both are options
     })
 
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
@@ -180,19 +181,77 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.debug_int := DM.module.io.debug_int(i)
     }
 
-    val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize))
+    val resetctrl = Some(DM).map { outerdebug =>
+      outerdebug.module.io.tl_reset := reset
+      outerdebug.module.io.tl_clock := clock
+      val resetctrl = IO(new ResetCtrlIO(p(DebugModuleKey).get.nComponents))
+      outerdebug.module.io.hartIsInReset := resetctrl.hartIsInReset
+      resetctrl.hartResetReq.foreach { rcio => outerdebug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
+      resetctrl
+    }
 
-    dtm.io.jtag_clock  := io.sj.jtag.TCK
-    dtm.io.jtag_reset  := io.sj.reset
-    dtm.io.jtag_mfr_id := io.sj.mfr_id
-    dtm.io.jtag_part_number := io.sj.part_number
-    dtm.io.jtag_version := io.sj.version
-    dtm.io.jtag <> io.sj.jtag
-    dtm.rf_reset := io.sj.reset
+    // noPrefix is workaround https://github.com/freechipsproject/chisel3/issues/1603
+    val debug = noPrefix(Some(DM).map { outerdebug =>
+      val debug = IO(new DebugIO)
 
-    DM.module.io.dmi.get.dmi <> dtm.io.dmi
-    DM.module.io.dmi.get.dmiClock := io.sj.jtag.TCK
-    DM.module.io.dmi.get.dmiReset := io.sj.reset
+      require(!(debug.clockeddmi.isDefined && debug.systemjtag.isDefined),
+        "You cannot have both DMI and JTAG interface in HasPeripheryDebugModuleImp")
+
+      require(!(debug.clockeddmi.isDefined && debug.apb.isDefined),
+        "You cannot have both DMI and APB interface in HasPeripheryDebugModuleImp")
+
+      require(!(debug.systemjtag.isDefined && debug.apb.isDefined),
+        "You cannot have both APB and JTAG interface in HasPeripheryDebugModuleImp")
+
+      debug.clockeddmi.foreach { dbg => outerdebug.module.io.dmi.get <> dbg }
+
+      /*(debug.apb
+        zip outer.apbDebugNodeOpt
+        zip outerdebug.module.io.apb_clock
+        zip outerdebug.module.io.apb_reset).foreach {
+        case (((io, apb), c ), r) =>
+          apb.out(0)._1 <> io
+          c:= io.clock
+          r:= io.reset
+      }*/
+
+      outerdebug.module.io.debug_reset := debug.reset
+      outerdebug.module.io.debug_clock := debug.clock
+
+      debug.ndreset := outerdebug.module.io.ctrl.ndreset
+      debug.dmactive := outerdebug.module.io.ctrl.dmactive
+      outerdebug.module.io.ctrl.dmactiveAck := debug.dmactiveAck
+      debug.extTrigger.foreach { x => outerdebug.module.io.extTrigger.foreach {y => x <> y}}
+
+      // TODO in inheriting traits: Set this to something meaningful, e.g. "component is in reset or powered down"
+      outerdebug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
+
+      debug
+    })
+
+    val dtm = debug.flatMap(_.systemjtag.map(instantiateJtagDTM(_)))
+
+    def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
+
+      val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize)) //, p(JtagDTMKey)))
+      dtm.io.jtag <> sj.jtag
+
+      debug.map(_.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x })  // force TMS high when debug is disabled
+
+      dtm.io.jtag_clock  := sj.jtag.TCK
+      dtm.io.jtag_reset  := sj.reset
+      dtm.io.jtag_mfr_id := sj.mfr_id
+      dtm.io.jtag_part_number := sj.part_number
+      dtm.io.jtag_version := sj.version
+      dtm.rf_reset := sj.reset
+
+      Some(DM).map { outerdebug => 
+        outerdebug.module.io.dmi.get.dmi <> dtm.io.dmi
+        outerdebug.module.io.dmi.get.dmiClock := sj.jtag.TCK
+        outerdebug.module.io.dmi.get.dmiReset := sj.reset
+      }
+      dtm
+    }
 
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)

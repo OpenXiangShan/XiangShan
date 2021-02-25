@@ -237,6 +237,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val dtvec = 0x800.U
 
   debugInt := csrio.externalInterrupt.debug_int
+  XSDebug(debugInt, "DebugInt is 1")
 
   val singleStep = dcsrOld.step && !debugMode
   reg_singleStepped := false.B // && input single_step
