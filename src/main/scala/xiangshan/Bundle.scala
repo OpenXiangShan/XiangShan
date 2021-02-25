@@ -528,3 +528,14 @@ class PerfInfoIO extends XSBundle {
   val clean = Input(Bool())
   val dump = Input(Bool())
 }
+
+class CustomCSRCtrlIO extends XSBundle {
+  // Prefetcher
+  val l1plus_pf_enable = Output(Bool())
+  val l2_pf_enable = Output(Bool())
+  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+  // Load violation predict
+  val lvpred_disable = Output(Bool())
+  val no_spec_load = Output(Bool())
+  val waittable_timeout = Output(UInt(5.W))
+}

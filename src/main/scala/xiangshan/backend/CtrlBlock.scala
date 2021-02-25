@@ -192,6 +192,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       // to mem block
       val lsq = new RoqLsqIO
     }
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val difftestIO = IO(new Bundle() {
@@ -284,6 +285,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   decode.io.waitTableUpdate(1) := DontCare
   decode.io.waitTableUpdate(1).valid := false.B
   // decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
+
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))

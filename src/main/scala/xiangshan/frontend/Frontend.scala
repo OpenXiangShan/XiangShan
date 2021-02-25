@@ -8,7 +8,7 @@ import utils.PipelineConnect
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
-import xiangshan.backend.fu.{HasExceptionNO, CustomCSRCtrlIO}
+import xiangshan.backend.fu.HasExceptionNO
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 

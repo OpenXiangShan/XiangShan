@@ -13,6 +13,8 @@ class DecodeStage extends XSModule {
     val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
+    // waitable ctrl
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
@@ -32,6 +34,7 @@ class DecodeStage extends XSModule {
   for (i <- 0 until StorePipelineWidth) {
     waittable.io.update(i) <> RegNext(io.waitTableUpdate(i))
   }
+  waittable.io.csrCtrl <> io.csrCtrl
 
   val loadWaitBitSet = PopCount(VecInit((0 until DecodeWidth).map(i => waittable.io.rdata(i) && io.out(i).fire())))
   XSPerf("loadWaitBitSet", loadWaitBitSet, acc = true) // rollback redirect generated

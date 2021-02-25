@@ -53,6 +53,8 @@ trait HasCSRConst {
   // Supervisor Custom Read/Write
   val Spfctl        = 0x5C0
 
+  val Slvpredctl    = 0x5C2
+
   val Sdsid         = 0x9C0
 
   // Machine Information Registers
