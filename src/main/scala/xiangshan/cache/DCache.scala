@@ -276,15 +276,15 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
-  io.write.ready := if (readHighPriority) {
+  io.write.ready := (if (readHighPriority) {
     if (singlePort) {
-      !io.read.map(_.valid).orR
+      !VecInit(io.read.map(_.valid)).asUInt.orR
     } else {
-      !(io.read.zipWithIndex.map { case (r, i) => r.valid && raddrs(i) === waddr }.orR)
+      !(Cat(io.read.zipWithIndex.map { case (r, i) => r.valid && raddrs(i) === waddr }).orR)
     }
   } else {
     true.B
-  }
+  })
   for (j <- 0 until LoadPipelineWidth) {
     // only one way could be read
     assert(RegNext(!io.read(j).fire() || PopCount(io.read(j).bits.way_en) === 1.U))
@@ -294,7 +294,7 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
     // for single port SRAM, do not allow read and write in the same cycle
     // for dual port SRAM, raddr === waddr is undefined behavior
     val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
-    io.read(j).ready := if (readHighPriority) true.B else !rwhazard
+    io.read(j).ready := (if (readHighPriority) true.B else !rwhazard)
 
     for (r <- 0 until blockRows) {
       // val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
