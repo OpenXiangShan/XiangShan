@@ -54,13 +54,16 @@ class NewLoadPipe extends DCacheModule {
 
   // --------------------------------------------------------------------------------
   // stage 1
-  val s1_valid = RegEnable(s0_valid, s0_fire)
+  val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_addr = io.lsu.s1_paddr
-  val s1_nack = RegEnable(io.nack, s0_fire)
+  val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
+
+  when (s0_fire) { s1_valid := true.B }
+  .elsewhen (s1_fire) { s1_valid := false.B }
 
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
@@ -87,14 +90,18 @@ class NewLoadPipe extends DCacheModule {
   data_read.way_en := s1_tag_match_way
   // only needs to read the specific row
   data_read.rmask := UIntToOH(get_row(s1_addr))
-  io.data_read.valid := s1_fire && s1_tag_match && !s1_nack
+  io.data_read.valid := s1_fire && !s1_nack
 
   // --------------------------------------------------------------------------------
   // stage 2
-  val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
+  // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
+  val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_addr = RegEnable(s1_addr, s1_fire)
   s2_ready := true.B
+
+  when (s1_fire) { s2_valid := !io.lsu.s1_kill }
+  .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
   
