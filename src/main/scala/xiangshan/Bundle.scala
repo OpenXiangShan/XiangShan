@@ -6,6 +6,8 @@ import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.{ImmUnion, XDecode, WaitTableParameters}
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.frontend.PreDecodeInfoForDebug
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasTageParameter
@@ -209,6 +211,9 @@ class FtqEntry extends XSBundle {
   // backend update
   val mispred = Vec(PredictWidth, Bool())
   val target = UInt(VAddrBits.W)
+
+  // For perf counters
+  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 
   def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
   def hasLastPrev = lastPacketPC.valid
