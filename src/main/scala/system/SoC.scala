@@ -190,9 +190,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-<<<<<<< HEAD
       xs_core(i).module.io.externalInterrupt.debug_int := DM.module.io.debug_int(i)
-=======
       l2prefetcher(i).module.io.enable := xs_core(i).module.io.l2_pf_enable
       l2prefetcher(i).module.io.in <> l2cache(i).module.io
     }
@@ -205,7 +203,6 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     if (env.DualCore) {
       difftestIO1 <> xs_core(1).module.difftestIO
       trapIO1 <> xs_core(1).module.trapIO
->>>>>>> master
     }
 
     val resetctrl = Some(DM).map { outerdebug =>

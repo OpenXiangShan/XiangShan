@@ -815,9 +815,6 @@ class CSR extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-<<<<<<< HEAD
-  csrio.trapTarget := Mux(debugInt, dtvec, Mux(delegS, stvec, mtvec))(VAddrBits-1, 0)
-=======
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
 
   // ctrl block will use theses later for flush
@@ -834,7 +831,6 @@ class CSR extends FunctionUnit with HasCSRConst
     retTargetReg,
     Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   )
->>>>>>> master
 
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -899,3 +895,4 @@ class CSR extends FunctionUnit with HasCSRConst
     difftestIO.medeleg := medeleg
   }
 }
+S

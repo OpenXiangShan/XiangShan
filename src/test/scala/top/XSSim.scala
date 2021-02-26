@@ -150,15 +150,12 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     val difftest = Seq(WireInit(0.U.asTypeOf(new DiffTestIO)), WireInit(0.U.asTypeOf(new DiffTestIO)))
     val trap = Seq(WireInit(0.U.asTypeOf(new TrapIO)), WireInit(0.U.asTypeOf(new TrapIO)))
 
-<<<<<<< HEAD
     val success = Wire(Bool())
     soc.module.reset := (reset.asBool | soc.module.debug.map { debug => AsyncResetReg(debug.ndreset) }.getOrElse(false.B)).asBool
     OuterDebug.connectDebug(soc.module.debug, soc.module.resetctrl, clock, reset.asBool, success)
 
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
-=======
->>>>>>> master
     if (!env.FPGAPlatform) {
       for (i <- 0 until NumCores) {
         difftest(i).commit := soc.module.difftestIO(i).fromRoq.commit
@@ -286,14 +283,10 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     io.perfInfo <> dut.module.io.perfInfo
     io.trap <> dut.module.io.trap
     io.uart <> dut.module.io.uart
-<<<<<<< HEAD
-
-=======
     if (!env.FPGAPlatform && env.DualCore) {
       io.difftest2 <> dut.module.io.difftest2
       io.trap2 <> dut.module.io.trap2
     }
->>>>>>> master
     if (axiSim) {
       io.memAXI <> axiSimRam.module.io
     } else {
