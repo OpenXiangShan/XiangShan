@@ -185,7 +185,10 @@ trait HasCSRConst {
   def IRQ_SSIP  = 9
   def IRQ_MSIP  = 11
 
+  def IRQ_DEBUG = 12
+
   val IntPriority = Seq(
+    IRQ_DEBUG, 
     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
     IRQ_UEIP, IRQ_USIP, IRQ_UTIP
