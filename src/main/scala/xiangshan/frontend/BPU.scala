@@ -559,8 +559,9 @@ class BPU extends BaseBPU {
   }
 
   s3.s3IO.predecode <> io.predecode
-
   s3.s3IO.redirect <> io.redirect
+  s3.s3IO.ctrl <> io.ctrl
+  
 
   if (BPUDebug) {
     if (debug_verbose) {
