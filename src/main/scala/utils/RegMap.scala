@@ -37,7 +37,7 @@ object MaskedRegMap { // TODO: add read mask
   }
   def isIllegalAddr(mapping: Map[Int, (UInt, UInt, UInt => UInt, UInt, UInt => UInt)], addr: UInt):Bool = {
     val illegalAddr = Wire(Bool())
-    illegalAddr := LookupTreeDefault(addr, true.B, mapping.map { case (a, _) => (a.U, false.B) })
+    illegalAddr := LookupTreeDefault(addr, true.B, mapping.toSeq.sortBy(_._1).map { case (a, _) => (a.U, false.B) })
     illegalAddr
   }
   def generate(mapping: Map[Int, (UInt, UInt, UInt => UInt, UInt, UInt => UInt)], addr: UInt, rdata: UInt,

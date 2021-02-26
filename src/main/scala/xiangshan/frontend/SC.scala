@@ -213,9 +213,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
       when (if4_provideds(w)) {
         // Use prediction from Statistical Corrector
         when (!if4_sumBelowThresholds(if4_chooseBit)) {
-          val pred = if4_scPreds(if4_chooseBit)
-          XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${pred}\n")
-          io.resp.takens(w) := pred
+          when (ctrl.sc_enable) {
+            val pred = if4_scPreds(if4_chooseBit)
+            XSDebug(RegNext(s3_fire), p"SC(${w.U}) overriden pred to ${pred}\n")
+            io.resp.takens(w) := pred
+          }
         }
       }
     }
