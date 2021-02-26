@@ -604,8 +604,8 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  // Note that both io.roq.lcommit and RegNext(io.roq.lcommit) should be take into consideration
-  vaddrModule.io.raddr(0) := (deqPtrExt + commitCount + io.roq.lcommit).value
+  // no inst will be commited 1 cycle before tval update
+  vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value 
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
