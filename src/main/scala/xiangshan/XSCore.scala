@@ -380,8 +380,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     slowWakeUpOut = intBlockSlowWakeUp
   ))
   val floatBlock = Module(new FloatBlock(
-    fastWakeUpIn = Seq(),
-    slowWakeUpIn = intExuConfigs.filter(_.writeFpRf) ++ loadExuConfigs,
+    intSlowWakeUpIn = intExuConfigs.filter(_.writeFpRf),
+    memSlowWakeUpIn = loadExuConfigs,
     fastWakeUpOut = Seq(),
     slowWakeUpOut = fpExuConfigs
   ))
@@ -408,9 +408,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOut.slow.map(x => intOutValid(x))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOut.slow.map(x => fpOutValid(x))
-  memBlock.io.wakeUpOut.slow.foreach(_.ready := true.B)
+  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
+  memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
+  memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
 
   fpExuConfigs.zip(floatBlock.io.wakeUpOut.slow).filterNot(_._1.writeIntRf).map(_._2.ready := true.B)
   val fpBlockWakeUpInt = fpExuConfigs
@@ -427,7 +428,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
 
-  floatBlock.io.wakeUpIn.slow <> intBlockWakeUpFp ++ memBlockWakeUpFp
+  floatBlock.io.intWakeUpFp <> intBlockWakeUpFp
+  floatBlock.io.memWakeUpFp <> memBlockWakeUpFp
   floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
 
   val wakeUpMem = Seq(

@@ -7,7 +7,7 @@ import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.mem.HasLoadHelper
+import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
 
 
 class FpBlockToCtrlIO extends XSBundle {
@@ -17,17 +17,18 @@ class FpBlockToCtrlIO extends XSBundle {
 
 class FloatBlock
 (
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
+  intSlowWakeUpIn: Seq[ExuConfig],
+  memSlowWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig],
-) extends XSModule with HasExeBlockHelper with HasLoadHelper {
+) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
     val toMemBlock = new FpBlockToMemBlockIO
 
-    val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
+    val intWakeUpFp = Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
+    val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     // from csr
@@ -37,27 +38,32 @@ class FloatBlock
   val redirect = io.fromCtrlBlock.redirect
   val flush = io.fromCtrlBlock.flush
 
-  require(fastWakeUpIn.isEmpty)
-  val wakeUpInReg = Wire(Flipped(new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)))
-  wakeUpInReg.slow.zip(io.wakeUpIn.slow).foreach{
+  val intWakeUpFpReg = Wire(Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput))))
+  intWakeUpFpReg.zip(io.intWakeUpFp).foreach{
     case (inReg, wakeUpIn) =>
       val in = WireInit(wakeUpIn)
       wakeUpIn.ready := in.ready
       in.valid := wakeUpIn.valid && !wakeUpIn.bits.uop.roqIdx.needFlush(redirect, flush)
-      PipelineConnect(in, inReg, inReg.fire(), inReg.bits.uop.roqIdx.needFlush(redirect, flush))
-  }
-  val wakeUpInRecode = WireInit(wakeUpInReg)
-  for(((rec, reg), cfg) <- wakeUpInRecode.slow.zip(wakeUpInReg.slow).zip(slowWakeUpIn)){
-    rec.bits.data := {
-      if(cfg == Exu.ldExeUnitCfg) fpRdataHelper(reg.bits.uop, reg.bits.data)
-      else Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
-        recode(reg.bits.data(31, 0), S),
-        recode(reg.bits.data(63, 0), D)
+      PipelineConnect(in, inReg,
+        inReg.fire() || inReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
       )
-    }
+  }
+  val intRecoded = WireInit(intWakeUpFpReg)
+  for(((rec, reg), cfg) <- intRecoded.zip(intWakeUpFpReg).zip(intSlowWakeUpIn)){
+    rec.bits.data := Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
+      recode(reg.bits.data(31, 0), S),
+      recode(reg.bits.data(63, 0), D)
+    )
     rec.bits.redirectValid := false.B
     reg.ready := rec.ready || !rec.valid
   }
+  val memRecoded = WireInit(io.memWakeUpFp)
+  for((rec, reg) <- memRecoded.zip(io.memWakeUpFp)){
+    rec.bits.data := fpRdataHelper(reg.bits.uop, reg.bits.data)
+    rec.bits.redirectValid := false.B
+    reg.ready := true.B
+  }
+  val wakeUpInRecode = intRecoded ++ memRecoded
 
   val fpRf = Module(new Regfile(
     numReadPorts = NRFpReadPorts,
@@ -94,7 +100,7 @@ class FloatBlock
     val fastPortsCnt = inBlockWbData.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(_.io.out)
-    val slowPorts = (inBlockListenPorts ++ wakeUpInRecode.slow).map(decoupledIOToValidIO)
+    val slowPorts = (inBlockListenPorts ++ wakeUpInRecode).map(decoupledIOToValidIO)
     val slowPortsCnt = slowPorts.length
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
@@ -149,19 +155,19 @@ class FloatBlock
   )
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    exeUnits.map(_.config) ++ intSlowWakeUpIn ++ memSlowWakeUpIn,
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in <> exeUnits.map(e =>
-    fpOutValid(WireInit(e.io.out), connectReady = true)
-  ) ++ wakeUpInRecode.slow
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
 
   for((exu, i) <- exeUnits.zipWithIndex){
     val out, outReg = Wire(DecoupledIO(new ExuOutput))
     out.bits := exu.io.out.bits
     out.valid := exu.io.out.valid && !out.bits.uop.roqIdx.needFlush(redirect, flush)
-    PipelineConnect(out, outReg, outReg.fire(), outReg.bits.uop.roqIdx.needFlush(redirect, flush))
+    PipelineConnect(out, outReg,
+      outReg.fire() || outReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
+    )
     io.wakeUpOut.slow(i).valid := outReg.valid
     io.wakeUpOut.slow(i).bits := outReg.bits
     io.wakeUpOut.slow(i).bits.redirectValid := false.B
@@ -169,6 +175,8 @@ class FloatBlock
       ieee(outReg.bits.data),
       outReg.bits.data
     )
+    fpWbArbiter.io.in(i).valid := exu.io.out.valid && exu.io.out.bits.uop.ctrl.fpWen && outReg.ready
+    fpWbArbiter.io.in(i).bits := exu.io.out.bits
     if(exu.config.writeIntRf){
       outReg.ready := !outReg.valid || (
         io.wakeUpOut.slow(i).ready && outReg.bits.uop.ctrl.rfWen
