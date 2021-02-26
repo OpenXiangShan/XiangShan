@@ -30,7 +30,7 @@ case class ExuParameters
 
   def NRFuType = 9
 
-  def FuOpWidth = 7
+  def FuOpWidth = 6
 }
 
 case class ExuConfig
@@ -82,8 +82,8 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
-    val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
-    val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
+    val flush = Input(Bool())
+    val out = DecoupledIO(new ExuOutput)
   })
 
   for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
@@ -100,19 +100,20 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val src2 = in.bits.src2
     val src3 = in.bits.src3
 
-    fu.io.in.valid := in.valid && sel && !in.bits.uop.roqIdx.needFlush(io.redirect)
+    fu.io.in.valid := in.valid && sel
     fu.io.in.bits.uop := in.bits.uop
     fu.io.in.bits.src.foreach(_ <> DontCare)
     if (fuCfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if (fuCfg.srcCnt > 1) {
+    if (fuCfg.srcCnt > 1 || fuCfg == jmpCfg) { // jump is special for jalr target
       fu.io.in.bits.src(1) := src2
     }
     if (fuCfg.srcCnt > 2) {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
+    fu.io.flushIn := io.flush
   }
 
 
@@ -145,15 +146,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     }
   }
 
-  val intArb = if (config.writeIntRf) writebackArb(
-    supportedFunctionUnits.zip(config.fuConfigs).filter(x => !x._2.writeFpRf).map(_._1.io.out),
-    io.toInt
-  ) else null
-
-  val fpArb = if (config.writeFpRf) writebackArb(
-    supportedFunctionUnits.zip(config.fuConfigs).filter(x => x._2.writeFpRf).map(_._1.io.out),
-    io.toFp
-  ) else null
+  val arb = writebackArb(supportedFunctionUnits.map(_.io.out), io.out)
 
   val readIntFu = config.fuConfigs
     .zip(supportedFunctionUnits.zip(fuSel))
@@ -177,7 +170,6 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     }
   }
 
-
   if (config.readIntRf) {
     io.fromInt.ready := inReady(readIntFu)
   }
@@ -187,21 +179,16 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   def assignDontCares(out: ExuOutput) = {
-    out.brUpdate := DontCare
     out.fflags := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B
     out.debug.isPerfCnt := false.B
+    out.debug.paddr := DontCare
     out.redirect <> DontCare
     out.redirectValid := false.B
   }
 
-  if (config.writeFpRf) {
-    assignDontCares(io.toFp.bits)
-  }
-  if (config.writeIntRf) {
-    assignDontCares(io.toInt.bits)
-  }
+  assignDontCares(io.out.bits)
 }
 
 object Exu {
@@ -231,6 +218,4 @@ object Exu {
       Seq.fill(exuParameters.FmiscCnt)(fmiscExeUnitCfg)
 
   val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs
-
-
 }

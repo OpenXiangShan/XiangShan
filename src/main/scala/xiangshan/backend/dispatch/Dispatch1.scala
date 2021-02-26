@@ -10,12 +10,18 @@ import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
 
+
+class PreDispatchInfo extends XSBundle {
+  val lsqNeedAlloc = Vec(RenameWidth, UInt(2.W))
+}
+
 // read rob and enqueue
 class Dispatch1 extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val renameBypass = Input(new RenameBypassInfo)
+    val preDpInfo = Input(new PreDispatchInfo)
     val recv = Output(Vec(RenameWidth, Bool()))
     // enq Roq
     val enqRoq = Flipped(new RoqEnqIO)
@@ -48,12 +54,13 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val isInt    = VecInit(io.fromRename.map(req => FuType.isIntExu(req.bits.ctrl.fuType)))
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
-    !req.bits.cf.brUpdate.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
+    !req.bits.cf.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
   ))
   val isFp     = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
-  val isLs     = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
+  val isMem    = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
+  val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.ctrl.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStoreExu(req.bits.ctrl.fuType)))
-  val isAMO    = VecInit(io.fromRename.map(req => req.bits.ctrl.fuType === FuType.mou))
+  val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.ctrl.fuType)))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.ctrl.blockBackward))
   val isNoSpecExec    = VecInit(io.fromRename.map(_.bits.ctrl.noSpecExec))
 
@@ -69,7 +76,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i) && !isAMO(i), isStore(i) | isBranch(i))
+    updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
     updatedPsrc1(i) := io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc1) {
@@ -100,7 +107,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update roqIdx, lqIdx, sqIdx
-    updatedUop(i).roqIdx := io.enqRoq.resp(i)
+    // updatedUop(i).roqIdx := io.enqRoq.resp(i)
+//    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
   }
@@ -145,9 +153,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     io.enqRoq.req(i).bits := updatedUop(i)
     XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
-    val shouldEnqLsq = isLs(i) && !isAMO(i)
-    io.enqLsq.needAlloc(i) := io.fromRename(i).valid && shouldEnqLsq
-    io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.enqLsq.needAlloc(i) := Mux(io.fromRename(i).valid, io.preDpInfo.lsqNeedAlloc(i), 0.U)
+    io.enqLsq.req(i).valid := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
     io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)
     XSDebug(io.enqLsq.req(i).valid,
@@ -166,9 +173,9 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     io.toFpDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isFp(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
 
-    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isLs(i)
+    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i)
     io.toLsDq.req(i).bits   := updatedUop(i)
-    io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isLs(i) && thisCanActualOut(i) &&
+    io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isMem(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
@@ -199,6 +206,6 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
-  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
-  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
+  XSPerf("dp1_in", PopCount(io.fromRename.map(_.valid)))
+  XSPerf("dp1_waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
 }

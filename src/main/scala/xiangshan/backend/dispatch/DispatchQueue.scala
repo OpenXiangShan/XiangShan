@@ -17,12 +17,13 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   }
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
+  val flush = Input(Bool())
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with HasCircularQueuePtrHelper {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
 
   val s_invalid :: s_valid:: Nil = Enum(2)
@@ -45,7 +46,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
 
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
   val canEnqueue = allowEnqueue
-  val canActualEnqueue = canEnqueue && !io.redirect.valid
+  val canActualEnqueue = canEnqueue && !(io.redirect.valid || io.flush)
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -77,17 +78,17 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
 
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
-    when (io.deq(i).fire() && !io.redirect.valid) {
+    when (io.deq(i).fire() && !(io.redirect.valid || io.flush)) {
       stateEntries(headPtr(i).value) := s_invalid
 
-      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
+//      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && roqIdxEntries(i).needFlush(io.redirect)
+    needCancel(i) := stateEntries(i) =/= s_invalid && (roqIdxEntries(i).needFlush(io.redirect, io.flush) || io.flush)
 
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
@@ -118,7 +119,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   // agreement with reservation station: don't dequeue when redirect.valid
   val nextHeadPtr = Wire(Vec(deqnum, new CircularQueuePtr(size)))
   for (i <- 0 until deqnum) {
-    nextHeadPtr(i) := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
+    nextHeadPtr(i) := Mux(io.flush,
       i.U.asTypeOf(new CircularQueuePtr(size)),
       Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq))
     headPtr(i) := nextHeadPtr(i)
@@ -127,7 +128,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
   // For now, we simply use PopCount to count #instr cancelled.
-  val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.isUnconditional())
+  val lastCycleMisprediction = RegNext(io.redirect.valid)
   // find the last one's position, starting from headPtr and searching backwards
   val validBitVec = VecInit((0 until size).map(i => stateEntries(i) === s_valid))
   val loValidBitVec = Cat((0 until size).map(i => validBitVec(i) && headPtrMask(i)))
@@ -140,8 +141,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
-  val exceptionValid = io.redirect.valid && io.redirect.bits.isUnconditional()
-  tailPtr(0) := Mux(exceptionValid,
+  tailPtr(0) := Mux(io.flush,
     0.U.asTypeOf(new CircularQueuePtr(size)),
     Mux(io.redirect.valid,
       tailPtr(0),
@@ -149,10 +149,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
         Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
         tailPtr(0) + numEnq))
   )
-  val lastCycleException = RegNext(exceptionValid)
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
+  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction && !io.flush)
   for (i <- 1 until enqnum) {
-    tailPtr(i) := Mux(exceptionValid,
+    tailPtr(i) := Mux(io.flush,
       i.U.asTypeOf(new CircularQueuePtr(size)),
       Mux(io.redirect.valid,
         tailPtr(i),
@@ -163,7 +162,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   }
 
   // update valid counter and allowEnqueue reg
-  validCounter := Mux(exceptionValid,
+  validCounter := Mux(io.flush,
     0.U,
     Mux(io.redirect.valid,
       validCounter,
@@ -203,6 +202,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   }
   XSDebug(false, true.B, "\n")
 
-  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
-  XSPerf("utilization", PopCount(stateEntries.map(_ =/= s_invalid)))
+//  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
+  XSPerf("dq_"+name+"_utilization", PopCount(stateEntries.map(_ =/= s_invalid)))
 }

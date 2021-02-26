@@ -8,16 +8,12 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 
-import freechips.rocketchip.config.Parameters
-import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
-import freechips.rocketchip.rocket.{CSR,Causes}
 import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 
 import xiangshan._
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.decode.Instructions._
-import freechips.rocketchip.tile.RocketTile
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -303,22 +299,6 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
-class RVCExpander extends XSModule {
-  val io = IO(new Bundle {
-    val in = Input(UInt(32.W))
-    val out = Output(new ExpandedInstruction)
-    val rvc = Output(Bool())
-  })
-
-  if (HasCExtension) {
-    io.rvc := io.in(1,0) =/= 3.U
-    io.out := new RVCDecoder(io.in, XLEN).decode
-  } else {
-    io.rvc := false.B
-    io.out := new RVCDecoder(io.in, XLEN).passthrough
-  }
-}
-
 //object Imm32Gen {
 //  def apply(sel: UInt, inst: UInt) = {
 //    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
@@ -428,25 +408,12 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
   val cf_ctrl = Wire(new CfCtrl)
 
-  val exp = Module(new RVCExpander())
-  exp.io.in := io.enq.ctrl_flow.instr
   ctrl_flow := io.enq.ctrl_flow
-  when (exp.io.rvc) {
-    ctrl_flow.instr := exp.io.out.bits
-  }
-
-  // save rvc decode info
-  // TODO maybe rvc_info are useless?
-  val rvc_info = Wire(new ExpandedInstruction())
-  val is_rvc = Wire(Bool())
-  rvc_info := exp.io.out
-  is_rvc := exp.io.rvc
 
   var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow
-  cf_ctrl.brTag := DontCare
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)
@@ -454,7 +421,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
-  cs.lsrc1 := Mux(ctrl_flow.instr === LUI || cs.src1Type === SrcType.pc, 0.U, ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc1 := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
   cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
   cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location

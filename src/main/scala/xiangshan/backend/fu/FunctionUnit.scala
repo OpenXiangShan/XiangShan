@@ -50,6 +50,7 @@ class FunctionUnitIO(val len: Int) extends XSBundle {
   val out = DecoupledIO(new FuOutput(len))
 
   val redirectIn = Flipped(ValidIO(new Redirect))
+  val flushIn = Input(Bool())
 }
 
 abstract class FunctionUnit(len: Int = 64) extends XSModule {
@@ -71,19 +72,18 @@ trait HasPipelineReg {
 
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
-  val flushVec = WireInit(false.B) +:
-    validVec.zip(uopVec).tail.map(x => x._1 && x._2.roqIdx.needFlush(io.redirectIn))
+  val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.roqIdx.needFlush(io.redirectIn, io.flushIn))
 
   for (i <- 0 until latency) {
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
   }
 
   for (i <- 1 to latency) {
-    when(flushVec(i - 1) || rdyVec(i) && !validVec(i - 1)) {
-      validVec(i) := false.B
-    }.elsewhen(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)) {
+    when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
       validVec(i) := validVec(i - 1)
       uopVec(i) := uopVec(i - 1)
+    }.elsewhen(flushVec(i) || rdyVec(i)){
+      validVec(i) := false.B
     }
   }
 
@@ -200,7 +200,7 @@ object FunctionUnit extends HasXSParameter {
     writeIntRf = false,
     writeFpRf = true,
     hasRedirect = false,
-    CertainLatency(0)
+    UncertainLatency()
   )
 
   val divCfg = FuConfig(

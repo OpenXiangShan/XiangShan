@@ -8,7 +8,8 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
 import utils.{DebugIdentityNode, DataDontCareNode}
 import utils.XSInfo
-import xiangshan.{HasXSParameter, XSCore, HasXSLog}
+import xiangshan.{HasXSParameter, XSCore, HasXSLog, DifftestBundle}
+import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
@@ -64,9 +65,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )))
+
+  private val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
 
   // L2 to L3 network
   // -------------------------------------------------
@@ -82,7 +85,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = "L3"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 32
     )
   )).node
 
@@ -102,7 +105,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := l2prefetcher(i).clientNode
+
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
     l2cache(i).node := DataDontCareNode(a = true, b = true) := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
@@ -165,20 +169,43 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
-      val extIntrs = Input(Vec(NrExtIntr, Bool()))
+      val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
       // debug io is below, both are options
     })
+    val difftestIO0 = IO(new DifftestBundle())
+    val difftestIO1 = IO(new DifftestBundle())
+    val difftestIO = Seq(difftestIO0, difftestIO1)
 
-    plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
+    val trapIO0 = IO(new xiangshan.TrapIO())
+    val trapIO1 = IO(new xiangshan.TrapIO())
+    val trapIO = Seq(trapIO0, trapIO1)
+
+    plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
+      xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+<<<<<<< HEAD
       xs_core(i).module.io.externalInterrupt.debug_int := DM.module.io.debug_int(i)
+=======
+      l2prefetcher(i).module.io.enable := xs_core(i).module.io.l2_pf_enable
+      l2prefetcher(i).module.io.in <> l2cache(i).module.io
+    }
+
+    difftestIO0 <> xs_core(0).module.difftestIO
+    difftestIO1 <> DontCare
+    trapIO0 <> xs_core(0).module.trapIO
+    trapIO1 <> DontCare
+    
+    if (env.DualCore) {
+      difftestIO1 <> xs_core(1).module.difftestIO
+      trapIO1 <> xs_core(1).module.trapIO
+>>>>>>> master
     }
 
     val resetctrl = Some(DM).map { outerdebug =>
@@ -254,8 +281,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     }
 
     // do not let dma AXI signals optimized out
-    chisel3.dontTouch(dma.out.head._1)
-    chisel3.dontTouch(extDev.out.head._1)
+    dontTouch(dma.out.head._1)
+    dontTouch(extDev.out.head._1)
+    dontTouch(io.extIntrs)
   }
 
 }

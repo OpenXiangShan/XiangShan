@@ -3,6 +3,7 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import utils._
+import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
@@ -39,6 +40,18 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   val isCall  = Bool()
   val isRet   = Bool()
   val excType = UInt(3.W)
+  def isBr = brType === BrType.branch
+  def isJal = brType === BrType.jal
+  def isJalr = brType === BrType.jalr
+  def notCFI = brType === BrType.notBr
+}
+
+class PreDecodeInfoForDebug(val usePerf: Boolean = true) extends XSBundle {
+  val isRVC   = if (usePerf) Bool() else UInt(0.W)
+  val brType  = if (usePerf) UInt(2.W) else UInt(0.W)
+  val isCall  = if (usePerf) Bool() else UInt(0.W)
+  val isRet   = if (usePerf) Bool() else UInt(0.W)
+  val excType = if (usePerf) UInt(3.W) else UInt(0.W)
   def isBr = brType === BrType.branch
   def isJal = brType === BrType.jal
   def isJalr = brType === BrType.jalr
@@ -132,5 +145,18 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
       p"isRet ${Binary(io.out.pd(i).isRet)}, " +
       p"isCall ${Binary(io.out.pd(i).isCall)}\n"
     )
+  }
+}
+
+class RVCExpander extends XSModule {
+  val io = IO(new Bundle {
+    val in = Input(UInt(32.W))
+    val out = Output(new ExpandedInstruction)
+  })
+
+  if (HasCExtension) {
+    io.out := new RVCDecoder(io.in, XLEN).decode
+  } else {
+    io.out := new RVCDecoder(io.in, XLEN).passthrough
   }
 }

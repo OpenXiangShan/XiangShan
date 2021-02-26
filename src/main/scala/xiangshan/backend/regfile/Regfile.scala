@@ -4,6 +4,22 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 
+object hartIdRFInt extends (() => Int) {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    x-1
+  }
+}
+
+object hartIdRFFp extends (() => Int) {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    x-1
+  }
+}
+
 class RfReadPort(len: Int) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
@@ -45,10 +61,11 @@ class Regfile
     }
 
     if (!env.FPGAPlatform) {
+      val id = if (hasZero) hartIdRFInt() else hartIdRFFp()
       val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
       ExcitingUtils.addSink(
         debugArchRat,
-        if(hasZero) "DEBUG_INI_ARCH_RAT" else "DEBUG_FP_ARCH_RAT",
+        if(hasZero) s"DEBUG_INI_ARCH_RAT$id" else s"DEBUG_FP_ARCH_RAT$id",
         ExcitingUtils.Debug
       )
 
@@ -61,7 +78,7 @@ class Regfile
       )))
       ExcitingUtils.addSource(
         debugArchReg,
-        if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG",
+        if(hasZero) s"DEBUG_INT_ARCH_REG$id" else s"DEBUG_FP_ARCH_REG$id",
         ExcitingUtils.Debug
       )
     }

@@ -8,7 +8,7 @@ import utils.PipelineConnect
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
-import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.backend.fu.{HasExceptionNO, CustomCSRCtrlIO}
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
@@ -33,6 +33,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val backend = new FrontendToBackendIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val ifu = Module(new IFU)
@@ -40,11 +41,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
   val instrUncache = outer.instrUncache.module
 
-  val needFlush = io.backend.redirect.valid
+  val needFlush = io.backend.redirect_cfiUpdate.valid
 
   // from backend
-  ifu.io.redirect <> io.backend.redirect
-  ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
+  ifu.io.redirect <> io.backend.redirect_cfiUpdate
+  ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
+  ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
+  ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
   // to icache
   val grantClientId = clientId(io.icacheMemGrant.bits.id)
   val grantEntryId = entryId(io.icacheMemGrant.bits.id)
@@ -70,6 +73,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.l1plusFlush := ifu.io.l1plusFlush
   l1plusPrefetcher.io.in.valid := ifu.io.prefetchTrainReq.valid
   l1plusPrefetcher.io.in.bits := ifu.io.prefetchTrainReq.bits
+  l1plusPrefetcher.io.enable := RegNext(io.csrCtrl.l1plus_pf_enable)
   val memAcquireArb = Module(new Arbiter(new L1plusCacheReq, nClients))
   memAcquireArb.io.in(icacheMissQueueId) <> ifu.io.icacheMemAcq
   memAcquireArb.io.in(icacheMissQueueId).bits.id := Cat(icacheMissQueueId.U(clientIdWidth.W),
@@ -86,6 +90,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   // ibuffer to backend
   io.backend.cfVec <> ibuffer.io.out
+  // ifu to backend
+  io.backend.fetchInfo <> ifu.io.toFtq
 
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),

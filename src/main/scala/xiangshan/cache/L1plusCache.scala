@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMWrapper}
+import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -88,7 +88,8 @@ object L1plusCacheMetadata {
 }
 
 class L1plusCacheMetaReadReq extends L1plusCacheBundle {
-  val idx    = UInt(idxBits.W)
+  val tagIdx    = UInt(idxBits.W)
+  val validIdx  = UInt(idxBits.W)
   val way_en = UInt(nWays.W)
   val tag    = UInt(tagBits.W)
 }
@@ -130,7 +131,7 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    val array = Module(new SRAMWrapper("L1Plus_Data", Bits((blockRows * encRowBits).W), set=nSets, way=1,
+    val array = Module(new SRAMTemplate(Bits((blockRows * encRowBits).W), set=nSets, way=1,
       shouldReset=false, holdRead=false, singlePort=singlePort))
     // data write
     array.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
@@ -202,14 +203,14 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
     val resp = Output(Vec(nWays, new L1plusCacheMetadata))
     val flush = Input(Bool())
   })
-  val waddr = io.write.bits.idx
+  val waddr = io.write.bits.tagIdx
   val wvalid = io.write.bits.data.valid
   val wtag = io.write.bits.data.tag.asUInt
   val wmask = Mux((nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
-  val tag_array = Module(new SRAMWrapper("L1Plus_Meta", UInt(encTagBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
@@ -237,12 +238,12 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
 
   // tag read
   tag_array.io.r.req.valid := io.read.fire()
-  tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
+  tag_array.io.r.req.bits.apply(setIdx=io.read.bits.tagIdx)
   val rtags = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected)
 
   for (i <- 0 until nWays) {
-    io.resp(i).valid := valid_array(RegNext(io.read.bits.idx))(i)
+    io.resp(i).valid := valid_array(io.read.bits.validIdx)(i)
     io.resp(i).tag   := rtags(i)
   }
 
@@ -253,15 +254,15 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
 
   def dumpRead() = {
     when (io.read.fire()) {
-      XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
-        io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
+      XSDebug("MetaArray Read: idx: (t:%d v:%d) way_en: %x tag: %x\n",
+        io.read.bits.tagIdx, io.read.bits.validIdx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
   def dumpWrite() = {
     when (io.write.fire()) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_valid: %x\n",
-        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.valid)
+        io.write.bits.tagIdx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.valid)
     }
   }
 
@@ -293,10 +294,11 @@ class L1plusCacheReq extends L1plusCacheBundle
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
+  val eccWrong = Bool()
   val id   = UInt(idWidth.W)
 
   override def toPrintable: Printable = {
-    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+    p"id=${Binary(id)} data=${Hexadecimal(data)} eccWrong=${Binary(eccWrong)}"
   }
 }
 
@@ -475,7 +477,7 @@ class L1plusCachePipe extends L1plusCacheModule
   val data_read = io.data_read.bits
 
   // Tag read for new requests
-  meta_read.idx    := get_idx(io.req.bits.addr)
+  meta_read.tagIdx    := get_idx(io.req.bits.addr)
   meta_read.way_en := ~0.U(nWays.W)
   meta_read.tag    := DontCare
   // Data read for new requests
@@ -501,6 +503,9 @@ class L1plusCachePipe extends L1plusCacheModule
     s1_valid_reg := false.B
   }
   s1_valid := s1_valid_reg
+
+  meta_read.validIdx  := get_idx(s1_addr)
+
 
   dump_pipeline_reqs("L1plusCachePipe s1", s1_valid, s1_req)
 
@@ -528,15 +533,24 @@ class L1plusCachePipe extends L1plusCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
+
+  //TODO: only detect error but not correct it
   val s2_data_decoded = Cat((0 until blockRows).reverse map { r =>
       val data = s2_data(r)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
-      decoded.corrected
+      decoded.uncorrected
+    })
+
+  val s2_data_wrong =  Cat((0 until blockRows).reverse map { r =>
+      val data = s2_data(r)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && s2_hit && decoded.error))
+      decoded.error
     })
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
+  io.resp.bits.eccWrong := s2_data_wrong.asUInt.orR
   io.resp.bits.id   := s2_req.id
 
   // replacement policy
@@ -671,7 +685,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
   // not encoded data
   val refill_data_raw = Reg(Vec(blockRows, UInt(rowBits.W)))
   when (state === s_refill_resp) {
@@ -682,7 +695,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-          refill_data((refill_ctr << log2Floor(beatRows)) + i.U) := cacheParams.dataCode.encode(row)
           refill_data_raw((refill_ctr << log2Floor(beatRows)) + i.U) := row
         }
 
@@ -715,7 +727,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.refill.bits.way_en  := req.way_en
     io.refill.bits.wmask   := ~0.U(blockRows.W)
     io.refill.bits.rmask   := DontCare
-    io.refill.bits.data    := refill_data
+    io.refill.bits.data    := refill_data_raw.map(row => cacheParams.dataCode.encode(row))
 
     when (io.refill.fire()) {
       state := s_meta_write_req
@@ -726,7 +738,8 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
   // meta write
   when (state === s_meta_write_req) {
     io.meta_write.valid           := true.B
-    io.meta_write.bits.idx        := req_idx
+    io.meta_write.bits.tagIdx        := req_idx
+    io.meta_write.bits.validIdx  := req_idx
     io.meta_write.bits.data.valid := true.B
     io.meta_write.bits.data.tag   := req_tag
     io.meta_write.bits.way_en     := req.way_en
@@ -828,7 +841,7 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
 
   // print meta_write
   XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_valid: %d new_tag: %x\n",
-    io.meta_write.bits.idx, io.meta_write.bits.way_en, io.meta_write.bits.tag,
+    io.meta_write.bits.tagIdx, io.meta_write.bits.way_en, io.meta_write.bits.tag,
     io.meta_write.bits.data.valid, io.meta_write.bits.data.tag)
 
   // print tilelink messages

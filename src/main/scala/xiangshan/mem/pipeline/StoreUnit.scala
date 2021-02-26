@@ -12,12 +12,20 @@ import xiangshan.cache._
 class StoreUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
   })
 
   // send req to dtlb
-  val saddr = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
+  // val saddr = io.in.bits.src1 + SignExt(io.in.bits.uop.ctrl.imm(11,0), VAddrBits)
+  val imm12 = WireInit(io.in.bits.uop.ctrl.imm(11,0))
+  val saddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
+  val saddr_hi = Mux(saddr_lo(12),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
+  )
+  val saddr = Cat(saddr_hi, saddr_lo(11,0))
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
@@ -29,11 +37,9 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits.vaddr := saddr
 
   io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-    io.out.bits.data := io.in.bits.src2
-  } // not not touch fp store raw data
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
+  io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -55,7 +61,6 @@ class StoreUnit_S1 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    // val fp_out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
@@ -63,6 +68,8 @@ class StoreUnit_S1 extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
+  val s1_mmio = io.dtlbResp.bits.mmio
+  val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
 
   io.in.ready := true.B
 
@@ -71,37 +78,42 @@ class StoreUnit_S1 extends XSModule {
   // Send TLB feedback to store issue queue
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
-  io.tlbFeedback.bits.roqIdx := io.in.bits.uop.roqIdx
+  io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
   XSDebug(io.tlbFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.roqIdx.asUInt
+    io.tlbFeedback.bits.rsIdx
   )
 
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.lsq.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
+  io.lsq.valid := io.in.valid && !s1_tlb_miss
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := io.dtlbResp.bits.mmio
+  io.lsq.bits.mmio := s1_mmio && !s1_exception
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
   io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
 
   // mmio inst with exception will be writebacked immediately
-  val hasException = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
-  io.out.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
+  io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
-
-  // encode data for fp store
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-	  io.lsq.bits.data := genWdata(ieee(io.in.bits.data), io.in.bits.uop.ctrl.fuOpType(1,0))
-	}
-
 }
 
 class StoreUnit_S2 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+  })
+
+  io.in.ready := true.B
+  io.out.bits := io.in.bits
+  io.out.valid := io.in.valid
+
+}
+
+class StoreUnit_S3 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val stout = DecoupledIO(new ExuOutput) // writeback store
@@ -114,8 +126,8 @@ class StoreUnit_S2 extends XSModule {
   io.stout.bits.data := DontCare
   io.stout.bits.redirectValid := false.B
   io.stout.bits.redirect := DontCare
-  io.stout.bits.brUpdate := DontCare
   io.stout.bits.debug.isMMIO := io.in.bits.mmio
+  io.stout.bits.debug.paddr := DontCare
   io.stout.bits.debug.isPerfCnt := false.B
   io.stout.bits.fflags := DontCare
 
@@ -125,8 +137,10 @@ class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
+    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val lsq = ValidIO(new LsPipelineBundle)
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
@@ -134,19 +148,23 @@ class StoreUnit extends XSModule {
   val store_s0 = Module(new StoreUnit_S0)
   val store_s1 = Module(new StoreUnit_S1)
   val store_s2 = Module(new StoreUnit_S2)
+  val store_s3 = Module(new StoreUnit_S3)
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
+  store_s0.io.rsIdx := io.rsIdx
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  store_s2.io.stout <> io.stout
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+
+  store_s3.io.stout <> io.stout
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
