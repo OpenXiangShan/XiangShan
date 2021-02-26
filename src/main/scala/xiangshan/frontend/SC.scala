@@ -168,8 +168,8 @@ class SCThreshold(val ctrBits: Int = 5) extends SCBundle {
   def update(cause: Bool): SCThreshold = {
     val res = Wire(new SCThreshold(this.ctrBits))
     val newCtr = satUpdate(this.ctr, this.ctrBits, cause)
-    val newThres = Mux(res.satPos(newCtr), this.thres + 1.U,
-                      Mux(res.satNeg(newCtr), this.thres - 1.U,
+    val newThres = Mux(res.satPos(newCtr) && this.thres <= maxThres, this.thres + 2.U,
+                      Mux(res.satNeg(newCtr) && this.thres >= minThres, this.thres - 2.U,
                       this.thres))
     res.thres := newThres
     res.ctr := Mux(res.satPos(newCtr) || res.satNeg(newCtr), res.neutralVal, newCtr)
@@ -280,10 +280,10 @@ trait HasSC extends HasSCParameter { this: Tage =>
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
 
-      when (scPred =/= tagePred && sumAbs < useThreshold - 2.U) {
+      when (scPred =/= tagePred && sumAbs <= useThreshold - 2.U && sumAbs >= useThreshold - 4.U) {
         val newThres = scThreshold.update(scPred =/= taken)
         scThreshold := newThres
-        XSDebug(p"scThres update: old d${useThreshold} --> new ${newThres.thres}\n")
+        XSDebug(p"scThres update: old ${useThreshold} --> new ${newThres.thres}\n")
       }
       when (scPred =/= taken || sumAbs < updateThreshold) {
         scUpdateMask.foreach(t => t(w) := true.B)
