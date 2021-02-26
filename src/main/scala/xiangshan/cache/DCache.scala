@@ -286,9 +286,6 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
     true.B
   })
   for (j <- 0 until LoadPipelineWidth) {
-    // only one way could be read
-    assert(RegNext(!io.read(j).fire() || PopCount(io.read(j).bits.way_en) === 1.U))
-
     val raddr = raddrs(j)
 
     // for single port SRAM, do not allow read and write in the same cycle
@@ -296,9 +293,11 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
     val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
     io.read(j).ready := (if (readHighPriority) true.B else !rwhazard)
 
+    // use way_en to select a way after data read out
+    assert(!(RegNext(io.read(j).fire() && PopCount(io.read(j).bits.way_en) > 1.U)))
+    val way_en = RegNext(io.read(j).bits.way_en)
+
     for (r <- 0 until blockRows) {
-      // val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
-      // io.resp(j)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
       val resp = Wire(Vec(rowWords, Vec(nWays, Bits(encWordBits.W))))
       val resp_chosen = Wire(Vec(rowWords, Bits(encWordBits.W)))
 
@@ -323,12 +322,13 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
           )
 
           // data read
-          val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
+          // read all ways and choose one after resp
+          val ren = io.read(j).valid/* && io.read(j).bits.way_en(w)*/ && io.read(j).bits.rmask(r)
           array.io.r.req.valid := ren
           array.io.r.req.bits.apply(setIdx = raddr)
-          resp(k)(w) := array.io.r.resp.data(0) & Mux(RegNext(ren), (-1).S(encWordBits.W).asUInt, 0.U(encWordBits.W))
+          resp(k)(w) := array.io.r.resp.data(0)
         }
-        resp_chosen(k) := ParallelOR(resp(k))
+        resp_chosen(k) := Mux1H(way_en, resp(k))
       }
       io.resp(j)(r) := Cat(resp_chosen)
     }
