@@ -9,6 +9,7 @@ import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, 
 import utils.{DebugIdentityNode, DataDontCareNode}
 import utils.XSInfo
 import xiangshan.{HasXSParameter, XSCore, HasXSLog, DifftestBundle}
+import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
@@ -65,6 +66,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     )
   )))
 
+  private val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
+
   // L2 to L3 network
   // -------------------------------------------------
   private val l3_xbar = TLXbar()
@@ -99,7 +102,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := l2prefetcher(i).clientNode
+
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
     l2cache(i).node := DataDontCareNode(a = true, b = true) := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
@@ -173,12 +177,15 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
+      xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-      xs_core(i).module.io.l2ToPrefetcher <> l2cache(i).module.io
+      l2prefetcher(i).module.io.enable := xs_core(i).module.io.l2_pf_enable
+      l2prefetcher(i).module.io.in <> l2cache(i).module.io
     }
+
     difftestIO0 <> xs_core(0).module.difftestIO
     difftestIO1 <> DontCare
     trapIO0 <> xs_core(0).module.trapIO

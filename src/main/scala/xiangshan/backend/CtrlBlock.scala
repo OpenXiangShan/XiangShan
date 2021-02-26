@@ -217,7 +217,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val redirectGen = Module(new RedirectGenerator)
 
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
-
   val roq = Module(new Roq(roqWbSize))
 
   val backendRedirect = redirectGen.io.stage2Redirect
@@ -226,8 +225,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val flushReg = RegNext(flush)
 
   redirectGen.io.exuMispredict.zip(io.fromIntBlock.exuRedirect).map({case (x, y) =>
-    x.valid := y.valid && y.bits.redirect.cfiUpdate.isMisPred
-    x.bits := y.bits
+    val misPred = y.valid && y.bits.redirect.cfiUpdate.isMisPred
+    val killedByOlder = y.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
+    x.valid := RegNext(misPred && !killedByOlder, init = false.B)
+    x.bits := RegEnable(y.bits, y.valid)
   })
   redirectGen.io.loadRelay := io.fromLsBlock.replay
   redirectGen.io.flush := flushReg
@@ -292,6 +293,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
+  rename.io.dispatchInfo <> dispatch.io.preDpInfo
 
   dispatch.io.redirect <> backendRedirect
   dispatch.io.flush := flushReg
@@ -324,13 +326,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect <> backendRedirect
-  roq.io.exeWbResults.zip(
-    io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
-  ).foreach{
-    case(x, y) =>
-      x.bits := y.bits
-      x.valid := y.valid
-  }
+  roq.io.exeWbResults <> (io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect

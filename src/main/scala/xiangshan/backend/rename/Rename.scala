@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.dispatch.PreDispatchInfo
 
 class RenameBypassInfo extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -23,6 +24,7 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val renameBypass = Output(new RenameBypassInfo)
+    val dispatchInfo = Output(new PreDispatchInfo)
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -201,6 +203,12 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
     }).reverse)
   }
+
+  val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
+  val isStore = VecInit(uops.map(uop => FuType.isStoreExu(uop.ctrl.fuType)))
+  val isAMO   = VecInit(uops.map(uop => FuType.isAMO(uop.ctrl.fuType)))
+  io.dispatchInfo.lsqNeedAlloc := VecInit((0 until RenameWidth).map(i =>
+    Mux(isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)))
 
   /**
     * Instructions commit: update freelist and rename table

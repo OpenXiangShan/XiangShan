@@ -56,23 +56,18 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
   ibuf.io.wdata.map(w => dontTouch(w.ftqOffset))
-  val head_ptr = RegInit(IbufPtr(false.B, 0.U))
-  val next_head_ptr = WireInit(head_ptr)
+  val head_vec = RegInit(VecInit((0 until DecodeWidth).map(_.U.asTypeOf(new IbufPtr))))
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
+  val head_ptr = head_vec(0)
   val tail_ptr = tail_vec(0)
 
-  // val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
-  val validEntries = RegInit(0.U(log2Up(IBufSize + 1).W))// valid entries
+  val validEntries = distanceBetween(tail_ptr, head_ptr)
   val allowEnq = RegInit(true.B)
 
-  // val enqValid = (IBufSize.U - PredictWidth.U) >= validEntries
-  val deqValid = validEntries > 0.U
-
   val numEnq = Mux(io.in.fire, PopCount(io.in.bits.mask), 0.U)
-  val numDeq = Mux(deqValid, PopCount(io.out.map(_.fire)), 0.U)
+  val numDeq = PopCount(io.out.map(_.fire))
 
-  validEntries := validEntries + numEnq - numDeq
-  allowEnq := (IBufSize.U - PredictWidth.U) >= (validEntries + numEnq)
+  allowEnq := (IBufSize - PredictWidth).U >= validEntries +& numEnq
 
   // Enque
   io.in.ready := allowEnq
@@ -86,76 +81,56 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  when(io.in.fire && !io.flush) {
-    for(i <- 0 until PredictWidth) {
-      val inWire = Wire(new IBufEntry)
-      inWire := DontCare
+  for (i <- 0 until PredictWidth) {
+    val inWire = Wire(new IBufEntry)
+    inWire.inst := io.in.bits.instrs(i)
+    inWire.pc := io.in.bits.pc(i)
+    inWire.pd := io.in.bits.pd(i)
+    inWire.ipf := io.in.bits.ipf
+    inWire.acf := io.in.bits.acf
+    inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
+    inWire.pred_taken := io.in.bits.pred_taken(i)
+    inWire.ftqPtr := io.in.bits.ftqPtr
+    inWire.ftqOffset := i.U
 
-      when(io.in.bits.mask(i)) {
-        inWire.inst := io.in.bits.instrs(i)
-        inWire.pc := io.in.bits.pc(i)
-        inWire.pd := io.in.bits.pd(i)
-        inWire.ipf := io.in.bits.ipf
-        inWire.acf := io.in.bits.acf
-        inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
-        inWire.pred_taken := io.in.bits.pred_taken(i)
-        inWire.ftqPtr := io.in.bits.ftqPtr
-        inWire.ftqOffset := i.U
-        // ibuf(tail_vec(offset(i)).value) := inWire
-      }
-      ibuf.io.waddr(i) := tail_vec(offset(i)).value
-      ibuf.io.wdata(i) := inWire
-      ibuf.io.wen(i) := io.in.bits.mask(i)
+    ibuf.io.waddr(i) := tail_vec(offset(i)).value
+    ibuf.io.wdata(i) := inWire
+    ibuf.io.wen(i)   := io.in.bits.mask(i) && io.in.fire && !io.flush
+  }
 
-    }
-
+  when (io.in.fire && !io.flush) {
     tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.mask)))
-  }.otherwise {
-    ibuf.io.wen.foreach(_ := false.B)
-    ibuf.io.waddr := DontCare
-    ibuf.io.wdata := DontCare
   }
 
-  // Deque
-  when(deqValid) {
-    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries), DecodeWidth)
+  // Dequeue
+  val validVec = Mux(validEntries >= DecodeWidth.U, ((1 << DecodeWidth) - 1).U, UIntToMask(validEntries, DecodeWidth))
+  for (i <- 0 until DecodeWidth) {
+    io.out(i).valid := validVec(i)
 
-    io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
-    next_head_ptr := head_ptr + PopCount(io.out.map(_.fire))
+    val outWire = ibuf.io.rdata(i)
 
-    for(i <- 0 until DecodeWidth) {
-      val outWire = ibuf.io.rdata(i)
+    io.out(i).bits.instr := outWire.inst
+    io.out(i).bits.pc := outWire.pc
+    // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
+    io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
+    io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+    io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
+    // io.out(i).bits.brUpdate := outWire.brInfo
+    io.out(i).bits.pd := outWire.pd
+    io.out(i).bits.pred_taken := outWire.pred_taken
+    io.out(i).bits.ftqPtr := outWire.ftqPtr
+    io.out(i).bits.ftqOffset := outWire.ftqOffset
 
-      io.out(i).bits.instr := outWire.inst
-      io.out(i).bits.pc := outWire.pc
-      // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
-      io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
-      io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
-      io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
-      // io.out(i).bits.brUpdate := outWire.brInfo
-      io.out(i).bits.pd := outWire.pd
-      io.out(i).bits.pred_taken := outWire.pred_taken
-      io.out(i).bits.ftqPtr := outWire.ftqPtr
-      io.out(i).bits.ftqOffset := outWire.ftqOffset
-
-      io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
-      
-      val head_wire = next_head_ptr.value + i.U
-      ibuf.io.raddr(i) := head_wire
-    }
-    head_ptr := next_head_ptr
-  }.otherwise {
-    ibuf.io.raddr := DontCare
-    io.out.foreach(_.valid := false.B)
-    io.out.foreach(_.bits <> DontCare)
+    io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
   }
+  val next_head_vec = VecInit(head_vec.map(_ + numDeq))
+  ibuf.io.raddr := VecInit(next_head_vec.map(_.value))
+  head_vec := next_head_vec
 
   // Flush
-  when(io.flush) {
-    validEntries := 0.U
+  when (io.flush) {
     allowEnq := true.B
-    head_ptr.value := 0.U
-    head_ptr.flag := false.B
+    head_vec := VecInit((0 until DecodeWidth).map(_.U.asTypeOf(new IbufPtr)))
     tail_vec := VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr)))
   }
 
@@ -170,12 +145,9 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  when(deqValid) {
-    XSDebug("Deque:\n")
-    for(i <- 0 until DecodeWidth){
-        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
-          p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
-    }
+  for (i <- 0 until DecodeWidth) {
+    XSDebug(io.out(i).fire(), p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
+      p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
   }
 
   XSDebug(p"ValidEntries: ${validEntries}\n")
@@ -210,5 +182,5 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   //   )
   // }
 
-  XSPerf("utilization", validEntries)
+  XSPerf("ibuf_utilization", validEntries)
 }

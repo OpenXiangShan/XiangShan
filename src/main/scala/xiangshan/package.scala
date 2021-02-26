@@ -148,7 +148,7 @@ package object xiangshan {
     def configable_cache(mode: UInt) = mode(7)
 
     def strToMode(s: String) = {
-      var result = 0.U << 8
+      var result = 0.U(8.W)
       if (s.toUpperCase.indexOf("R") >= 0) result = result + R
       if (s.toUpperCase.indexOf("W") >= 0) result = result + W
       if (s.toUpperCase.indexOf("X") >= 0) result = result + X

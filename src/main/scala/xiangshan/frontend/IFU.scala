@@ -65,6 +65,7 @@ class IFUIO extends XSBundle
   val fetchPacket = DecoupledIO(new FetchPacket)
   // from backend
   val redirect = Flipped(ValidIO(new Redirect))
+  val bp_ctrl = Input(new BPUCtrl)
   val commitUpdate = Flipped(ValidIO(new FtqEntry))
   val ftqEnqPtr = Input(new FtqPtr)
   val ftqLeftOne = Input(Bool())
@@ -419,6 +420,10 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
 
+  // For perf counters
+  toFtqBuf.pd    := if4_pd.pd
+
+
   val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
   val if4_taken = WireInit(if4_bp.taken)
   val if4_real_valids = if4_pd.mask &
@@ -480,6 +485,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.l1plusFlush := icache.io.l1plusflush
   io.prefetchTrainReq := icache.io.prefetchTrainReq
 
+  bpu.io.ctrl := RegNext(io.bp_ctrl)
   bpu.io.commit <> io.commitUpdate
   bpu.io.redirect <> io.redirect
 

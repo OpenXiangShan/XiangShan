@@ -574,6 +574,22 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 
+    // first instruction commit
+    for (int i = 0; i < NumCore; i++) {
+      if (lastcommit[i] - max_cycle > firstCommit_limit && !hascommit[i]) {
+        eprintf("No instruction commits for %d cycles of core %d. Please check the first instruction.\n", i, firstCommit_limit);
+        eprintf("Note: The first instruction may lie in 0x10000000 which may executes and commits after 500 cycles.\n");
+        eprintf("   Or the first instruction may lie in 0x80000000 which may executes and commits after 2000 cycles.\n");
+#ifdef DUALCORE
+        int priviledgeMode = (i == 0) ? dut_ptr->io_difftest_priviledgeMode : dut_ptr->io_difftest2_priviledgeMode;
+#else
+        int priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
+#endif
+        difftest_display(priviledgeMode, i);
+        trapCode = STATE_ABORT;
+      }
+    }
+
     for (int i = 0; i < NumCore; i++) {
 #ifdef DUALCORE
       int first_instr_commit = (i == 0) ? dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u :
@@ -767,6 +783,10 @@ inline void Emulator::save_coverage(time_t t) {
 }
 #endif
 
+void Emulator::trigger_perfDump() {
+  dut_ptr->io_perfInfo_dump = 1;
+  single_cycle();
+}
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
@@ -781,15 +801,19 @@ void Emulator::display_trapinfo() {
       eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_ABORT:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_LIMIT_EXCEEDED:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_SIG:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
   }
 

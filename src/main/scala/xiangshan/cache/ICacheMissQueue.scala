@@ -60,6 +60,7 @@ class IcacheMissReq extends ICacheBundle
 class IcacheMissResp extends ICacheBundle
 {
     val data = UInt(blockBits.W)
+    val eccWrong = Bool()
     val clientID = UInt(2.W)
 }
 
@@ -94,6 +95,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
     val readBeatCnt = Counter(refillCycles)
     //val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
     val respDataReg = Reg(UInt(blockBits.W))
+    val eccWrongReg = RegInit(false.B)
 
     //initial
     io.resp.bits := DontCare
@@ -129,6 +131,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
       is(s_memReadResp){
         when (io.mem_grant.bits.id === io.id && io.mem_grant.fire()) {
 	        respDataReg := io.mem_grant.bits.data
+          eccWrongReg := io.mem_grant.bits.eccWrong
           state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
         }
       }
@@ -142,6 +145,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
       is(s_wait_resp){
         io.resp.bits.data := respDataReg.asUInt
+        io.resp.bits.eccWrong := eccWrongReg
 	      io.resp.bits.clientID := req.clientID
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
@@ -229,16 +233,13 @@ class IcacheMissQueue extends ICacheMissQueueModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    if (!env.FPGAPlatform && !env.DualCore) {
-      ExcitingUtils.addSource(
-        BoolStopWatch(
-          start = entry.io.req.fire(),
-          stop = entry.io.resp.fire() || entry.io.flush,
-          startHighPriority = true),
-        "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
-        Perf
-      )
-    }
+    XSPerf(
+      "ICacheMissQueue_PenaltyEntry" + Integer.toString(i, 10),
+      BoolStopWatch(
+        start = entry.io.req.fire(),
+        stop = entry.io.resp.fire() || entry.io.flush,
+        startHighPriority = true)
+    )
 
     entry
   }
