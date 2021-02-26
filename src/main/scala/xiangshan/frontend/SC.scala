@@ -202,9 +202,9 @@ trait HasSC extends HasSCParameter { this: Tage =>
     }
   }
   
-  val scThreshold = RegInit(SCThreshold(5))
-  val useThreshold = WireInit(scThreshold.thres)
-  val updateThreshold = WireInit((useThreshold << 3) + 21.U)
+  val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
+  val useThresholds = VecInit(scThresholds map (_.thres))
+  val updateThresholds = VecInit(useThresholds map (t => (t << 3) + 21.U))
   
   val if3_scResps = VecInit(scTables.map(t => t.io.resp))
 
@@ -240,7 +240,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
     val if3_pvdrCtrCentered = getPvdrCentered(providerCtr)
     val if3_totalSums = VecInit(if3_scTableSums.map(_  + if3_pvdrCtrCentered))
     val if3_sumAbs = VecInit(if3_totalSums.map(_.abs.asUInt))
-    val if3_sumBelowThresholds = VecInit(if3_sumAbs.map(_ < useThreshold))
+    val if3_sumBelowThresholds = VecInit(if3_sumAbs zip useThresholds map {case (s, t) => s < t})
     val if3_scPreds = VecInit(if3_totalSums.map (_ >= 0.S))
 
     val if4_sumBelowThresholds = RegEnable(if3_sumBelowThresholds, s3_fire)
@@ -280,12 +280,12 @@ trait HasSC extends HasSCParameter { this: Tage =>
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
 
-      when (scPred =/= tagePred && sumAbs <= useThreshold - 2.U && sumAbs >= useThreshold - 4.U) {
-        val newThres = scThreshold.update(scPred =/= taken)
-        scThreshold := newThres
-        XSDebug(p"scThres update: old ${useThreshold} --> new ${newThres.thres}\n")
+      when (scPred =/= tagePred && sumAbs <= useThresholds(w) - 2.U && sumAbs >= useThresholds(w) - 4.U) {
+        val newThres = scThresholds(w).update(scPred =/= taken)
+        scThresholds(w) := newThres
+        XSDebug(p"scThres update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
       }
-      when (scPred =/= taken || sumAbs < updateThreshold) {
+      when (scPred =/= taken || sumAbs < updateThresholds(w)) {
         scUpdateMask.foreach(t => t(w) := true.B)
         XSDebug(sum < 0.S,
           p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
