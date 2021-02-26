@@ -419,6 +419,10 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
 
+  // For perf counters
+  toFtqBuf.pd    := if4_pd.pd
+
+
   val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
   val if4_taken = WireInit(if4_bp.taken)
   val if4_real_valids = if4_pd.mask &
