@@ -46,6 +46,18 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   def notCFI = brType === BrType.notBr
 }
 
+class PreDecodeInfoForDebug(val usePerf: Boolean = true) extends XSBundle {
+  val isRVC   = if (usePerf) Bool() else UInt(0.W)
+  val brType  = if (usePerf) UInt(2.W) else UInt(0.W)
+  val isCall  = if (usePerf) Bool() else UInt(0.W)
+  val isRet   = if (usePerf) Bool() else UInt(0.W)
+  val excType = if (usePerf) UInt(3.W) else UInt(0.W)
+  def isBr = brType === BrType.branch
+  def isJal = brType === BrType.jal
+  def isJalr = brType === BrType.jalr
+  def notCFI = brType === BrType.notBr
+}
+
 class PreDecodeResp extends XSBundle with HasIFUConst {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
