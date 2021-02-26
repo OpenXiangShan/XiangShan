@@ -52,7 +52,7 @@ trait HasCSRConst {
 
   // Supervisor Custom Read/Write
   val Sbpctl        = 0x5C0
-  val Spfctl        = 0x5C8
+  val Spfctl        = 0x5C1
 
   val Sdsid         = 0x9C0
 
