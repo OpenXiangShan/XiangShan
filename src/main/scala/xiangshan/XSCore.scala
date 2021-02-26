@@ -109,7 +109,9 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
   NumPerfCounters: Int = 16,
-  NrExtIntr: Int = 150
+  NrExtIntr: Int = 150,
+  PerfRealTime: Boolean = false,
+  PerfIntervalBits: Int = 15
 )
 
 trait HasXSParameter {
@@ -192,6 +194,8 @@ trait HasXSParameter {
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
   val NrExtIntr = core.NrExtIntr
+  val PerfRealTime = core.PerfRealTime
+  val PerfIntervalBits = core.PerfIntervalBits
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -311,7 +315,7 @@ case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = false,
+  EnablePerfDebug: Boolean = true,
   DualCore: Boolean = false
 )
 
@@ -338,7 +342,6 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
-  val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
@@ -355,7 +358,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
-    val l2ToPrefetcher = Flipped(new PrefetcherIO(PAddrBits))
+    val l2_pf_enable = Output(Bool())
   })
 
   val difftestIO = IO(new DifftestBundle())
@@ -390,11 +393,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  val l2Prefetcher = outer.l2Prefetcher.module
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
   frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
+  frontend.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
@@ -443,21 +446,23 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
 
   integerBlock.io.csrio.hartId <> io.hartId
-  integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
-  integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.perf <> DontCare
+  integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  integerBlock.io.csrio.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  integerBlock.io.csrio.fpu.isIllegal := false.B
+  integerBlock.io.csrio.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.fpu.frm <> floatBlock.io.frm
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
+  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
   integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
-  integerBlock.io.csrio.perfinfo <> ctrlBlock.io.roqio.toCSR.perfinfo
+
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+
   memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
-
-  floatBlock.io.frm <> integerBlock.io.csrio.frm
-
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -474,16 +479,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
 
-  val l2PrefetcherIn = Wire(Decoupled(new MissReq))
-  if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "bop") {
-    l2PrefetcherIn.valid := io.l2ToPrefetcher.acquire.valid
-    l2PrefetcherIn.bits := DontCare
-    l2PrefetcherIn.bits.addr := io.l2ToPrefetcher.acquire.bits.address
-    l2PrefetcherIn.bits.cmd := Mux(io.l2ToPrefetcher.acquire.bits.write, MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
-  } else {
-    l2PrefetcherIn <> memBlock.io.toDCachePrefetch
-  }
-  l2Prefetcher.io.in <> l2PrefetcherIn
+  // if l2 prefetcher use stream prefetch, it should be placed in XSCore
+  assert(l2PrefetcherParameters._type == "bop")
+  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()
