@@ -3,10 +3,10 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
+import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
+import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
-import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.Regfile
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
@@ -246,12 +246,21 @@ class IntegerBlock
     isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(e => {
-    if(e.config.writeFpRf) WireInit(e.io.out) else e.io.out
+    val w = WireInit(e.io.out)
+    val fpWen = if(e.config.writeFpRf) e.io.out.bits.uop.ctrl.fpWen else false.B
+    w.valid := e.io.out.valid && !fpWen
+    w
   }) ++ io.wakeUpIn.slow
 
-  exeUnits.zip(intWbArbiter.io.in).filter(_._1.config.writeFpRf).zip(io.wakeUpIn.slow).foreach{
-    case ((exu, wInt), wFp) =>
-      exu.io.out.ready := wFp.fire() || wInt.fire()
+  exeUnits.zip(intWbArbiter.io.in).foreach{
+    case (exu, wInt) =>
+      if(exu.config.writeFpRf){
+        val wakeUpOut = io.wakeUpOut.slow(0) // jmpExeUnit
+        val writeFpReady = wakeUpOut.fire() && wakeUpOut.bits.uop.ctrl.fpWen
+        exu.io.out.ready := wInt.fire() || writeFpReady || !exu.io.out.valid
+      } else {
+        exu.io.out.ready := wInt.fire() || !exu.io.out.valid
+      }
   }
 
   // set busytable and update roq
