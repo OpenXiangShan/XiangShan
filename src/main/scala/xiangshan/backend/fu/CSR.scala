@@ -796,7 +796,7 @@ class CSR extends FunctionUnit with HasCSRConst
     when (debugInt) {
       debugMode := true.B
       dpc := SignExt(csrio.exception.bits.cf.pc, XLEN)
-      dcsrNew.cause := Mux(reg_singleStepped, 4.U, 3.U)
+      dcsrNew.cause := 3.U
       dcsrNew.prv := priviledgeMode // TODO
       priviledgeMode := ModeM
       mstatusNew.mprv := false.B
