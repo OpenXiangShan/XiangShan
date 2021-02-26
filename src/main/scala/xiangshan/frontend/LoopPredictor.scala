@@ -37,7 +37,7 @@ class LoopEntry extends LTBBundle {
   // val unusable = Bool()
 
   def isLearned = conf === 7.U
-  def isConf = conf =/= 0.U
+  def isConf = conf =/= 0.U && conf =/= 7.U
   def isUnconf = conf === 0.U
 }
 
@@ -161,54 +161,58 @@ class LTBColumn extends LTBModule {
 
   when(redirectValid && redirect.mispred && !isReplay && !doingReset) {
     wen := true.B
-    when(tagMatch && if4_rEntry.isLearned) {
-      XSDebug("[redirect] 0\n")
-      wEntry.conf := 0.U
-      wEntry.specCnt := 0.U
-    }.elsewhen(tagMatch && if4_rEntry.isConf) {
-      when(cntMatch) {
-        XSDebug("[redirect] 1\n")
-        wEntry.conf := if4_rEntry.conf + 1.U
-        wEntry.specCnt := 0.U
-      }.otherwise {
-        XSDebug("[redirect] 2\n")
+    when(tagMatch) {
+      when(if4_rEntry.isLearned) {
+        XSDebug("[redirect] 0\n")
         wEntry.conf := 0.U
         wEntry.specCnt := 0.U
-        wEntry.tripCnt := redirect.specCnt
+      }.elsewhen(if4_rEntry.isConf) {
+        when(cntMatch) {
+          XSDebug("[redirect] 1\n")
+          wEntry.conf := if4_rEntry.conf + 1.U
+          wEntry.specCnt := 0.U
+        }.otherwise {
+          XSDebug("[redirect] 2\n")
+          wEntry.conf := 0.U
+          wEntry.specCnt := 0.U
+          wEntry.tripCnt := redirect.specCnt
+        }
+      }.elsewhen(if4_rEntry.isUnconf) {
+        when(cntMatch) {
+          XSDebug("[redirect] 3\n")
+          wEntry.conf := 1.U
+          wEntry.age := 7.U
+          wEntry.specCnt := 0.U
+        }.otherwise {
+          XSDebug("[redirect] 4\n")
+          wEntry.tripCnt := redirect.specCnt
+          wEntry.age := 7.U
+          wEntry.specCnt := 0.U
+        }
       }
-    }.elsewhen(tagMatch && if4_rEntry.isUnconf) {
-      when(cntMatch) {
-        XSDebug("[redirect] 3\n")
-        wEntry.conf := 1.U
-        wEntry.age := 7.U
-        wEntry.specCnt := 0.U
-      }.otherwise {
-        XSDebug("[redirect] 4\n")
-        wEntry.tripCnt := redirect.specCnt
-        wEntry.age := 7.U
-        wEntry.specCnt := 0.U
-      }
-    }.elsewhen(!tagMatch && if4_rEntry.isLearned) {
+    }.otherwise {
+      when(if4_rEntry.isLearned) {
         XSDebug("[redirect] 5\n")
-      // do nothing? or release this entry
-    }.elsewhen(!tagMatch && if4_rEntry.isConf) {
-      when(if4_rEntry.age === 0.U) {
-        XSDebug("[redirect] 6\n")
+        // do nothing? or release this entry
+      }.elsewhen(if4_rEntry.isConf) {
+        when(if4_rEntry.age === 0.U) {
+          XSDebug("[redirect] 6\n")
+          wEntry.tag := redirectTag
+          wEntry.conf := 1.U
+          wEntry.specCnt := 0.U
+          wEntry.tripCnt := redirect.specCnt
+        }.otherwise {
+          XSDebug("[redirect] 7\n")
+          wEntry.age := if4_rEntry.age - 1.U
+        }
+      }.elsewhen(if4_rEntry.isUnconf) {
+        XSDebug("[redirect] 8\n")
         wEntry.tag := redirectTag
         wEntry.conf := 1.U
+        wEntry.age := 7.U
         wEntry.specCnt := 0.U
         wEntry.tripCnt := redirect.specCnt
-      }.otherwise {
-        XSDebug("[redirect] 7\n")
-        wEntry.age := if4_rEntry.age - 1.U
       }
-    }.elsewhen(!tagMatch && if4_rEntry.isUnconf) {
-      XSDebug("[redirect] 8\n")
-      wEntry.tag := redirectTag
-      wEntry.conf := 1.U
-      wEntry.age := 7.U
-      wEntry.specCnt := 0.U
-      wEntry.tripCnt := redirect.specCnt
     }
   }.elsewhen(redirectValid && !doingReset){
     XSDebug("[redirect] 9\n")
@@ -376,7 +380,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
   for (i <- 0 until PredictWidth) {
-    io.resp.exit(i) := ltbResps(i).exit
+    io.resp.exit(i) := ltbResps(i).exit && ctrl.loop_enable
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 

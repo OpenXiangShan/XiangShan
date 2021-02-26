@@ -50,7 +50,8 @@ class BIM extends BasePredictor with BimParams {
   bim.io.r.req.bits.setIdx := if1_row
 
   val if2_bimRead = bim.io.r.resp.data
-  io.resp.ctrs  := if2_bimRead
+  val ctrlMask = Fill(if2_bimRead.getWidth, ctrl.bim_enable.asUInt).asTypeOf(if2_bimRead)
+  io.resp.ctrs  := VecInit(if2_bimRead zip ctrlMask map {case (a, b) => a & b})
   io.meta.ctrs  := if2_bimRead
 
   val updateValid = RegNext(io.update.valid)
