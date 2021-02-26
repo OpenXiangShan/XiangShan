@@ -380,7 +380,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
   for (i <- 0 until PredictWidth) {
-    io.resp.exit(i) := ltbResps(i).exit
+    io.resp.exit(i) := ltbResps(i).exit && ctrl.loop_enable
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 

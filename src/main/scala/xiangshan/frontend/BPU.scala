@@ -108,9 +108,14 @@ trait HasIFUFire { this: MultiIOModule =>
   val s3_fire  = fires(2)
   val out_fire = fires(3)
 }
+
+trait HasCtrl { this: BasePredictor =>
+  val ctrl = IO(Input(new BPUCtrl))
+}
+
 abstract class BasePredictor extends XSModule
   with HasBPUParameter with HasIFUConst with PredictorUtils
-  with HasIFUFire {
+  with HasIFUFire with HasCtrl {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -244,9 +249,9 @@ class BPUStage2 extends BPUStage {
 @chiselName
 class BPUStage3 extends BPUStage {
   class S3IO extends XSBundle {
-
     val predecode = Input(new Predecode)
     val redirect =  Flipped(ValidIO(new Redirect))
+    val ctrl = Input(new BPUCtrl)
   }
   val s3IO = IO(new S3IO)
   // TAGE has its own pipelines and the
@@ -305,6 +310,7 @@ class BPUStage3 extends BPUStage {
     ras.io.isLastHalfRVI := s3IO.predecode.hasLastHalfRVI
     ras.io.redirect := s3IO.redirect
     ras.fires <> fires
+    ras.ctrl := s3IO.ctrl
 
     for(i <- 0 until PredictWidth){
       io.out.brInfo.rasSp :=  ras.io.meta.rasSp
@@ -406,6 +412,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
   preds.map(p => {
     p.io.update <> io.commit
     p.fires <> io.inFire
+    p.ctrl <> io.ctrl
   })
 
   val s1 = Module(new BPUStage1)
