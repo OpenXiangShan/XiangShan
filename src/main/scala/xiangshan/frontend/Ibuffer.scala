@@ -7,6 +7,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
+import xiangshan.backend.decode.WaitTableParameters
 
 class IbufPtr extends CircularQueuePtr(IbufPtr.IBufSize) { }
 
@@ -28,9 +29,10 @@ class IBufferIO extends XSBundle {
 class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new IBufferIO)
 
-  class IBufEntry extends XSBundle {
+  class IBufEntry extends XSBundle with WaitTableParameters {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
+    val foldpc = UInt(WaitTableAddrWidth.W)
     val pd = new PreDecodeInfo
     val ipf = Bool()
     val acf = Bool()
@@ -89,6 +91,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     inWire.ipf := io.in.bits.ipf
     inWire.acf := io.in.bits.acf
     inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
+    inWire.foldpc := io.in.bits.foldpc(i)
     inWire.pred_taken := io.in.bits.pred_taken(i)
     inWire.ftqPtr := io.in.bits.ftqPtr
     inWire.ftqOffset := i.U
@@ -122,6 +125,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     io.out(i).bits.ftqOffset := outWire.ftqOffset
 
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
+    io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
   }
   val next_head_vec = VecInit(head_vec.map(_ + numDeq))

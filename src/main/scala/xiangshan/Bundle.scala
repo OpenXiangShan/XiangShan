@@ -6,8 +6,8 @@ import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.{ImmUnion, XDecode, WaitTableParameters}
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasTageParameter
 import xiangshan.frontend.HasSCParameter
 import xiangshan.frontend.HasIFUConst
@@ -20,12 +20,13 @@ import Chisel.experimental.chiselName
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket extends XSBundle {
+class FetchPacket extends XSBundle with WaitTableParameters {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
   val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
+  val foldpc = Vec(PredictWidth, UInt(WaitTableAddrWidth.W))
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -173,9 +174,10 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow extends XSBundle {
+class CtrlFlow extends XSBundle with WaitTableParameters {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  val foldpc = UInt(WaitTableAddrWidth.W)
   val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo

@@ -23,7 +23,7 @@ class DecodeStage extends XSModule {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
     
     // read waittable, update loadWaitBit
-    waittable.io.raddr(i) := io.in(i).bits.pc(VAddrBits-1, 1)
+    waittable.io.raddr(i) := io.in(i).bits.foldpc
     decoders(i).io.enq.ctrl_flow.loadWaitBit := waittable.io.rdata(i)
 
     io.out(i).valid      := io.in(i).valid

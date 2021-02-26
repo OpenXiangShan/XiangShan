@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion}
+import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -42,7 +42,7 @@ class CtrlToLsBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
+class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
   val io = IO(new Bundle() {
     val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
@@ -154,7 +154,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
 
   // update waittable if load violation redirect triggered
   io.waitTableUpdate.valid := isReplay && s2_redirect_valid_reg
-  io.waitTableUpdate.waddr := real_pc(VAddrBits-1, 1)
+  io.waitTableUpdate.waddr := XORFold(real_pc(VAddrBits-1, 1), WaitTableAddrWidth)
   io.waitTableUpdate.wdata := true.B
 
   io.stage3Redirect.valid := s2_redirect_valid_reg
