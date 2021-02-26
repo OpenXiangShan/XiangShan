@@ -40,7 +40,7 @@ jobs:
       - name: Build EMU
         run:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME B=0 E=0 -j220 EMU_TRACE=1 EMU_THREADS=8
-      - name: Run cputest
+      - name: Basic Test - cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
           echo $CPU_TEST_DIR
@@ -57,16 +57,20 @@ jobs:
               fi
           done
           exit $ret
-      - name: Run riscv-tests
+      - name: Basic Test - riscv-tests
         run: |
           numactl -m 1 -C 64-71 make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
-      - name: Run microbench
+      - name: Simple Test - microbench
         run: |
           numactl -m 1 -C 64-71 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run
-      - name: Run coremark
+      - name: Simple Test - CoreMark
         run: |
           numactl -m 1 -C 64-71 make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run
-      - name: Run Linux
+      - name: System Test - Linux
         run: |
           numactl -m 1 -C 64-71 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin
+      - name: Floating-point Test - povray
+        run: |
+          numactl -m 1 -C 64-71 ./build/emu -i /home/ci-runner/xsenv/workloads/povray/_3400001000_.gz -I 5000000 | tee emu_result.log
+          grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
 
