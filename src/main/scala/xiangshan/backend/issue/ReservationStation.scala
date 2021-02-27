@@ -450,7 +450,11 @@ class ReservationStationCtrl
   srcUpdateListen.map(a => a.map(b => b.map(c => c := false.B )))
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
-      srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j)).orR
+      if (exuCfg == Exu.stExeUnitCfg && j == 0) {
+        srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j).zip(fastPortsCfg ++ slowPortsCfg).filter(_._2.writeIntRf).map(_._1)).orR
+      } else {
+        srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j)).orR
+      }
     }
   }
 
@@ -692,7 +696,8 @@ class ReservationStationData
   // Data : single read, multi write
   // ------------------------
   val data = if (exuCfg == Exu.stExeUnitCfg) {
-    val srcBase = Module(new RSDataSingleSrc(srcLen, iqSize, fastPortsCnt + slowPortsCnt, 1))
+    val baseListenWidth = (fastPortsCfg ++ slowPortsCfg).filter(_.writeIntRf).size
+    val srcBase = Module(new RSDataSingleSrc(srcLen, iqSize, baseListenWidth, 1))
     val srcData = Module(new RSDataSingleSrc(srcLen, iqSize, fastPortsCnt + slowPortsCnt, 2))
     srcBase.suggestName(s"${this.name}_data0")
     srcData.suggestName(s"${this.name}_data1")
@@ -705,8 +710,13 @@ class ReservationStationData
     }
   }
   (0 until srcNum).foreach{ i =>
-    data(i).listen.wen := io.listen.wen(i)
-    data(i).listen.wdata := io.listen.wdata
+    if (exuCfg == Exu.stExeUnitCfg && i == 0) {
+      data(i).listen.wen := VecInit(io.listen.wen(i).map(a => VecInit(a.zip((fastPortsCfg ++ slowPortsCfg).map(_.writeIntRf)).filter(_._2).map(_._1))))
+      data(i).listen.wdata := io.listen.wdata.zip((fastPortsCfg ++ slowPortsCfg).map(_.writeIntRf)).filter(_._2).map(_._1)
+    } else {
+      data(i).listen.wen := io.listen.wen(i)
+      data(i).listen.wdata := io.listen.wdata
+    }
   }
 
   val addrReg = RegEnable(io.in.addr, io.in.valid)
