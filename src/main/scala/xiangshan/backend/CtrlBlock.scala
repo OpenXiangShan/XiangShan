@@ -98,7 +98,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
     val redirect = Wire(Valid(new Redirect))
-    redirect.valid := exuOut.valid
+    redirect.valid := exuOut.valid && exuOut.bits.redirect.cfiUpdate.isMisPred
     redirect.bits := exuOut.bits.redirect
     redirect
   }
@@ -246,10 +246,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val flushReg = RegNext(flush)
 
   val exuRedirect = io.fromIntBlock.exuRedirect.map(x => {
-    val misPred = x.valid && x.bits.redirectValid && x.bits.redirect.cfiUpdate.isMisPred
+    val valid = x.valid && x.bits.redirectValid
     val killedByOlder = x.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
     val delayed = Wire(Valid(new ExuOutput))
-    delayed.valid := RegNext(misPred && !killedByOlder, init = false.B)
+    delayed.valid := RegNext(valid && !killedByOlder, init = false.B)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed
   })
@@ -269,7 +269,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   ftq.io.flushIdx := RegNext(roq.io.flushOut.bits.ftqIdx)
   ftq.io.flushOffset := RegNext(roq.io.flushOut.bits.ftqOffset)
   ftq.io.frontendRedirect <> frontendRedirect
-  ftq.io.exuWriteback <> io.fromIntBlock.exuRedirect
+  ftq.io.exuWriteback <> exuRedirect
 
   ftq.io.ftqRead.last.ptr := roq.io.flushOut.bits.ftqIdx
   val flushPC = GetPcByFtq(
