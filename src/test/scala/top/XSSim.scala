@@ -154,8 +154,6 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     soc.module.reset := (reset.asBool | soc.module.debug.map { debug => AsyncResetReg(debug.ndreset) }.getOrElse(false.B)).asBool
     OuterDebug.connectDebug(soc.module.debug, soc.module.resetctrl, clock, reset.asBool, success)
 
-
-    val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {
       for (i <- 0 until NumCores) {
         difftest(i).commit := soc.module.difftestIO(i).fromRoq.commit

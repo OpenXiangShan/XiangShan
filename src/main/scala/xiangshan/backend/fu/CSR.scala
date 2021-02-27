@@ -252,14 +252,18 @@ class CSR extends FunctionUnit with HasCSRConst
   // Debug CSRs
 
   val debugMode = RegInit(false.B)
-  val dcsrReg = RegInit(0.U(32.W)) // TODO reset value
+  val dcsr = RegInit(0.U(32.W)) // TODO reset value
   val dpc = Reg(UInt(64.W))
   val dscratch = Reg(UInt(64.W))
 
-  val dcsrOld = dcsrReg.asTypeOf(new DcsrStruct)
+  val dcsrData = WireInit(dcsr.asTypeOf(new DcsrStruct))
 
-  debugInt := csrio.externalInterrupt.debug_int
-  XSDebug(debugInt, "DebugInt is 1")
+  def dcsrUpdateSideEffect(dcsr: UInt): UInt = {
+    val dcsrOld = WireInit(dcsr.asTypeOf(new DcsrStruct))
+    val dcsrNew = dcsr | (dcsrOld.prv(0) | dcsrOld.prv(1)).asUInt // turn 10 priv into 11
+    dcsrNew
+  }
+   XSDebug(csrio.externalInterrupt.debug_int, "DebugInt is 1")
 
   // val singleStep = dcsrOld.step && !debugMode
   // reg_singleStepped := false.B // && input single_step
@@ -542,7 +546,7 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
 
     //--- Debug Mode ---
-    MaskedRegMap(Dcsr, dcsrReg),
+    MaskedRegMap(Dcsr, dcsr, "h0000c007".U, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
     MaskedRegMap(Dscratch, dscratch),
   )
@@ -688,7 +692,7 @@ class CSR extends FunctionUnit with HasCSRConst
   when (valid && isDret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val dcsrNew = WireInit(dcsrReg.asTypeOf(new DcsrStruct))
+    val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
     mstatusNew.mprv := 0.U
     mstatus := mstatusNew.asUInt
     priviledgeMode := dcsrNew.prv
@@ -736,8 +740,10 @@ class CSR extends FunctionUnit with HasCSRConst
   io.in.ready := true.B
   io.out.valid := valid
 
+  val ebreakEnterDebug = (priviledgeMode === ModeM && dcsrData.ebreakm) || (priviledgeMode === ModeS && dcsrData.ebreaks) || (priviledgeMode === ModeU && dcsrData.ebreaku)
+
   val csrExceptionVec = WireInit(cfIn.exceptionVec)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak && ebreakEnterDebug
   csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
@@ -770,7 +776,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.uop.cf.pc, intrNO)
 
-  val debugIntr = intrNO === IRQ_DEBUG
+  val debugIntr = intrNO === IRQ_DEBUG.U
 
   // exceptions
   val raiseException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
@@ -854,26 +860,26 @@ class CSR extends FunctionUnit with HasCSRConst
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val dcsrNew = WireInit(dcsrReg.asTypeOf(new DcsrStruct))
+    val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
 
     when (debugExceptionIntr) {
       when (debugIntr) {
         debugMode := true.B
         priviledgeMode := ModeM
         mstatusNew.mprv := false.B
-        dpc := SignExt(csrio.exception.bits.cf.pc, XLEN)
+        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
         dcsrNew.cause := 1.U
         dcsrNew.prv := priviledgeMode
       } .elsewhen (!debugMode) {
         // ebreak in running hart
         debugMode := true.B
-        dpc := SignExt(csrio.exception.bits.cf.pc, XLEN)
+        dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
         dcsrNew.cause := 3.U
         dcsrNew.prv := priviledgeMode // TODO
         priviledgeMode := ModeM
         mstatusNew.mprv := false.B
       }
-      dcsrReg := dcsrNew.asUInt
+      dcsr := dcsrNew.asUInt
     }.elsewhen (delegS) {
       scause := causeNO
       sepc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
@@ -924,4 +930,3 @@ class CSR extends FunctionUnit with HasCSRConst
     difftestIO.medeleg := medeleg
   }
 }
-S
