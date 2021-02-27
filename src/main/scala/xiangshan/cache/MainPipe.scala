@@ -366,7 +366,7 @@ class NewMainPipe extends DCacheModule {
   val s3_valid = RegInit(false.B)
   val s3_fire = Wire(Bool())
   val s3_req = RegEnable(s2_req, s2_fire)
-  s3_ready := !s3_valid || s3_fire
+  s3_ready := !s3_valid //|| s3_fire
 
   val s3_rmask = RegEnable(s2_rmask, s2_fire)
   val s3_store_wmask = RegEnable(s2_store_wmask, s2_fire)
