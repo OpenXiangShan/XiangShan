@@ -115,7 +115,7 @@ class NewMainPipe extends DCacheModule {
   // stage 0
   // read meta
   val s0_valid = io.req.valid
-  val s0_fire = s0_valid && s1_ready
+  val s0_fire = io.req.fire()
   val s0_req = io.req.bits
 
   val word_mask = Wire(Vec(blockRows, Vec(rowWords, Bits(wordBytes.W))))
