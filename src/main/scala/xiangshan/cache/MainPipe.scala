@@ -262,7 +262,7 @@ class NewMainPipe extends DCacheModule {
   io.data_read.valid := s1_valid && s2_ready && s1_need_data
   val data_read = io.data_read.bits
   data_read.rmask := s1_rmask
-  data_read.way_en := ~0.U(nWays.W)
+  data_read.way_en := s1_way_en
   data_read.addr := s1_req.addr
 
   dump_pipeline_reqs("MainPipe s1", s1_valid, s1_req)
