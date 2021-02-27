@@ -315,7 +315,7 @@ case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = true,
+  EnablePerfDebug: Boolean = false,
   DualCore: Boolean = false
 )
 

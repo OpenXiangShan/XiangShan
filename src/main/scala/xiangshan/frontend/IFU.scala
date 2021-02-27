@@ -533,12 +533,12 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.fetchPacket.valid := fetchPacketValid
 
 //  if(IFUDebug) {
-  if (!env.FPGAPlatform) {
-    val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
-    val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
-    val predictor = predictor_s4
-    toFtqBuf.metas.map(_.predictor := predictor)
-  }
+  // if (!env.FPGAPlatform) {
+  //   val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
+  //   val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
+  //   val predictor = predictor_s4
+  //   toFtqBuf.metas.map(_.predictor := predictor)
+  // }
  // }
 
   // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
@@ -561,6 +561,52 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   // ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
   // ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
   // ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
+
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
+    val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
+    val predictor = predictor_s4
+    toFtqBuf.metas.map(_.predictor := predictor)
+
+    // val ubtbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    // val btbAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    // val bimResp = WireInit(VecInit(Seq.fill(PredictWidth) {false.B} ))
+    // val tageAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+    // val rasAns = WireInit(0.U.asTypeOf(new PredictorAnswer))
+    // val loopAns = WireInit(VecInit(Seq.fill(PredictWidth) {0.U.asTypeOf(new PredictorAnswer)} ))
+
+    // ExcitingUtils.addSink(ubtbAns, "ubtbAns")
+    // ExcitingUtils.addSink(btbAns, "btbAns")
+    // ExcitingUtils.addSink(bimResp, "bimResp")
+    // ExcitingUtils.addSink(tageAns, "tageAns")
+    // ExcitingUtils.addSink(rasAns, "rasAns")
+    // // ExcitingUtils.addSink(loopAns, "loopAns")
+    
+    // val ubtbAns_s3 = RegEnable(ubtbAns, if2_fire)
+    // val ubtbAns_s4 = RegEnable(ubtbAns_s3, if3_fire)
+
+    // val btbAns_s3 = RegEnable(btbAns, if2_fire)
+    // val btbAns_s4 = RegEnable(btbAns_s3, if3_fire)
+    // val bimResp_s3 = RegEnable(bimResp, if2_fire)
+    // val bimResp_s4 = RegEnable(bimResp_s3, if3_fire)
+
+    toFtqBuf.metas.zipWithIndex.foreach{ case(x,i) =>
+      x.predictor := predictor
+
+      // x.ubtbAns := ubtbAns_s4(i)
+      // x.btbAns := btbAns_s4(i)
+      // x.btbAns.taken := bimResp_s4(i)
+      // x.tageAns := tageAns(i)
+      // x.rasAns := rasAns // Is this right?
+      // x.loopAns := loopAns(i)
+
+      x.ubtbAns := bpu.io.brInfo.metas(i).ubtbAns
+      x.btbAns := bpu.io.brInfo.metas(i).btbAns
+      x.tageAns := bpu.io.brInfo.metas(i).tageAns
+      x.rasAns := bpu.io.brInfo.metas(i).rasAns // Is this right?
+      x.loopAns := bpu.io.brInfo.metas(i).loopAns
+    }
+  }
 
   // debug info
   if (IFUDebug) {

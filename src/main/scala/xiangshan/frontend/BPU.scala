@@ -213,6 +213,16 @@ class BPUStage1 extends BPUStage {
   io.out.resp <> io.in.resp
   io.out.brInfo := io.in.brInfo
 
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record ubtb pred result
+      meta.ubtbAns.hit := ubtbResp.hits(i)
+      meta.ubtbAns.taken := ubtbResp.takens(i)
+      meta.ubtbAns.target := ubtbResp.targets(i)
+    }
+  }
+
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
       ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
@@ -232,6 +242,16 @@ class BPUStage2 extends BPUStage {
   jalMask := DontCare
 
   hasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && HasCExtension.B
+
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record btb pred result
+      meta.btbAns.hit := btbResp.hits(i)
+      meta.btbAns.taken := bimResp.ctrs(i)(1)
+      meta.btbAns.target := btbResp.targets(i)
+    }
+  }
 
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
@@ -321,6 +341,26 @@ class BPUStage3 extends BPUStage {
     for (i <- 0 until PredictWidth) {
       when(rets(i) && ras.io.out.valid){
         targets(i) := ras.io.out.bits.target
+      }
+    }
+
+    // For perf counters
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+        // record tage pred result
+        meta.tageAns.hit := tageResp.hits(i)
+        meta.tageAns.taken := tageResp.takens(i)
+        meta.tageAns.target := DontCare
+
+        // record ras pred result
+        meta.rasAns.hit := ras.io.out.valid
+        meta.rasAns.taken := true.B
+        meta.rasAns.target := ras.io.out.bits.target
+
+        // record loop pred result
+        meta.loopAns.hit := loopRes(i)
+        meta.loopAns.taken := false.B
+        meta.loopAns.target := DontCare
       }
     }
   }

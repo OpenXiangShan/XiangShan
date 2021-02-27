@@ -291,27 +291,104 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // Branch Predictor Perf counters
+  val fires = io.roq_commits.map{case c => c.valid && !c.bits.pd.notCFI}
+  val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+  val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+  val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
+  val isJTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJal}
+  val isITypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJalr}
+  val isCTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isCall}
+  val isRTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isRet}
+
+  val mbpInstrs = fires
+  val mbpRights = predRights
+  val mbpWrongs = predWrongs
+  val mbpBRights = Cat(predRights) & Cat(isBTypes)
+  val mbpBWrongs = Cat(predWrongs) & Cat(isBTypes)
+  val mbpJRights = Cat(predRights) & Cat(isJTypes)
+  val mbpJWrongs = Cat(predWrongs) & Cat(isJTypes)
+  val mbpIRights = Cat(predRights) & Cat(isITypes)
+  val mbpIWrongs = Cat(predWrongs) & Cat(isITypes)
+  val mbpCRights = Cat(predRights) & Cat(isCTypes)
+  val mbpCWrongs = Cat(predWrongs) & Cat(isCTypes)
+  val mbpRRights = Cat(predRights) & Cat(isRTypes)
+  val mbpRWrongs = Cat(predWrongs) & Cat(isRTypes)
+
+  def predCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], lastRights: Seq[Bool], isWrong: Bool, checkTarget: Boolean) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).zip(lastRights).map {
+      case ((((valid, pd), ans), taken), lastRight) =>
+      Mux(valid && pd.isBr, 
+        isWrong ^ Mux(ans.hit.asBool,
+          Mux(ans.taken.asBool, if(checkTarget) {ans.target === commitEntry.target} else {taken},
+          !taken),
+        lastRight),
+      false.B)
+    }
+  }
+
+  def loopCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+      case (((valid, pd), ans), taken) =>
+      Mux(valid && (pd.isBr) && ans.hit.asBool, 
+        isWrong ^ (!taken),
+          false.B)
+    }
+  }
+
+  def rasCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+      case (((valid, pd), ans), taken) =>
+      Mux(valid && pd.isRet && taken && ans.hit.asBool,
+        isWrong ^ (ans.target === commitEntry.target),
+          false.B)
+    }
+  }
+
+  val ubtbRights = predCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), commitEntry.takens.map(!_), false.B, true)
+  val ubtbWrongs = predCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), commitEntry.takens.map(!_), true.B, true)
+  // btb and ubtb pred jal and jalr as well
+  val btbRights = predCheck(commitEntry, commitEntry.metas.map(_.btbAns), ubtbRights, false.B, true)
+  val btbWrongs = predCheck(commitEntry, commitEntry.metas.map(_.btbAns), ubtbRights, true.B, true)
+  val tageRights = predCheck(commitEntry, commitEntry.metas.map(_.tageAns), btbRights, false.B, false)
+  val tageWrongs = predCheck(commitEntry, commitEntry.metas.map(_.tageAns), btbRights, true.B, false)
+
+  val loopRights = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), false.B)
+  val loopWrongs = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), true.B)
+
+  val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
+  val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
+
   val perfCountsMap = Map(
-    "BpInstr" -> PopCount(io.roq_commits.map{case c => c.valid && !c.bits.pd.notCFI}),
+    "BpInstr" -> PopCount(mbpInstrs),
     "BpBInstr" -> PopCount(io.roq_commits.map{case c => c.valid && c.bits.pd.isBr}),
-    // "BpRight" -> PopCount((0 until PredictWidth).map{i => !mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-    "BpRight"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-    // "BpWrong" -> PopCount((0 until PredictWidth).map{i => mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-    "BpWrong"  -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-    "BpBRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-    "BpBWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-    "BpJRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-    "BpJWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-    "BpIRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-    "BpIWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-    "BpCRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isCall && commitEntry.valids(i)}),
-    "BpCWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isCall && commitEntry.valids(i)}),
-    "BpRRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isRet && commitEntry.valids(i)}),
-    "BpRWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isRet && commitEntry.valids(i)}),
+    "BpRight"  -> PopCount(mbpRights),
+    "BpWrong"  -> PopCount(mbpWrongs),
+    "BpBRight" -> PopCount(mbpBRights),
+    "BpBWrong" -> PopCount(mbpBWrongs),
+    "BpJRight" -> PopCount(mbpJRights),
+    "BpJWrong" -> PopCount(mbpJWrongs),
+    "BpIRight" -> PopCount(mbpIRights),
+    "BpIWrong" -> PopCount(mbpIWrongs),
+    "BpCRight" -> PopCount(mbpCRights),
+    "BpCWrong" -> PopCount(mbpCWrongs),
+    "BpRRight" -> PopCount(mbpRRights),
+    "BpRWrong" -> PopCount(mbpRWrongs),
+
+    "ubtbRight" -> PopCount(ubtbRights),
+    "ubtbWrong" -> PopCount(ubtbWrongs),
+    "btbRight" -> PopCount(btbRights),
+    "btbWrong" -> PopCount(btbWrongs),
+    "tageRight" -> PopCount(tageRights),
+    "tageWrong" -> PopCount(tageWrongs),
+
+    "rasRight"  -> PopCount(rasRights),
+    "rasWrong"  -> PopCount(rasWrongs),
+    "loopRight" -> PopCount(loopRights),
+    "loopWrong" -> PopCount(loopWrongs),
   )
 
   for((key, value) <- perfCountsMap) {
-    XSPerf(key, value, acc = true, intervalBits = 0)
+    XSPerf(key, value)
   }
 
   XSPerf("ftq_entries", validEntries)
