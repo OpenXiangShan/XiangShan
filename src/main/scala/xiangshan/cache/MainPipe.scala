@@ -237,7 +237,7 @@ class NewMainPipe extends DCacheModule {
 
   // replacement policy
   val replacer = cacheParams.replacement
-  val s1_repl_way_en = WireInit(0.U(log2Up(nWays).W))
+  val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way), RegNext(s1_repl_way_en))
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
   val s1_repl_coh = s1_repl_meta.coh
