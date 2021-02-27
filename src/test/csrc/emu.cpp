@@ -801,7 +801,6 @@ void Emulator::display_trapinfo() {
       eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_ABORT:
-      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_LIMIT_EXCEEDED:
