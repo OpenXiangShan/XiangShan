@@ -167,7 +167,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   // feedback tlb result to RS
   io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
+  io.tlbFeedback.bits.hit := !s2_tlb_miss && !s2_exception && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.needReplayFromRS := s2_cache_replay
 
