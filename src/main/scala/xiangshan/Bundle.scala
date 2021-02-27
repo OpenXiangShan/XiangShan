@@ -15,6 +15,7 @@ import xiangshan.frontend.HasSCParameter
 import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
+import xiangshan.frontend.BPUCtrl
 import utils._
 
 import scala.math.max
@@ -545,4 +546,6 @@ class CustomCSRCtrlIO extends XSBundle {
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
   val waittable_timeout = Output(UInt(5.W))
+  // Branch predicter
+  val bp_ctrl = Output(new BPUCtrl)
 }
