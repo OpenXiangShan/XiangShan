@@ -71,7 +71,7 @@ jobs:
           numactl -m 1 -C 64-71 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin
       - name: Floating-point Test - povray
         run: |
-          numactl -m 1 -C 64-71 ./build/emu -i /home/ci-runner/xsenv/workloads/povray/_3400001000_.gz -I 5000000 | tee emu_result.log
+          numactl -m 1 -C 64-71 make emu IMAGE=/home/ci-runner/xsenv/workloads/povray/_3400001000_.gz EMU_ARGS="-I 5000000" | tee emu_result.log
           grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
   emu-performance:
     runs-on: self-hosted
@@ -90,18 +90,18 @@ jobs:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME DRAMSIM3_HOME=$DRAMSIM3_HOME -j220 EMU_THREADS=16 WITH_DRAMSIM3=1
       - name: SPEC06 Test - mcf
         run: |
-          numactl -m 1 -C 64-79 ./build/emu -i /home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz -I 5000000 | tee emu_result.log
+          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz EMU_ARGS="-I 5000000" | tee emu_result.log
           grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
       - name: SPEC06 Test - xalancbmk
         run: |
-          numactl -m 1 -C 64-79 ./build/emu -i /home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz -I 5000000 | tee emu_result.log
+          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz EMU_ARGS="-I 5000000" | tee emu_result.log
           grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
       - name: SPEC06 Test - gcc
         run: |
-          numactl -m 1 -C 64-79 ./build/emu -i /home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz -I 5000000 | tee emu_result.log
+          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz EMU_ARGS="-I 5000000" | tee emu_result.log
           grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
       - name: SPEC06 Test - namd
         run: |
-          numactl -m 1 -C 64-79 ./build/emu -i /home/ci-runner/xsenv/workloads/namd/_4850001000_.gz -I 5000000 | tee emu_result.log
+          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/namd/_4850001000_.gz EMU_ARGS="-I 5000000" | tee emu_result.log
           grep -q "EXCEEDING CYCLE/INSTR LIMIT" emu_result.log
 
