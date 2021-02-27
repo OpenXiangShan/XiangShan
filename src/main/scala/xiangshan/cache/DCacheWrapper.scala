@@ -295,7 +295,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
   val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
 
-  mainPipeReqArb.io.out.ready := mainPipe.io.req.ready
+  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
   mainPipe.io.req.valid := mainPipeReq_valid
   mainPipe.io.req.bits  := mainPipeReq_req
 
