@@ -569,6 +569,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #else
         int priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 #endif
+        eprintf("Let REF run one more instruction.\n");
+        ref_difftest_exec(1, i);
         difftest_display(priviledgeMode, i);
         trapCode = STATE_ABORT;
       }
