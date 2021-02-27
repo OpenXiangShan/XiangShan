@@ -248,7 +248,7 @@ class BPUStage2 extends BPUStage {
     io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
       // record btb pred result
       meta.btbAns.hit := btbResp.hits(i)
-      meta.btbAns.taken := bimResp.ctrs(i)(1)
+      meta.btbAns.taken := takens(i)
       meta.btbAns.target := btbResp.targets(i)
     }
   }

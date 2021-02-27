@@ -314,14 +314,47 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRights = Cat(predRights) & Cat(isRTypes)
   val mbpRWrongs = Cat(predWrongs) & Cat(isRTypes)
 
-  def predCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], lastRights: Seq[Bool], isWrong: Bool, checkTarget: Boolean) = {
-    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).zip(lastRights).map {
-      case ((((valid, pd), ans), taken), lastRight) =>
-      Mux(valid && pd.isBr, 
+  // def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], lastRights: Seq[Bool], isWrong: Bool, checkTarget: Boolean) = {
+  //   commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).zip(lastRights).map {
+  //     case ((((valid, pd), ans), taken), lastRight) =>
+  //     Mux(valid && pd.isBr, 
+  //       isWrong ^ Mux(ans.hit.asBool,
+  //         Mux(ans.taken.asBool, if(checkTarget) {taken && ans.target === commitEntry.target} else {taken},
+  //         !taken),
+  //       lastRight),
+  //     false.B)
+  //   }
+  // }
+
+  def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+      case (((valid, pd), ans), taken) =>
+      Mux(valid && pd.isBr,
         isWrong ^ Mux(ans.hit.asBool,
-          Mux(ans.taken.asBool, if(checkTarget) {ans.target === commitEntry.target} else {taken},
+          Mux(ans.taken.asBool, taken && ans.target === commitEntry.target,
           !taken),
-        lastRight),
+        !taken),
+      false.B)
+    }
+  }
+
+  def btbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+      case (((valid, pd), ans), taken) =>
+      Mux(valid && pd.isBr,
+        isWrong ^ Mux(ans.hit.asBool,
+          Mux(ans.taken.asBool, taken && ans.target === commitEntry.target,
+          !taken),
+        !taken),
+      false.B)
+    }
+  }
+
+  def tageCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+    commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+      case (((valid, pd), ans), taken) =>
+      Mux(valid && pd.isBr,
+        isWrong ^ (ans.taken.asBool === taken),
       false.B)
     }
   }
@@ -338,19 +371,19 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   def rasCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
     commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
       case (((valid, pd), ans), taken) =>
-      Mux(valid && pd.isRet && taken && ans.hit.asBool,
+      Mux(valid && pd.isRet /*&& taken*/ && ans.hit.asBool,
         isWrong ^ (ans.target === commitEntry.target),
           false.B)
     }
   }
 
-  val ubtbRights = predCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), commitEntry.takens.map(!_), false.B, true)
-  val ubtbWrongs = predCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), commitEntry.takens.map(!_), true.B, true)
+  val ubtbRights = ubtbCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), false.B)
+  val ubtbWrongs = ubtbCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), true.B)
   // btb and ubtb pred jal and jalr as well
-  val btbRights = predCheck(commitEntry, commitEntry.metas.map(_.btbAns), ubtbRights, false.B, true)
-  val btbWrongs = predCheck(commitEntry, commitEntry.metas.map(_.btbAns), ubtbRights, true.B, true)
-  val tageRights = predCheck(commitEntry, commitEntry.metas.map(_.tageAns), btbRights, false.B, false)
-  val tageWrongs = predCheck(commitEntry, commitEntry.metas.map(_.tageAns), btbRights, true.B, false)
+  val btbRights = btbCheck(commitEntry, commitEntry.metas.map(_.btbAns), false.B)
+  val btbWrongs = btbCheck(commitEntry, commitEntry.metas.map(_.btbAns), true.B)
+  val tageRights = tageCheck(commitEntry, commitEntry.metas.map(_.tageAns), false.B)
+  val tageWrongs = tageCheck(commitEntry, commitEntry.metas.map(_.tageAns), true.B)
 
   val loopRights = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), false.B)
   val loopWrongs = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), true.B)
