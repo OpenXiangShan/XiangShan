@@ -58,7 +58,7 @@ trait HasExeBlockHelper {
   def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
     if(connectReady) x.ready := out.ready
-    out.valid := x.valid && x.bits.uop.ctrl.rfWen
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
     out
   }
   def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
