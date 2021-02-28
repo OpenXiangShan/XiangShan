@@ -224,14 +224,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // the s1 kill signal
   // only lsu uses this, replay never kills
   for (w <- 0 until LoadPipelineWidth) {
-    // ldu(w).io.lsu <> io.lsu.load(w)
-    // TODO: change io.lsu.load(w) to NewDCacheLoadIO type
-    ldu(w).io.lsu.req <> io.lsu.load(w).req
-    io.lsu.load(w).resp <> ldu(w).io.lsu.resp
-    ldu(w).io.lsu.s1_kill := io.lsu.load(w).s1_kill
-    ldu(w).io.lsu.s1_paddr := io.lsu.load(w).s1_paddr
-    io.lsu.load(w).s1_data := DontCare
-    io.lsu.load(w).s2_hit_way := ldu(w).io.lsu.s2_hit_way
+    ldu(w).io.lsu <> io.lsu.load(w)
 
     // replay and nack not needed anymore
     // TODO: remove replay and nack
