@@ -717,13 +717,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // Perf Count
-  XSPerf("ptw_req_count", validOneCycle)
-  XSPerf("ptw_l1_hit", l1Hit)
-  XSPerf("ptw_l2_hit", l2Hit)
-  XSPerf("ptw_l3_hit", l3Hit)
-  XSPerf("ptw_mem_req_count", memReqFire)
-  XSPerf("ptw_mem_req_cycle", BoolStopWatch(memReqFire, memRespFire, true))
-  XSPerf("ptw_mem_req_blocked_cycle", mem.a.valid && !memReqReady)
+  XSPerf("access", validOneCycle)
+  XSPerf("l1_hit", l1Hit)
+  XSPerf("l2_hit", l2Hit)
+  XSPerf("l3_hit", l3Hit)
+  XSPerf("mem_count", memReqFire)
+  XSPerf("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
+  XSPerf("mem_blocked_cycle", mem.a.valid && !memReqReady)
 
   // debug info
   for (i <- 0 until PtwWidth) {
