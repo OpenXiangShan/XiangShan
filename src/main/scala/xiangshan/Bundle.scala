@@ -117,8 +117,6 @@ class PredictorAnswer extends XSBundle {
 }
 
 class BpuMeta extends XSBundle with HasBPUParameter {
-  val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
-  val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
   val bimCtr = UInt(2.W)
   val tageMeta = new TageMeta

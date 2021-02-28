@@ -448,8 +448,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     XSDebug(io.inFire(3), "bpuMeta sent!\n")
     for (i <- 0 until PredictWidth) {
       val b = io.brInfo.metas(i)
-      XSDebug(io.inFire(3), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, bimCtr:%d\n",
-        i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.bimCtr)
+      XSDebug(io.inFire(3), "brInfo(%d): btbWrWay:%d, bimCtr:%d\n",
+        i.U, b.btbWriteWay, b.bimCtr)
       val t = b.tageMeta
       XSDebug(io.inFire(3), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
         t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
@@ -488,10 +488,6 @@ class BPU extends BaseBPU {
 
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
-  for (i <- 0 until PredictWidth) {
-    s1_brInfo_in.metas(i).ubtbWriteWay := ubtb.io.uBTBMeta.writeWay(i)
-    s1_brInfo_in.metas(i).ubtbHits := ubtb.io.uBTBMeta.hits(i)
-  }
 
   btb.io.pc.valid := s1_fire
   btb.io.pc.bits := io.in.pc
