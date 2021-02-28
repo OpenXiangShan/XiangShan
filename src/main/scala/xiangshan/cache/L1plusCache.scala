@@ -294,10 +294,11 @@ class L1plusCacheReq extends L1plusCacheBundle
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
+  val eccWrong = Bool()
   val id   = UInt(idWidth.W)
 
   override def toPrintable: Printable = {
-    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+    p"id=${Binary(id)} data=${Hexadecimal(data)} eccWrong=${Binary(eccWrong)}"
   }
 }
 
@@ -532,15 +533,24 @@ class L1plusCachePipe extends L1plusCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
+
+  //TODO: only detect error but not correct it
   val s2_data_decoded = Cat((0 until blockRows).reverse map { r =>
       val data = s2_data(r)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
-      decoded.corrected
+      decoded.uncorrected
+    })
+
+  val s2_data_wrong =  Cat((0 until blockRows).reverse map { r =>
+      val data = s2_data(r)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && s2_hit && decoded.error))
+      decoded.error
     })
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
+  io.resp.bits.eccWrong := s2_data_wrong.asUInt.orR
   io.resp.bits.id   := s2_req.id
 
   // replacement policy
@@ -675,7 +685,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
   // not encoded data
   val refill_data_raw = Reg(Vec(blockRows, UInt(rowBits.W)))
   when (state === s_refill_resp) {
@@ -686,7 +695,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-          refill_data((refill_ctr << log2Floor(beatRows)) + i.U) := cacheParams.dataCode.encode(row)
           refill_data_raw((refill_ctr << log2Floor(beatRows)) + i.U) := row
         }
 
@@ -719,7 +727,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.refill.bits.way_en  := req.way_en
     io.refill.bits.wmask   := ~0.U(blockRows.W)
     io.refill.bits.rmask   := DontCare
-    io.refill.bits.data    := refill_data
+    io.refill.bits.data    := refill_data_raw.map(row => cacheParams.dataCode.encode(row))
 
     when (io.refill.fire()) {
       state := s_meta_write_req

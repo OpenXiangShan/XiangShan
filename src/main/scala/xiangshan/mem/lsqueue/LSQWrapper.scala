@@ -54,6 +54,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
+    val issuePtrExt = Output(new SqPtr)
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
   val difftestIO = IO(new Bundle() {
     val fromSQ = new Bundle() {
@@ -111,6 +113,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.roq <> io.roq
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
+  storeQueue.io.issuePtrExt <> io.issuePtrExt
+  storeQueue.io.storeIssue <> io.storeIssue
 
   loadQueue.io.load_s1 <> io.forward
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE

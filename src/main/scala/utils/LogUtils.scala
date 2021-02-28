@@ -104,7 +104,7 @@ object XSWarn extends LogHelper(XSLogLevel.WARN)
 object XSError extends LogHelper(XSLogLevel.ERROR)
 
 object XSPerf extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt, acc: Boolean = true)(implicit name: String) = {
+  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false)(implicit name: String) = {
     val counter = RegInit(0.U(64.W))
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))

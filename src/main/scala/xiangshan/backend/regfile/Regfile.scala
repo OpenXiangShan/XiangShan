@@ -49,7 +49,7 @@ class Regfile
 
   val useBlackBox = false
   if (!useBlackBox) {
-    val mem = Mem(NRPhyRegs, UInt(len.W))
+    val mem = Reg(Vec(NRPhyRegs, UInt(len.W)))
     for (r <- io.readPorts) {
       val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
       r.data := RegNext(rdata)

@@ -150,9 +150,10 @@ class BTB extends BasePredictor with BTBParams{
   for (b <- 0 until BtbBanks) {
     val meta_entry = if2_metaRead(if2_bankHitWays(b))(b)
     val data_entry = if2_dataRead(if2_bankHitWays(b))(b)
+    val target = Mux(data_entry.extended, if2_edataRead, Cat(if2_pc(VAddrBits-1, lowerBitsSize+instOffsetBits), data_entry.lower, 0.U(instOffsetBits.W)))
     // Use real pc to calculate the target
-    io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead, Cat(if2_pc(VAddrBits-1, lowerBitsSize+instOffsetBits), data_entry.lower, 0.U(instOffsetBits.W)))
-    io.resp.hits(b)  := if2_bankHits(b)
+    io.resp.targets(b) := target
+    io.resp.hits(b)  := if2_bankHits(b) && ctrl.btb_enable
     io.resp.isBrs(b) := meta_entry.isBr
     io.resp.isRVC(b) := meta_entry.isRVC
     io.meta.writeWay(b) := writeWay(b)

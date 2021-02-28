@@ -10,6 +10,7 @@ import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
+import xiangshan.backend.decode.WaitTableParameters
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -65,6 +66,7 @@ class IFUIO extends XSBundle
   val fetchPacket = DecoupledIO(new FetchPacket)
   // from backend
   val redirect = Flipped(ValidIO(new Redirect))
+  val bp_ctrl = Input(new BPUCtrl)
   val commitUpdate = Flipped(ValidIO(new FtqEntry))
   val ftqEnqPtr = Input(new FtqPtr)
   val ftqLeftOne = Input(Bool())
@@ -96,7 +98,7 @@ class PrevHalfInstr extends XSBundle {
 }
 
 @chiselName
-class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
+class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
@@ -227,9 +229,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     comp.io.res
   }
 
-  val if3_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => !if3_pendingPrevHalfInstr && if3_bp.takens(i) && if3_nextValidPCNotEquals(if3_bp.targets(i))))
   val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
-  val if3_predTakenRedirect    = ParallelOR(if3_predTakenRedirectVec)
+  val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
   val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(if3_snpc)
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
@@ -361,10 +362,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
     comp.io.res
   }
 
-  val if4_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => if4_bp.takens(i) && if4_nextValidPCNotEquals(if4_bp.targets(i))))
-
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
-  val if4_predTakenRedirect = ParallelORR(if4_predTakenRedirectVec)
+  val if4_predTakenRedirect = if4_bp.taken && if4_nextValidPCNotEquals(if4_bp.target)
   val if4_predNotTakenRedirect = !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
   // val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
 
@@ -418,6 +417,10 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   toFtqBuf.rasTop   := bpu.io.brInfo.rasTop
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
   toFtqBuf.metas    := bpu.io.brInfo.metas
+
+  // For perf counters
+  toFtqBuf.pd    := if4_pd.pd
+
 
   val if4_jmpIdx = WireInit(if4_bp.jmpIdx)
   val if4_taken = WireInit(if4_bp.taken)
@@ -480,6 +483,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   io.l1plusFlush := icache.io.l1plusflush
   io.prefetchTrainReq := icache.io.prefetchTrainReq
 
+  bpu.io.ctrl := RegNext(io.bp_ctrl)
   bpu.io.commit <> io.commitUpdate
   bpu.io.redirect <> io.redirect
 
@@ -514,6 +518,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   fetchPacketWire.instrs := expandedInstrs
 
   fetchPacketWire.pc := if4_pd.pc
+  fetchPacketWire.foldpc := if4_pd.pc.map(i => XORFold(i(VAddrBits-1,1), WaitTableAddrWidth))
 
   fetchPacketWire.pdmask := if4_pd.mask
   fetchPacketWire.pd := if4_pd.pd

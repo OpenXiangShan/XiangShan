@@ -148,7 +148,7 @@ class MicroBTB extends BasePredictor
 
         //only when hit and instruction valid and entry valid can output data
         io.out.targets(b) := read_resps(b).target
-        io.out.hits(b)   := banks(b).read_hit
+        io.out.hits(b)   := banks(b).read_hit && ctrl.ubtb_enable
         io.out.takens(b) := read_resps(b).taken
         io.out.is_RVC(b) := read_resps(b).is_RVC
         io.out.brMask(b) := read_resps(b).is_Br

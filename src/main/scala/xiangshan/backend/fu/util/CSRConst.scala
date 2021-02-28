@@ -51,7 +51,10 @@ trait HasCSRConst {
   val Satp          = 0x180
 
   // Supervisor Custom Read/Write
-  val Spfctl        = 0x5C0
+  val Sbpctl        = 0x5C0
+  val Spfctl        = 0x5C1
+
+  val Slvpredctl    = 0x5C2
 
   val Sdsid         = 0x9C0
 

@@ -1,14 +1,13 @@
 package xiangshan.frontend
-import utils.XSInfo
+import utils._
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.PipelineConnect
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
-import xiangshan.backend.fu.{HasExceptionNO, CustomCSRCtrlIO}
+import xiangshan.backend.fu.HasExceptionNO
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
@@ -45,6 +44,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // from backend
   ifu.io.redirect <> io.backend.redirect_cfiUpdate
+  ifu.io.bp_ctrl <> io.csrCtrl.bp_ctrl
   ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
   ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
   ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
@@ -99,5 +99,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //   )
   // }
 
-
+  val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  XSPerf("FrontendBubble", frontendBubble)
 }
