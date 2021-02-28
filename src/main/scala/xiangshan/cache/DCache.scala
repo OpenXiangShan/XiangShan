@@ -416,10 +416,13 @@ class DuplicatedMetaArray extends DCacheModule {
   val meta = Seq.fill(LoadPipelineWidth) { Module(new L1MetadataArray(onReset _)) }
 
   for (w <- 0 until LoadPipelineWidth) {
-    meta(w).io.write <> io.write
+    // meta(w).io.write <> io.write
+    meta(w).io.write.valid := io.write.valid
+    meta(w).io.write.bits := io.write.bits
     meta(w).io.read  <> io.read(w)
     io.resp(w) <> meta(w).io.resp
   }
+  io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
 
   def dumpRead() = {
     (0 until LoadPipelineWidth) map { w =>
