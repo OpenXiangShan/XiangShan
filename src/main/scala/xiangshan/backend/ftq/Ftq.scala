@@ -205,7 +205,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  val headClear = Cat(commitStateQueue(headPtr.value).map(s => s === s_invalid)).andR()
+  val headClear = Cat(commitStateQueue(headPtr.value).map(s => {
+    s === s_invalid || s === s_commited
+  })).andR()
   when(headClear && headPtr =/= tailPtr) {
     headPtr := headPtr + 1.U
   }
