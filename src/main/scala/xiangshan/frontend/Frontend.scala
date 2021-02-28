@@ -1,5 +1,5 @@
 package xiangshan.frontend
-import utils.XSInfo
+import utils.{XSInfo, XSPerf}
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
@@ -99,5 +99,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //   )
   // }
 
-
+  val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  XSPerf("FrontendBubble", frontendBubble)
 }
