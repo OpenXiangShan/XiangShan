@@ -505,7 +505,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit[NumCore];
-  const int stuck_limit = 2000;
+  const int stuck_limit = 5000;
   const int firstCommit_limit = 10000;
   uint64_t core_max_instr[NumCore];
 

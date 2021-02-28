@@ -243,11 +243,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+ 
+    // Lsq to load unit's rs
+    reservationStations(i).io.stIssuePtr := lsq.io.issuePtrExt
 
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+
+    // update waittable
+    // TODO: read pc
+    io.fromCtrlBlock.waitTableUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 
@@ -260,10 +267,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.memfeedback
-    stu.io.rsIdx       := rs.io.rsIdx
+    stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
+
+    // sync issue info to rs 
+    lsq.io.storeIssue(i).valid := rs.io.deq.valid
+    lsq.io.storeIssue(i).bits := rs.io.deq.bits
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
