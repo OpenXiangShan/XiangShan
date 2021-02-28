@@ -135,25 +135,37 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    val array = List.fill(bankNum)(Module(new SRAMTemplate(Bits((bankRows * encRowBits).W), set=nSets, way=1,
+    val array = List.fill(bankNum)(Module(new SRAMTemplate(UInt((bankRows * rowBits).W), set=nSets, way=1,
       shouldReset=false, holdRead=false, singlePort=singlePort)))
+    val codeArray = Module(new SRAMTemplate(UInt((blockRows *codeWidth).W), set=nSets, way=1,
+      shouldReset=false, holdRead=false, singlePort=singlePort))
     // data write
     for (b <- 0 until bankNum){
-      val respDataUInt = io.write.bits.data.asUInt
+      val respData = VecInit(io.write.bits.data.map{row => row(rowBits - 1, 0)}).asUInt
+      val respCode = VecInit(io.write.bits.data.map{row => row(encRowBits - 1, rowBits)}).asUInt
       array(b).io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
       array(b).io.w.req.bits.apply(
         setIdx=waddr,
-        data=respDataUInt((b+1)*blockEcodedBits/2 - 1, b*blockEcodedBits/2),
+        data=respData((b+1)*blockBits/2 - 1, b*blockBits/2),
         waymask=1.U)
-
+      
+      codeArray.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+      codeArray.io.w.req.bits.apply(
+        setIdx=waddr,
+        data=respCode,
+        waymask=1.U)
+      
       // data read
       array(b).io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
       array(b).io.r.req.bits.apply(setIdx=raddr)
+
+      codeArray.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+      codeArray.io.r.req.bits.apply(setIdx=raddr)
       for (r <- 0 until blockRows) {
-        if(r < blockRows/2){ io.resp(w)(r) := RegNext(array(0).io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits)) }
+        if(r < blockRows/2){ io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(0).io.r.resp.data(0)((r + 1) * rowBits - 1, r * rowBits) )) }
         else { 
           val r_half = r - blockRows/2
-          io.resp(w)(r) := RegNext(array(1).io.r.resp.data(0)((r_half + 1) * encRowBits - 1, r_half * encRowBits)) 
+          io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(1).io.r.resp.data(0)((r_half + 1) * rowBits - 1, r_half * rowBits))) 
         }
       }
     }
