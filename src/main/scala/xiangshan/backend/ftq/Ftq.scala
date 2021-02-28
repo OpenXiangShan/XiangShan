@@ -318,18 +318,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val mbpRRights = Cat(predRights) & Cat(isRTypes)
     val mbpRWrongs = Cat(predWrongs) & Cat(isRTypes)
 
-    // def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], lastRights: Seq[Bool], isWrong: Bool, checkTarget: Boolean) = {
-    //   commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).zip(lastRights).map {
-    //     case ((((valid, pd), ans), taken), lastRight) =>
-    //     Mux(valid && pd.isBr, 
-    //       isWrong ^ Mux(ans.hit.asBool,
-    //         Mux(ans.taken.asBool, if(checkTarget) {taken && ans.target === commitEntry.target} else {taken},
-    //         !taken),
-    //       lastRight),
-    //     false.B)
-    //   }
-    // }
-
     def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
       commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
         case (((valid, pd), ans), taken) =>
