@@ -295,7 +295,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    val fires = io.roq_commits.map{case c => c.valid && !c.bits.pd.notCFI}
+    val fires = commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && !pd.notCFI}
     val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
     val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
     val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
@@ -375,7 +375,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     def rasCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
       commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
         case (((valid, pd), ans), taken) =>
-        Mux(valid && pd.isRet /*&& taken*/ && ans.hit.asBool,
+        Mux(valid && pd.isRet.asBool /*&& taken*/ && ans.hit.asBool,
           isWrong ^ (ans.target === commitEntry.target),
             false.B)
       }
@@ -397,7 +397,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
     val perfCountsMap = Map(
       "BpInstr" -> PopCount(mbpInstrs),
-      "BpBInstr" -> PopCount(io.roq_commits.map{case c => c.valid && c.bits.pd.isBr}),
+      "BpBInstr" -> PopCount(commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && pd.isBr}),
       "BpRight"  -> PopCount(mbpRights),
       "BpWrong"  -> PopCount(mbpWrongs),
       "BpBRight" -> PopCount(mbpBRights),
