@@ -116,6 +116,7 @@ class MicroBTB extends BasePredictor
         io.read_resp.is_Br := ren && hit_meta.is_Br
         io.read_resp.taken := ren && hit_and_taken
         io.read_resp.target := target
+        io.read_hit := hit_oh.orR
 
         debug_io.read_hit := hit_oh.orR
         debug_io.read_hit_way := OHToUInt(hit_oh)
