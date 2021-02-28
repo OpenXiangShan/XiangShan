@@ -44,7 +44,7 @@ class CtrlToLsBlockIO extends XSBundle {
 
 class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
   val io = IO(new Bundle() {
-    val loadRelay = Flipped(ValidIO(new Redirect))
+    val loadReplay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
     val flush = Input(Bool())
     val stage2FtqRead = new FtqRead
@@ -95,7 +95,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   val oldestAluOut = ParallelOperation(io.exuMispredict.tail, selectOlderExuOut)
   val (oldestExuOut, jumpIsOlder) = selectOlderExuOutWithFlag(oldestAluOut, jumpOut) // select between jump and alu
 
-  val oldestMispredict = selectOlderRedirect(io.loadRelay, {
+  val oldestMispredict = selectOlderRedirect(io.loadReplay, {
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := oldestExuOut.valid
     redirect.bits := oldestExuOut.bits.redirect
@@ -239,7 +239,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     x.valid := RegNext(misPred && !killedByOlder, init = false.B)
     x.bits := RegEnable(y.bits, y.valid)
   })
-  redirectGen.io.loadRelay := io.fromLsBlock.replay
+  redirectGen.io.loadReplay := io.fromLsBlock.replay
   redirectGen.io.flush := flushReg
 
   ftq.io.enq <> io.frontend.fetchInfo
