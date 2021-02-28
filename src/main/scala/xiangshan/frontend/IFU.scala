@@ -10,6 +10,7 @@ import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
+import xiangshan.backend.decode.WaitTableParameters
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -97,7 +98,7 @@ class PrevHalfInstr extends XSBundle {
 }
 
 @chiselName
-class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
+class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
@@ -517,6 +518,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   fetchPacketWire.instrs := expandedInstrs
 
   fetchPacketWire.pc := if4_pd.pc
+  fetchPacketWire.foldpc := if4_pd.pc.map(i => XORFold(i(VAddrBits-1,1), WaitTableAddrWidth))
 
   fetchPacketWire.pdmask := if4_pd.mask
   fetchPacketWire.pd := if4_pd.pd
