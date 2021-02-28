@@ -206,7 +206,7 @@ endif
 ifndef NOOP_HOME
 $(error NOOP_HOME is not set)
 endif
-EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
+EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM) $(EMU_ARGS)
 
 emu: $(EMU)
 	ls build

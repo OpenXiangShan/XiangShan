@@ -198,7 +198,7 @@ class RAS extends BasePredictor
     io.meta.rasSp := spec_ras.sp
     io.meta.rasTop := spec_ras.top
 
-    io.out.valid := !spec_is_empty
+    io.out.valid := !spec_is_empty && ctrl.ras_enable
     io.out.bits.target := spec_top_addr
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS

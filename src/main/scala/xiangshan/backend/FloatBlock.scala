@@ -7,7 +7,7 @@ import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.mem.HasLoadHelper
+import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
 
 
 class FpBlockToCtrlIO extends XSBundle {
@@ -17,17 +17,18 @@ class FpBlockToCtrlIO extends XSBundle {
 
 class FloatBlock
 (
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
+  intSlowWakeUpIn: Seq[ExuConfig],
+  memSlowWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig],
-) extends XSModule with HasExeBlockHelper with HasLoadHelper {
+) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
     val toMemBlock = new FpBlockToMemBlockIO
 
-    val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
+    val intWakeUpFp = Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
+    val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     // from csr
@@ -37,24 +38,32 @@ class FloatBlock
   val redirect = io.fromCtrlBlock.redirect
   val flush = io.fromCtrlBlock.flush
 
-  require(fastWakeUpIn.isEmpty)
-  val wakeUpInReg = Wire(Flipped(new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)))
-  wakeUpInReg.slow.zip(io.wakeUpIn.slow).foreach{
-    case (inReg, in) =>
-      PipelineConnect(in, inReg, inReg.fire(), in.bits.uop.roqIdx.needFlush(redirect, flush))
-  }
-  val wakeUpInRecode = WireInit(wakeUpInReg)
-  for(((rec, reg), cfg) <- wakeUpInRecode.slow.zip(wakeUpInReg.slow).zip(slowWakeUpIn)){
-    rec.bits.data := {
-      if(cfg == Exu.ldExeUnitCfg) fpRdataHelper(reg.bits.uop, reg.bits.data)
-      else Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
-        recode(reg.bits.data(31, 0), S),
-        recode(reg.bits.data(63, 0), D)
+  val intWakeUpFpReg = Wire(Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput))))
+  intWakeUpFpReg.zip(io.intWakeUpFp).foreach{
+    case (inReg, wakeUpIn) =>
+      val in = WireInit(wakeUpIn)
+      wakeUpIn.ready := in.ready
+      in.valid := wakeUpIn.valid && !wakeUpIn.bits.uop.roqIdx.needFlush(redirect, flush)
+      PipelineConnect(in, inReg,
+        inReg.fire() || inReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
       )
-    }
-    rec.bits.redirectValid := false.B
-    reg.ready := rec.ready
   }
+  val intRecoded = WireInit(intWakeUpFpReg)
+  for(((rec, reg), cfg) <- intRecoded.zip(intWakeUpFpReg).zip(intSlowWakeUpIn)){
+    rec.bits.data := Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
+      recode(reg.bits.data(31, 0), S),
+      recode(reg.bits.data(63, 0), D)
+    )
+    rec.bits.redirectValid := false.B
+    reg.ready := rec.ready || !rec.valid
+  }
+  val memRecoded = WireInit(io.memWakeUpFp)
+  for((rec, reg) <- memRecoded.zip(io.memWakeUpFp)){
+    rec.bits.data := fpRdataHelper(reg.bits.uop, reg.bits.data)
+    rec.bits.redirectValid := false.B
+    reg.ready := true.B
+  }
+  val wakeUpInRecode = intRecoded ++ memRecoded
 
   val fpRf = Module(new Regfile(
     numReadPorts = NRFpReadPorts,
@@ -86,12 +95,13 @@ class FloatBlock
     }
 
     val readFpRf = cfg.readFpRf
+    val wakeUpInRecodeWithCfg = intSlowWakeUpIn.zip(intRecoded) ++ memSlowWakeUpIn.zip(memRecoded)
 
-    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency).map(_.io.out.bits.data)
-    val fastPortsCnt = inBlockWbData.length
+    val inBlockFastPorts = exeUnits.filter(e => e.config.hasCertainLatency).map(a => (a.config, a.io.out.bits.data))
+    val fastPortsCnt = inBlockFastPorts.length
 
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(_.io.out)
-    val slowPorts = (inBlockListenPorts ++ wakeUpInRecode.slow).map(decoupledIOToValidIO)
+    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(a => (a.config, a.io.out))
+    val slowPorts = (inBlockListenPorts ++ wakeUpInRecodeWithCfg).map(a => (a._1, decoupledIOToValidIO(a._2)))
     val slowPortsCnt = slowPorts.length
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
@@ -99,7 +109,13 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1, fastPortsCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = false))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+      inBlockFastPorts.map(_._1),
+      slowPorts.map(_._1),
+      fixedDelay = certainLatency,
+      fastWakeup = certainLatency >= 0,
+      feedback = false
+    ))
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush <> flush // TODO: remove it
@@ -115,8 +131,8 @@ class FloatBlock
     rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
     if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
 
-    rs.io.fastDatas <> inBlockWbData
-    rs.io.slowPorts <> slowPorts
+    rs.io.fastDatas <> inBlockFastPorts.map(_._2)
+    rs.io.slowPorts <> slowPorts.map(_._2)
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
@@ -139,22 +155,6 @@ class FloatBlock
     rs.io.fastUopsIn <> inBlockUops
   }
 
-  val (recodeOut, ieeeOutReg) = exeUnits.map(e => {
-    val rec = WireInit(e.io.out)
-    val recReg = Wire(DecoupledIO(new ExuOutput))
-    PipelineConnect(
-      rec, recReg, recReg.fire(),
-      rec.bits.uop.roqIdx.needFlush(redirect, flush)
-    )
-    val ieeeReg = WireInit(recReg)
-    recReg.ready := ieeeReg.ready
-    ieeeReg.bits.data := Mux(recReg.bits.uop.ctrl.fpWen, ieee(recReg.bits.data), recReg.bits.data)
-    ieeeReg.bits.redirectValid := false.B
-    (rec, ieeeReg)
-  }).unzip
-
-  io.wakeUpOut.slow <> ieeeOutReg
-
   // read fp rf from ctrl block
   fpRf.io.readPorts.zipWithIndex.map{ case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
   (0 until exuParameters.StuCnt).foreach(i =>
@@ -162,17 +162,39 @@ class FloatBlock
   )
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    exeUnits.map(_.config) ++ intSlowWakeUpIn ++ memSlowWakeUpIn,
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in <> exeUnits.map(e =>
-    if(e.config.writeIntRf) WireInit(e.io.out) else e.io.out
-  ) ++ wakeUpInRecode.slow
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
 
-  exeUnits.zip(recodeOut).zip(fpWbArbiter.io.in).filter(_._1._1.config.writeIntRf).foreach {
-    case ((exu, wInt), wFp) =>
-      exu.io.out.ready := wInt.fire() || wFp.fire()
+  for((exu, i) <- exeUnits.zipWithIndex){
+    val out, outReg = Wire(DecoupledIO(new ExuOutput))
+    out.bits := exu.io.out.bits
+    out.valid := exu.io.out.valid && !out.bits.uop.roqIdx.needFlush(redirect, flush)
+    PipelineConnect(out, outReg,
+      outReg.fire() || outReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
+    )
+    io.wakeUpOut.slow(i).valid := outReg.valid
+    io.wakeUpOut.slow(i).bits := outReg.bits
+    io.wakeUpOut.slow(i).bits.redirectValid := false.B
+    io.wakeUpOut.slow(i).bits.data := Mux(outReg.bits.uop.ctrl.fpWen,
+      ieee(outReg.bits.data),
+      outReg.bits.data
+    )
+    fpWbArbiter.io.in(i).valid := exu.io.out.valid && exu.io.out.bits.uop.ctrl.fpWen && outReg.ready
+    fpWbArbiter.io.in(i).bits := exu.io.out.bits
+    if(exu.config.writeIntRf){
+      outReg.ready := !outReg.valid || (
+        io.wakeUpOut.slow(i).ready && outReg.bits.uop.ctrl.rfWen
+        ) || outReg.bits.uop.ctrl.fpWen
+      // don't consider flush in 'intFire'
+      val intFire = exu.io.out.valid && out.ready && out.bits.uop.ctrl.rfWen
+      exu.io.out.ready := intFire || fpWbArbiter.io.in(i).fire() || !exu.io.out.valid
+    } else {
+      outReg.ready := true.B
+      exu.io.out.ready := fpWbArbiter.io.in(i).fire() || !exu.io.out.valid
+    }
   }
 
   XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
@@ -182,7 +204,7 @@ class FloatBlock
 
   fpRf.io.writePorts.zip(fpWbArbiter.io.out).foreach{
     case (rf, wb) =>
-      rf.wen := wb.valid && wb.bits.uop.ctrl.fpWen
+      rf.wen := wb.valid
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }

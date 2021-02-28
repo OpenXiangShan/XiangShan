@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion}
+import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -37,11 +37,12 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
+  val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
+class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
   val io = IO(new Bundle() {
     val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
@@ -49,6 +50,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
+    val waitTableUpdate = Output(new WaitTableUpdateReq) // generated in stage2
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
@@ -149,6 +151,12 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
       snpc
     )
   )
+
+  // update waittable if load violation redirect triggered
+  io.waitTableUpdate.valid := isReplay && s2_redirect_valid_reg
+  io.waitTableUpdate.waddr := XORFold(real_pc(VAddrBits-1, 1), WaitTableAddrWidth)
+  io.waitTableUpdate.wdata := true.B
+
   io.stage3Redirect.valid := s2_redirect_valid_reg
   io.stage3Redirect.bits := s2_redirect_bits_reg
   val stage3CfiUpdate = io.stage3Redirect.bits.cfiUpdate
@@ -184,6 +192,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       // to mem block
       val lsq = new RoqLsqIO
     }
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val difftestIO = IO(new Bundle() {
@@ -217,7 +226,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val redirectGen = Module(new RedirectGenerator)
 
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
-
   val roq = Module(new Roq(roqWbSize))
 
   val backendRedirect = redirectGen.io.stage2Redirect
@@ -227,7 +235,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   redirectGen.io.exuMispredict.zip(io.fromIntBlock.exuRedirect).map({case (x, y) =>
     val misPred = y.valid && y.bits.redirect.cfiUpdate.isMisPred
-    val killedByOlder = y.bits.uop.roqIdx.needFlush(backendRedirect, flush)
+    val killedByOlder = y.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
     x.valid := RegNext(misPred && !killedByOlder, init = false.B)
     x.bits := RegEnable(y.bits, y.valid)
   })
@@ -271,6 +279,13 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.ftqLeftOne := ftq.io.leftOne
 
   decode.io.in <> io.frontend.cfVec
+  // currently, we only update wait table when isReplay
+  decode.io.waitTableUpdate(0) <> RegNext(redirectGen.io.waitTableUpdate)
+  decode.io.waitTableUpdate(1) := DontCare
+  decode.io.waitTableUpdate(1).valid := false.B
+  // decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
+
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))
@@ -327,13 +342,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect <> backendRedirect
-  roq.io.exeWbResults.zip(
-    io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
-  ).foreach{
-    case(x, y) =>
-      x.bits := y.bits
-      x.valid := y.valid
-  }
+  roq.io.exeWbResults <> (io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect

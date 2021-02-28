@@ -5,6 +5,7 @@ import chisel3.util._
 import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, XSDebug, XSPerf}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
+import xiangshan.frontend.PreDecodeInfoForDebug
 
 class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
 
@@ -76,6 +77,8 @@ class Ftq_2R_SRAMEntry extends XSBundle {
 class Ftq_1R_Commit_SRAMEntry extends XSBundle {
   val metas = Vec(PredictWidth, new BpuMeta)
   val rvc_mask = Vec(PredictWidth, Bool())
+
+  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 }
 
 class FtqRead extends Bundle {
@@ -141,6 +144,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   ftq_1r_sram.io.waddr := tailPtr.value
   ftq_1r_sram.io.wdata.metas := io.enq.bits.metas
   ftq_1r_sram.io.wdata.rvc_mask := io.enq.bits.rvc_mask
+  ftq_1r_sram.io.wdata.pd := io.enq.bits.pd
 
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
@@ -233,6 +237,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // from 1r sram
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
   commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
+  commitEntry.pd := RegNext(ftq_1r_sram.io.rdata(0).pd)
   // from regs
   commitEntry.valids := RegNext(RegNext(commit_valids))
   commitEntry.mispred := RegNext(RegNext(mispredict_vec(headPtr.value)))
@@ -290,6 +295,32 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("stall", io.enq.valid && !io.enq.ready)
   XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
   XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+
+  // Branch Predictor Perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val perfCountsMap = Map(
+      "BpInstr"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      "BpBInstr" -> PopCount((0 until PredictWidth).map{i => commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      // "BpRight" -> PopCount((0 until PredictWidth).map{i => !mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
+      "BpRight"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      // "BpWrong" -> PopCount((0 until PredictWidth).map{i => mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
+      "BpWrong"  -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
+      "BpBRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      "BpBWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
+      "BpJRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
+      "BpJWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
+      "BpIRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
+      "BpIWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
+      "BpCRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
+      "BpCWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
+      "BpRRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
+      "BpRWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
+    )
+
+    for((key, value) <- perfCountsMap) {
+      XSPerf(key, value)
+    }
+  }
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
