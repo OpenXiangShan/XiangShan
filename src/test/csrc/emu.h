@@ -19,6 +19,7 @@ struct EmuArgs {
   uint32_t seed;
   uint64_t max_cycles;
   uint64_t max_instr;
+  uint64_t warmup_instr;
   uint64_t log_begin, log_end;
   const char *image;
   const char *snapshot_path;
@@ -29,6 +30,7 @@ struct EmuArgs {
     seed = 0;
     max_cycles = -1;
     max_instr = -1;
+    warmup_instr = -1;
     log_begin = 1;
     log_end = -1;
     snapshot_path = NULL;

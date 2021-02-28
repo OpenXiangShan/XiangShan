@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion}
+import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -37,20 +37,22 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
+  val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
+class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
-    val loadRelay = Flipped(ValidIO(new Redirect))
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
+    val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val stage1FtqRead = Vec(numRedirect + 1, new FtqRead)
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
+    val waitTableUpdate = Output(new WaitTableUpdateReq) 
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
@@ -93,7 +95,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   }
 
   for((ptr, redirect) <- io.stage1FtqRead.map(_.ptr).zip(
-    io.exuMispredict.map(_.bits.redirect) :+ io.loadRelay.bits
+    io.exuMispredict.map(_.bits.redirect) :+ io.loadReplay.bits
   )){ ptr := redirect.ftqIdx }
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
@@ -110,7 +112,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     oldestAluRedirect, getRedirect(jumpOut)
   ))
   val oldestExuOutput = Mux(jumpIsOlder.asBool(), jumpOut, aluOut(oldestAluIdx))
-  val (oldestRedirect, _) = selectOldestRedirect(Seq(io.loadRelay, oldestExuRedirect))
+  val (oldestRedirect, _) = selectOldestRedirect(Seq(io.loadReplay, oldestExuRedirect))
 
   val s1_isJump = RegNext(jumpIsOlder.asBool(), init = false.B)
   val s1_jumpTarget = RegEnable(jumpOut.bits.redirect.cfiUpdate.target, jumpOut.valid)
@@ -161,6 +163,11 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
     )
   )
 
+  // update waittable if load violation redirect triggered
+  io.waitTableUpdate.valid := RegNext(isReplay && s1_redirect_valid_reg, init = false.B)
+  io.waitTableUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), WaitTableAddrWidth))
+  io.waitTableUpdate.wdata := true.B
+
   io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
@@ -205,6 +212,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       // to mem block
       val lsq = new RoqLsqIO
     }
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val difftestIO = IO(new Bundle() {
@@ -256,7 +264,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
-  redirectGen.io.loadRelay := io.fromLsBlock.replay
+  redirectGen.io.loadReplay := io.fromLsBlock.replay
   redirectGen.io.flush := flushReg
 
   ftq.io.enq <> io.frontend.fetchInfo
@@ -295,6 +303,13 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.ftqLeftOne := ftq.io.leftOne
 
   decode.io.in <> io.frontend.cfVec
+  // currently, we only update wait table when isReplay
+  decode.io.waitTableUpdate(0) <> RegNext(redirectGen.io.waitTableUpdate)
+  decode.io.waitTableUpdate(1) := DontCare
+  decode.io.waitTableUpdate(1).valid := false.B
+  // decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
+  decode.io.csrCtrl := RegNext(io.csrCtrl)
+
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))

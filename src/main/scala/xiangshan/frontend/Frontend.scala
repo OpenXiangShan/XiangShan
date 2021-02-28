@@ -1,5 +1,4 @@
 package xiangshan.frontend
-
 import utils._
 import chisel3._
 import chisel3.util._
@@ -8,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
-import xiangshan.backend.fu.{HasExceptionNO, CustomCSRCtrlIO}
+import xiangshan.backend.fu.HasExceptionNO
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
@@ -100,5 +99,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //   )
   // }
 
-
+  val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  XSPerf("FrontendBubble", frontendBubble)
 }
