@@ -2,6 +2,7 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import utils.XSPerf
 import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
@@ -51,7 +52,7 @@ trait HasExeBlockHelper {
   }
   def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
     val out = WireInit(x)
-    out.valid := x.valid && x.bits.uop.ctrl.rfWen
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
     out
   }
   def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
@@ -156,19 +157,25 @@ class IntegerBlock
 
     val readIntRf = cfg.readIntRf
 
-    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency).map(_.io.out.bits.data)
-    val fastDatas = inBlockWbData ++ io.wakeUpIn.fast.map(_.bits.data)
-    val wakeupCnt = fastDatas.length
+    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency).map(a => (a.config, a.io.out.bits.data))
+    val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data))
+    val fastPortsCnt = fastDatas.length
 
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(_.io.out)
-    val slowPorts = (inBlockListenPorts ++ io.wakeUpIn.slow).map(decoupledIOToValidIO)
+    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(a => (a.config, a.io.out))
+    val slowPorts = (inBlockListenPorts ++ slowWakeUpIn.zip(io.wakeUpIn.slow)).map(a => (a._1, decoupledIOToValidIO(a._2)))
     val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
 
-    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
+    println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+      fastDatas.map(_._1),
+      slowPorts.map(_._1),
+      fixedDelay = certainLatency,
+      fastWakeup = certainLatency >= 0,
+      feedback = feedback
+    ))
 
     rs.io.redirect <> redirect
     rs.io.flush <> flush // TODO: remove it
@@ -185,8 +192,8 @@ class IntegerBlock
       rs.io.jalr_target := io.fromCtrlBlock.jalr_target
     }
 
-    rs.io.fastDatas <> fastDatas
-    rs.io.slowPorts <> slowPorts
+    rs.io.fastDatas <> fastDatas.map(_._2)
+    rs.io.slowPorts <> slowPorts.map(_._2)
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.fromInt <> rs.io.deq
@@ -252,6 +259,8 @@ class IntegerBlock
     w
   }) ++ io.wakeUpIn.slow
 
+  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
+  
   exeUnits.zip(intWbArbiter.io.in).foreach{
     case (exu, wInt) =>
       if(exu.config.writeFpRf){

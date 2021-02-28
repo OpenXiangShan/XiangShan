@@ -72,18 +72,19 @@ class L1plusPrefetcher extends PrefetchModule {
     XSDebug(p"io.mem_acquire:     v=${io.mem_acquire.valid} r=${io.mem_acquire.ready} ${io.mem_acquire.bits}\n")
     XSDebug(p"io.mem_grant:       v=${io.mem_grant.valid} r=${io.mem_grant.ready} ${io.mem_grant.bits}\n")
 
-    XSPerf("L1+Prefetch_reqCnt", io.mem_acquire.fire())
+    XSPerf("reqCnt", io.mem_acquire.fire())
     def idWidth: Int = log2Up(l1plusPrefetcherParameters.nEntries)
-    (0 until l1plusPrefetcherParameters.nEntries).foreach(i =>
+    (0 until l1plusPrefetcherParameters.nEntries).foreach(i => {
       XSPerf(
-        "L1+Prefetch_penaltyEntry" + Integer.toString(i, 10),
+        "entryPenalty" + Integer.toString(i, 10),
         BoolStopWatch(
           start = io.mem_acquire.fire() && io.mem_acquire.bits.id(idWidth - 1, 0) === i.U,
           stop = io.mem_grant.fire() && io.mem_grant.bits.id(idWidth - 1, 0) === i.U,
           startHighPriority = true
         )
       )
-    )
+      // XSPerf("entryReq" + Integer.toString(i, 10), io.mem_acquire.fire() && io.mem_acquire.bits.id(idWidth - 1, 0) === i.U)
+    })
 
   } else {
     io.in.ready := true.B

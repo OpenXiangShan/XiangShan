@@ -543,6 +543,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     XSPerf("itlb_ptw_req_cycle", waiting)
     XSPerf("itlb_wait_blocked_count", waiting && hasMissReq)
     XSPerf("itlb_ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+    XSPerf("itlb_access", valid(0) && vmEnable)
+    XSPerf("itlb_miss", valid(0) && vmEnable && missVec(0))
   }
 
   // Log
