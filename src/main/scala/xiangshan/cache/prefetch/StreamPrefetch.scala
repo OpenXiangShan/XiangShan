@@ -228,8 +228,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule with HasT
   }
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
-  io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) =>
-    r.ready && i.U === io.resp.bits.idx}).asUInt.orR
+  io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) => r.ready}).asUInt.orR
   
   // realloc this stream buffer for a newly-found stream
   when (io.alloc.valid) {
@@ -374,8 +373,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   }
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
-  io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>
-    i.U === io.resp.bits.stream && buf.io.resp.ready}).asUInt.orR
+  io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>  buf.io.resp.ready}).asUInt.orR
   
   // debug info
   XSDebug(s"${p.cacheName} " + p"io: ${io}\n")

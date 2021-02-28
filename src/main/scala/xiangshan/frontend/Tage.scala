@@ -430,8 +430,8 @@ class Tage extends BaseTage {
     if3_providerUs(w) := if3_resps(if3_provider)(w).bits.u
     if3_providerCtrs(w) := if3_resps(if3_provider)(w).bits.ctr
 
-    io.resp.hits(w) := if4_provideds(w)
-    io.resp.takens(w) := if4_tageTakens(w)
+    io.resp.hits(w) := if4_provideds(w) && ctrl.tage_enable
+    io.resp.takens(w) := if4_tageTakens(w) && ctrl.tage_enable
     io.meta(w) := DontCare
     io.meta(w).provider.valid := if4_provideds(w)
     io.meta(w).provider.bits := if4_providers(w)
