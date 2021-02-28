@@ -410,6 +410,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toIntBlock <> integerBlock.io.fromCtrlBlock
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
+  ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
   val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
   val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
@@ -462,7 +463,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
-  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
+  memBlock.io.tlbCsr <> RegNext(integerBlock.io.csrio.tlb)
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
