@@ -131,3 +131,10 @@ object GetOddBits {
     VecInit((0 until input.getWidth/2).map(i => {input(2*i+1)})).asUInt
   }
 }
+
+object XORFold {
+  def apply(input: UInt, reswidth: Int): UInt = {
+    require(input.getWidth*2>=reswidth)
+    input(reswidth-1, 0) ^ input(2*reswidth-1, reswidth)
+  }
+}

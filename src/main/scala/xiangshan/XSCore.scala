@@ -410,6 +410,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toIntBlock <> integerBlock.io.fromCtrlBlock
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
+  ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
   val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
   val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
