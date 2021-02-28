@@ -296,8 +296,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     io.roqio.toCSR.trapTarget,
     flushPC + 4.U // flush pipe
   )
+  val flushRedirectReg = Wire(Valid(new Redirect))
+  flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
+  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
 
-  io.frontend.redirect_cfiUpdate := Mux(flushRedirect.valid, flushRedirect, frontendRedirect)
+  io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, frontendRedirect)
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
   io.frontend.ftqEnqPtr := ftq.io.enqPtr
   io.frontend.ftqLeftOne := ftq.io.leftOne
