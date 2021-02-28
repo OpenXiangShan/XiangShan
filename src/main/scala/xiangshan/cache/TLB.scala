@@ -532,9 +532,17 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     for (i <- 0 until Width) {
       XSPerf("dtlb_miss" + Integer.toString(i, 10), valid(i) && vmEnable && missVec(i))
     }
+    XSPerf("dtlb_ptw_req_count", ptw.req.fire())
+    XSPerf("dtlb_ptw_req_cycle", waiting)
+    XSPerf("dtlb_wait_blocked_count", waiting && hasMissReq)
+    XSPerf("dtlb_ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
   } else {
     XSPerf("itlb_access", valid(0) && vmEnable)
     XSPerf("itlb_miss", valid(0) && vmEnable && missVec(0))
+    XSPerf("itlb_ptw_req_count", ptw.req.fire())
+    XSPerf("itlb_ptw_req_cycle", waiting)
+    XSPerf("itlb_wait_blocked_count", waiting && hasMissReq)
+    XSPerf("itlb_ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
   }
 
   // Log

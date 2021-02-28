@@ -716,6 +716,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     }
   }
 
+  // Perf Count
+  XSPerf("ptw_req_count", validOneCycle)
+  XSPerf("ptw_l1_hit", l1Hit)
+  XSPerf("ptw_l2_hit", l2Hit)
+  XSPerf("ptw_l3_hit", l3Hit)
+  XSPerf("ptw_mem_req_count", memReqFire)
+  XSPerf("ptw_mem_req_cycle", BoolStopWatch(memReqFire, memRespFire, true))
+  XSPerf("ptw_mem_req_blocked_cycle", mem.a.valid && !memReqReady)
+
   // debug info
   for (i <- 0 until PtwWidth) {
     XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
@@ -726,7 +735,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(p"req:${req} arb.io.out:(${arb.io.out.valid},${arb.io.out.ready}) arbChosen:${arbChosen} ptwFinish:${ptwFinish}\n")
 
   XSDebug(p"[mem][A] (${mem.a.valid},${mem.a.ready})\n")
-  XSDebug(p"[mem][A] memAddr:0x${Hexadecimal(memAddr)} l1addr:0x${Hexadecimal(l1addr)} l2addr:0x${Hexadecimal(l2addr)} l3addr:0x${Hexadecimal(l3addr)} memAddrReg:0x${Hexadecimal(memAddrReg)} memPteReg.ppn:0x${Hexadecimal(memPteReg.ppn)}")
+  XSDebug("[mem][A] memAddr:0x${Hexadecimal(memAddr)} l1addr:0x${Hexadecimal(l1addr)} l2addr:0x${Hexadecimal(l2addr)} l3addr:0x${Hexadecimal(l3addr)} memAddrReg:0x${Hexadecimal(memAddrReg)} memPteReg.ppn:0x${Hexadecimal(memPteReg.ppn)}")
   XSDebug(p"[mem][D] (${mem.d.valid},${mem.d.ready}) memSelData:0x${Hexadecimal(memSelData)} memPte:${memPte} memPte.isLeaf:${memPte.isLeaf()} memPte.isPf(${level}):${memPte.isPf(level)}\n")
   XSDebug(memRespFire, p"[mem][D] memPtes:${printVec(memPtes)}\n")
 
