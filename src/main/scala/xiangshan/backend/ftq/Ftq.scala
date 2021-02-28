@@ -291,6 +291,11 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
+  XSPerf("entry", validEntries)
+  XSPerf("stall", io.enq.valid && !io.enq.ready)
+  XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
+  XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     val perfCountsMap = Map(
@@ -316,11 +321,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
       XSPerf(key, value)
     }
   }
-
-  XSPerf("ftq_entries", validEntries)
-  XSPerf("ftq_stall", io.enq.valid && !io.enq.ready, acc = true)
-  XSPerf("ftq_mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
-  XSPerf("ftq_replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
