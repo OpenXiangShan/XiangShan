@@ -44,6 +44,10 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val pcfg = l1plusPrefetcherParameters
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
+  def codeWidth = encRowBits - rowBits
+  def bankNum = 2
+  def bankRows = blockRows / bankNum
+  def blockEcodedBits = blockRows * encRowBits
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
   // def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
@@ -131,20 +135,27 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    val array = Module(new SRAMTemplate(Bits((blockRows * encRowBits).W), set=nSets, way=1,
-      shouldReset=false, holdRead=false, singlePort=singlePort))
+    val array = List.fill(bankNum)(Module(new SRAMTemplate(Bits((bankRows * encRowBits).W), set=nSets, way=1,
+      shouldReset=false, holdRead=false, singlePort=singlePort)))
     // data write
-    array.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
-    array.io.w.req.bits.apply(
-      setIdx=waddr,
-      data=io.write.bits.data.asUInt,
-      waymask=1.U)
+    for (b <- 0 until bankNum){
+      val respDataUInt = io.write.bits.data.asUInt
+      array(b).io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+      array(b).io.w.req.bits.apply(
+        setIdx=waddr,
+        data=respDataUInt((b+1)*blockEcodedBits/2 - 1, b*blockEcodedBits/2),
+        waymask=1.U)
 
-    // data read
-    array.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
-    array.io.r.req.bits.apply(setIdx=raddr)
-    for (r <- 0 until blockRows) {
-      io.resp(w)(r) := RegNext(array.io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits))
+      // data read
+      array(b).io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+      array(b).io.r.req.bits.apply(setIdx=raddr)
+      for (r <- 0 until blockRows) {
+        if(r < blockRows/2){ io.resp(w)(r) := RegNext(array(0).io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits)) }
+        else { 
+          val r_half = r - blockRows/2
+          io.resp(w)(r) := RegNext(array(1).io.r.resp.data(0)((r_half + 1) * encRowBits - 1, r_half * encRowBits)) 
+        }
+      }
     }
   }
 
