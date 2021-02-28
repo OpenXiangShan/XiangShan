@@ -175,6 +175,8 @@ class FloatBlock
       exu.io.out.ready := wInt.fire() || wFp.fire()
   }
 
+  XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out
 
