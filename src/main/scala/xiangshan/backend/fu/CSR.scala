@@ -115,13 +115,6 @@ class PerfCounterIO extends XSBundle {
   val value = Input(UInt(XLEN.W))
 }
 
-class CustomCSRCtrlIO extends XSBundle {
-  val bp_ctrl = Output(new BPUCtrl)
-  val l1plus_pf_enable = Output(Bool())
-  val l2_pf_enable = Output(Bool())
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
-}
-
 class CSRFileIO extends XSBundle {
   val hartId = Input(UInt(64.W))
   // output (for func === CSROpType.jmp)
@@ -141,8 +134,8 @@ class CSRFileIO extends XSBundle {
   val externalInterrupt = new ExternalInterruptIO
   // TLB
   val tlb = Output(new TlbCsrBundle)
-  // Prefetcher
-  val customCtrl = new CustomCSRCtrlIO
+  // Custom microarchiture ctrl signal
+  val customCtrl = Output(new CustomCSRCtrlIO)
 }
 
 class CSR extends FunctionUnit with HasCSRConst
@@ -375,16 +368,6 @@ class CSR extends FunctionUnit with HasCSRConst
   // sbpctl
   // Bits 0-7: {LOOP, RAS, SC, TAGE, BIM, BTB, uBTB}
   val sbpctl = RegInit(UInt(XLEN.W), "h7f".U)
-  // spfctl Bit 0: L1plusCache Prefetcher Enable
-  // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
-  // sdsid: Differentiated Services ID
-  val sdsid = RegInit(UInt(XLEN.W), 0.U)
-
-  val tlbBundle = Wire(new TlbCsrBundle)
-  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
-  csrio.tlb := tlbBundle
-
   csrio.customCtrl.bp_ctrl.ubtb_enable := sbpctl(0)
   csrio.customCtrl.bp_ctrl.btb_enable  := sbpctl(1)
   csrio.customCtrl.bp_ctrl.bim_enable  := sbpctl(2)
@@ -392,9 +375,26 @@ class CSR extends FunctionUnit with HasCSRConst
   csrio.customCtrl.bp_ctrl.sc_enable   := sbpctl(4)
   csrio.customCtrl.bp_ctrl.ras_enable  := sbpctl(5)
   csrio.customCtrl.bp_ctrl.loop_enable := sbpctl(6)
+
+  // spfctl Bit 0: L1plusCache Prefetcher Enable
+  // spfctl Bit 1: L2Cache Prefetcher Enable
+  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.l1plus_pf_enable := spfctl(0)
-  csrio.customCtrl.l2_pf_enable     := spfctl(1)
+  csrio.customCtrl.l2_pf_enable := spfctl(1)
+
+  // sdsid: Differentiated Services ID
+  val sdsid = RegInit(UInt(XLEN.W), 0.U)
   csrio.customCtrl.dsid := sdsid
+
+  // slvpredctl: load violation predict settings
+  val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
+  csrio.customCtrl.lvpred_disable := slvpredctl(0)
+  csrio.customCtrl.no_spec_load := slvpredctl(1)
+  csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
+
+  val tlbBundle = Wire(new TlbCsrBundle)
+  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+  csrio.tlb := tlbBundle
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -522,6 +522,7 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
     MaskedRegMap(Sdsid, sdsid),
+    MaskedRegMap(Slvpredctl, slvpredctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),

@@ -156,8 +156,8 @@ void init_ram(const char *img) {
   #error DRAMSIM3_CONFIG or DRAMSIM3_OUTDIR is not defined
   #endif
   assert(dram == NULL);
-  // dram = new ComplexCoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
-  dram = new SimpleCoDRAMsim3(90);
+  dram = new ComplexCoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
+  // dram = new SimpleCoDRAMsim3(90);
 #endif
 
   pthread_mutex_init(&ram_mutex, 0);
@@ -389,14 +389,14 @@ void dramsim3_helper_falling(axi_channel &axi) {
   // WREQ: check whether the write request can be accepted
   // Note: block the next write here to simplify logic
   axi_addr_t waddr;
-  if (wait_req_w == NULL && axi_get_waddr(axi, waddr) && dram->will_accept(waddr, false)) {
+  if (wait_req_w == NULL && axi_get_waddr(axi, waddr) && dram->will_accept(waddr, true)) {
     axi_accept_waddr(axi);
     axi_accept_wdata(axi);
     // printf("try to accept write request to 0x%lx\n", waddr);
   }
 
   // WDATA: check whether the write data can be accepted
-  if (wait_req_w != NULL) {
+  if (wait_req_w != NULL && dram->will_accept(wait_req_w->address, true)) {
     axi_accept_wdata(axi);
   }
 

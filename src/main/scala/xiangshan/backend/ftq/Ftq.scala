@@ -2,7 +2,7 @@ package xiangshan.backend.ftq
 
 import chisel3._
 import chisel3.util._
-import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, XSDebug, XSPerf}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerf}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
@@ -103,8 +103,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val frontendRedirect = Flipped(ValidIO(new Redirect))
     // exu write back, update info
     val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    // pc read reqs (0: jump/auipc 1: mispredict/load replay 2: exceptions)
-    val ftqRead = Vec(3, Flipped(new FtqRead))
+    // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: exceptions)
+    val ftqRead = Vec(1 + 6 + 1, Flipped(new FtqRead))
+    val cfiRead = Flipped(new FtqRead)
   })
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -121,11 +122,11 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
 
-  val ftq_4r_sram = Module(new FtqNRSRAM(new Ftq_4R_SRAMEntry, 4))
-  ftq_4r_sram.io.wen := real_fire
-  ftq_4r_sram.io.waddr := tailPtr.value
-  ftq_4r_sram.io.wdata.ftqPC := io.enq.bits.ftqPC
-  ftq_4r_sram.io.wdata.lastPacketPC := io.enq.bits.lastPacketPC
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_4R_SRAMEntry, FtqSize, 9, 1))
+  ftq_pc_mem.io.wen(0) := real_fire
+  ftq_pc_mem.io.waddr(0) := tailPtr.value
+  ftq_pc_mem.io.wdata(0).ftqPC := io.enq.bits.ftqPC
+  ftq_pc_mem.io.wdata(0).lastPacketPC := io.enq.bits.lastPacketPC
   val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
   ftq_2r_sram.io.wen := real_fire
   ftq_2r_sram.io.waddr := tailPtr.value
@@ -205,13 +206,14 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  val headClear = Cat(commitStateQueue(headPtr.value).map(s => s === s_invalid)).andR()
+  val headClear = Cat(commitStateQueue(headPtr.value).map(s => {
+    s === s_invalid || s === s_commited
+  })).andR()
   when(headClear && headPtr =/= tailPtr) {
     headPtr := headPtr + 1.U
   }
 
-  ftq_4r_sram.io.raddr(0) := headPtr.value
-  ftq_4r_sram.io.ren(0) := true.B
+  ftq_pc_mem.io.raddr(0) := headPtr.value
   ftq_2r_sram.io.raddr(0) := headPtr.value
   ftq_2r_sram.io.ren(0) := true.B
   ftq_1r_sram.io.raddr(0) := headPtr.value
@@ -225,8 +227,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
   })
   // from 4r sram
-  commitEntry.ftqPC := RegNext(ftq_4r_sram.io.rdata(0).ftqPC)
-  commitEntry.lastPacketPC := RegNext(ftq_4r_sram.io.rdata(0).lastPacketPC)
+  commitEntry.ftqPC := RegNext(ftq_pc_mem.io.rdata(0).ftqPC)
+  commitEntry.lastPacketPC := RegNext(ftq_pc_mem.io.rdata(0).lastPacketPC)
   // from 2r sram
   commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
   commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
@@ -253,27 +255,24 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // read logic
   for ((req, i) <- io.ftqRead.zipWithIndex) {
     req.entry := DontCare
-    ftq_4r_sram.io.raddr(1 + i) := req.ptr.value
-    ftq_4r_sram.io.ren(1 + i) := true.B
-    req.entry.ftqPC := ftq_4r_sram.io.rdata(1 + i).ftqPC
-    req.entry.lastPacketPC := ftq_4r_sram.io.rdata(1 + i).lastPacketPC
+    ftq_pc_mem.io.raddr(1 + i) := req.ptr.value
+    req.entry.ftqPC := ftq_pc_mem.io.rdata(1 + i).ftqPC
+    req.entry.lastPacketPC := ftq_pc_mem.io.rdata(1 + i).lastPacketPC
     if(i == 0){ // jump, read npc
       pred_target_sram.io.raddr(0) := req.ptr.value
       pred_target_sram.io.ren(0) := true.B
       req.entry.target := pred_target_sram.io.rdata(0)
     }
-    if(i == 1){ // mispredict, read more info
-      ftq_2r_sram.io.raddr(1) := req.ptr.value
-      ftq_2r_sram.io.ren(1) := true.B
-      req.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
-      req.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
-      req.entry.hist := ftq_2r_sram.io.rdata(1).hist
-      req.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
-      req.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
-      req.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
-    }
   }
-
+  ftq_2r_sram.io.raddr(1) := io.cfiRead.ptr.value
+  ftq_2r_sram.io.ren(1) := true.B
+  io.cfiRead.entry := DontCare
+  io.cfiRead.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
+  io.cfiRead.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
+  io.cfiRead.entry.hist := ftq_2r_sram.io.rdata(1).hist
+  io.cfiRead.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
+  io.cfiRead.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
+  io.cfiRead.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
@@ -291,36 +290,134 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
+  XSPerf("entry", validEntries)
+  XSPerf("stall", io.enq.valid && !io.enq.ready)
+  XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
+  XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val fires = commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && !pd.notCFI}
+    val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+    val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+    val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
+    val isJTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJal}
+    val isITypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJalr}
+    val isCTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isCall}
+    val isRTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isRet}
+
+    val mbpInstrs = fires
+    val mbpRights = predRights
+    val mbpWrongs = predWrongs
+    val mbpBRights = Cat(predRights) & Cat(isBTypes)
+    val mbpBWrongs = Cat(predWrongs) & Cat(isBTypes)
+    val mbpJRights = Cat(predRights) & Cat(isJTypes)
+    val mbpJWrongs = Cat(predWrongs) & Cat(isJTypes)
+    val mbpIRights = Cat(predRights) & Cat(isITypes)
+    val mbpIWrongs = Cat(predWrongs) & Cat(isITypes)
+    val mbpCRights = Cat(predRights) & Cat(isCTypes)
+    val mbpCWrongs = Cat(predWrongs) & Cat(isCTypes)
+    val mbpRRights = Cat(predRights) & Cat(isRTypes)
+    val mbpRWrongs = Cat(predWrongs) & Cat(isRTypes)
+
+    def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+      commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+        case (((valid, pd), ans), taken) =>
+        Mux(valid && pd.isBr,
+          isWrong ^ Mux(ans.hit.asBool,
+            Mux(ans.taken.asBool, taken && ans.target === commitEntry.target,
+            !taken),
+          !taken),
+        false.B)
+      }
+    }
+
+    def btbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+      commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+        case (((valid, pd), ans), taken) =>
+        Mux(valid && pd.isBr,
+          isWrong ^ Mux(ans.hit.asBool,
+            Mux(ans.taken.asBool, taken && ans.target === commitEntry.target,
+            !taken),
+          !taken),
+        false.B)
+      }
+    }
+
+    def tageCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+      commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+        case (((valid, pd), ans), taken) =>
+        Mux(valid && pd.isBr,
+          isWrong ^ (ans.taken.asBool === taken),
+        false.B)
+      }
+    }
+
+    def loopCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+      commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+        case (((valid, pd), ans), taken) =>
+        Mux(valid && (pd.isBr) && ans.hit.asBool, 
+          isWrong ^ (!taken),
+            false.B)
+      }
+    }
+
+    def rasCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
+      commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
+        case (((valid, pd), ans), taken) =>
+        Mux(valid && pd.isRet.asBool /*&& taken*/ && ans.hit.asBool,
+          isWrong ^ (ans.target === commitEntry.target),
+            false.B)
+      }
+    }
+
+    val ubtbRights = ubtbCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), false.B)
+    val ubtbWrongs = ubtbCheck(commitEntry, commitEntry.metas.map(_.ubtbAns), true.B)
+    // btb and ubtb pred jal and jalr as well
+    val btbRights = btbCheck(commitEntry, commitEntry.metas.map(_.btbAns), false.B)
+    val btbWrongs = btbCheck(commitEntry, commitEntry.metas.map(_.btbAns), true.B)
+    val tageRights = tageCheck(commitEntry, commitEntry.metas.map(_.tageAns), false.B)
+    val tageWrongs = tageCheck(commitEntry, commitEntry.metas.map(_.tageAns), true.B)
+
+    val loopRights = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), false.B)
+    val loopWrongs = loopCheck(commitEntry, commitEntry.metas.map(_.loopAns), true.B)
+
+    val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
+    val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
+
     val perfCountsMap = Map(
-      "BpInstr"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-      "BpBInstr" -> PopCount((0 until PredictWidth).map{i => commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-      // "BpRight" -> PopCount((0 until PredictWidth).map{i => !mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-      "BpRight"  -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-      // "BpWrong" -> PopCount((0 until PredictWidth).map{i => mispredict_vec(headPtr.value)(i) && commit_valids(i)}),
-      "BpWrong"  -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}),
-      "BpBRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-      "BpBWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isBr && commitEntry.valids(i)}),
-      "BpJRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-      "BpJWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJal && commitEntry.valids(i)}),
-      "BpIRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-      "BpIWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isJalr && commitEntry.valids(i)}),
-      "BpCRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
-      "BpCWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isCall.asBool && commitEntry.valids(i)}),
-      "BpRRight" -> PopCount((0 until PredictWidth).map{i => !commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
-      "BpRWrong" -> PopCount((0 until PredictWidth).map{i => commitEntry.mispred(i) && commitEntry.pd(i).isRet.asBool && commitEntry.valids(i)}),
+      "BpInstr" -> PopCount(mbpInstrs),
+      "BpBInstr" -> PopCount(commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && pd.isBr}),
+      "BpRight"  -> PopCount(mbpRights),
+      "BpWrong"  -> PopCount(mbpWrongs),
+      "BpBRight" -> PopCount(mbpBRights),
+      "BpBWrong" -> PopCount(mbpBWrongs),
+      "BpJRight" -> PopCount(mbpJRights),
+      "BpJWrong" -> PopCount(mbpJWrongs),
+      "BpIRight" -> PopCount(mbpIRights),
+      "BpIWrong" -> PopCount(mbpIWrongs),
+      "BpCRight" -> PopCount(mbpCRights),
+      "BpCWrong" -> PopCount(mbpCWrongs),
+      "BpRRight" -> PopCount(mbpRRights),
+      "BpRWrong" -> PopCount(mbpRWrongs),
+
+      "ubtbRight" -> PopCount(ubtbRights),
+      "ubtbWrong" -> PopCount(ubtbWrongs),
+      "btbRight" -> PopCount(btbRights),
+      "btbWrong" -> PopCount(btbWrongs),
+      "tageRight" -> PopCount(tageRights),
+      "tageWrong" -> PopCount(tageWrongs),
+
+      "rasRight"  -> PopCount(rasRights),
+      "rasWrong"  -> PopCount(rasWrongs),
+      "loopRight" -> PopCount(loopRights),
+      "loopWrong" -> PopCount(loopWrongs),
     )
 
     for((key, value) <- perfCountsMap) {
       XSPerf(key, value)
     }
   }
-
-  XSPerf("ftq_entries", validEntries)
-  XSPerf("ftq_stall", io.enq.valid && !io.enq.ready, acc = true)
-  XSPerf("ftq_mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level, acc = true)
-  XSPerf("ftq_replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level), acc = true)
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")

@@ -234,12 +234,13 @@ class IcacheMissQueue extends ICacheMissQueueModule
     }
 
     XSPerf(
-      "ICacheMissQueue_PenaltyEntry" + Integer.toString(i, 10),
+      "entryPenalty" + Integer.toString(i, 10),
       BoolStopWatch(
         start = entry.io.req.fire(),
         stop = entry.io.resp.fire() || entry.io.flush,
         startHighPriority = true)
     )
+    XSPerf("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
 
     entry
   }

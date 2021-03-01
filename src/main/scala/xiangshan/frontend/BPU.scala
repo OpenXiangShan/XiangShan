@@ -218,6 +218,16 @@ class BPUStage1 extends BPUStage {
   io.out.resp <> io.in.resp
   io.out.brInfo := io.in.brInfo
 
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record ubtb pred result
+      meta.ubtbAns.hit := ubtbResp.hits(i)
+      meta.ubtbAns.taken := ubtbResp.takens(i)
+      meta.ubtbAns.target := ubtbResp.targets(i)
+    }
+  }
+
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
       ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
@@ -237,6 +247,16 @@ class BPUStage2 extends BPUStage {
   jalMask := DontCare
 
   hasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && HasCExtension.B
+
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record btb pred result
+      meta.btbAns.hit := btbResp.hits(i)
+      meta.btbAns.taken := takens(i)
+      meta.btbAns.target := btbResp.targets(i)
+    }
+  }
 
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
@@ -327,6 +347,26 @@ class BPUStage3 extends BPUStage {
     for (i <- 0 until PredictWidth) {
       when(rets(i) && ras.io.out.valid){
         targets(i) := ras.io.out.bits.target
+      }
+    }
+
+    // For perf counters
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+        // record tage pred result
+        meta.tageAns.hit := tageResp.hits(i)
+        meta.tageAns.taken := tageResp.takens(i)
+        meta.tageAns.target := DontCare
+
+        // record ras pred result
+        meta.rasAns.hit := ras.io.out.valid
+        meta.rasAns.taken := true.B
+        meta.rasAns.target := ras.io.out.bits.target
+
+        // record loop pred result
+        meta.loopAns.hit := loopRes(i)
+        meta.loopAns.taken := false.B
+        meta.loopAns.target := DontCare
       }
     }
   }
@@ -448,8 +488,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     XSDebug(io.inFire(3), "bpuMeta sent!\n")
     for (i <- 0 until PredictWidth) {
       val b = io.brInfo.metas(i)
-      XSDebug(io.inFire(3), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, bimCtr:%d\n",
-        i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.bimCtr)
+      XSDebug(io.inFire(3), "brInfo(%d): btbWrWay:%d, bimCtr:%d\n",
+        i.U, b.btbWriteWay, b.bimCtr)
       val t = b.tageMeta
       XSDebug(io.inFire(3), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
         t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
@@ -488,10 +528,6 @@ class BPU extends BaseBPU {
 
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
-  for (i <- 0 until PredictWidth) {
-    s1_brInfo_in.metas(i).ubtbWriteWay := ubtb.io.uBTBMeta.writeWay(i)
-    s1_brInfo_in.metas(i).ubtbHits := ubtb.io.uBTBMeta.hits(i)
-  }
 
   btb.io.pc.valid := s1_fire
   btb.io.pc.bits := io.in.pc
