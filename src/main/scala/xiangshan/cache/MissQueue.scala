@@ -364,7 +364,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   })
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
-  val refill_arb   = Module(new RRArbiter(new Refill, cfg.nMissEntries))
+  val refill_arb   = Module(new Arbiter(new Refill, cfg.nMissEntries))
 
   // dispatch req to MSHR
   val primary_ready  = Wire(Vec(cfg.nMissEntries, Bool()))
