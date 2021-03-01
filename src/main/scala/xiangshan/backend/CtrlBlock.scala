@@ -309,8 +309,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
-//  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
-
+  dispatch.io.singleStep := RegNext(io.fromIntBlock.singleStep)
 
   fpBusyTable.io.flush := flushReg
   intBusyTable.io.flush := flushReg

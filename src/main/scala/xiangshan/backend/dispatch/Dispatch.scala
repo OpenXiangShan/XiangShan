@@ -50,6 +50,8 @@ class Dispatch extends XSModule {
       val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
       // ls: hardwired to (0, 1, 2, 4)
     }
+    // From CSR: to control single step execution
+    val singleStep = Input(Bool())
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -65,7 +67,7 @@ class Dispatch extends XSModule {
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
-  // dispatch1.io.redirect <> io.redirect
+  dispatch1.io.flush <> io.flush
   dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.preDpInfo := RegEnable(io.preDpInfo, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
@@ -74,6 +76,7 @@ class Dispatch extends XSModule {
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
+  dispatch1.io.singleStep := io.singleStep
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops

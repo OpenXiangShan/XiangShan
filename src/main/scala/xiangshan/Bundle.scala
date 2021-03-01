@@ -255,6 +255,7 @@ class CtrlSignals extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+  val singleStep = Bool()
   val isRVF = Bool()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)

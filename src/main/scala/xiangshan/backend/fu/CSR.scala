@@ -141,6 +141,8 @@ class CSRFileIO extends XSBundle {
   val externalInterrupt = new ExternalInterruptIO
   // TLB
   val tlb = Output(new TlbCsrBundle)
+  // Debug mode
+  val singleStep = Output(Bool())
   // Prefetcher
   val customCtrl = new CustomCSRCtrlIO
 }
@@ -267,6 +269,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   // val singleStep = dcsrOld.step && !debugMode
   // reg_singleStepped := false.B // && input single_step
+  csrio.singleStep := false.B
 
   // Machine-Level CSRs
 
