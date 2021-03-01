@@ -60,7 +60,7 @@ class MainPipeResp extends DCacheBundle
   }
 }
 
-class NewMainPipe extends DCacheModule {
+class MainPipe extends DCacheModule {
   val io = IO(new DCacheBundle {
     // req and resp
     val req        = Flipped(DecoupledIO(new MainPipeReq))
@@ -553,7 +553,7 @@ class NewMainPipe extends DCacheModule {
   data_write.rmask := DontCare
   data_write.way_en := s3_way_en
   data_write.addr := s3_req.addr
-  data_write.wmask := wmask
+  data_write.wmask := VecInit(wmask.map(_.orR)).asUInt
   data_write.data := s3_wdata_merged
 
   // --------------------------------------------------------------------------------

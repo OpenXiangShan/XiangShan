@@ -155,11 +155,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core modules
-  val ldu = Seq.fill(LoadPipelineWidth) { Module(new NewLoadPipe) }
+  val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
   val storeReplayUnit = Module(new StoreReplayQueue)
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
 
-  val mainPipe   = Module(new NewMainPipe)
+  val mainPipe   = Module(new MainPipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))

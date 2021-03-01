@@ -15,7 +15,7 @@ case class DCacheParameters
 (
     nSets: Int = 64,
     nWays: Int = 8,
-    rowBits: Int = 64,
+    rowBits: Int = 128,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
@@ -60,7 +60,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
   // this is a VIPT L1 cache
   require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
-  require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
+  // require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
 }
 
 abstract class DCacheModule extends L1CacheModule
@@ -103,66 +103,8 @@ class L1DataReadReq extends DCacheBundle {
 
 // Now, we can write a cache-block in a single cycle
 class L1DataWriteReq extends L1DataReadReq {
-  val wmask  = Vec(blockRows, Bits(rowWords.W))
+  val wmask  = Bits(blockRows.W)
   val data   = Vec(blockRows, Bits(encRowBits.W))
-}
-
-abstract class AbstractDataArray extends DCacheModule {
-  val io = IO(new DCacheBundle {
-    val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
-    val write = Flipped(DecoupledIO(new L1DataWriteReq))
-    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(blockRows, Bits(encRowBits.W)))))
-    val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-  })
-
-  def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
-
-  def dumpRead() = {
-    (0 until LoadPipelineWidth) map { w =>
-      when (io.read(w).valid) {
-        XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
-          io.read(w).bits.way_en, io.read(w).bits.addr)
-      }
-    }
-  }
-
-  def dumpWrite() = {
-    when (io.write.valid) {
-      XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
-        io.write.bits.way_en, io.write.bits.addr)
-
-      (0 until blockRows) map { r =>
-        XSDebug(s"cycle: $r data: %x wmask: %x\n",
-          io.write.bits.data(r), io.write.bits.wmask(r))
-      }
-    }
-  }
-
-  def dumpResp() = {
-    (0 until LoadPipelineWidth) map { w =>
-      XSDebug(s"DataArray ReadResp channel: $w\n")
-      (0 until nWays) map { i =>
-        (0 until blockRows) map { r =>
-          XSDebug(s"way: $i cycle: $r data: %x\n", io.resp(w)(i)(r))
-        }
-      }
-    }
-  }
-
-  def dumpNack() = {
-    (0 until LoadPipelineWidth) map { w =>
-      when (io.nacks(w)) {
-        XSDebug(s"DataArray NACK channel: $w\n")
-      }
-    }
-  }
-
-  def dump() = {
-    dumpRead
-    dumpWrite
-    dumpNack
-    dumpResp
-  }
 }
 
 abstract class TransposeAbstractDataArray extends DCacheModule {
@@ -221,55 +163,6 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
   }
 }
 
-class DuplicatedDataArray extends AbstractDataArray
-{
-  val singlePort = true
-  // write is always ready
-  io.write.ready := true.B
-  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
-  for (j <- 0 until LoadPipelineWidth) {
-    val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
-
-    // for single port SRAM, do not allow read and write in the same cycle
-    // for dual port SRAM, raddr === waddr is undefined behavior
-    val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
-    io.read(j).ready := !rwhazard
-
-    for (w <- 0 until nWays) {
-      for (r <- 0 until blockRows) {
-        val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
-        io.resp(j)(w)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
-
-        for (k <- 0 until rowWords) {
-          val array = Module(new SRAMTemplate(
-            Bits(encWordBits.W),
-            set=nSets,
-            way=1,
-            shouldReset=false,
-            holdRead=false,
-            singlePort=singlePort
-          ))
-          // data write
-          val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
-          array.io.w.req.valid := wen
-          array.io.w.req.bits.apply(
-            setIdx=waddr,
-            data=io.write.bits.data(r)(encWordBits*(k+1)-1,encWordBits*k),
-            waymask=1.U
-          )
-
-          // data read
-          val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
-          array.io.r.req.valid := ren
-          array.io.r.req.bits.apply(setIdx=raddr)
-          resp(k) := array.io.r.resp.data(0)
-        }
-      }
-    }
-    io.nacks(j) := false.B
-  }
-}
-
 class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   val singlePort = true
   val readHighPriority = true
@@ -285,8 +178,10 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   } else {
     true.B
   })
+
   for (j <- 0 until LoadPipelineWidth) {
     val raddr = raddrs(j)
+    val rmask = io.read(j).bits.rmask
 
     // for single port SRAM, do not allow read and write in the same cycle
     // for dual port SRAM, raddr === waddr is undefined behavior
@@ -301,37 +196,36 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
       val resp = Wire(Vec(rowWords, Vec(nWays, Bits(encWordBits.W))))
       val resp_chosen = Wire(Vec(rowWords, Bits(encWordBits.W)))
 
-      for (k <- 0 until rowWords) {
-        for (w <- 0 until nWays) {
-          val array = Module(new SRAMTemplate(
-            Bits(encWordBits.W),
-            set = nSets,
-            way = 1,
-            shouldReset = false,
-            holdRead = false,
-            singlePort = singlePort
-          ))
+      for (w <- 0 until nWays) {
+        val array = Module(new SRAMTemplate(
+          Bits(encRowBits.W),
+          set = nSets,
+          way = 1,
+          shouldReset = false,
+          holdRead = false,
+          singlePort = singlePort
+        ))
 
-          // data write
-          val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
-          array.io.w.req.valid := wen
-          array.io.w.req.bits.apply(
-            setIdx = waddr,
-            data = io.write.bits.data(r)(encWordBits*(k+1)-1, encWordBits*k),
-            waymask = 1.U
-          )
+        // data write
+        val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)
+        array.io.w.req.valid := wen
+        array.io.w.req.bits.apply(
+          setIdx = waddr,
+          data = io.write.bits.data(r),
+          waymask = 1.U
+        )
 
-          // data read
-          // read all ways and choose one after resp
-          val ren = io.read(j).valid/* && io.read(j).bits.way_en(w)*/ && io.read(j).bits.rmask(r)
-          array.io.r.req.valid := ren
-          array.io.r.req.bits.apply(setIdx = raddr)
-          resp(k)(w) := array.io.r.resp.data(0)
-        }
-        resp_chosen(k) := Mux1H(way_en, resp(k))
+        // data read
+        // read all ways and choose one after resp
+        val ren = io.read(j).valid && rmask(r)
+        array.io.r.req.valid := ren
+        array.io.r.req.bits.apply(setIdx = raddr)
+        (0 until rowWords).foreach(k => resp(k)(w) := array.io.r.resp.data(0)(encWordBits * (k + 1) - 1, encWordBits * k))
       }
-      io.resp(j)(r) := Cat(resp_chosen)
+      (0 until rowWords).foreach(k => resp_chosen(k) := Mux1H(way_en, resp(k)))
+      io.resp(j)(r) := resp_chosen.asUInt
     }
+
     io.nacks(j) := false.B
   }
 }

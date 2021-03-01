@@ -6,7 +6,7 @@ import freechips.rocketchip.tilelink.ClientMetadata
 
 import utils.XSDebug
 
-class NewLoadPipe extends DCacheModule {
+class LoadPipe extends DCacheModule {
   val io = IO(new DCacheBundle {
     // incoming requests
     // val lsu       = Flipped(new NewDCacheLoadIO)
