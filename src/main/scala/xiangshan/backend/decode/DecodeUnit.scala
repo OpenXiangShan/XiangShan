@@ -432,10 +432,10 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
 
   // debug single step
-  val singleStep = WireInit(false.B)
-  cs.noSpecExec := singleStep
+  // val singleStep = WireInit(false.B)
+  // cs.noSpecExec := singleStep
   // cs.flushPipe  := singleStep
-  cs.blockBackward := singleStep 
+  // cs.blockBackward := singleStep 
   
   // fix frflags
   //                           fflags    zero csrrs rd    csr
