@@ -110,6 +110,8 @@ class NewMainPipe extends DCacheModule {
   val s1_s0_set_conflict, s2_s0_set_conflict, s3_s0_set_conflict = Wire(Bool())
   val set_conflict = s1_s0_set_conflict || s2_s0_set_conflict || s3_s0_set_conflict
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
+  val s3_valid = RegInit(false.B)
+  val update_meta, need_write_data = Wire(Bool())
 
   // --------------------------------------------------------------------------------
   // stage 0
@@ -143,9 +145,9 @@ class NewMainPipe extends DCacheModule {
 
   val meta_ready = io.meta_read.ready
   val data_ready = io.data_read.ready
-  io.req.ready := meta_ready && !set_conflict && s1_ready
+  io.req.ready := meta_ready && !set_conflict && s1_ready && !(s3_valid && update_meta)
 
-  io.meta_read.valid := io.req.valid && !set_conflict && s1_ready
+  io.meta_read.valid := io.req.valid && !set_conflict/* && s1_ready*/ && !(s3_valid && update_meta)
   val meta_read = io.meta_read.bits
   meta_read.idx := get_idx(s0_req.addr)
   meta_read.way_en := ~0.U(nWays.W)
@@ -195,7 +197,7 @@ class NewMainPipe extends DCacheModule {
   // read data, get meta, check hit or miss
   val s1_valid = RegInit(false.B)
   val s1_need_data = RegEnable(need_data, s0_fire)
-  val s1_fire = s1_valid && s2_ready && (!s1_need_data || data_ready)
+  val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.data_read.fire())
   val s1_req = RegEnable(s0_req, s0_fire)
 
   val s1_rmask = RegEnable(s0_rmask, s0_fire)
@@ -257,7 +259,7 @@ class NewMainPipe extends DCacheModule {
   }
 
   // read data
-  io.data_read.valid := s1_valid && s2_ready && s1_need_data
+  io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
   val data_read = io.data_read.bits
   data_read.rmask := s1_rmask
   data_read.way_en := s1_way_en
@@ -361,10 +363,9 @@ class NewMainPipe extends DCacheModule {
   // stage 3
   // do permission checking, write/amo stuff in s3
   // we only change cache internal states(lr/sc counter, tag/data array) in s3
-  val s3_valid = RegInit(false.B)
   val s3_fire = Wire(Bool())
   val s3_req = RegEnable(s2_req, s2_fire)
-  s3_ready := !s3_valid //|| s3_fire
+  s3_ready := !s3_valid || s3_fire
 
   val s3_rmask = RegEnable(s2_rmask, s2_fire)
   val s3_store_wmask = RegEnable(s2_store_wmask, s2_fire)
@@ -430,7 +431,7 @@ class NewMainPipe extends DCacheModule {
   val probe_update_meta = s3_req.probe && s3_tag_match && s3_coh =/= probe_new_coh
   val store_update_meta = s3_store_hit && s3_hit_coh =/= s3_new_hit_coh
   val amo_update_meta = s3_amo_hit && s3_hit_coh =/= s3_new_hit_coh
-  val update_meta = miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta
+  update_meta := miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta
 
   val new_coh = Mux(miss_update_meta, miss_new_coh,
     Mux(probe_update_meta, probe_new_coh,
@@ -514,7 +515,7 @@ class NewMainPipe extends DCacheModule {
     Mux(s3_store_hit, s3_store_wmask,
     Mux(s3_can_do_amo_write, s3_amo_wmask,
       none_wmask)))
-  val need_write_data = VecInit(wmask.map(w => w.orR)).asUInt.orR
+  need_write_data := VecInit(wmask.map(w => w.orR)).asUInt.orR
 
   // generate write data
   // AMO hits
