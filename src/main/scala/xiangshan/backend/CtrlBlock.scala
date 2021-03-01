@@ -261,10 +261,16 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed
   })
+  val loadReplay = Wire(Valid(new Redirect))
+  loadReplay.valid := RegNext(io.fromLsBlock.replay.valid &&
+    !io.fromLsBlock.replay.bits.roqIdx.needFlush(backendRedirect, flushReg),
+    init = false.B
+  )
+  loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
   VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
-  redirectGen.io.loadReplay := io.fromLsBlock.replay
+  redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushReg
 
   ftq.io.enq <> io.frontend.fetchInfo
