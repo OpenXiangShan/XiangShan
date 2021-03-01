@@ -2,7 +2,7 @@ package xiangshan.backend.ftq
 
 import chisel3._
 import chisel3.util._
-import utils.{CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, XSDebug, XSPerf}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerf}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
@@ -103,8 +103,9 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     val frontendRedirect = Flipped(ValidIO(new Redirect))
     // exu write back, update info
     val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    // pc read reqs (0: jump/auipc 1: mispredict/load replay 2: exceptions)
-    val ftqRead = Vec(3, Flipped(new FtqRead))
+    // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: exceptions)
+    val ftqRead = Vec(1 + 6 + 1, Flipped(new FtqRead))
+    val cfiRead = Flipped(new FtqRead)
   })
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -121,11 +122,11 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
 
-  val ftq_4r_sram = Module(new FtqNRSRAM(new Ftq_4R_SRAMEntry, 4))
-  ftq_4r_sram.io.wen := real_fire
-  ftq_4r_sram.io.waddr := tailPtr.value
-  ftq_4r_sram.io.wdata.ftqPC := io.enq.bits.ftqPC
-  ftq_4r_sram.io.wdata.lastPacketPC := io.enq.bits.lastPacketPC
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_4R_SRAMEntry, FtqSize, 9, 1))
+  ftq_pc_mem.io.wen(0) := real_fire
+  ftq_pc_mem.io.waddr(0) := tailPtr.value
+  ftq_pc_mem.io.wdata(0).ftqPC := io.enq.bits.ftqPC
+  ftq_pc_mem.io.wdata(0).lastPacketPC := io.enq.bits.lastPacketPC
   val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
   ftq_2r_sram.io.wen := real_fire
   ftq_2r_sram.io.waddr := tailPtr.value
@@ -212,8 +213,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     headPtr := headPtr + 1.U
   }
 
-  ftq_4r_sram.io.raddr(0) := headPtr.value
-  ftq_4r_sram.io.ren(0) := true.B
+  ftq_pc_mem.io.raddr(0) := headPtr.value
   ftq_2r_sram.io.raddr(0) := headPtr.value
   ftq_2r_sram.io.ren(0) := true.B
   ftq_1r_sram.io.raddr(0) := headPtr.value
@@ -227,8 +227,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
   })
   // from 4r sram
-  commitEntry.ftqPC := RegNext(ftq_4r_sram.io.rdata(0).ftqPC)
-  commitEntry.lastPacketPC := RegNext(ftq_4r_sram.io.rdata(0).lastPacketPC)
+  commitEntry.ftqPC := RegNext(ftq_pc_mem.io.rdata(0).ftqPC)
+  commitEntry.lastPacketPC := RegNext(ftq_pc_mem.io.rdata(0).lastPacketPC)
   // from 2r sram
   commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
   commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
@@ -255,27 +255,24 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // read logic
   for ((req, i) <- io.ftqRead.zipWithIndex) {
     req.entry := DontCare
-    ftq_4r_sram.io.raddr(1 + i) := req.ptr.value
-    ftq_4r_sram.io.ren(1 + i) := true.B
-    req.entry.ftqPC := ftq_4r_sram.io.rdata(1 + i).ftqPC
-    req.entry.lastPacketPC := ftq_4r_sram.io.rdata(1 + i).lastPacketPC
+    ftq_pc_mem.io.raddr(1 + i) := req.ptr.value
+    req.entry.ftqPC := ftq_pc_mem.io.rdata(1 + i).ftqPC
+    req.entry.lastPacketPC := ftq_pc_mem.io.rdata(1 + i).lastPacketPC
     if(i == 0){ // jump, read npc
       pred_target_sram.io.raddr(0) := req.ptr.value
       pred_target_sram.io.ren(0) := true.B
       req.entry.target := pred_target_sram.io.rdata(0)
     }
-    if(i == 1){ // mispredict, read more info
-      ftq_2r_sram.io.raddr(1) := req.ptr.value
-      ftq_2r_sram.io.ren(1) := true.B
-      req.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
-      req.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
-      req.entry.hist := ftq_2r_sram.io.rdata(1).hist
-      req.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
-      req.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
-      req.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
-    }
   }
-
+  ftq_2r_sram.io.raddr(1) := io.cfiRead.ptr.value
+  ftq_2r_sram.io.ren(1) := true.B
+  io.cfiRead.entry := DontCare
+  io.cfiRead.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
+  io.cfiRead.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
+  io.cfiRead.entry.hist := ftq_2r_sram.io.rdata(1).hist
+  io.cfiRead.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
+  io.cfiRead.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
+  io.cfiRead.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
