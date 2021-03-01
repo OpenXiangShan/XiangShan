@@ -447,7 +447,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   XSPerf("mmioCnt", io.uncache.req.fire())
   XSPerf("writeback", io.mmioStout.fire())
   XSPerf("wbBlocked", io.mmioStout.valid && !io.mmioStout.ready)
-  XSPerf("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
   XSPerf("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerf("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
