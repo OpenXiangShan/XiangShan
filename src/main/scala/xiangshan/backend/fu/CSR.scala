@@ -796,7 +796,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val debugExceptionIntr = hasbreakPoint || debugIntr //TODO: singlestep
 
-  val raiseExceptionIntr = csrio.exception.valid
+  val raiseExceptionIntr = csrio.exception.valid // also not in debug mode
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
