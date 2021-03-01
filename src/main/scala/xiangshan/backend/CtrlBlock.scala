@@ -144,6 +144,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s2_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s2_pd.isRVC, 2.U, 4.U)
   val isReplay = RedirectLevel.flushItself(s2_redirect_bits_reg.level)
+
+  XSPerf("replay", isReplay)
   val target = Mux(isReplay,
     real_pc, // repaly from itself
     Mux(s2_redirect_bits_reg.cfiUpdate.taken,
