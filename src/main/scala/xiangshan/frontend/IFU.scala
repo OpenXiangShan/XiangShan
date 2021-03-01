@@ -533,35 +533,22 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   io.fetchPacket.bits := fetchPacketWire
   io.fetchPacket.valid := fetchPacketValid
 
-//  if(IFUDebug) {
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
     val predictor_s3 = RegEnable(Mux(if3_redirect, 1.U(log2Up(4).W), 0.U(log2Up(4).W)), if3_fire)
     val predictor_s4 = Mux(if4_redirect, 2.U, predictor_s3)
     val predictor = predictor_s4
     toFtqBuf.metas.map(_.predictor := predictor)
+
+    toFtqBuf.metas.zipWithIndex.foreach{ case(x,i) =>
+      x.predictor := predictor
+
+      x.ubtbAns := bpu.io.brInfo.metas(i).ubtbAns
+      x.btbAns := bpu.io.brInfo.metas(i).btbAns
+      x.tageAns := bpu.io.brInfo.metas(i).tageAns
+      x.rasAns := bpu.io.brInfo.metas(i).rasAns // Is this right?
+      x.loopAns := bpu.io.brInfo.metas(i).loopAns
+    }
   }
- // }
-
-  // val predRight = cfiUpdate.valid && !cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
-  // val predWrong = cfiUpdate.valid && cfiUpdate.bits.isMisPred && !cfiUpdate.bits.isReplay
-
-  // val ubtbRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 0.U
-  // val ubtbWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 0.U
-  // val btbRight  = predRight && cfiUpdate.bits.bpuMeta.predictor === 1.U
-  // val btbWrong  = predWrong && cfiUpdate.bits.bpuMeta.predictor === 1.U
-  // val tageRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 2.U
-  // val tageWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 2.U
-  // val loopRight = predRight && cfiUpdate.bits.bpuMeta.predictor === 3.U
-  // val loopWrong = predWrong && cfiUpdate.bits.bpuMeta.predictor === 3.U
-
-  // ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
-  // ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
-  // ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
-  // ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
-  // ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
-  // ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
-  // ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
-  // ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
 
   // debug info
   if (IFUDebug) {
