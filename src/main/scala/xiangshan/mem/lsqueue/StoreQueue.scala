@@ -441,14 +441,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
 
   // perf counter
-  XSPerf("sqFull", !allowEnqueue, acc = true)
-  XSPerf("sqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
-  XSPerf("sqMmioCnt", io.uncache.req.fire(), acc = true)
-  XSPerf("sqWriteback", io.mmioStout.fire(), acc = true)
-  XSPerf("sqWbBlocked", io.mmioStout.valid && !io.mmioStout.ready, acc = true)
-  XSPerf("sqValidEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
-  XSPerf("sqCmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
-  XSPerf("sqNCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
+  XSPerf("utilization", validCount)
+  XSPerf("full", !allowEnqueue)
+  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerf("mmioCnt", io.uncache.req.fire())
+  XSPerf("writeback", io.mmioStout.fire())
+  XSPerf("wbBlocked", io.mmioStout.valid && !io.mmioStout.ready)
+  XSPerf("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
+  XSPerf("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
+  XSPerf("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)

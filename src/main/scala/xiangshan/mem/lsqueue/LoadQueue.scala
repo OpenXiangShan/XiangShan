@@ -640,13 +640,14 @@ class LoadQueue extends XSModule
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
   // perf counter
-  XSPerf("lqRollback", io.rollback.valid, acc = true) // rollback redirect generated
-  XSPerf("lqFull", !allowEnqueue, acc = true)
-  XSPerf("lqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
-  XSPerf("lqMmioCnt", io.uncache.req.fire(), acc = true)
-  XSPerf("lqRefill", io.dcache.valid, acc = true)
-  XSPerf("lqWriteback", PopCount(VecInit(io.ldout.map(i => i.fire()))), acc = true)
-  XSPerf("lqWbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))), acc = true)
+  XSPerf("utilization", validCount)
+  XSPerf("rollback", io.rollback.valid) // rollback redirect generated
+  XSPerf("full", !allowEnqueue)
+  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerf("mmioCnt", io.uncache.req.fire())
+  XSPerf("refill", io.dcache.valid)
+  XSPerf("writeback", PopCount(VecInit(io.ldout.map(i => i.fire()))))
+  XSPerf("wbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)

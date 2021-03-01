@@ -2,6 +2,7 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import utils.XSPerf
 import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
@@ -57,7 +58,7 @@ trait HasExeBlockHelper {
   def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
     val out = WireInit(x)
     if(connectReady) x.ready := out.ready
-    out.valid := x.valid && x.bits.uop.ctrl.rfWen
+    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
     out
   }
   def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
@@ -258,6 +259,8 @@ class IntegerBlock
     w
   }) ++ io.wakeUpIn.slow
 
+  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
+  
   exeUnits.zip(intWbArbiter.io.in).foreach{
     case (exu, wInt) =>
       if(exu.config.writeFpRf){
