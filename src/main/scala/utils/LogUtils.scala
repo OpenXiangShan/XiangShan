@@ -4,6 +4,7 @@ import chisel3._
 import top.Parameters
 import xiangshan.HasXSParameter
 import utils.XSLogLevel.XSLogLevel
+import chisel3.ExcitingUtils.ConnectionType
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
@@ -102,26 +103,40 @@ object XSWarn extends LogHelper(XSLogLevel.WARN)
 
 object XSError extends LogHelper(XSLogLevel.ERROR)
 
-object XSPerf {
-  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false, intervalBits: Int = 15)(implicit name: String) = {
+object XSPerf extends HasXSParameter {
+  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false)(implicit name: String) = {
     val counter = RegInit(0.U(64.W))
     val next_counter = WireInit(0.U(64.W))
     val logTimestamp = WireInit(0.U(64.W))
-    val enableDebug = Parameters.get.envParameters.EnablePerfDebug
+    val env = Parameters.get.envParameters
     next_counter := counter + perfCnt
     counter := next_counter
 
-    if (enableDebug) {
+    if (env.EnablePerfDebug) {
       ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      val printCond =
-        if(intervalBits == 0) true.B
-        else (logTimestamp(intervalBits - 1, 0) === 0.U)
-      when(printCond) { // TODO: Need print when program exit?
-        if(acc) {
+      val printCond = if (PerfIntervalBits == 0) true.B else (logTimestamp(PerfIntervalBits - 1, 0) === 0.U)
+      val printEnable = if (PerfRealTime) printCond else false.B
+      val xstrap = WireInit(false.B)
+      if (!env.FPGAPlatform && !env.DualCore) {
+        ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
+      }
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+      when (perfClean) {
+        counter := 0.U
+      }
+      when (printEnable) {  // interval print
+        if (acc) {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
-        }else{
+        } else {
           XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
         }
+      }
+      when (xstrap || perfDump) {  // summary print
+        // dump acc counter by default
+        XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
       }
     }
   }

@@ -108,9 +108,14 @@ trait HasIFUFire { this: MultiIOModule =>
   val s3_fire  = fires(2)
   val out_fire = fires(3)
 }
+
+trait HasCtrl { this: BasePredictor =>
+  val ctrl = IO(Input(new BPUCtrl))
+}
+
 abstract class BasePredictor extends XSModule
-  with HasBPUParameter with HasIFUConst with PredictorUtils 
-  with HasIFUFire {
+  with HasBPUParameter with HasIFUConst with PredictorUtils
+  with HasIFUFire with HasCtrl {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -196,7 +201,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter
 @chiselName
 class BPUStage1 extends BPUStage {
 
-  // ubtb is accessed with inLatch pc in s1, 
+  // ubtb is accessed with inLatch pc in s1,
   // so we use io.in instead of inLatch
   val ubtbResp = io.in.resp.ubtb
   // the read operation is already masked, so we do not need to mask here
@@ -212,6 +217,16 @@ class BPUStage1 extends BPUStage {
   // so it does not need to be latched
   io.out.resp <> io.in.resp
   io.out.brInfo := io.in.brInfo
+
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record ubtb pred result
+      meta.ubtbAns.hit := ubtbResp.hits(i)
+      meta.ubtbAns.taken := ubtbResp.takens(i)
+      meta.ubtbAns.target := ubtbResp.targets(i)
+    }
+  }
 
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
@@ -233,6 +248,16 @@ class BPUStage2 extends BPUStage {
 
   hasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && HasCExtension.B
 
+  // For perf counters
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+      // record btb pred result
+      meta.btbAns.hit := btbResp.hits(i)
+      meta.btbAns.taken := takens(i)
+      meta.btbAns.target := btbResp.targets(i)
+    }
+  }
+
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
       btbResp.hits.asUInt, VecInit(bimResp.ctrs.map(_(1))).asUInt)
@@ -244,9 +269,9 @@ class BPUStage2 extends BPUStage {
 @chiselName
 class BPUStage3 extends BPUStage {
   class S3IO extends XSBundle {
-
     val predecode = Input(new Predecode)
     val redirect =  Flipped(ValidIO(new Redirect))
+    val ctrl = Input(new BPUCtrl)
   }
   val s3IO = IO(new S3IO)
   // TAGE has its own pipelines and the
@@ -274,7 +299,7 @@ class BPUStage3 extends BPUStage {
 
   val callIdx = PriorityEncoder(calls)
   val retIdx  = PriorityEncoder(rets)
-  
+
   val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
   val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
   val brTakens = ((brs & brPred) & ~loopRes)
@@ -305,6 +330,7 @@ class BPUStage3 extends BPUStage {
     ras.io.isLastHalfRVI := s3IO.predecode.hasLastHalfRVI
     ras.io.redirect := s3IO.redirect
     ras.fires <> fires
+    ras.ctrl := s3IO.ctrl
 
     for(i <- 0 until PredictWidth){
       io.out.brInfo.rasSp :=  ras.io.meta.rasSp
@@ -312,7 +338,7 @@ class BPUStage3 extends BPUStage {
     }
     takens := VecInit((0 until PredictWidth).map(i => {
       (jalrs(i) && btbHits(i)) ||
-          jals(i) || brTakens(i) || 
+          jals(i) || brTakens(i) ||
           (ras.io.out.valid && rets(i)) ||
           (!ras.io.out.valid && rets(i) && btbHits(i))
       }
@@ -321,6 +347,26 @@ class BPUStage3 extends BPUStage {
     for (i <- 0 until PredictWidth) {
       when(rets(i) && ras.io.out.valid){
         targets(i) := ras.io.out.bits.target
+      }
+    }
+
+    // For perf counters
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      io.out.brInfo.metas.zipWithIndex.foreach{case (meta, i) =>
+        // record tage pred result
+        meta.tageAns.hit := tageResp.hits(i)
+        meta.tageAns.taken := tageResp.takens(i)
+        meta.tageAns.target := DontCare
+
+        // record ras pred result
+        meta.rasAns.hit := ras.io.out.valid
+        meta.rasAns.taken := true.B
+        meta.rasAns.target := ras.io.out.bits.target
+
+        // record loop pred result
+        meta.loopAns.hit := loopRes(i)
+        meta.loopAns.taken := false.B
+        meta.loopAns.target := DontCare
       }
     }
   }
@@ -361,8 +407,8 @@ trait BranchPredictorComponents extends HasXSParameter {
   val ubtb = Module(new MicroBTB)
   val btb = Module(new BTB)
   val bim = Module(new BIM)
-  val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC) 
-                              else          Module(new Tage) } 
+  val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
+                              else          Module(new Tage) }
               else          { Module(new FakeTage) })
   val loop = Module(new LoopPredictor)
   val preds = Seq(ubtb, btb, bim, tage, loop)
@@ -375,11 +421,22 @@ class BPUReq extends XSBundle {
   val inMask = UInt(PredictWidth.W)
 }
 
-abstract class BaseBPU extends XSModule with BranchPredictorComponents 
+class BPUCtrl extends XSBundle {
+  val ubtb_enable = Bool()
+  val btb_enable  = Bool()
+  val bim_enable  = Bool()
+  val tage_enable = Bool()
+  val sc_enable   = Bool()
+  val ras_enable  = Bool()
+  val loop_enable = Bool()
+}
+
+abstract class BaseBPU extends XSModule with BranchPredictorComponents
   with HasBPUParameter with HasIFUConst {
   val io = IO(new Bundle() {
     // from backend
     val redirect = Flipped(ValidIO(new Redirect))
+    val ctrl     = Input(new BPUCtrl)
     val commit   = Flipped(ValidIO(new FtqEntry))
     // from if1
     val in = Input(new BPUReq)
@@ -395,6 +452,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
   preds.map(p => {
     p.io.update <> io.commit
     p.fires <> io.inFire
+    p.ctrl <> io.ctrl
   })
 
   val s1 = Module(new BPUStage1)
@@ -425,13 +483,13 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
   io.out(2) <> s3.io.pred
 
   io.brInfo := s3.io.out.brInfo
-  
+
   if (BPUDebug) {
     XSDebug(io.inFire(3), "bpuMeta sent!\n")
     for (i <- 0 until PredictWidth) {
       val b = io.brInfo.metas(i)
-      XSDebug(io.inFire(3), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, bimCtr:%d\n",
-        i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.bimCtr)
+      XSDebug(io.inFire(3), "brInfo(%d): btbWrWay:%d, bimCtr:%d\n",
+        i.U, b.btbWriteWay, b.bimCtr)
       val t = b.tageMeta
       XSDebug(io.inFire(3), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
         t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
@@ -470,10 +528,6 @@ class BPU extends BaseBPU {
 
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
-  for (i <- 0 until PredictWidth) {
-    s1_brInfo_in.metas(i).ubtbWriteWay := ubtb.io.uBTBMeta.writeWay(i)
-    s1_brInfo_in.metas(i).ubtbHits := ubtb.io.uBTBMeta.hits(i)
-  }
 
   btb.io.pc.valid := s1_fire
   btb.io.pc.bits := io.in.pc
@@ -541,8 +595,9 @@ class BPU extends BaseBPU {
   }
 
   s3.s3IO.predecode <> io.predecode
-
   s3.s3IO.redirect <> io.redirect
+  s3.s3IO.ctrl <> io.ctrl
+  
 
   if (BPUDebug) {
     if (debug_verbose) {
@@ -554,7 +609,7 @@ class BPU extends BaseBPU {
       XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
     }
   }
-  
+
 
 
   if (EnableCFICommitLog) {

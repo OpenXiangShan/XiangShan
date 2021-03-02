@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <time.h>
+#include "compress.h"
 
 uint8_t *pmem;
 
@@ -14,7 +15,7 @@ void init_goldenmem() {
   }
   void* get_img_start();
   long get_img_size();
-  memcpy(pmem, get_img_start(), get_img_size());
+  nonzero_large_memcpy(pmem, get_img_start(), get_img_size());
 }
 
 void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len) {
@@ -80,3 +81,4 @@ inline void paddr_write(paddr_t addr, word_t data, int len) {
   if (in_pmem(addr)) pmem_write(addr, data, len);
   else panic("write not in pmem!");
 }
+

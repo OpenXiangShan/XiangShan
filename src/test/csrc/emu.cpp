@@ -15,6 +15,7 @@ static inline void print_help(const char *file) {
   printf("  -s, --seed=NUM             use this seed\n");
   printf("  -C, --max-cycles=NUM       execute at most NUM cycles\n");
   printf("  -I, --max-instr=NUM        execute at most NUM instructions\n");
+  printf("  -W, --warmup-instr=NUM     the number of warmup instructions\n");
   printf("  -i, --image=FILE           run with this image file\n");
   printf("  -b, --log-begin=NUM        display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM          stop display log at NUM th cycle\n");
@@ -35,6 +36,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
+    { "warmup-instr",   1, NULL, 'W' },
     { "image",          1, NULL, 'i' },
     { "log-begin",      1, NULL, 'b' },
     { "log-end",        1, NULL, 'e' },
@@ -44,7 +46,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
   int o;
   while ( (o = getopt_long(argc, const_cast<char *const*>(argv),
-          "-s:C:I:hi:m:b:e:", long_options, &long_index)) != -1) {
+          "-s:C:I:W:hi:m:b:e:", long_options, &long_index)) != -1) {
     switch (o) {
       case 0:
         switch (long_index) {
@@ -64,6 +66,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
         break;
       case 'C': args.max_cycles = atoll(optarg);  break;
       case 'I': args.max_instr = atoll(optarg);  break;
+      case 'W': args.warmup_instr = atoll(optarg);  break;
       case 'i': args.image = optarg; break;
       case 'b': args.log_begin = atoll(optarg);  break;
       case 'e': args.log_end = atoll(optarg); break;
@@ -502,7 +505,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit[NumCore];
-  const int stuck_limit = 2000;
+  const int stuck_limit = 5000;
   const int firstCommit_limit = 10000;
   uint64_t core_max_instr[NumCore];
 
@@ -549,9 +552,17 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       trapCode = STATE_SIG;
       break;
     }
+    if (dut_ptr->io_trap_instrCnt >= args.warmup_instr) {
+      printf("Warmup finished. The performance counters will be dumped and then reset.\n");
+      dut_ptr->io_perfInfo_clean = 1;
+      dut_ptr->io_perfInfo_dump = 1;
+      args.warmup_instr = -1;
+    }
 
     single_cycle();
     max_cycle --;
+    dut_ptr->io_perfInfo_clean = 0;
+    dut_ptr->io_perfInfo_dump = 0;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
 #ifdef DUALCORE
@@ -564,6 +575,24 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         eprintf("No instruction of core%d commits for %d cycles, maybe get stuck\n"
             "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
             i, stuck_limit, stuck_limit);
+#ifdef DUALCORE
+        int priviledgeMode = (i == 0) ? dut_ptr->io_difftest_priviledgeMode : dut_ptr->io_difftest2_priviledgeMode;
+#else
+        int priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
+#endif
+        eprintf("Let REF run one more instruction.\n");
+        ref_difftest_exec(1, i);
+        difftest_display(priviledgeMode, i);
+        trapCode = STATE_ABORT;
+      }
+    }
+
+    // first instruction commit
+    for (int i = 0; i < NumCore; i++) {
+      if (lastcommit[i] - max_cycle > firstCommit_limit && !hascommit[i]) {
+        eprintf("No instruction commits for %d cycles of core %d. Please check the first instruction.\n", i, firstCommit_limit);
+        eprintf("Note: The first instruction may lie in 0x10000000 which may executes and commits after 500 cycles.\n");
+        eprintf("   Or the first instruction may lie in 0x80000000 which may executes and commits after 2000 cycles.\n");
 #ifdef DUALCORE
         int priviledgeMode = (i == 0) ? dut_ptr->io_difftest_priviledgeMode : dut_ptr->io_difftest2_priviledgeMode;
 #else
@@ -767,6 +796,10 @@ inline void Emulator::save_coverage(time_t t) {
 }
 #endif
 
+void Emulator::trigger_perfDump() {
+  dut_ptr->io_perfInfo_dump = 1;
+  single_cycle();
+}
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
@@ -784,12 +817,15 @@ void Emulator::display_trapinfo() {
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_LIMIT_EXCEEDED:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_SIG:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
+      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
   }
 

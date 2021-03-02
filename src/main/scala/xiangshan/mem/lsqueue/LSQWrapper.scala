@@ -29,7 +29,7 @@ class InflightBlockInfo extends XSBundle {
 
 class LsqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(RenameWidth, Input(Bool()))
+  val needAlloc = Vec(RenameWidth, Input(UInt(2.W)))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
   val resp = Vec(RenameWidth, Output(new LSIdx))
 }
@@ -43,16 +43,19 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
+    val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect))
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
+    val issuePtrExt = Output(new SqPtr)
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
   val difftestIO = IO(new Bundle() {
     val fromSQ = new Bundle() {
@@ -74,15 +77,13 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   loadQueue.io.enq.sqCanAccept := storeQueue.io.enq.canAccept
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   for (i <- 0 until RenameWidth) {
-    val isStore = CommitType.lsInstIsStore(io.enq.req(i).bits.ctrl.commitType)
-
-    loadQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i) && !isStore
-    loadQueue.io.enq.req(i).valid  := !isStore && io.enq.req(i).valid
+    loadQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i)(0)
+    loadQueue.io.enq.req(i).valid := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
     loadQueue.io.enq.req(i).bits  := io.enq.req(i).bits
 
-    storeQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i) && isStore
-    storeQueue.io.enq.req(i).valid :=  isStore && io.enq.req(i).valid
-    storeQueue.io.enq.req(i).bits := io.enq.req(i).bits
+    storeQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i)(1)
+    storeQueue.io.enq.req(i).valid := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
+    storeQueue.io.enq.req(i).bits  := io.enq.req(i).bits
 
     io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
     io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i)
@@ -94,6 +95,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
   loadQueue.io.loadDataForwarded <> io.loadDataForwarded
+  loadQueue.io.needReplayFromRS <> io.needReplayFromRS
   loadQueue.io.ldout <> io.ldout
   loadQueue.io.roq <> io.roq
   loadQueue.io.rollback <> io.rollback
@@ -111,6 +113,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.roq <> io.roq
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
+  storeQueue.io.issuePtrExt <> io.issuePtrExt
+  storeQueue.io.storeIssue <> io.storeIssue
 
   loadQueue.io.load_s1 <> io.forward
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE

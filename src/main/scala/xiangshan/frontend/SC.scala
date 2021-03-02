@@ -259,10 +259,12 @@ trait HasSC extends HasSCParameter { this: Tage =>
       XSDebug(p"---------tage${w} provided so that sc used---------\n")
       XSDebug(p"scCtrs:$if4_scCtrs, prdrCtr:${if4_providerCtrs(w)}, sumAbs:$if4_sumAbs, tageTaken:${if4_chooseBit}\n")
       when (!if4_sumBelowThresholds(if4_chooseBit)) {
-        val pred = if4_scPreds(if4_chooseBit)
-        val debug_pc = Cat(packetIdx(debug_pc_s3), w.U, 0.U(instOffsetBits.W))
-        XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
-        io.resp.takens(w) := pred
+        when (ctrl.sc_enable) {
+          val pred = if4_scPreds(if4_chooseBit)
+          val debug_pc = Cat(packetIdx(debug_pc_s3), w.U, 0.U(instOffsetBits.W))
+          XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
+          io.resp.takens(w) := pred
+        }
       }
     }
 
