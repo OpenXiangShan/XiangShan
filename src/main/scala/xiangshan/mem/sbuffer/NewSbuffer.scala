@@ -176,7 +176,12 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 //   lru.io.mask := stateVec.map(isValid(_))
 
   val plru = new PseudoLRU(StoreBufferSize)
-  val evictionIdx = plru.way
+  val replaceIdx = plru.way
+
+  val validMast = stateVec.map(s => isValid(s))
+  val drainIdx = PriorityEncoder(validMast)
+
+  val evictionIdx = Mux(sbuffer_state === x_drain_sbuffer, drainIdx, replaceIdx)
 
   val intags = io.in.map(in => getTag(in.bits.addr))
   val sameTag = intags(0) === intags(1)
@@ -360,6 +365,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val prepareValid = ((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer)) &&
                       isValid(stateVec(evictionIdx)) &&
                       noSameBlockInflight(evictionIdx)
+
 
   when(prepareValid){
     stateVec(evictionIdx) := s_prepare
