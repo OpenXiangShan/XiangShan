@@ -794,18 +794,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
-  val walkCycle = state === s_walk || state === s_extrawalk
-  val walkBeatCnt = RegInit(0.U)
-  val walkExceedCnt = RegInit(0.U)
-  when (walkCycle) {
-    walkBeatCnt := walkBeatCnt + 1.U
-  }.elsewhen (walkBeatCnt =/= 0.U) {
-    when (walkBeatCnt > 4.U) {
-      walkExceedCnt := walkExceedCnt + walkBeatCnt - 4.U
-    }
-    walkBeatCnt := 0.U
-  }
-
   XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))
@@ -813,15 +801,14 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
   // XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
   // XSPerf("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
-  XSPerf("walkInstr", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U))
-  XSPerf("walkCycle", walkCycle)
-  XSPerf("walkExceedCnt", walkExceedCnt)
+  XSPerf("walkInstrAcc", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U))
+  XSPerf("walkCycleAcc", state === s_walk || state === s_extrawalk)
   val deqNotWritebacked = valid(deqPtr.value) && !writebacked(deqPtr.value)
   val deqUopCommitType = io.commits.info(0).commitType
-  XSPerf("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
-  XSPerf("waitBranchCycle", deqNotWritebacked && deqUopCommitType === CommitType.BRANCH)
-  XSPerf("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
-  XSPerf("waitStoreCycle", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
+  XSPerf("waitNormalCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
+  XSPerf("waitBranchCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.BRANCH)
+  XSPerf("waitLoadCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
+  XSPerf("waitStoreCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
   XSPerf("roqHeadPC", io.commits.info(0).pc)
 
   val instrCnt = RegInit(0.U(64.W))
