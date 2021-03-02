@@ -6,7 +6,12 @@ import xiangshan._
 import utils._
 import xiangshan.cache._
 
-trait HasSbufferCst extends HasXSParameter {
+class SbufferFlushBundle extends Bundle {
+  val valid = Output(Bool())
+  val empty = Input(Bool())
+}
+
+trait HasSbufferConst extends HasXSParameter {
 
   // use 1h to speedup selection
   def s_invalid  = (1<<0).U(4.W)
@@ -32,7 +37,7 @@ trait HasSbufferCst extends HasXSParameter {
   val TagWidth: Int = PAddrBits - OffsetWidth
 }
 
-class SbufferBundle extends XSBundle with HasSbufferCst
+class SbufferBundle extends XSBundle with HasSbufferConst
 
 class SbufferLine extends SbufferBundle {
   val tag = UInt(TagWidth.W)
@@ -109,16 +114,13 @@ class SbufferLru(nWay: Int) extends XSModule {
 
 
 
-class NewSbuffer extends XSModule with HasSbufferCst {
+class NewSbuffer extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
-    val flush = new Bundle {
-      val valid = Input(Bool())
-      val empty = Output(Bool())
-    } // sbuffer flush
+    val flush = Flipped(new SbufferFlushBundle)
   })
   val difftestIO = IO(new Bundle() {
     val sbufferResp = Output(Bool())

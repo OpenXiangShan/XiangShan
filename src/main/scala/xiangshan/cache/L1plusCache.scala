@@ -44,6 +44,10 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val pcfg = l1plusPrefetcherParameters
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
+  def codeWidth = encRowBits - rowBits
+  def bankNum = 2
+  def bankRows = blockRows / bankNum
+  def blockEcodedBits = blockRows * encRowBits
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
   // def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
@@ -131,20 +135,39 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   io.read.ready := !rwhazard
 
   for (w <- 0 until nWays) {
-    val array = Module(new SRAMTemplate(Bits((blockRows * encRowBits).W), set=nSets, way=1,
+    val array = List.fill(bankNum)(Module(new SRAMTemplate(UInt((bankRows * rowBits).W), set=nSets, way=1,
+      shouldReset=false, holdRead=false, singlePort=singlePort)))
+    val codeArray = Module(new SRAMTemplate(UInt((blockRows *codeWidth).W), set=nSets, way=1,
       shouldReset=false, holdRead=false, singlePort=singlePort))
     // data write
-    array.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
-    array.io.w.req.bits.apply(
-      setIdx=waddr,
-      data=io.write.bits.data.asUInt,
-      waymask=1.U)
+    for (b <- 0 until bankNum){
+      val respData = VecInit(io.write.bits.data.map{row => row(rowBits - 1, 0)}).asUInt
+      val respCode = VecInit(io.write.bits.data.map{row => row(encRowBits - 1, rowBits)}).asUInt
+      array(b).io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+      array(b).io.w.req.bits.apply(
+        setIdx=waddr,
+        data=respData((b+1)*blockBits/2 - 1, b*blockBits/2),
+        waymask=1.U)
+      
+      codeArray.io.w.req.valid := io.write.bits.way_en(w) && io.write.valid
+      codeArray.io.w.req.bits.apply(
+        setIdx=waddr,
+        data=respCode,
+        waymask=1.U)
+      
+      // data read
+      array(b).io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+      array(b).io.r.req.bits.apply(setIdx=raddr)
 
-    // data read
-    array.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
-    array.io.r.req.bits.apply(setIdx=raddr)
-    for (r <- 0 until blockRows) {
-      io.resp(w)(r) := RegNext(array.io.r.resp.data(0)((r + 1) * encRowBits - 1, r * encRowBits))
+      codeArray.io.r.req.valid := io.read.bits.way_en(w) && io.read.valid
+      codeArray.io.r.req.bits.apply(setIdx=raddr)
+      for (r <- 0 until blockRows) {
+        if(r < blockRows/2){ io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(0).io.r.resp.data(0)((r + 1) * rowBits - 1, r * rowBits) )) }
+        else { 
+          val r_half = r - blockRows/2
+          io.resp(w)(r) := RegNext(Cat(codeArray.io.r.resp.data(0)((r + 1) * codeWidth - 1, r * codeWidth) ,array(1).io.r.resp.data(0)((r_half + 1) * rowBits - 1, r_half * rowBits))) 
+        }
+      }
     }
   }
 
@@ -294,10 +317,11 @@ class L1plusCacheReq extends L1plusCacheBundle
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
+  val eccWrong = Bool()
   val id   = UInt(idWidth.W)
 
   override def toPrintable: Printable = {
-    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+    p"id=${Binary(id)} data=${Hexadecimal(data)} eccWrong=${Binary(eccWrong)}"
   }
 }
 
@@ -532,15 +556,24 @@ class L1plusCachePipe extends L1plusCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
+
+  //TODO: only detect error but not correct it
   val s2_data_decoded = Cat((0 until blockRows).reverse map { r =>
       val data = s2_data(r)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.uncorrectable))
-      decoded.corrected
+      decoded.uncorrected
+    })
+
+  val s2_data_wrong =  Cat((0 until blockRows).reverse map { r =>
+      val data = s2_data(r)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && s2_hit && decoded.error))
+      decoded.error
     })
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
+  io.resp.bits.eccWrong := s2_data_wrong.asUInt.orR
   io.resp.bits.id   := s2_req.id
 
   // replacement policy
@@ -675,7 +708,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
   // not encoded data
   val refill_data_raw = Reg(Vec(blockRows, UInt(rowBits.W)))
   when (state === s_refill_resp) {
@@ -686,7 +718,6 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-          refill_data((refill_ctr << log2Floor(beatRows)) + i.U) := cacheParams.dataCode.encode(row)
           refill_data_raw((refill_ctr << log2Floor(beatRows)) + i.U) := row
         }
 
@@ -719,7 +750,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.refill.bits.way_en  := req.way_en
     io.refill.bits.wmask   := ~0.U(blockRows.W)
     io.refill.bits.rmask   := DontCare
-    io.refill.bits.data    := refill_data
+    io.refill.bits.data    := refill_data_raw.map(row => cacheParams.dataCode.encode(row))
 
     when (io.refill.fire()) {
       state := s_meta_write_req

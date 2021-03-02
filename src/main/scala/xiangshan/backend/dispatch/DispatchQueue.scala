@@ -23,7 +23,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with HasCircularQueuePtrHelper {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
 
   val s_invalid :: s_valid:: Nil = Enum(2)

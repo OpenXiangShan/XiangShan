@@ -24,24 +24,25 @@ object LqPtr extends HasXSParameter {
   }
 }
 
+trait HasFpLoadHelper { this: HasFPUParameters =>
+  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
+    LookupTree(uop.ctrl.fuOpType, List(
+      LSUOpType.lw   -> recode(rdata(31, 0), S),
+      LSUOpType.ld   -> recode(rdata(63, 0), D)
+    ))
+  }
+}
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
     val fpWen = uop.ctrl.fpWen
     LookupTree(uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, rdata, SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.lw   -> Mux(fpWen, Cat(Fill(32, 1.U(1.W)), rdata(31, 0)), SignExt(rdata(31, 0), XLEN)),
       LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
-    ))
-  }
-
-  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
-    LookupTree(uop.ctrl.fuOpType, List(
-      LSUOpType.lw   -> recode(rdata(31, 0), S),
-      LSUOpType.ld   -> recode(rdata(63, 0), D)
     ))
   }
 }
@@ -604,7 +605,8 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  vaddrModule.io.raddr(0) := deqPtr + io.roq.lcommit
+  // no inst will be commited 1 cycle before tval update
+  vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value 
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
@@ -638,13 +640,14 @@ class LoadQueue extends XSModule
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
   // perf counter
-  XSPerf("lqRollback", io.rollback.valid, acc = true) // rollback redirect generated
-  XSPerf("lqFull", !allowEnqueue, acc = true)
-  XSPerf("lqMmioCycle", uncacheState =/= s_idle, acc = true) // lq is busy dealing with uncache req
-  XSPerf("lqMmioCnt", io.uncache.req.fire(), acc = true)
-  XSPerf("lqRefill", io.dcache.valid, acc = true)
-  XSPerf("lqWriteback", PopCount(VecInit(io.ldout.map(i => i.fire()))), acc = true)
-  XSPerf("lqWbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))), acc = true)
+  XSPerf("utilization", validCount)
+  XSPerf("rollback", io.rollback.valid) // rollback redirect generated
+  XSPerf("full", !allowEnqueue)
+  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerf("mmioCnt", io.uncache.req.fire())
+  XSPerf("refill", io.dcache.valid)
+  XSPerf("writeback", PopCount(VecInit(io.ldout.map(i => i.fire()))))
+  XSPerf("wbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
