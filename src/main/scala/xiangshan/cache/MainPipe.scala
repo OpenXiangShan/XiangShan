@@ -83,6 +83,9 @@ class MainPipe extends DCacheModule {
 
     // lrsc locked block should block probe
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
+
+    // update state vec in replacement algo
+    val replace_access = ValidIO(new ReplacementAccessBundle)
   })
 
   // assign default value to output signals
@@ -199,6 +202,7 @@ class MainPipe extends DCacheModule {
   val s1_need_data = RegEnable(need_data, s0_fire)
   val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.data_read.fire())
   val s1_req = RegEnable(s0_req, s0_fire)
+  val s1_set = get_idx(s1_req.addr)
 
   val s1_rmask = RegEnable(s0_rmask, s0_fire)
   val s1_store_wmask = RegEnable(store_wmask, s0_fire)
@@ -238,7 +242,7 @@ class MainPipe extends DCacheModule {
   // replacement policy
   val replacer = cacheParams.replacement
   val s1_repl_way_en = WireInit(0.U(nWays.W))
-  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way), RegNext(s1_repl_way_en))
+  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way(s1_set)), RegNext(s1_repl_way_en))
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
   val s1_repl_coh = s1_repl_meta.coh
 
@@ -249,14 +253,11 @@ class MainPipe extends DCacheModule {
   val s1_meta          = Mux(s1_need_replacement, s1_repl_meta,   s1_hit_meta)
   val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
 
-  // for now, since we are using random replacement
-  // we only need to update replacement states after every valid replacement decision
-  // we only do replacement when we are true miss(not permission miss)
-  when (s1_fire) {
-    when (s1_need_replacement) {
-      replacer.miss
-    }
-  }
+  // when (s1_fire) {
+  //   when (s1_need_replacement) {
+  //     replacer.miss
+  //   }
+  // }
 
   // read data
   io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
@@ -583,6 +584,12 @@ class MainPipe extends DCacheModule {
   s3_fire := s3_valid && (!need_writeback || io.wb_req.ready) &&
                          (!update_meta || io.meta_write.ready) &&
                          (!need_write_data || io.data_write.ready)
+
+  // --------------------------------------------------------------------------------
+  // update replacement policy
+  io.replace_access.valid := RegNext(s3_fire) && (RegNext(update_meta) || RegNext(need_write_data))
+  io.replace_access.bits.set := RegNext(get_idx(s3_req.addr))
+  io.replace_access.bits.way := RegNext(s3_way_en)
 
   // --------------------------------------------------------------------------------
   // send store/amo miss to miss queue

@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate, ParallelOR}
+import utils.{Code, ReplacementPolicy, XSDebug, SRAMTemplate, ParallelOR}
 
 import scala.math.max
 
@@ -19,6 +19,7 @@ case class DCacheParameters
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
+    replacer: Option[String] = Some("random"),
     nMissEntries: Int = 1,
     nProbeEntries: Int = 1,
     nReleaseEntries: Int = 1,
@@ -30,8 +31,7 @@ case class DCacheParameters
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
-
-  def replacement = new RandomReplacement(nWays)
+  def replacement = ReplacementPolicy.fromString(replacer, nWays, nSets)
 }
 
 trait HasDCacheParameters extends HasL1CacheParameters {
@@ -105,6 +105,11 @@ class L1DataReadReq extends DCacheBundle {
 class L1DataWriteReq extends L1DataReadReq {
   val wmask  = Bits(blockRows.W)
   val data   = Vec(blockRows, Bits(encRowBits.W))
+}
+
+class ReplacementAccessBundle extends DCacheBundle {
+  val set = UInt(log2Up(nSets).W)
+  val way = UInt(log2Up(nWays).W)
 }
 
 abstract class TransposeAbstractDataArray extends DCacheModule {

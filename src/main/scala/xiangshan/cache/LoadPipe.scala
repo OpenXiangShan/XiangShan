@@ -22,6 +22,9 @@ class LoadPipe extends DCacheModule {
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
+
+    // update state vec in replacement algo
+    val replace_access = ValidIO(new ReplacementAccessBundle)
   })
 
   val s1_ready = Wire(Bool())
@@ -94,6 +97,10 @@ class LoadPipe extends DCacheModule {
   io.data_read.valid := s1_fire && !s1_nack
 
   io.lsu.s1_data := DontCare
+  
+  io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
+  io.replace_access.bits.set := get_idx(s1_req.addr)
+  io.replace_access.bits.way := OHToUInt(s1_tag_match_way)
 
   // --------------------------------------------------------------------------------
   // stage 2
