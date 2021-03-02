@@ -33,7 +33,8 @@ class MemBlock(
   val fastWakeUpIn: Seq[ExuConfig],
   val slowWakeUpIn: Seq[ExuConfig],
   val fastWakeUpOut: Seq[ExuConfig],
-  val slowWakeUpOut: Seq[ExuConfig]
+  val slowWakeUpOut: Seq[ExuConfig],
+  val numIntWakeUpFp: Int
 )(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
@@ -55,6 +56,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val slowWakeUpIn = outer.slowWakeUpIn
   val fastWakeUpOut = outer.fastWakeUpOut
   val slowWakeUpOut = outer.slowWakeUpOut
+  val numIntWakeUpFp = outer.numIntWakeUpFp
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -63,6 +65,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
+    val intWakeUpFp = Vec(numIntWakeUpFp, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOutInt = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val wakeUpOutFp = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
@@ -144,14 +147,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map{
-          case (Exu.jumpExeUnitCfg, value) if cfg == Exu.stExeUnitCfg =>
-            val jumpOut = Wire(Flipped(DecoupledIO(new ExuOutput)))
-            jumpOut.bits := RegNext(value.bits)
-            jumpOut.valid := RegNext(
-              value.valid && !value.bits.uop.roqIdx.needFlush(redirect, io.fromCtrlBlock.flush)
-            )
-            jumpOut.ready := true.B
-            (Exu.jumpExeUnitCfg, jumpOut)
+          case (Exu.jumpExeUnitCfg, _) if cfg == Exu.stExeUnitCfg =>
+            (Exu.jumpExeUnitCfg, io.intWakeUpFp.head)
           case (config, value) => (config, value)
         }
     ).map(a => (a._1, decoupledIOToValidIO(a._2)))
@@ -212,6 +209,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.wakeUpOutInt.slow <> exeWbReqs
   io.wakeUpOutFp.slow <> wakeUpFp
   io.wakeUpIn.slow.foreach(_.ready := true.B)
+  io.intWakeUpFp.foreach(_.ready := true.B)
 
   val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
