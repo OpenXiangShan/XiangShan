@@ -285,7 +285,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       when (scPred =/= tagePred && sumAbs <= useThresholds(w) - 2.U && sumAbs >= useThresholds(w) - 4.U) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
-        XSDebug(p"scThres update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
+        XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
       }
       when (scPred =/= taken || sumAbs < updateThresholds(w)) {
         scUpdateMask.foreach(t => t(w) := true.B)
