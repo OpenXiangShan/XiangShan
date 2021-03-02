@@ -18,6 +18,7 @@ class PreDispatchInfo extends XSBundle {
 // read rob and enqueue
 class Dispatch1 extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
+    val flush = Input(Bool())
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val renameBypass = Input(new RenameBypassInfo)
@@ -44,6 +45,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
+    // From CSR: to control single step execution
+    val singleStep = Input(Bool())
   })
 
 
@@ -66,8 +69,14 @@ class Dispatch1 extends XSModule with HasExceptionNO {
 
   /**
     * Part 2:
-    *   Update commitType, psrc1, psrc2, psrc3, old_pdest, roqIdx, lqIdx, sqIdx for the uops
+    *   Update commitType, psrc1, psrc2, psrc3, old_pdest, lqIdx, sqIdx, singleStep for the uops
     */
+  val singleStepStatus = RegInit(false.B)
+  when (io.flush) {
+    singleStepStatus := false.B
+  }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
+    singleStepStatus := true.B
+  }
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val updatedPsrc1 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
@@ -106,11 +115,11 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     updatedUop(i).old_pdest := updatedOldPdest(i)
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
-    // update roqIdx, lqIdx, sqIdx
-    // updatedUop(i).roqIdx := io.enqRoq.resp(i)
-//    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
+    // update lqIdx, sqIdx
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
+    // update singleStep
+    updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
   }
 
 
@@ -125,7 +134,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(io.fromRename.map(r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR))
+  val hasException = VecInit(io.fromRename.map(r => selectFrontend(r.bits.cf.exceptionVec).asUInt.orR || r.bits.ctrl.singleStep))
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Roq is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isNoSpecExec(i) && (!io.enqRoq.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)

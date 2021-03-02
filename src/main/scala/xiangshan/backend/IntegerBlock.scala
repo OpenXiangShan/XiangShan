@@ -26,6 +26,8 @@ class IntBlockToCtrlIO extends XSBundle {
   // write back to brq
   val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
+  // single step control
+  val singleStep = Output(Bool())
 }
 
 trait HasExeBlockHelper {
@@ -236,6 +238,7 @@ class IntegerBlock
       x.valid := y.fire() && y.bits.redirectValid
       x.bits := y.bits
   }
+  io.toCtrlBlock.singleStep := jmpExeUnit.csrio.singleStep
 
   jmpExeUnit.csrio <> io.csrio
   jmpExeUnit.fenceio <> io.fenceio

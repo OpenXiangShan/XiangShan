@@ -166,10 +166,13 @@ class RoqExceptionInfo extends XSBundle {
   val roqIdx = new RoqPtr
   val exceptionVec = ExceptionVec()
   val flushPipe = Bool()
+  val singleStep = Bool()
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe
-  // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR
+  def is_valid = exceptionVec.asUInt.orR || flushPipe || singleStep
+  // instructions with exceptions and singleStep are allowed
+  // to write back when they are dispatched
+  def can_writeback = exceptionVec.asUInt.orR || singleStep
+  def has_exception = exceptionVec.asUInt.orR || singleStep
 }
 
 class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
@@ -186,8 +189,8 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
 
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
-  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
-  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
+  val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.is_valid && !lastCycleFlush))
+  val in_wb_valid = io.wb.map(w => w.valid && w.bits.is_valid && !lastCycleFlush)
 
   // s0: compare wb(1),wb(2) and wb(3),wb(4)
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !bits.roqIdx.needFlush(io.redirect, io.flush) }
@@ -227,6 +230,7 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
       }.elsewhen (current.bits.roqIdx === s1_out_bits.roqIdx) {
         current.bits.exceptionVec := (s1_out_bits.exceptionVec.asUInt | current.bits.exceptionVec.asUInt).asTypeOf(ExceptionVec())
         current.bits.flushPipe := s1_out_bits.flushPipe || current.bits.flushPipe
+        current.bits.singleStep := s1_out_bits.singleStep || current.bits.singleStep
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
@@ -415,7 +419,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.roqIdx === deqPtr
-  val deqHasException = deqHasExceptionOrFlush && !exceptionDataRead.bits.flushPipe
+  val deqHasException = deqHasExceptionOrFlush && exceptionDataRead.bits.has_exception
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
   val isFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe
@@ -429,6 +433,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.exception.bits.uop := RegEnable(debug_deqUop, exceptionHappen)
   io.exception.bits.uop.ctrl.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.uop.cf.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
+  io.exception.bits.uop.ctrl.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(deqDispatchData.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
 
@@ -734,6 +739,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     exceptionGen.io.enq(i).bits.roqIdx := io.enq.req(i).bits.roqIdx
     exceptionGen.io.enq(i).bits.exceptionVec := selectFrontend(io.enq.req(i).bits.cf.exceptionVec, false, true)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
+    exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
   }
 
   // TODO: don't hard code these idxes
@@ -755,6 +761,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     }
     exceptionGen.io.wb(index).bits.exceptionVec := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
     exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
+    exceptionGen.io.wb(index).bits.singleStep   := false.B
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
