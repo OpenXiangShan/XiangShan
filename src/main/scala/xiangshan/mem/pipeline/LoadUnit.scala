@@ -33,7 +33,7 @@ class LoadUnit_S0 extends XSModule {
   // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
   val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi = Mux(s0_vaddr_lo(12), 
+  val s0_vaddr_hi = Mux(s0_vaddr_lo(12),
     Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
     Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
   )
@@ -225,7 +225,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // Such inst will be writebacked from load queue.
   io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
   // io.out.bits.forwardX will be send to lq
-  io.out.bits.forwardMask := forwardMask 
+  io.out.bits.forwardMask := forwardMask
   // data retbrived from dcache is also included in io.out.bits.forwardData
   io.out.bits.forwardData := rdataVec
 
@@ -285,9 +285,9 @@ class LoadUnit extends XSModule with HasLoadHelper {
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
   io.lsq.forward.sqIdxMask := sqIdxMaskReg
 
-  // use s2_hit_way to select data received in s1
-  load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
-  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
+  // // use s2_hit_way to select data received in s1
+  // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
+  // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
   io.fastUop.valid := io.dcache.s1_hit_way.orR && load_s1.io.in.valid
   io.fastUop.bits := load_s1.io.out.bits.uop
