@@ -137,11 +137,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // load has uncertain latency, so only use external wake up data
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-      .map(_._2.bits.data)
-    val wakeupCnt = fastDatas.length
+    val fastPortsCnt = fastDatas.length
 
     val slowPorts = (
-      (if(cfg == Exu.stExeUnitCfg) wakeUpFp else exeWbReqs) ++
+      (loadExuConfigs.zip(if(cfg == Exu.stExeUnitCfg) wakeUpFp else exeWbReqs)) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map{
@@ -152,19 +151,25 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
               value.valid && !value.bits.uop.roqIdx.needFlush(redirect, io.fromCtrlBlock.flush)
             )
             jumpOut.ready := true.B
-            jumpOut
-          case (_, value) => value
+            (Exu.jumpExeUnitCfg, jumpOut)
+          case (config, value) => (config, value)
         }
-      ).map(decoupledIOToValidIO)
+    ).map(a => (a._1, decoupledIOToValidIO(a._2)))
 
     val slowPortsCnt = slowPorts.length
 
     // if tlb miss, replay
     val feedback = true
 
-    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
+    println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1, wakeupCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = feedback))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+      fastDatas.map(_._1),
+      slowPorts.map(_._1),
+      fixedDelay = certainLatency,
+      fastWakeup = certainLatency >= 0,
+      feedback = feedback)
+    )
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush    <> io.fromCtrlBlock.flush // TODO: remove it
@@ -177,8 +182,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 
-    rs.io.fastDatas <> fastDatas
-    rs.io.slowPorts <> slowPorts
+    rs.io.fastDatas <> fastDatas.map(_._2.bits.data)
+    rs.io.slowPorts <> slowPorts.map(_._2)
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
@@ -238,11 +243,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+ 
+    // Lsq to load unit's rs
+    reservationStations(i).io.stIssuePtr := lsq.io.issuePtrExt
 
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
+
+    // update waittable
+    // TODO: read pc
+    io.fromCtrlBlock.waitTableUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 
@@ -255,10 +267,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.memfeedback
-    stu.io.rsIdx       := rs.io.rsIdx
+    stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
+
+    // sync issue info to rs 
+    lsq.io.storeIssue(i).valid := rs.io.deq.valid
+    lsq.io.storeIssue(i).bits := rs.io.deq.bits
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits

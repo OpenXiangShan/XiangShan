@@ -95,12 +95,13 @@ class FloatBlock
     }
 
     val readFpRf = cfg.readFpRf
+    val wakeUpInRecodeWithCfg = intSlowWakeUpIn.zip(intRecoded) ++ memSlowWakeUpIn.zip(memRecoded)
 
-    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency).map(_.io.out.bits.data)
-    val fastPortsCnt = inBlockWbData.length
+    val inBlockFastPorts = exeUnits.filter(e => e.config.hasCertainLatency).map(a => (a.config, a.io.out.bits.data))
+    val fastPortsCnt = inBlockFastPorts.length
 
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(_.io.out)
-    val slowPorts = (inBlockListenPorts ++ wakeUpInRecode).map(decoupledIOToValidIO)
+    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(a => (a.config, a.io.out))
+    val slowPorts = (inBlockListenPorts ++ wakeUpInRecodeWithCfg).map(a => (a._1, decoupledIOToValidIO(a._2)))
     val slowPortsCnt = slowPorts.length
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
@@ -108,7 +109,13 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1, fastPortsCnt, slowPortsCnt, fixedDelay = certainLatency, fastWakeup = certainLatency >= 0, feedback = false))
+    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+      inBlockFastPorts.map(_._1),
+      slowPorts.map(_._1),
+      fixedDelay = certainLatency,
+      fastWakeup = certainLatency >= 0,
+      feedback = false
+    ))
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush <> flush // TODO: remove it
@@ -124,8 +131,8 @@ class FloatBlock
     rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
     if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
 
-    rs.io.fastDatas <> inBlockWbData
-    rs.io.slowPorts <> slowPorts
+    rs.io.fastDatas <> inBlockFastPorts.map(_._2)
+    rs.io.slowPorts <> slowPorts.map(_._2)
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
@@ -189,6 +196,8 @@ class FloatBlock
       exu.io.out.ready := fpWbArbiter.io.in(i).fire() || !exu.io.out.valid
     }
   }
+
+  XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out

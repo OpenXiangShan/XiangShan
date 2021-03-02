@@ -658,7 +658,7 @@ class ICache extends ICacheModule
   dump_pipe_info()
 
   // Performance Counter
-  XSPerf("icache_req", s3_valid && !blocking)
-  XSPerf("icache_miss", s3_miss && blocking && io.resp.fire())
-  XSPerf("icache_mmio", s3_mmio && blocking && io.resp.fire())
+  XSPerf("req", s3_valid && !blocking)
+  XSPerf("miss", s3_miss && blocking && io.resp.fire())
+  XSPerf("mmio", s3_mmio && blocking && io.resp.fire())
 }
