@@ -170,10 +170,13 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val validCount = RegInit(0.U((log2Up(StoreBufferSize) + 1).W))
   val full = invalidCount === 0.U // full = TODO: validCount(log2Up(StoreBufferSize))
 
-  val lru = Module(new ChooseReplace(StoreBufferSize))
-  val evictionIdx = lru.io.way
+//   val lru = Module(new ChooseReplace(StoreBufferSize))
+//   val evictionIdx = lru.io.way
 
-  lru.io.mask := stateVec.map(isValid(_))
+//   lru.io.mask := stateVec.map(isValid(_))
+
+  val plru = new PseudoLRU(StoreBufferSize)
+  val evictionIdx = plru.way
 
   val intags = io.in.map(in => getTag(in.bits.addr))
   val sameTag = intags(0) === intags(1)
@@ -225,6 +228,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
   def wordReqToBufLine(req: DCacheWordReq, reqtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
+    plru.access(insertIdx)
+    
     stateVec(insertIdx) := s_valid
     cohCount(insertIdx) := 0.U
     tag(insertIdx) := reqtag
@@ -246,6 +251,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   def mergeWordReq(req: DCacheWordReq, mergeIdx:UInt, wordOffset:UInt): Unit = {
+    plru.access(mergeIdx)
+
     cohCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
@@ -301,10 +308,10 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => isInvalid(s))).andR() && !Cat(io.in.map(_.valid)).orR()
 
-  do_eviction := validCount >= 12.U
+  do_eviction := full
 
   io.flush.empty := RegNext(empty && io.sqempty)
-  lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
+  // lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
   switch(sbuffer_state){
     is(x_idle){
       when(io.flush.valid){
