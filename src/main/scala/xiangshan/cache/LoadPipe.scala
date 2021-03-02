@@ -22,6 +22,9 @@ class LoadPipe extends DCacheModule
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
+
+    // update state vec in replacement algo
+    val replace_access = ValidIO(new ReplacementAccessBundle)
   })
 
   // LSU requests
@@ -109,6 +112,10 @@ class LoadPipe extends DCacheModule
   (0 until nWays) map (i => assert (!(s1_valid && s1_tag_match && (i.U === OHToUInt(s1_tag_match_way)) && s1_decoded(i).uncorrectable)))
 
   io.lsu.s1_data := s1_word_decoded
+
+  io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
+  io.replace_access.bits.set := get_idx(s1_req.addr)
+  io.replace_access.bits.way := OHToUInt(s1_tag_match_way)
 
   // --------------------------------------------------------------------------------
   // stage 2

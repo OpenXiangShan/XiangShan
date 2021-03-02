@@ -314,6 +314,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     assert (!bus.d.fire())
   }
 
+  //----------------------------------------
+  // update replacement policy
+  val replacer = cacheParams.replacement
+  val access_bundles = ldu.map(_.io.replace_access) ++ Seq(mainPipe.io.replace_access)
+  val sets = access_bundles.map(_.bits.set)
+  val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
+  (touch_ways zip access_bundles).map{ case (w, access) =>
+    w.valid := access.valid
+    w.bits := access.bits.way
+  }
+  replacer.access(sets, touch_ways)
+
 
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {
