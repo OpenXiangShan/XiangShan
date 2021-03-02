@@ -261,10 +261,16 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed
   })
+  val loadReplay = Wire(Valid(new Redirect))
+  loadReplay.valid := RegNext(io.fromLsBlock.replay.valid &&
+    !io.fromLsBlock.replay.bits.roqIdx.needFlush(backendRedirect, flushReg),
+    init = false.B
+  )
+  loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
   VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
-  redirectGen.io.loadReplay := io.fromLsBlock.replay
+  redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushReg
 
   ftq.io.enq <> io.frontend.fetchInfo
@@ -296,8 +302,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     io.roqio.toCSR.trapTarget,
     flushPC + 4.U // flush pipe
   )
+  val flushRedirectReg = Wire(Valid(new Redirect))
+  flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
+  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
 
-  io.frontend.redirect_cfiUpdate := Mux(flushRedirect.valid, flushRedirect, frontendRedirect)
+  io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, frontendRedirect)
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
   io.frontend.ftqEnqPtr := ftq.io.enqPtr
   io.frontend.ftqLeftOne := ftq.io.leftOne
@@ -325,7 +334,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      io.frontend.redirect_cfiUpdate.valid)
+      flushReg || io.frontend.redirect_cfiUpdate.valid)
   }
 
   rename.io.redirect <> backendRedirect
@@ -366,7 +375,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect <> backendRedirect
-  roq.io.exeWbResults <> (io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
+  val exeWbResults = VecInit(io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
+  for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
+    roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(backendRedirect, flushReg))
+    roq_wb.bits := RegNext(wb.bits)
+  }
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
