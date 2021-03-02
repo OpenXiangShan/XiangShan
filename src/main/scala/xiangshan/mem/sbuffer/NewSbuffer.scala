@@ -178,8 +178,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val plru = new PseudoLRU(StoreBufferSize)
   val replaceIdx = plru.way
 
-  val validMast = stateVec.map(s => isValid(s))
-  val drainIdx = PriorityEncoder(validMast)
+  val validMask = stateVec.map(s => isValid(s))
+  val drainIdx = PriorityEncoder(validMask)
 
   val evictionIdx = Mux(sbuffer_state === x_drain_sbuffer, drainIdx, replaceIdx)
 
