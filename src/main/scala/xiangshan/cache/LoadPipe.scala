@@ -22,7 +22,7 @@ class LoadPipe extends DCacheModule {
 
     // meta and data array read port
     val data_read = DecoupledIO(new L1DataReadReq)
-    val data_resp = Input(Vec(blockRows, Bits(rowBits.W)))
+    val data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
 
@@ -152,14 +152,15 @@ class LoadPipe extends DCacheModule {
   val s2_word_idx = if (rowWords == 1) 0.U else s2_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
 
   // load data gen
-  val s2_data_words = Wire(Vec(rowWords, UInt(wordBits.W)))
+  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
   for (w <- 0 until rowWords) {
-    s2_data_words(w) := s2_data(wordBits * (w + 1) - 1, wordBits * w)
+    s2_data_words(w) := s2_data(encWordBits * (w + 1) - 1, encWordBits * w)
   }
   val s2_word = s2_data_words(s2_word_idx)
   // val s2_decoded = cacheParams.dataCode.decode(s2_word)
   // val s2_word_decoded = s2_decoded.corrected
-  // assert(RegNext(!(s2_valid && s2_tag_match && s2_decoded.uncorrectable)))
+  val s2_word_decoded = s2_word(wordBits - 1, 0)
+  assert(RegNext(!(s2_valid && s2_tag_match && cacheParams.dataCode.decode(s2_word).uncorrectable)))
 
 
   // only dump these signals when they are actually valid
@@ -180,7 +181,7 @@ class LoadPipe extends DCacheModule {
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid := s2_valid
   resp.bits := DontCare
-  resp.bits.data := s2_word
+  resp.bits.data := s2_word_decoded
   // on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request

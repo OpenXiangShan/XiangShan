@@ -116,7 +116,7 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
-    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(rowBits.W))))
+    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(encRowBits.W))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
@@ -232,6 +232,9 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
         data = getECCFromRow(io.write.bits.data(r)),
         waymask = io.write.bits.way_en
       )
+      when (ecc_array.io.w.req.valid) {
+        XSDebug(p"write in ecc sram ${j.U} row ${r.U}: setIdx=${Hexadecimal(ecc_array.io.w.req.bits.setIdx)} ecc(0)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(0))} ecc(1)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(1))} waymask=${Hexadecimal(io.write.bits.way_en)}\n")
+      }
 
       ecc_array.io.r.req.valid := io.read(j).valid && rmask(r)
       ecc_array.io.r.req.bits.apply(setIdx = raddr)
@@ -254,6 +257,9 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
           data = io.write.bits.data(r),
           waymask = 1.U
         )
+        when (wen) {
+          XSDebug(p"write in data sram ${j.U} row ${r.U} way ${w.U}: setIdx=${Hexadecimal(data_array.io.w.req.bits.setIdx)} data=${Hexadecimal(io.write.bits.data(r))}\n")
+        }
 
         // data read
         // read all ways and choose one after resp
@@ -266,12 +272,11 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
       for (k <- 0 until rowWords) {
         resp_chosen(k) := Mux1H(way_en, resp(k))
         ecc_resp_chosen(k) := Mux1H(way_en, ecc_resp(k))
-        // TODO: raise exception when ECC error is found
-        assert(!RegNext(cacheParams.dataCode.decode(Cat(ecc_resp_chosen(k), resp_chosen(k))).uncorrectable &&
-          way_en.orR &&
-          RegNext(io.read(j).fire() && rmask(r))))
+        // assert(!RegNext(cacheParams.dataCode.decode(Cat(ecc_resp_chosen(k), resp_chosen(k))).uncorrectable &&
+        //   way_en.orR &&
+        //   RegNext(io.read(j).fire() && rmask(r))))
       }
-      io.resp(j)(r) := resp_chosen.asUInt
+      io.resp(j)(r) := Cat((0 until rowWords).reverse map {k => Cat(ecc_resp_chosen(k), resp_chosen(k))})// resp_chosen.asUInt
 
     }
 
