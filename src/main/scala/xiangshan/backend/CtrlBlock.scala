@@ -170,6 +170,10 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
 
   io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
+  val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
+  val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
+      if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
+    })(s1_redirect_bits_reg.ftqOffset), enable = s1_redirect_valid_reg)
   val s2_hist = RegEnable(ftqRead.hist, enable = s1_redirect_valid_reg)
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
@@ -189,9 +193,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.specCnt := s2_ftqRead.specCnt
   stage3CfiUpdate.hist := s2_hist
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
-  stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
-    if(i == 0) false.B else Cat(s2_ftqRead.br_mask.take(i)).orR()
-  })(s2_redirect_bits_reg.ftqOffset)
+  stage3CfiUpdate.sawNotTakenBranch := s2_sawNotTakenBranch
   stage3CfiUpdate.target := s2_target
   stage3CfiUpdate.taken := s2_redirect_bits_reg.cfiUpdate.taken
   stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
