@@ -373,7 +373,7 @@ class ReservationStationSelect
   io.deq.valid := selectValid
   io.deq.bits  := selectIndex
 
-  io.numExist := RegNext(Mux(nextTailPtr.flag, (iqSize-1).U, nextTailPtr.value))
+  io.numExist := RegNext(Mux(nextTailPtr.flag, if(isPow2(iqSize)) (iqSize-1).U else iqSize.U, nextTailPtr.value))
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 }
