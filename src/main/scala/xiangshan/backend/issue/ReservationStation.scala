@@ -126,6 +126,10 @@ class ReservationStation
   val ctrl   = Module(new ReservationStationCtrl(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
   val data   = Module(new ReservationStationData(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
 
+  select.suggestName(s"${this.name}_select")
+  ctrl.suggestName(s"${this.name}_ctrl")
+  data.suggestName(s"${this.name}_data")
+
   select.io.redirect := io.redirect
   select.io.flush := io.flush
   io.numExist := select.io.numExist
@@ -495,6 +499,7 @@ class ReservationStationCtrl
       sqIdx(enqPtr)  := enqUop.sqIdx
     }
     ldWait.suggestName(s"${this.name}_ldWait")
+    sqIdx.suggestName(s"${this.name}_sqIdx")
     io.readyVec := srcQueue.map(Cat(_).andR).zip(ldWait).map{ case (s, l) => s&l }
   }
 
