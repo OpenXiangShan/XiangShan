@@ -83,18 +83,25 @@ class BIM extends BasePredictor with BimParams {
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
   for (b <- 0 until BimBanks) {
-    when (needToUpdate(b)) {
+    when (needToUpdate.reduce(_||_)) {
       when (wrbypass_hit) {
-        wrbypass_ctrs(wrbypass_hit_idx)(b) := newCtrs(b)
-        wrbypass_ctr_valids(wrbypass_hit_idx)(b) := true.B
-      } .otherwise {
-        wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
-        (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
-        wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
-        wrbypass_rows(wrbypass_enq_idx) := updateRow
-        wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
+        when (needToUpdate(b)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(b) := newCtrs(b)
+          wrbypass_ctr_valids(wrbypass_hit_idx)(b) := true.B
+        }
+      }.otherwise {
+        wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B
+        when (needToUpdate(b)) {
+          wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
+          wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
+          wrbypass_rows(wrbypass_enq_idx) := updateRow
+        }
       }
     }
+  }
+  
+  when (needToUpdate.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
   }
 
   bim.io.w.apply(
@@ -105,15 +112,21 @@ class BIM extends BasePredictor with BimParams {
   )
 
   if (BPUDebug && debug) {
+    val u = io.update.bits
     XSDebug(doing_reset, "Reseting...\n")
     XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", updateValid, u.ftqPC, u.valids.asUInt, u.target)
     
     XSDebug("[update] brMask=%b, taken=%b isMisPred=%b\n", u.br_mask.asUInt, newTakens.asUInt, u.mispred.asUInt)
     for (i <- 0 until BimBanks) {
+      XSDebug(RegNext(io.pc.valid && io.inMask(i)), p"BimResp[$i]: ctr = ${io.resp.ctrs(i)}\n")
+      XSDebug(needToUpdate(i),
+        p"update bim bank $i: pc:${Hexadecimal(u.ftqPC)}, taken:${u.takens(i)}, " +
+        p"oldCtr:${oldCtrs(i)}, newCtr:${newCtrs(i)}\n")
+      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i) && needToUpdate(i),
+        p"bank $i wrbypass hit wridx $wrbypass_hit_idx: row:$updateRow, " +
+        p"ctr:${oldCtrs(i)}, newCtr:${newCtrs(i)}\n")
       XSDebug(true.B, p"bimCtr(${i.U})=${Binary(u.metas(i).bimCtr)} oldCtr=${Binary(oldCtrs(i))} newCtr=${Binary(newCtrs(i))}\n")
     }
-    XSDebug("needToUpdate=%b updateRow=%x\n", needToUpdate.asUInt, updateRow)
-    XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
   }
   
 }
