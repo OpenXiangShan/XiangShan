@@ -9,7 +9,6 @@ import utils.XSDebug
 class LoadPipe extends DCacheModule {
   val io = IO(new DCacheBundle {
     // incoming requests
-    // val lsu       = Flipped(new NewDCacheLoadIO)
     val lsu = Flipped(new DCacheLoadIO)
     // req got nacked in stage 0?
     val nack      = Input(Bool())
@@ -95,8 +94,6 @@ class LoadPipe extends DCacheModule {
   // only needs to read the specific row
   data_read.rmask := UIntToOH(get_row(s1_addr))
   io.data_read.valid := s1_fire && !s1_nack
-
-  io.lsu.s1_data := DontCare
   
   io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
   io.replace_access.bits.set := get_idx(s1_req.addr)
