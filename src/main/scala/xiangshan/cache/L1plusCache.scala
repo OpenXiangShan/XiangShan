@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
+import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -26,6 +26,7 @@ case class L1plusCacheParameters
     rowBits: Int = 64,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
+    replacer: Option[String] = Some("random"),
     nMissEntries: Int = 1,
     blockBytes: Int = 64
 ) extends L1CacheParameters {
@@ -33,7 +34,7 @@ case class L1plusCacheParameters
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
 
-  def replacement = new RandomReplacement(nWays)
+  def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
 }
 
 trait HasL1plusCacheParameters extends HasL1CacheParameters {
@@ -554,6 +555,10 @@ class L1plusCachePipe extends L1plusCacheModule
   val s2_hit           = s2_tag_match_way.orR
   val s2_hit_way       = OHToUInt(s2_tag_match_way, nWays)
 
+  //replacement marker
+  val replacer = cacheParams.replacement
+  when(s2_valid && s2_hit){ replacer.access(get_idx(s2_req.addr), s2_hit_way ) }
+
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
 
@@ -577,8 +582,7 @@ class L1plusCachePipe extends L1plusCacheModule
   io.resp.bits.id   := s2_req.id
 
   // replacement policy
-  val replacer = cacheParams.replacement
-  val replaced_way_en = UIntToOH(replacer.way)
+  val replaced_way_en = UIntToOH(replacer.way(get_idx(s2_req.addr)))
 
   io.miss_req.valid       := s2_valid && !s2_hit
   io.miss_req.bits.id     := s2_req.id
@@ -587,10 +591,6 @@ class L1plusCachePipe extends L1plusCacheModule
   io.miss_req.bits.way_en := replaced_way_en
 
   s2_passdown := s2_valid && ((s2_hit && io.resp.ready) || (!s2_hit && io.miss_req.ready))
-
-  when (io.miss_req.fire()) {
-    replacer.miss
-  }
 
   val resp = io.resp
   when (resp.valid) {
