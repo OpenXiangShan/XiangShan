@@ -472,14 +472,14 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
-  val itlbRepester = Module(new PTWRepeater())
-  val dtlbRepester = Module(new PTWRepeater())
-  itlbRepester.io.tlb <> frontend.io.ptw
-  dtlbRepester.io.tlb <> memBlock.io.ptw
-  itlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
-  dtlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.tlb(0) <> dtlbRepester.io.ptw
-  ptw.io.tlb(1) <> itlbRepester.io.ptw
+  val itlbRepeater = Module(new PTWRepeater())
+  val dtlbRepeater = Module(new PTWRepeater())
+  itlbRepeater.io.tlb <> frontend.io.ptw
+  dtlbRepeater.io.tlb <> memBlock.io.ptw
+  itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
+  dtlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
+  ptw.io.tlb(0) <> dtlbRepeater.io.ptw
+  ptw.io.tlb(1) <> itlbRepeater.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
 
