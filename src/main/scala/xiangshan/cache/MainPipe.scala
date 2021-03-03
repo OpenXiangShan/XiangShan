@@ -61,6 +61,9 @@ class MainPipeResp extends DCacheBundle
 }
 
 class MainPipe extends DCacheModule {
+  def metaBits = (new L1Metadata).getWidth
+  def encMetaBits = cacheParams.tagCode.width(metaBits)
+
   val io = IO(new DCacheBundle {
     // req and resp
     val req        = Flipped(DecoupledIO(new MainPipeReq))
@@ -75,7 +78,7 @@ class MainPipe extends DCacheModule {
     val data_write = DecoupledIO(new L1DataWriteReq)
 
     val meta_read  = DecoupledIO(new L1MetaReadReq)
-    val meta_resp  = Input(Vec(nWays, new L1Metadata))
+    val meta_resp  = Input(Vec(nWays, UInt(encMetaBits.W)))
     val meta_write = DecoupledIO(new L1MetaWriteReq)
 
     // write back
@@ -87,6 +90,11 @@ class MainPipe extends DCacheModule {
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
   })
+
+  def getMeta(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(metaBits - 1, 0)
+  }
 
   // assign default value to output signals
   io.req.ready := false.B
@@ -222,8 +230,10 @@ class MainPipe extends DCacheModule {
   s1_ready := !s1_valid || s1_fire
 
   // tag match
-  val meta_resp = WireInit(VecInit(Seq.fill(nWays)(0.U.asTypeOf(new L1Metadata))))
-  meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(meta_resp))
+  val ecc_meta_resp = WireInit(VecInit(Seq.fill(nWays)(0.U(encMetaBits.W))))
+  ecc_meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(ecc_meta_resp))
+  val meta_resp = ecc_meta_resp.map(m => getMeta(m).asTypeOf(new L1Metadata))
+  
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_req.addr))).asUInt
@@ -253,18 +263,15 @@ class MainPipe extends DCacheModule {
   val s1_meta          = Mux(s1_need_replacement, s1_repl_meta,   s1_hit_meta)
   val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
 
-  // when (s1_fire) {
-  //   when (s1_need_replacement) {
-  //     replacer.miss
-  //   }
-  // }
-
   // read data
   io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
   val data_read = io.data_read.bits
   data_read.rmask := s1_rmask
   data_read.way_en := s1_way_en
   data_read.addr := s1_req.addr
+
+  // tag ecc check
+  (0 until nWays).foreach(w => assert(!(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(ecc_meta_resp(w)).uncorrectable)))
 
   dump_pipeline_reqs("MainPipe s1", s1_valid, s1_req)
 

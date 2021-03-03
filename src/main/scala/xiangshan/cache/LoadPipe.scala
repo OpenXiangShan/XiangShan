@@ -7,6 +7,13 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import utils.XSDebug
 
 class LoadPipe extends DCacheModule {
+  def metaBits = (new L1Metadata).getWidth
+  def encMetaBits = cacheParams.tagCode.width(metaBits)
+  def getMeta(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(metaBits - 1, 0)
+  }
+
   val io = IO(new DCacheBundle {
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
@@ -17,7 +24,7 @@ class LoadPipe extends DCacheModule {
     val data_read = DecoupledIO(new L1DataReadReq)
     val data_resp = Input(Vec(blockRows, Bits(rowBits.W)))
     val meta_read = DecoupledIO(new L1MetaReadReq)
-    val meta_resp = Input(Vec(nWays, new L1Metadata))
+    val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -71,7 +78,7 @@ class LoadPipe extends DCacheModule {
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
   // tag check
-  val meta_resp = io.meta_resp
+  val meta_resp = VecInit(io.meta_resp.map(r => getMeta(r).asTypeOf(new L1Metadata)))
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
@@ -98,6 +105,9 @@ class LoadPipe extends DCacheModule {
   io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
   io.replace_access.bits.set := get_idx(s1_req.addr)
   io.replace_access.bits.way := OHToUInt(s1_tag_match_way)
+
+  // tag ecc check
+  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
 
   // --------------------------------------------------------------------------------
   // stage 2
