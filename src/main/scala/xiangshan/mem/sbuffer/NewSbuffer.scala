@@ -56,6 +56,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
   val difftestIO = IO(new Bundle() {
     val sbufferResp = Output(Bool())
@@ -257,7 +258,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => isInvalid(s))).andR() && !Cat(io.in.map(_.valid)).orR()
 
-  do_eviction := validCount >= 12.U
+  do_eviction := validCount >= RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
 
   io.flush.empty := RegNext(empty && io.sqempty)
   // lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
