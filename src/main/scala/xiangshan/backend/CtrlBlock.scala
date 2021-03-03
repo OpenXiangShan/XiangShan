@@ -170,6 +170,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
 
   io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
+  val s2_hist = RegEnable(ftqRead.hist, enable = s1_redirect_valid_reg)
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
   val s2_cfiUpdata_pc = RegEnable(cfiUpdate_pc, enable = s1_redirect_valid_reg)
@@ -186,7 +187,7 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.rasEntry := s2_ftqRead.rasTop
   stage3CfiUpdate.predHist := s2_ftqRead.predHist
   stage3CfiUpdate.specCnt := s2_ftqRead.specCnt
-  stage3CfiUpdate.hist := s2_ftqRead.hist
+  stage3CfiUpdate.hist := s2_hist
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
   stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
     if(i == 0) false.B else Cat(s2_ftqRead.br_mask.take(i)).orR()
