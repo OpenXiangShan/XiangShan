@@ -350,13 +350,15 @@ void dramsim3_helper_rising(const axi_channel &axi) {
     void *data_start = meta->data + meta->offset * meta->size / sizeof(uint64_t);
     axi_get_wdata(axi, data_start, meta->size);
     meta->offset++;
+    // printf("accept a new write data\n");
+  }
+  if (wait_req_w) {
+    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_req_w->meta);
     // if this is the last beat
-    if (meta->offset == meta->len) {
-      assert(dram->will_accept(wait_req_w->address, true));
+    if (meta->offset == meta->len && dram->will_accept(wait_req_w->address, true)) {
       dram->add_request(wait_req_w);
       wait_req_w = NULL;
     }
-    // printf("accept a new write data\n");
   }
 }
 
@@ -397,7 +399,11 @@ void dramsim3_helper_falling(axi_channel &axi) {
 
   // WDATA: check whether the write data can be accepted
   if (wait_req_w != NULL && dram->will_accept(wait_req_w->address, true)) {
-    axi_accept_wdata(axi);
+    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_req_w->meta);
+    // we have to check whether the last finished write request has been accepted by dram
+    if (meta->offset != meta->len) {
+      axi_accept_wdata(axi);
+    }
   }
 
   // WRESP: if finished, we try the next write response
