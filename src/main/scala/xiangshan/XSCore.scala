@@ -346,7 +346,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
     fastWakeUpOut = Seq(),
-    slowWakeUpOut = loadExuConfigs
+    slowWakeUpOut = loadExuConfigs,
+    numIntWakeUpFp = intExuConfigs.count(_.writeFpRf)
   ))
 
   lazy val module = new XSCoreImp(this)
@@ -427,7 +428,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
     .zip(integerBlock.io.wakeUpOut.slow)
     .filter(_._1.writeFpRf)
-    .map(_._2).map(x => fpOutValid(x, connectReady = true))
+    .map(_._2)
 
   integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
@@ -445,6 +446,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // Note: 'WireInit' is used to block 'ready's from memBlock,
   // we don't need 'ready's from memBlock
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
+  memBlock.io.intWakeUpFp <> floatBlock.io.intWakeUpOut
 
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare
