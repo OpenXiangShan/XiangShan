@@ -129,6 +129,7 @@ class ReservationStation
   select.io.redirect := io.redirect
   select.io.flush := io.flush
   io.numExist := select.io.numExist
+  XSPerf("utilization", io.numExist)
   select.io.redirectVec := ctrl.io.redirectVec
   select.io.readyVec := ctrl.io.readyVec
   select.io.enq.valid := io.fromDispatch.valid
