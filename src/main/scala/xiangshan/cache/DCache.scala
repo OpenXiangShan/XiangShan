@@ -104,7 +104,7 @@ class L1DataReadReq extends DCacheBundle {
 // Now, we can write a cache-block in a single cycle
 class L1DataWriteReq extends L1DataReadReq {
   val wmask  = Bits(blockRows.W)
-  val data   = Vec(blockRows, Bits(encRowBits.W))
+  val data   = Vec(blockRows, Bits(rowBits.W))
 }
 
 class ReplacementAccessBundle extends DCacheBundle {
@@ -116,7 +116,7 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
-    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(encRowBits.W))))
+    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(rowBits.W))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
@@ -171,6 +171,22 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
 class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   val singlePort = true
   val readHighPriority = true
+  def eccBits = encWordBits - wordBits
+
+  def getECCFromEncWord(encWord: UInt) = {
+    require(encWord.getWidth == encWordBits)
+    encWord(encWordBits - 1, wordBits)
+  }
+
+  def getECCFromRow(row: UInt) = {
+    require(row.getWidth == rowBits)
+    VecInit((0 until rowWords).map { w =>
+      val word = row(wordBits * (w + 1) - 1, wordBits * w)
+      getECCFromEncWord(cacheParams.dataCode.encode(word))
+    })
+  }
+
+  println(s"ecc bits for each word: $eccBits")
   
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
@@ -198,12 +214,33 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
     val way_en = RegNext(io.read(j).bits.way_en)
 
     for (r <- 0 until blockRows) {
-      val resp = Wire(Vec(rowWords, Vec(nWays, Bits(encWordBits.W))))
-      val resp_chosen = Wire(Vec(rowWords, Bits(encWordBits.W)))
+      val resp = Wire(Vec(rowWords, Vec(nWays, Bits(wordBits.W))))
+      val resp_chosen = Wire(Vec(rowWords, Bits(wordBits.W)))
+      val ecc_resp = Wire(Vec(rowWords, Vec(nWays, Bits(eccBits.W))))
+      val ecc_resp_chosen = Wire(Vec(rowWords, Bits(eccBits.W)))
+
+      val ecc_array = Module(new SRAMTemplate(
+        Vec(rowWords, Bits(eccBits.W)),
+        set = nSets,
+        way = nWays,
+        shouldReset = false,
+        holdRead = false,
+        singlePort = singlePort
+      ))
+
+      ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)
+      ecc_array.io.w.req.bits.apply(
+        setIdx = waddr,
+        data = getECCFromRow(io.write.bits.data(r)),
+        waymask = io.write.bits.way_en
+      )
+
+      ecc_array.io.r.req.valid := io.read(j).valid && rmask(r)
+      ecc_array.io.r.req.bits.apply(setIdx = raddr)
 
       for (w <- 0 until nWays) {
-        val array = Module(new SRAMTemplate(
-          Bits(encRowBits.W),
+        val data_array = Module(new SRAMTemplate(
+          Bits(rowBits.W),
           set = nSets,
           way = 1,
           shouldReset = false,
@@ -213,8 +250,8 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
 
         // data write
         val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)
-        array.io.w.req.valid := wen
-        array.io.w.req.bits.apply(
+        data_array.io.w.req.valid := wen
+        data_array.io.w.req.bits.apply(
           setIdx = waddr,
           data = io.write.bits.data(r),
           waymask = 1.U
@@ -223,12 +260,19 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
         // data read
         // read all ways and choose one after resp
         val ren = io.read(j).valid && rmask(r)
-        array.io.r.req.valid := ren
-        array.io.r.req.bits.apply(setIdx = raddr)
-        (0 until rowWords).foreach(k => resp(k)(w) := array.io.r.resp.data(0)(encWordBits * (k + 1) - 1, encWordBits * k))
+        data_array.io.r.req.valid := ren
+        data_array.io.r.req.bits.apply(setIdx = raddr)
+        (0 until rowWords).foreach(k => resp(k)(w) := data_array.io.r.resp.data(0)(wordBits * (k + 1) - 1, wordBits * k))
+        (0 until rowWords).foreach(k => ecc_resp(k)(w) := ecc_array.io.r.resp.data(w)(k))
       }
-      (0 until rowWords).foreach(k => resp_chosen(k) := Mux1H(way_en, resp(k)))
+      for (k <- 0 until rowWords) {
+        resp_chosen(k) := Mux1H(way_en, resp(k))
+        ecc_resp_chosen(k) := Mux1H(way_en, ecc_resp(k))
+        // TODO: raise exception when ECC error is found
+        assert(!RegNext(cacheParams.dataCode.decode(Cat(ecc_resp_chosen(k), resp_chosen(k))).uncorrectable && RegNext(io.read(j).valid && rmask(r))))
+      }
       io.resp(j)(r) := resp_chosen.asUInt
+
     }
 
     io.nacks(j) := false.B
@@ -252,6 +296,10 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
 
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
+  def getMeta(encMeta: UInt): UInt = {
+    require(encMeta.getWidth == encMetaBits)
+    encMeta(metaBits - 1, 0)
+  }
 
   val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
@@ -268,11 +316,16 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val ren = io.read.fire()
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
-  io.resp := tag_array.io.r.resp.data.map(rdata =>
-      cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
+  // io.resp := tag_array.io.r.resp.data.map(rdata =>
+  //     cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
+  io.resp := tag_array.io.r.resp.data.map(eccMeta =>
+    getMeta(eccMeta).asTypeOf(new L1Metadata))
 
-  // io.read.ready := !wen
-  // io.write.ready := !rst
+  // TODO: raise exception when ECC error is found
+  for (w <- 0 until nWays) {
+    assert(!RegNext(cacheParams.tagCode.decode(tag_array.io.r.resp.data(w)).uncorrectable && RegNext(ren)))
+  }
+
   io.write.ready := !ren
   io.read.ready := !rst
 
