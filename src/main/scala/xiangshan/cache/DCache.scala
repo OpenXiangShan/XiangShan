@@ -185,8 +185,6 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
       getECCFromEncWord(cacheParams.dataCode.encode(word))
     })
   }
-
-  println(s"ecc bits for each word: $eccBits")
   
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)

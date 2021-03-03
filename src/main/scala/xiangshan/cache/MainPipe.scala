@@ -71,7 +71,7 @@ class MainPipe extends DCacheModule {
 
     // meta/data read/write
     val data_read  = DecoupledIO(new L1DataReadReq)
-    val data_resp  = Input(Vec(blockRows, Bits(encRowBits.W)))
+    val data_resp  = Input(Vec(blockRows, Bits(rowBits.W)))
     val data_write = DecoupledIO(new L1DataWriteReq)
 
     val meta_read  = DecoupledIO(new L1MetaReadReq)
@@ -319,7 +319,7 @@ class MainPipe extends DCacheModule {
       s2_tag_match, s2_has_permission, s2_hit, s2_need_replacement, s2_way_en, s2_coh.state)
   }
 
-  val data_resp = WireInit(VecInit(Seq.fill(blockRows)(0.U(encRowBits.W))))
+  val data_resp = WireInit(VecInit(Seq.fill(blockRows)(0.U(rowBits.W))))
   data_resp := Mux(RegNext(s1_fire), io.data_resp, RegNext(data_resp))
 
   // generate write data
@@ -330,13 +330,9 @@ class MainPipe extends DCacheModule {
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  // TODO: deal with ECC errors
   val s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
-      val data = data_resp(r)(encWordBits * (w + 1) - 1, encWordBits * w)
-      val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && s2_rmask(r) && decoded.uncorrectable))
-      decoded.corrected
+      data_resp(r)(wordBits * (w + 1) - 1, wordBits * w)
     }
   }
 
@@ -539,23 +535,13 @@ class MainPipe extends DCacheModule {
     })
   }
 
-  // ECC encode data
-  val s3_wdata_merged = Wire(Vec(blockRows, UInt(encRowBits.W)))
-  for (i <- 0 until blockRows) {
-    s3_wdata_merged(i) := Cat((0 until rowWords).reverse map { w =>
-      val wdata = s3_amo_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
-      val wdata_encoded = cacheParams.dataCode.encode(wdata)
-      wdata_encoded
-    })
-  }
-
   val data_write = io.data_write.bits
   io.data_write.valid := s3_fire && need_write_data
   data_write.rmask := DontCare
   data_write.way_en := s3_way_en
   data_write.addr := s3_req.addr
   data_write.wmask := VecInit(wmask.map(_.orR)).asUInt
-  data_write.data := s3_wdata_merged
+  data_write.data := s3_amo_data_merged
 
   // --------------------------------------------------------------------------------
   // Writeback
