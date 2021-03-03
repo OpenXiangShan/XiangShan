@@ -77,6 +77,7 @@ abstract class ICacheBundle extends XSBundle
 abstract class ICacheModule extends XSModule
   with HasICacheParameters
   with HasFrontEndExceptionNo
+  with HasIFUConst
 
 abstract class ICacheArray extends XSModule
   with HasICacheParameters
@@ -436,7 +437,7 @@ class ICache extends ICacheModule
 
 
   /* icache miss
-   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking
+   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking  
    * block the pipeline until refill finishes
    */
   val icacheMissQueue = Module(new IcacheMissQueue)
@@ -528,7 +529,7 @@ class ICache extends ICacheModule
     (cutPacket.asUInt, outMask.asUInt)
   }
   val mmioDataVec = io.mmio_grant.bits.data.asTypeOf(Vec(mmioBeats,UInt(mmioBusWidth.W)))
-  val (mmio_packet,mmio_mask)  = cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
+  val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
 
   XSDebug("mmio data  %x\n", mmio_packet)
 
@@ -541,7 +542,7 @@ class ICache extends ICacheModule
     val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
-    wayResp.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
+    wayResp.mask := s3_req_mask
     wayResp.ipf := s3_exception_vec(pageFault)
     wayResp.acf := s3_exception_vec(accessFault)  || s3_meta_wrong || s3_data_wrong
     //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
@@ -564,7 +565,7 @@ class ICache extends ICacheModule
 
   //icache response: to pre-decoder
   io.resp.valid := s3_valid && (s3_hit || exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
-  io.resp.bits.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
+  io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
