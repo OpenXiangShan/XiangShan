@@ -116,10 +116,10 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val timeOutMask = VecInit(widthMap(i => cohCount(i)(countBits - 1)))
   val (timeOutIdx, hasTimeOut) = PriorityEncoderWithFlag(timeOutMask)
 
-  val validMask = stateVec.map(s => isValid(s))
+  val validMask = VecInit(stateVec.map(s => isValid(s)))
   val drainIdx = PriorityEncoder(validMask)
 
-
+  val inflightMask = VecInit(stateVec.map(s => isInflight(s)))
 
   val intags = io.in.map(in => getTag(in.bits.addr))
   val sameTag = intags(0) === intags(1)
@@ -134,7 +134,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   for(i <- 0 until StorePipelineWidth){
     mergeMask(i) := widthMap(j =>
-      intags(i) === tag(j) && isValid(stateVec(j))
+      intags(i) === tag(j) && validMask(j)
     )
   }
 
@@ -239,7 +239,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   // ---------------------- Send Dcache Req ---------------------
 
   val do_eviction = Wire(Bool())
-  val empty = Cat(stateVec.map(s => isInvalid(s))).andR() && !Cat(io.in.map(_.valid)).orR()
+  val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
 
   do_eviction := validCount >= 12.U
 
@@ -270,7 +270,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
-    !Cat(widthMap(i => isInflight(stateVec(i)) && tag(idx) === tag(i))).orR()
+    !Cat(widthMap(i => inflightMask(i) && tag(idx) === tag(i))).orR()
   }
 
   val need_drain = sbuffer_state === x_drain_sbuffer
@@ -283,8 +283,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
       If there is a inflight dcache req which has same tag with evictionIdx's tag,
       current eviction should be blocked.
    */
-  val prepareValid = (need_drain || hasTimeOut || need_drain) &&
-    noSameBlockInflight(evictionIdx) && isValid(evictionIdx)
+  val prepareValid = (need_drain || hasTimeOut || need_replace) &&
+    noSameBlockInflight(evictionIdx) && validMask(evictionIdx)
   val prepareValidReg = RegInit(false.B)
   val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
   val willSendDcacheReq = prepareValid && canSendDcacheReq
@@ -296,11 +296,16 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
   when(willSendDcacheReq){
     stateVec(evictionIdx) := s_inflight
+    XSDebug(p"$evictionIdx will be sent to Dcache\n")
   }
+  XSDebug(p"need drain:$need_drain hasTimeOut: $hasTimeOut need replace:$need_replace\n")
+  XSDebug(p"drainIdx:$drainIdx tIdx:$timeOutIdx replIdx:$replaceIdx " +
+    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${validMask(evictionIdx)}\n")
+  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may note accurate
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !hasTimeOut && canSendDcacheReq)
+    need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
   val evictionTag = RegEnable(tag(evictionIdx), enable = willSendDcacheReq)
@@ -339,7 +344,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
 
   for(i <- 0 until StoreBufferSize){
-    when(isValid(stateVec(i)) && !timeOutMask(i)){
+    when(validMask(i) && !timeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U
     }
   }
@@ -348,8 +353,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   for ((forward, i) <- io.forward.zipWithIndex) {
     val tag_matches = widthMap(w => tag(w) === getTag(forward.paddr))
-    val valid_tag_matches = widthMap(w => tag_matches(w) && isValid(stateVec(w)))
-    val inflight_tag_matches = widthMap(w => tag_matches(w) && isInflight(stateVec(w)))
+    val valid_tag_matches = widthMap(w => tag_matches(w) && validMask(w))
+    val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
     val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
