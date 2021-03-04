@@ -59,7 +59,7 @@ class SbufferData extends XSModule with HasSbufferConst {
     when(req(i).valid){
       for(j <- 0 until DataBytes){
         when(req(i).bits.mask(j)){
-          data(req(i).bits.idx)(req(i).bits.wordOffset)(j) := req(i).bits.data(j)
+          data(req(i).bits.idx)(req(i).bits.wordOffset)(j) := req(i).bits.data(j*8+7, j*8)
         }
       }
     }
