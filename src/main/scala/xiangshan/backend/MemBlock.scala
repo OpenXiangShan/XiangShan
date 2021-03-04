@@ -78,6 +78,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val exceptionAddr = new ExceptionAddrIO // to csr
       val roq = Flipped(new RoqLsqIO) // roq to lsq
     }
+
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
   val difftestIO = IO(new Bundle() {
     val fromSbuffer = new Bundle() {
@@ -304,6 +306,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.sqempty        <> sbuffer.io.sqempty
 
   // Sbuffer
+  sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
   sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
   sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
