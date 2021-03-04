@@ -98,7 +98,9 @@ public:
   uint64_t execute(uint64_t max_cycle, uint64_t max_instr);
   uint64_t get_cycles() const { return cycles; }
   EmuArgs get_args() const { return args; }
-  bool is_good_trap() { return trapCode == STATE_GOODTRAP; };
+  bool is_good_trap() {
+    return trapCode == STATE_GOODTRAP || trapCode == STATE_LIMIT_EXCEEDED;
+  };
   int get_trapcode() { return trapCode; }  
 };
 

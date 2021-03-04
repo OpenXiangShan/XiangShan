@@ -171,6 +171,11 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
 
   io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
+  val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
+  val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
+      if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
+    })(s1_redirect_bits_reg.ftqOffset), enable = s1_redirect_valid_reg)
+  val s2_hist = RegEnable(ftqRead.hist, enable = s1_redirect_valid_reg)
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
   val s2_cfiUpdata_pc = RegEnable(cfiUpdate_pc, enable = s1_redirect_valid_reg)
@@ -187,11 +192,9 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.rasEntry := s2_ftqRead.rasTop
   stage3CfiUpdate.predHist := s2_ftqRead.predHist
   stage3CfiUpdate.specCnt := s2_ftqRead.specCnt
-  stage3CfiUpdate.hist := s2_ftqRead.hist
+  stage3CfiUpdate.hist := s2_hist
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
-  stage3CfiUpdate.sawNotTakenBranch := VecInit((0 until PredictWidth).map{ i =>
-    if(i == 0) false.B else Cat(s2_ftqRead.br_mask.take(i)).orR()
-  })(s2_redirect_bits_reg.ftqOffset)
+  stage3CfiUpdate.sawNotTakenBranch := s2_sawNotTakenBranch
   stage3CfiUpdate.target := s2_target
   stage3CfiUpdate.taken := s2_redirect_bits_reg.cfiUpdate.taken
   stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
@@ -262,10 +265,16 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed
   })
+  val loadReplay = Wire(Valid(new Redirect))
+  loadReplay.valid := RegNext(io.fromLsBlock.replay.valid &&
+    !io.fromLsBlock.replay.bits.roqIdx.needFlush(backendRedirect, flushReg),
+    init = false.B
+  )
+  loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
   VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
-  redirectGen.io.loadReplay := io.fromLsBlock.replay
+  redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushReg
 
   ftq.io.enq <> io.frontend.fetchInfo
@@ -297,8 +306,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     io.roqio.toCSR.trapTarget,
     flushPC + 4.U // flush pipe
   )
+  val flushRedirectReg = Wire(Valid(new Redirect))
+  flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
+  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
 
-  io.frontend.redirect_cfiUpdate := Mux(flushRedirect.valid, flushRedirect, frontendRedirect)
+  io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, frontendRedirect)
   io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
   io.frontend.ftqEnqPtr := ftq.io.enqPtr
   io.frontend.ftqLeftOne := ftq.io.leftOne
@@ -326,7 +338,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      io.frontend.redirect_cfiUpdate.valid)
+      flushReg || io.frontend.redirect_cfiUpdate.valid)
   }
 
   rename.io.redirect <> backendRedirect
@@ -367,7 +379,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect <> backendRedirect
-  roq.io.exeWbResults <> (io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
+  val exeWbResults = VecInit(io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
+  for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
+    roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(backendRedirect, flushReg))
+    roq_wb.bits := RegNext(wb.bits)
+  }
 
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect

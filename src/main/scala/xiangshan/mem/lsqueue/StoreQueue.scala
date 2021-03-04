@@ -110,7 +110,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // no inst will be commited 1 cycle before tval update
-  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount).value 
+  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount).value
 
   /**
     * Enqueue at dispatch
@@ -150,21 +150,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val IssuePtrMoveStride = 4
   require(IssuePtrMoveStride >= 2)
 
-  val issueLookup = Wire(Vec(IssuePtrMoveStride, Bool()))
-  for (i <- 0 until IssuePtrMoveStride) {
-    val lookUpPtr = issuePtrExt.value + i.U
-    if(i == 0){
-      issueLookup(i) := allocated(lookUpPtr) && issued(lookUpPtr)
-    }else{
-      issueLookup(i) := allocated(lookUpPtr) && issued(lookUpPtr) && issueLookup(i-1)
-    }
+  val issueLookupVec = (0 until IssuePtrMoveStride).map(issuePtrExt + _.U)
+  val issueLookup = issueLookupVec.map(ptr => allocated(ptr.value) && issued(ptr.value) && ptr =/= enqPtrExt(0))
+  val nextIssuePtr = issuePtrExt + PriorityEncoder(VecInit(issueLookup.map(!_) :+ true.B))
+  issuePtrExt := nextIssuePtr
 
-    when(issueLookup(i)){
-      issuePtrExt := issuePtrExt + (i+1).U
-    }
-  }
-  
-  when(io.brqRedirect.valid || io.flush){
+  when (io.brqRedirect.valid || io.flush) {
     issuePtrExt := Mux(
       isAfter(cmtPtrExt(0), deqPtrExt(0)),
       cmtPtrExt(0),

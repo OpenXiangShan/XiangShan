@@ -185,7 +185,7 @@ class BTB extends BasePredictor with BTBParams{
   val updateBank = u.cfiIndex.bits
   val updateRow = btbAddr.getBankIdx(cfi_pc)
   val updateIsBr = u.br_mask(u.cfiIndex.bits)
-  val updateTaken = u.cfiIndex.valid
+  val updateTaken = u.cfiIndex.valid && u.valids(u.cfiIndex.bits)
   // TODO: remove isRVC
   val metaWrite = BtbMetaEntry(btbAddr.getTag(cfi_pc), updateIsBr, u.cfiIsRVC)
   val dataWrite = BtbDataEntry(new_lower, new_extended)

@@ -62,16 +62,16 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
 class Ftq_4R_SRAMEntry extends XSBundle {
   val ftqPC = UInt(VAddrBits.W)
   val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
+  val hist = new GlobalHistory
+  val br_mask = Vec(PredictWidth, Bool())
 }
 
 // redirect and commit need read these infos
 class Ftq_2R_SRAMEntry extends XSBundle {
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
-  val hist = new GlobalHistory
   val predHist = new GlobalHistory
   val specCnt = Vec(PredictWidth, UInt(10.W))
-  val br_mask = Vec(PredictWidth, Bool())
 }
 
 class Ftq_1R_Commit_SRAMEntry extends XSBundle {
@@ -127,15 +127,15 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   ftq_pc_mem.io.waddr(0) := tailPtr.value
   ftq_pc_mem.io.wdata(0).ftqPC := io.enq.bits.ftqPC
   ftq_pc_mem.io.wdata(0).lastPacketPC := io.enq.bits.lastPacketPC
+  ftq_pc_mem.io.wdata(0).hist := io.enq.bits.hist
+  ftq_pc_mem.io.wdata(0).br_mask := io.enq.bits.br_mask
   val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
   ftq_2r_sram.io.wen := real_fire
   ftq_2r_sram.io.waddr := tailPtr.value
   ftq_2r_sram.io.wdata.rasSp := io.enq.bits.rasSp
   ftq_2r_sram.io.wdata.rasEntry := io.enq.bits.rasTop
-  ftq_2r_sram.io.wdata.hist := io.enq.bits.hist
   ftq_2r_sram.io.wdata.predHist := io.enq.bits.predHist
   ftq_2r_sram.io.wdata.specCnt := io.enq.bits.specCnt
-  ftq_2r_sram.io.wdata.br_mask := io.enq.bits.br_mask
   val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
   pred_target_sram.io.wen := real_fire
   pred_target_sram.io.waddr := tailPtr.value
@@ -229,13 +229,13 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // from 4r sram
   commitEntry.ftqPC := RegNext(ftq_pc_mem.io.rdata(0).ftqPC)
   commitEntry.lastPacketPC := RegNext(ftq_pc_mem.io.rdata(0).lastPacketPC)
+  commitEntry.hist := RegNext(ftq_pc_mem.io.rdata(0).hist)
+  commitEntry.br_mask := RegNext(ftq_pc_mem.io.rdata(0).br_mask)
   // from 2r sram
   commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
   commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
-  commitEntry.hist := RegNext(ftq_2r_sram.io.rdata(0).hist)
   commitEntry.predHist := RegNext(ftq_2r_sram.io.rdata(0).predHist)
   commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
-  commitEntry.br_mask := RegNext(ftq_2r_sram.io.rdata(0).br_mask)
   // from 1r sram
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
   commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
@@ -258,6 +258,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     ftq_pc_mem.io.raddr(1 + i) := req.ptr.value
     req.entry.ftqPC := ftq_pc_mem.io.rdata(1 + i).ftqPC
     req.entry.lastPacketPC := ftq_pc_mem.io.rdata(1 + i).lastPacketPC
+    req.entry.hist := ftq_pc_mem.io.rdata(1 + i).hist
+    req.entry.br_mask := ftq_pc_mem.io.rdata(1 + i).br_mask
     if(i == 0){ // jump, read npc
       pred_target_sram.io.raddr(0) := req.ptr.value
       pred_target_sram.io.ren(0) := true.B
@@ -269,10 +271,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.cfiRead.entry := DontCare
   io.cfiRead.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
   io.cfiRead.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
-  io.cfiRead.entry.hist := ftq_2r_sram.io.rdata(1).hist
   io.cfiRead.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
   io.cfiRead.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
-  io.cfiRead.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
