@@ -180,7 +180,7 @@ class MicroBTB extends BasePredictor
     val read_resps = VecInit(banks.map(b => b.read_resp))
 
     for (b <- 0 until PredictWidth) {
-        banks(b).read_pc.valid := io.pc.valid && io.inMask(b)
+        banks(b).read_pc.valid := io.inMask(b)
         banks(b).read_pc.bits := io.pc.bits
         
         //only when hit and instruction valid and entry valid can output data

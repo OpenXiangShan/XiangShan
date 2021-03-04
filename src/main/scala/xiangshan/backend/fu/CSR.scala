@@ -355,6 +355,11 @@ class CSR extends FunctionUnit with HasCSRConst
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
 
+  // smblockctl: memory block configurations
+  // bits 0-3: store buffer flush threshold (default: 8 entries)
+  val smblockctl = RegInit(UInt(XLEN.W), "h7".U)
+  csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
+
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   csrio.tlb := tlbBundle
@@ -486,6 +491,7 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Spfctl, spfctl),
     MaskedRegMap(Sdsid, sdsid),
     MaskedRegMap(Slvpredctl, slvpredctl),
+    MaskedRegMap(Smblockctl, smblockctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
