@@ -157,14 +157,14 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
 
 }
 
-class SCThreshold(val ctrBits: Int = 5) extends SCBundle {
+class SCThreshold(val ctrBits: Int = 6) extends SCBundle {
   val ctr = UInt(ctrBits.W)
   def satPos(ctr: UInt = this.ctr) = ctr === ((1.U << ctrBits) - 1.U)
   def satNeg(ctr: UInt = this.ctr) = ctr === 0.U
   def neutralVal = (1.U << (ctrBits - 1))
-  val thres = UInt(5.W)
-  def minThres = 5.U
-  def maxThres = 31.U
+  val thres = UInt(8.W)
+  def minThres = 6.U
+  def maxThres = 255.U
   def update(cause: Bool): SCThreshold = {
     val res = Wire(new SCThreshold(this.ctrBits))
     val newCtr = satUpdate(this.ctr, this.ctrBits, cause)
@@ -282,12 +282,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
 
-      when (scPred =/= tagePred && sumAbs <= useThresholds(w) - 2.U && sumAbs >= useThresholds(w) - 4.U) {
+      when (scPred =/= taken || sumAbs < useThresholds(w)) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
         XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
-      }
-      when (scPred =/= taken || sumAbs < updateThresholds(w)) {
+
         scUpdateMask.foreach(t => t(w) := true.B)
         XSDebug(sum < 0.S,
           p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
