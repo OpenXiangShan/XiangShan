@@ -123,13 +123,13 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
         when (io.update.mask(w)) {
           wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := true.B
           wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdatas(w)
-          wrbypass_idxs(wrbypass_enq_idx) := update_idx
         }
       }
     }
   }
-
+  
   when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_idxs(wrbypass_enq_idx) := update_idx
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
   }
 
