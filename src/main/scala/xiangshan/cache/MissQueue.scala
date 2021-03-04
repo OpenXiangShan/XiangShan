@@ -451,8 +451,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // one refill at a time
   OneHot.checkOneHot(refill_arb.io.in.map(r => r.valid))
 
-  TLArbiter.robin(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
-  TLArbiter.robin(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
+  TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
+  TLArbiter.lowest(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
 
   io.pipe_req <> pipe_req_arb.io.out
 
