@@ -131,6 +131,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
+  io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
   io.in.ready := !io.in.valid || io.out.ready
@@ -169,6 +170,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.tlbFeedback.bits.flushState := io.in.bits.ptwBack
   io.needReplayFromRS := s2_cache_replay
 
   // merge forward result

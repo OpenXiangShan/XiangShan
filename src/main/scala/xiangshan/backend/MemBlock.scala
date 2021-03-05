@@ -193,7 +193,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // exeUnits(i).io.fromInt <> rs.io.deq
     rs.io.memfeedback := DontCare
 
-    rs.suggestName(s"rsd_${cfg.name}")
+    rs.suggestName(s"rs_${cfg.name}")
 
     rs
   })
