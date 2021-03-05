@@ -94,13 +94,13 @@ class BIM extends BasePredictor with BimParams {
         when (needToUpdate(b)) {
           wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
           wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
-          wrbypass_rows(wrbypass_enq_idx) := updateRow
         }
       }
     }
   }
   
   when (needToUpdate.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_rows(wrbypass_enq_idx) := updateRow
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
   }
 
