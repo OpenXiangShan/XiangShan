@@ -67,9 +67,12 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val allowEnq = RegInit(true.B)
 
   val numEnq = Mux(io.in.fire, PopCount(io.in.bits.mask), 0.U)
+  val numTryDeq = Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries)
   val numDeq = PopCount(io.out.map(_.fire))
 
-  allowEnq := (IBufSize - PredictWidth).U >= validEntries +& numEnq
+  val numAfterEnq = validEntries +& numEnq
+  val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
+  allowEnq := (IBufSize - PredictWidth).U >= nextValidEntries
 
   // Enque
   io.in.ready := allowEnq
