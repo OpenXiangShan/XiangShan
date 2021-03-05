@@ -136,6 +136,7 @@ class ReservationStation
   select.io.deq.ready := io.deq.ready
   if (feedback) {
     select.io.memfeedback := io.memfeedback
+    select.io.flushState := io.memfeedback.bits.flushState
   }
 
   ctrl.io.in.valid := select.io.enq.fire()// && !(io.redirect.valid || io.flush) // NOTE: same as select
@@ -228,6 +229,8 @@ class ReservationStationSelect
       def fire() = valid && ready
     }
     val deq = DecoupledIO(UInt(iqIdxWidth.W))
+
+    val flushState = if (feedback) Input(Bool()) else null
   })
 
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until iqSize).map(f))
@@ -326,11 +329,15 @@ class ReservationStationSelect
   // redirect and feedback && wakeup
   for (i <- 0 until iqSize) {
     // replay
-    when (stateQueue(i) === s_replay) {
-      countQueue(i) := countQueue(i) - 1.U
-      when (countQueue(i) === 0.U) {
-        stateQueue(i) := s_valid
-        cntCountQueue(i) := Mux(cntCountQueue(i)===3.U, cntCountQueue(i), cntCountQueue(i) + 1.U)
+    if (feedback) {
+      when (stateQueue(i) === s_replay) {
+        countQueue(i) := countQueue(i) - 1.U
+        when (countQueue(i) === 0.U && !io.flushState) {
+          cntCountQueue(i) := Mux(cntCountQueue(i)===3.U, cntCountQueue(i), cntCountQueue(i) + 1.U)
+        }
+        when (io.flushState || countQueue(i) === 0.U) {
+          stateQueue(i) := s_valid
+        }
       }
     }
 
@@ -489,7 +496,7 @@ class ReservationStationCtrl
       when (!isAfter(sq, io.stIssuePtr)) {
         lw := true.B
       }
-    } 
+    }
     when (enqEn) {
       ldWait(enqPtr) := !enqUop.cf.loadWaitBit
       sqIdx(enqPtr)  := enqUop.sqIdx
