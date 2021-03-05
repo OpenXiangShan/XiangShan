@@ -171,7 +171,9 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(
+    x => x._1 <> fpOutValid(x._2, connectReady = true)
+  )
 
   for((exu, i) <- exeUnits.zipWithIndex){
     val out, outReg = Wire(DecoupledIO(new ExuOutput))
