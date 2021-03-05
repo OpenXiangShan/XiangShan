@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate}
+import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerf}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -634,6 +634,10 @@ class L1plusCachePipe extends L1plusCacheModule
         )
       }
   }
+
+  XSPerf("req", s0_valid)
+  XSPerf("miss", s2_valid && !s2_hit)
+
 }
 
 class L1plusCacheMissReq extends L1plusCacheBundle
