@@ -222,7 +222,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
-  dtlb.io.csr    <> io.tlbCsr
+  dtlb.io.csr    <> RegNext(io.tlbCsr)
   if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
     difftestIO.fromSQ <> lsq.difftestIO.fromSQ

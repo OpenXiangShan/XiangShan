@@ -466,7 +466,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
-  memBlock.io.tlbCsr <> RegNext(integerBlock.io.csrio.tlb)
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -485,7 +485,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
-  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
+  io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()
