@@ -212,7 +212,7 @@ class ReservationStationSelect
   val fastPortsCnt = fastPortsCfg.size
   val slowPortsCnt = slowPortsCfg.size
   require(nonBlocked==fastWakeup)
-  val replayDelay = VecInit(Seq(5, 10, 40, 40).map(_.U(6.W)))
+  val replayDelay = VecInit(Seq(5, 10, 25, 25).map(_.U(5.W)))
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
