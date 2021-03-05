@@ -199,10 +199,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     waymask = Mux(doing_clear_u_lo, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
   )
 
-  val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
-  val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(TageCtrBits.W))))
-  val wrbypass_ctr_valids = Reg(Vec(wrBypassEntries, Vec(TageBanks, Bool())))
+  val wrbypass_tags    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(tagLen.W))))
+  val wrbypass_idxs    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
+  val wrbypass_ctrs    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(TageBanks, UInt(TageCtrBits.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(TageBanks, Bool()))))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
@@ -215,7 +215,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_hit      = wrbypass_hits.reduce(_||_)
   // val wrbypass_rhit     = wrbypass_rhits.reduce(_||_)
-  val wrbypass_hit_idx  = PriorityEncoder(wrbypass_hits)
+  val wrbypass_hit_idx  = ParallelPriorityEncoder(wrbypass_hits)
   // val wrbypass_rhit_idx = PriorityEncoder(wrbypass_rhits)
 
   // val wrbypass_rctr_hits = VecInit((0 until TageBanks).map( b => wrbypass_ctr_valids(wrbypass_rhit_idx)(b)))
@@ -248,21 +248,30 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
     update_hi_wdata(w)    := io.update.u(w)(1)
     update_lo_wdata(w)    := io.update.u(w)(0)
-  }
 
-  when (io.update.mask.reduce(_||_)) {
-    when (wrbypass_hits.reduce(_||_)) {
-      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := update_wdata(updateBank).ctr
-      wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank) := true.B
-    } .otherwise {
-      wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
-      (0 until TageBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
-      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
-      wrbypass_tags(wrbypass_enq_idx) := update_tag
-      wrbypass_idxs(wrbypass_enq_idx) := update_idx
-      wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+    when (io.update.mask.reduce(_||_)) {
+      when (wrbypass_hit) {
+        when (io.update.mask(w)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(w) := update_wdata(w).ctr
+          wrbypass_ctr_valids(wrbypass_hit_idx)(w) := true.B
+        }
+      } .otherwise {
+        // reset valid bit first
+        wrbypass_ctr_valids(wrbypass_enq_idx)(w) := false.B
+        when (io.update.mask(w)) {
+          wrbypass_ctr_valids(wrbypass_enq_idx)(w) := true.B
+          wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdata(w).ctr
+          wrbypass_tags(wrbypass_enq_idx) := update_tag
+          wrbypass_idxs(wrbypass_enq_idx) := update_idx
+        }
+      }
     }
   }
+
+  when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+  }
+
 
   if (BPUDebug && debug) {
     val u = io.update
@@ -270,27 +279,27 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val ub = PriorityEncoder(u.uMask)
     val idx = if2_idx
     val tag = if2_tag
-    XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, mask=%b, mask=%b\n",
-      io.req.bits.pc, io.req.bits.hist, idx, tag, io.req.bits.mask, if2_mask)
+    XSDebug(io.req.valid, 
+      p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+      p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
+      p"tag=$tag, mask=${Binary(if2_mask)}\n")
     for (i <- 0 until TageBanks) {
-      XSDebug(RegNext(io.req.valid) && if3_req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n",
-        i.U, if3_idx, if3_req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
+      XSDebug(RegNext(io.req.valid && io.req.bits.mask(i)) && if3_req_rhits(i),
+        p"TageTableResp[$i]: idx=$if3_idx, hit:${if3_req_rhits(i)}, " +
+        p"ctr:${io.resp(i).bits.ctr}, u:${io.resp(i).bits.u}\n")
+      XSDebug(io.update.mask(i),
+        p"update Table bank $i: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+        p"taken:${u.taken(i)}, alloc:${u.alloc(i)}, oldCtr:${u.oldCtr(i)}\n")
+      XSDebug(io.update.mask(i),
+        p"update Table bank $i: writing tag:${update_tag}, " +
+        p"ctr: ${update_wdata(b).ctr} in idx $update_idx\n")
+      val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(i)
+      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i) && io.update.mask(i),
+        p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
+        p"ctr:$hitCtr, newCtr:${update_wdata(i).ctr}")
     }
 
-    XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", if3_req_rhits.asUInt, if3_mask)
     XSDebug(RegNext(io.req.valid) && !if3_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
-
-    XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
-      u.pc, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
-    XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
-      update_wdata(b).tag, update_wdata(b).ctr, update_idx)
-    XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, hist:%x, bank:%d, writing in u:%b\n",
-      u.pc, u.hist, ub, io.update.u(ub))
-
-    val updateBank = PriorityEncoder(io.update.mask)
-    XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank),
-      "wrbypass hits, wridx:%d, tag:%x, idx:%d, hitctr:%d, bank:%d\n",
-      wrbypass_hit_idx, update_tag, update_idx, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), updateBank)
 
     // when (wrbypass_rhit && wrbypass_ctr_valids(wrbypass_rhit_idx).reduce(_||_)) {
     //   for (b <- 0 until TageBanks) {
