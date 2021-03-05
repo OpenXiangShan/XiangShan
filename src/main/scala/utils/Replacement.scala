@@ -72,7 +72,6 @@ abstract class SetAssocReplacementPolicy {
   def access(set: UInt, touch_way: UInt): Unit
   def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]): Unit
   def way(set: UInt): UInt
-  def miss(set: UInt): Unit
 }
 
 
