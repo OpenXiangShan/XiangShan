@@ -38,7 +38,7 @@ trait HasSbufferConst extends HasXSParameter {
 
 class SbufferBundle extends XSBundle with HasSbufferConst
 
-class dataWriteReq extends SbufferBundle {
+class DataWriteReq extends SbufferBundle {
   val idx = UInt(SbufferIndexWidth.W)
   val mask = UInt((DataBits/8).W)
   val data = UInt(DataBits.W)
@@ -47,7 +47,7 @@ class dataWriteReq extends SbufferBundle {
 
 class SbufferData extends XSModule with HasSbufferConst {
   val io = IO(new Bundle(){
-    val writeReq = Vec(StorePipelineWidth, Flipped(ValidIO(new dataWriteReq)))
+    val writeReq = Vec(StorePipelineWidth, Flipped(ValidIO(new DataWriteReq)))
     val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
   })
 
@@ -124,9 +124,6 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
   // sbuffer entry count
-  val invalidCount = RegInit(StoreBufferSize.U((log2Up(StoreBufferSize) + 1).W))
-  val validCount = RegInit(0.U((log2Up(StoreBufferSize) + 1).W))
-  val full = invalidCount === 0.U // full = TODO: validCount(log2Up(StoreBufferSize))
 
   val plru = new PseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(StorePipelineWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
@@ -229,20 +226,17 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     writeReq(i).bits.wordOffset := wordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
-    
-    accessIdx(i).valid := in.fire()
-    accessIdx(i).bits := DontCare
+    val insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
+    val flushMask = if(i == 0) true.B else !sameTag
+    accessIdx(i).valid := RegNext(in.fire())
+    accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
     when(in.fire()){
       when(canMerge(i)){
         writeReq(i).bits.idx := mergeIdx(i)
-        accessIdx(i).bits := RegNext(mergeIdx(i))
         mergeWordReq(in.bits, mergeIdx(i), wordOffset)
         XSDebug(p"merge req $i to line [${mergeIdx(i)}]\n")
       }.otherwise({
-        val insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
-        val flushMask = if(i == 0) true.B else !sameTag
         writeReq(i).bits.idx := insertIdx
-        accessIdx(i).bits := RegNext(insertIdx)
         wordReqToBufLine(in.bits, intags(i), insertIdx, wordOffset, flushMask)
         XSDebug(p"insert req $i to line[$insertIdx]\n")
       })
@@ -270,10 +264,12 @@ class NewSbuffer extends XSModule with HasSbufferConst {
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val do_eviction = Wire(Bool())
   val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
+  val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
+  val validCount = PopCount(validMask)
+  val do_eviction = RegNext(validCount >= threshold, init = false.B)
 
-  do_eviction := validCount >= RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
+  XSDebug(p"validCount[$validCount]\n")
 
   io.flush.empty := RegNext(empty && io.sqempty)
   // lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
@@ -367,13 +363,6 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     difftestIO.sbufferData := WireInit(data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
     difftestIO.sbufferMask := WireInit(mask(respId).asUInt)
   }
-
-  val needSpace = (io.in(0).fire && !canMerge(0)) +& (io.in(1).fire && !canMerge(1) && !sameTag)
-  invalidCount := invalidCount - needSpace + io.dcache.resp.fire()
-  validCount := validCount + needSpace - prepareValid
-
-  XSDebug(p"needSpace[$needSpace] invalidCount[$invalidCount]  validCount[$validCount]\n")
-
 
   for(i <- 0 until StoreBufferSize){
     when(validMask(i) && !timeOutMask(i)){
