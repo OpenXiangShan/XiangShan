@@ -163,6 +163,7 @@ class SCThreshold(val ctrBits: Int = 6) extends SCBundle {
   def satNeg(ctr: UInt = this.ctr) = ctr === 0.U
   def neutralVal = (1.U << (ctrBits - 1))
   val thres = UInt(8.W)
+  def initVal = 60.U
   def minThres = 6.U
   def maxThres = 255.U
   def update(cause: Bool): SCThreshold = {
@@ -182,7 +183,7 @@ object SCThreshold {
   def apply(bits: Int) = {
     val t = Wire(new SCThreshold(ctrBits=bits))
     t.ctr := t.neutralVal
-    t.thres := t.minThres
+    t.thres := t.initVal
     t
   }
 }
