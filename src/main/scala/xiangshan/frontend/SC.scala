@@ -300,6 +300,8 @@ trait HasSC extends HasSCParameter { this: Tage =>
       update_conf(w) := sumAbs >= useThresholds(w)
       update_agree(w) := scPred === tagePred
       update_disagree(w) := scPred =/= tagePred
+      sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
+      sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
       when (scPred =/= taken || sumAbs < useThresholds(w)) {
         val newThres = scThresholds(w).update(scPred =/= taken)
@@ -318,8 +320,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
         XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
         update_on_mispred(w) := scPred =/= taken
         update_on_unconf(w) := scPred === taken
-        sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken
-        sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken
       }
     }
   }
