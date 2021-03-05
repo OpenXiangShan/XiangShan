@@ -88,6 +88,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
   io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.tlbFeedback.bits.flushState := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
