@@ -261,14 +261,14 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
         when (io.update.mask(w)) {
           wrbypass_ctr_valids(wrbypass_enq_idx)(w) := true.B
           wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdata(w).ctr
-          wrbypass_tags(wrbypass_enq_idx) := update_tag
-          wrbypass_idxs(wrbypass_enq_idx) := update_idx
         }
       }
     }
   }
-
+  
   when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_tags(wrbypass_enq_idx) := update_tag
+    wrbypass_idxs(wrbypass_enq_idx) := update_idx
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
   }
 
