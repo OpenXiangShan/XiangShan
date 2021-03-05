@@ -572,6 +572,7 @@ class L1plusCachePipe extends L1plusCacheModule
   touch_ways(0).valid := s2_valid && s2_hit
   touch_ways(0).bits  := s2_hit_way
 
+  replacer.access(touch_sets, touch_ways)
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
