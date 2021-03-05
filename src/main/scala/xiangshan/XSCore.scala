@@ -413,8 +413,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
   ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
+  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(WireInit(_))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(WireInit(_))
   memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
   memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
 
@@ -422,7 +422,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockWakeUpInt = fpExuConfigs
     .zip(floatBlock.io.wakeUpOut.slow)
     .filter(_._1.writeIntRf)
-    .map(_._2).map(x => intOutValid(x, connectReady = true))
+    .map(_._2)
 
   intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
@@ -466,7 +466,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
-  memBlock.io.tlbCsr <> RegNext(integerBlock.io.csrio.tlb)
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -485,7 +485,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
-  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
+  io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()

@@ -260,7 +260,7 @@ class IntegerBlock
       w.valid := e.io.out.valid
     }
     w
-  }) ++ io.wakeUpIn.slow
+  }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
   XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
   
