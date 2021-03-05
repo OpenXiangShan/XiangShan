@@ -413,8 +413,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
   ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
+  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(WireInit(_))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(WireInit(_))
   memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
   memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
 
@@ -422,7 +422,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockWakeUpInt = fpExuConfigs
     .zip(floatBlock.io.wakeUpOut.slow)
     .filter(_._1.writeIntRf)
-    .map(_._2).map(x => intOutValid(x, connectReady = true))
+    .map(_._2)
 
   intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
