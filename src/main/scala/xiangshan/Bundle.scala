@@ -394,6 +394,7 @@ class RoqCommitIO extends XSBundle {
 class TlbFeedback extends XSBundle {
   val rsIdx = UInt(log2Up(IssQueSize).W)
   val hit = Bool()
+  val flushState = Bool()
 }
 
 class RSFeedback extends TlbFeedback
