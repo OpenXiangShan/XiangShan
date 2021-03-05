@@ -104,7 +104,7 @@ class L1DataReadReq extends DCacheBundle {
 // Now, we can write a cache-block in a single cycle
 class L1DataWriteReq extends L1DataReadReq {
   val wmask  = Bits(blockRows.W)
-  val data   = Vec(blockRows, Bits(encRowBits.W))
+  val data   = Vec(blockRows, Bits(rowBits.W))
 }
 
 class ReplacementAccessBundle extends DCacheBundle {
@@ -171,6 +171,20 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
 class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
   val singlePort = true
   val readHighPriority = true
+  def eccBits = encWordBits - wordBits
+
+  def getECCFromEncWord(encWord: UInt) = {
+    require(encWord.getWidth == encWordBits)
+    encWord(encWordBits - 1, wordBits)
+  }
+
+  def getECCFromRow(row: UInt) = {
+    require(row.getWidth == rowBits)
+    VecInit((0 until rowWords).map { w =>
+      val word = row(wordBits * (w + 1) - 1, wordBits * w)
+      getECCFromEncWord(cacheParams.dataCode.encode(word))
+    })
+  }
   
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
@@ -198,12 +212,36 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
     val way_en = RegNext(io.read(j).bits.way_en)
 
     for (r <- 0 until blockRows) {
-      val resp = Wire(Vec(rowWords, Vec(nWays, Bits(encWordBits.W))))
-      val resp_chosen = Wire(Vec(rowWords, Bits(encWordBits.W)))
+      val resp = Wire(Vec(rowWords, Vec(nWays, Bits(wordBits.W))))
+      val resp_chosen = Wire(Vec(rowWords, Bits(wordBits.W)))
+      val ecc_resp = Wire(Vec(rowWords, Vec(nWays, Bits(eccBits.W))))
+      val ecc_resp_chosen = Wire(Vec(rowWords, Bits(eccBits.W)))
+
+      val ecc_array = Module(new SRAMTemplate(
+        Vec(rowWords, Bits(eccBits.W)),
+        set = nSets,
+        way = nWays,
+        shouldReset = false,
+        holdRead = false,
+        singlePort = singlePort
+      ))
+
+      ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)
+      ecc_array.io.w.req.bits.apply(
+        setIdx = waddr,
+        data = getECCFromRow(io.write.bits.data(r)),
+        waymask = io.write.bits.way_en
+      )
+      when (ecc_array.io.w.req.valid) {
+        XSDebug(p"write in ecc sram ${j.U} row ${r.U}: setIdx=${Hexadecimal(ecc_array.io.w.req.bits.setIdx)} ecc(0)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(0))} ecc(1)=${Hexadecimal(getECCFromRow(io.write.bits.data(r))(1))} waymask=${Hexadecimal(io.write.bits.way_en)}\n")
+      }
+
+      ecc_array.io.r.req.valid := io.read(j).valid && rmask(r)
+      ecc_array.io.r.req.bits.apply(setIdx = raddr)
 
       for (w <- 0 until nWays) {
-        val array = Module(new SRAMTemplate(
-          Bits(encRowBits.W),
+        val data_array = Module(new SRAMTemplate(
+          Bits(rowBits.W),
           set = nSets,
           way = 1,
           shouldReset = false,
@@ -213,22 +251,33 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
 
         // data write
         val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)
-        array.io.w.req.valid := wen
-        array.io.w.req.bits.apply(
+        data_array.io.w.req.valid := wen
+        data_array.io.w.req.bits.apply(
           setIdx = waddr,
           data = io.write.bits.data(r),
           waymask = 1.U
         )
+        when (wen) {
+          XSDebug(p"write in data sram ${j.U} row ${r.U} way ${w.U}: setIdx=${Hexadecimal(data_array.io.w.req.bits.setIdx)} data=${Hexadecimal(io.write.bits.data(r))}\n")
+        }
 
         // data read
         // read all ways and choose one after resp
         val ren = io.read(j).valid && rmask(r)
-        array.io.r.req.valid := ren
-        array.io.r.req.bits.apply(setIdx = raddr)
-        (0 until rowWords).foreach(k => resp(k)(w) := array.io.r.resp.data(0)(encWordBits * (k + 1) - 1, encWordBits * k))
+        data_array.io.r.req.valid := ren
+        data_array.io.r.req.bits.apply(setIdx = raddr)
+        (0 until rowWords).foreach(k => resp(k)(w) := data_array.io.r.resp.data(0)(wordBits * (k + 1) - 1, wordBits * k))
+        (0 until rowWords).foreach(k => ecc_resp(k)(w) := ecc_array.io.r.resp.data(w)(k))
       }
-      (0 until rowWords).foreach(k => resp_chosen(k) := Mux1H(way_en, resp(k)))
-      io.resp(j)(r) := resp_chosen.asUInt
+      for (k <- 0 until rowWords) {
+        resp_chosen(k) := Mux1H(way_en, resp(k))
+        ecc_resp_chosen(k) := Mux1H(way_en, ecc_resp(k))
+        // assert(!RegNext(cacheParams.dataCode.decode(Cat(ecc_resp_chosen(k), resp_chosen(k))).uncorrectable &&
+        //   way_en.orR &&
+        //   RegNext(io.read(j).fire() && rmask(r))))
+      }
+      io.resp(j)(r) := Cat((0 until rowWords).reverse map {k => Cat(ecc_resp_chosen(k), resp_chosen(k))})// resp_chosen.asUInt
+
     }
 
     io.nacks(j) := false.B
@@ -237,10 +286,13 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
 
 class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val rstVal = onReset()
+  val metaBits = rstVal.getWidth
+  val encMetaBits = cacheParams.tagCode.width(metaBits)
+
   val io = IO(new Bundle {
     val read = Flipped(Decoupled(new L1MetaReadReq))
     val write = Flipped(Decoupled(new L1MetaWriteReq))
-    val resp = Output(Vec(nWays, new L1Metadata))
+    val resp = Output(Vec(nWays, UInt(encMetaBits.W)))
   })
   val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
   val rst = rst_cnt < nSets.U
@@ -249,9 +301,6 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
   val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
   when (rst) { rst_cnt := rst_cnt + 1.U }
-
-  val metaBits = rstVal.getWidth
-  val encMetaBits = cacheParams.tagCode.width(metaBits)
 
   val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
@@ -268,11 +317,8 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val ren = io.read.fire()
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
-  io.resp := tag_array.io.r.resp.data.map(rdata =>
-      cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
+  io.resp := tag_array.io.r.resp.data
 
-  // io.read.ready := !wen
-  // io.write.ready := !rst
   io.write.ready := !ren
   io.read.ready := !rst
 
@@ -290,28 +336,30 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     }
   }
 
-  def dumpResp() = {
-    (0 until nWays) map { i =>
-      XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
-        io.resp(i).tag, io.resp(i).coh.state)
-    }
-  }
+  // def dumpResp() = {
+  //   (0 until nWays) map { i =>
+  //     XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
+  //       io.resp(i).tag, io.resp(i).coh.state)
+  //   }
+  // }
 
   def dump() = {
     dumpRead
     dumpWrite
-    dumpResp
+    // dumpResp
   }
 }
 
 class DuplicatedMetaArray extends DCacheModule {
+  def onReset = L1Metadata(0.U, ClientMetadata.onReset)
+  val metaBits = onReset.getWidth
+  val encMetaBits = cacheParams.tagCode.width(metaBits)
+
   val io = IO(new DCacheBundle {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
-    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, new L1Metadata)))
+    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, UInt(encMetaBits.W))))
   })
-
-  def onReset = L1Metadata(0.U, ClientMetadata.onReset)
   val meta = Seq.fill(LoadPipelineWidth) { Module(new L1MetadataArray(onReset _)) }
 
   for (w <- 0 until LoadPipelineWidth) {
@@ -339,18 +387,18 @@ class DuplicatedMetaArray extends DCacheModule {
     }
   }
 
-  def dumpResp() = {
-    (0 until LoadPipelineWidth) map { w =>
-      (0 until nWays) map { i =>
-        XSDebug(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
-          io.resp(w)(i).tag, io.resp(w)(i).coh.state)
-      }
-    }
-  }
+  // def dumpResp() = {
+  //   (0 until LoadPipelineWidth) map { w =>
+  //     (0 until nWays) map { i =>
+  //       XSDebug(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
+  //         io.resp(w)(i).tag, io.resp(w)(i).coh.state)
+  //     }
+  //   }
+  // }
 
   def dump() = {
     dumpRead
     dumpWrite
-    dumpResp
+    // dumpResp
   }
 }
