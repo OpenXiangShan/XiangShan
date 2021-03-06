@@ -218,7 +218,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
   scUpdateOldCtrs := DontCare
 
   val updateSCMetas = VecInit(u.metas.map(_.tageMeta.scMeta))
-
+  
+  val if4_sc_used, if4_conf, if4_unconf, if4_agree, if4_disagree =
+    0.U.asTypeOf(Vec(TageBanks, Bool()))
+  val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
+    0.U.asTypeOf(Vec(TageBanks, Bool()))
+  val update_on_mispred, update_on_unconf, sc_misp_tage_corr, sc_corr_tage_misp =
+    0.U.asTypeOf(Vec(TageBanks, Bool()))
+  
   // for sc ctrs
   def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
   // for tage ctrs
@@ -256,6 +263,9 @@ trait HasSC extends HasSCParameter { this: Tage =>
     scMeta.ctrs   := if4_scCtrs
 
     when (if4_provideds(w)) {
+      if4_sc_used(w) := true.B
+      if4_unconf(w) := if4_sumBelowThresholds(if4_chooseBit)
+      if4_conf(w) := !if4_sumBelowThresholds(if4_chooseBit)
       // Use prediction from Statistical Corrector
       XSDebug(p"---------tage${w} provided so that sc used---------\n")
       XSDebug(p"scCtrs:$if4_scCtrs, prdrCtr:${if4_providerCtrs(w)}, sumAbs:$if4_sumAbs, tageTaken:${if4_chooseBit}\n")
@@ -264,6 +274,8 @@ trait HasSC extends HasSCParameter { this: Tage =>
           val pred = if4_scPreds(if4_chooseBit)
           val debug_pc = Cat(packetIdx(debug_pc_s3), w.U, 0.U(instOffsetBits.W))
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
+          if4_agree(w) := if4_tageTakens(w) === pred
+          if4_disagree(w) := if4_tageTakens(w) =/= pred
           io.resp.takens(w) := pred
         }
       }
@@ -271,7 +283,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
     val updateSCMeta = updateSCMetas(w)
     val updateTageMeta = updateMetas(w)
-    when (updateValids(w) && updateSCMeta.scUsed.asBool && updateBrMask(w)) {
+    when (updateValids(w) && updateSCMeta.scUsed.asBool) {
       val scPred = updateSCMeta.scPred
       val tagePred = updateSCMeta.tageTaken
       val taken = u.takens(w)
@@ -283,6 +295,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
 
+      update_sc_used(w) := true.B
+      update_unconf(w) := sumAbs < useThresholds(w)
+      update_conf(w) := sumAbs >= useThresholds(w)
+      update_agree(w) := scPred === tagePred
+      update_disagree(w) := scPred =/= tagePred
+      sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
+      sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
+
       when (scPred =/= taken || sumAbs < useThresholds(w)) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
@@ -290,24 +310,36 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
         scUpdateMask.foreach(t => t(w) := true.B)
         XSDebug(sum < 0.S,
-          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-          p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
+        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+        p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
         )
         XSDebug(sum >= 0.S,
-          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-          p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
+        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+        p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateTageMisPreds(w)})\n"
         )
         XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
+        update_on_mispred(w) := scPred =/= taken
+        update_on_unconf(w) := scPred === taken
       }
     }
+  }
 
-    for (i <- 0 until SCNTables) {
-      scTables(i).io.update.mask := RegNext(scUpdateMask(i))
-      scTables(i).io.update.tagePreds := RegNext(scUpdateTagePreds)
-      scTables(i).io.update.takens    := RegNext(scUpdateTakens)
-      scTables(i).io.update.oldCtrs   := RegNext(VecInit(scUpdateOldCtrs.map(_(i))))
-      scTables(i).io.update.pc := RegNext(u.ftqPC)
-      scTables(i).io.update.hist := RegNext(updateHist)
-    }
+  tage_perf("sc_conf", PopCount(if4_conf), PopCount(update_conf))
+  tage_perf("sc_unconf", PopCount(if4_unconf), PopCount(update_unconf))
+  tage_perf("sc_agree", PopCount(if4_agree), PopCount(update_agree))
+  tage_perf("sc_disagree", PopCount(if4_disagree), PopCount(update_disagree))
+  tage_perf("sc_used", PopCount(if4_sc_used), PopCount(update_sc_used))
+  XSPerf("sc_update_on_mispred", PopCount(update_on_mispred))
+  XSPerf("sc_update_on_unconf", PopCount(update_on_unconf))
+  XSPerf("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
+  XSPerf("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+
+  for (i <- 0 until SCNTables) {
+    scTables(i).io.update.mask := RegNext(scUpdateMask(i))
+    scTables(i).io.update.tagePreds := RegNext(scUpdateTagePreds)
+    scTables(i).io.update.takens    := RegNext(scUpdateTakens)
+    scTables(i).io.update.oldCtrs   := RegNext(VecInit(scUpdateOldCtrs.map(_(i))))
+    scTables(i).io.update.pc := RegNext(u.ftqPC)
+    scTables(i).io.update.hist := RegNext(updateHist)
   }
 }
