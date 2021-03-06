@@ -18,17 +18,14 @@ class StoreUnit_S0 extends XSModule {
   })
 
   // send req to dtlb
-  val saddr_old = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
+  // val saddr = io.in.bits.src1 + SignExt(io.in.bits.uop.ctrl.imm(11,0), VAddrBits)
   val imm12 = WireInit(io.in.bits.uop.ctrl.imm(11,0))
   val saddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(imm12(11),
-    Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12)),
-    Mux((saddr_lo(12)), io.in.bits.src1(VAddrBits-1, 12)+1.U, io.in.bits.src1(VAddrBits-1, 12))
+  val saddr_hi = Mux(saddr_lo(12),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
+    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
   )
   val saddr = Cat(saddr_hi, saddr_lo(11,0))
-  when(io.in.fire() && saddr(VAddrBits-1,0) =/= (io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN))(VAddrBits-1,0)){
-    printf("saddr %x saddr_old %x\n", saddr, saddr_old(VAddrBits-1,0))
-  }
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
@@ -40,9 +37,6 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits.vaddr := saddr
 
   io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-    io.out.bits.data := io.in.bits.src2
-  } // not not touch fp store raw data
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx
@@ -67,7 +61,6 @@ class StoreUnit_S1 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    // val fp_out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
@@ -85,6 +78,7 @@ class StoreUnit_S1 extends XSModule {
   // Send TLB feedback to store issue queue
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
+  io.tlbFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
   XSDebug(io.tlbFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
@@ -95,7 +89,7 @@ class StoreUnit_S1 extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.lsq.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
+  io.lsq.valid := io.in.valid && !s1_tlb_miss
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
@@ -106,12 +100,6 @@ class StoreUnit_S1 extends XSModule {
   // mmio inst with exception will be writebacked immediately
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
-
-  // encode data for fp store
-  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-	  io.lsq.bits.data := genWdata(ieee(io.in.bits.data), io.in.bits.uop.ctrl.fuOpType(1,0))
-	}
-
 }
 
 class StoreUnit_S2 extends XSModule {

@@ -3,8 +3,45 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
 
+class ExuWbArbiter(n: Int) extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
+    val out = DecoupledIO(new ExuOutput)
+  })
+
+  class ExuCtrl extends Bundle{
+    val uop = new MicroOp
+    val fflags = UInt(5.W)
+    val redirectValid = Bool()
+    val redirect = new Redirect
+    val debug = new DebugBundle
+  }
+  val ctrl_arb = Module(new Arbiter(new ExuCtrl, n))
+  val data_arb = Module(new Arbiter(UInt((XLEN+1).W), n))
+
+  ctrl_arb.io.out.ready := io.out.ready
+  data_arb.io.out.ready := io.out.ready
+
+  for(((in, ctrl), data) <- io.in.zip(ctrl_arb.io.in).zip(data_arb.io.in)){
+    ctrl.valid := in.valid
+    for((name, d) <- ctrl.bits.elements) {
+      d := in.bits.elements(name)
+    }
+    data.valid := in.valid
+    data.bits := in.bits.data
+    in.ready := ctrl.ready
+    assert(ctrl.ready === data.ready)
+  }
+  assert(ctrl_arb.io.chosen === data_arb.io.chosen)
+
+  io.out.bits.data := data_arb.io.out.bits
+  for((name, d) <- ctrl_arb.io.out.bits.elements){
+    io.out.bits.elements(name) := d
+  }
+  io.out.valid := ctrl_arb.io.out.valid
+  assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
+}
 
 class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
 
@@ -15,14 +52,6 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
     val out = Vec(numOut, ValidIO(new ExuOutput))
   })
 
-
-//  def exuOutToRfReq(exuOut: DecoupledIO[ExuOutput]): DecoupledIO[ExuOutput] = {
-//    val req = WireInit(exuOut)
-//    req.valid := exuOut.valid && wen(exuOut.bits)
-//    exuOut.ready := Mux(req.valid, req.ready, true.B)
-//    req
-//  }
-
   val directConnect = io.in.zip(priorities).filter(x => x._2 == 0).map(_._1)
   val mulReq = io.in.zip(priorities).filter(x => x._2 == 1).map(_._1)
   val otherReq = io.in.zip(priorities).filter(x => x._2 > 1).map(_._1)
@@ -32,9 +61,11 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
 
   io.out.take(directConnect.size).zip(directConnect).foreach{
     case (o, i) =>
-      o.bits := i.bits
-      o.valid := i.valid
-      i.ready := true.B
+      val arb = Module(new ExuWbArbiter(1))
+      arb.io.in.head <> i
+      o.bits := arb.io.out.bits
+      o.valid := arb.io.out.valid
+      arb.io.out.ready := true.B
   }
 
   def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
@@ -59,17 +90,11 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
   for(i <- mulReq.indices) {
     val out = io.out(directConnect.size + i)
     val other = arbReq(i).getOrElse(Seq())
-    if(other.isEmpty){
-      out.valid := mulReq(i).valid
-      out.bits := mulReq(i).bits
-      mulReq(i).ready := true.B
-    } else {
-      val arb = Module(new Arbiter(new ExuOutput, 1+other.size))
-      arb.io.in <> mulReq(i) +: other
-      out.valid := arb.io.out.valid
-      out.bits := arb.io.out.bits
-      arb.io.out.ready := true.B
-    }
+    val arb = Module(new ExuWbArbiter(1+other.size))
+    arb.io.in <> mulReq(i) +: other
+    out.valid := arb.io.out.valid
+    out.bits := arb.io.out.bits
+    arb.io.out.ready := true.B
   }
 
   if(portUsed < numOut){

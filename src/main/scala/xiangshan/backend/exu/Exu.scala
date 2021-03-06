@@ -83,8 +83,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
-    val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
+    val out = DecoupledIO(new ExuOutput)
   })
 
   for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
@@ -147,15 +146,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     }
   }
 
-  val intArb = if (config.writeIntRf) writebackArb(
-    supportedFunctionUnits.zip(config.fuConfigs).filter(x => !x._2.writeFpRf).map(_._1.io.out),
-    io.toInt
-  ) else null
-
-  val fpArb = if (config.writeFpRf) writebackArb(
-    supportedFunctionUnits.zip(config.fuConfigs).filter(x => x._2.writeFpRf).map(_._1.io.out),
-    io.toFp
-  ) else null
+  val arb = writebackArb(supportedFunctionUnits.map(_.io.out), io.out)
 
   val readIntFu = config.fuConfigs
     .zip(supportedFunctionUnits.zip(fuSel))
@@ -179,7 +170,6 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     }
   }
 
-
   if (config.readIntRf) {
     io.fromInt.ready := inReady(readIntFu)
   }
@@ -198,12 +188,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     out.redirectValid := false.B
   }
 
-  if (config.writeFpRf) {
-    assignDontCares(io.toFp.bits)
-  }
-  if (config.writeIntRf) {
-    assignDontCares(io.toInt.bits)
-  }
+  assignDontCares(io.out.bits)
 }
 
 object Exu {
@@ -224,15 +209,13 @@ object Exu {
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(stExeUnitCfg)
 
   val intExuConfigs = jumpExeUnitCfg +: (
-    Seq.fill(exuParameters.AluCnt)(aluExeUnitCfg) ++
-      Seq.fill(exuParameters.MduCnt)(mulDivExeUnitCfg)
+    Seq.fill(exuParameters.MduCnt)(mulDivExeUnitCfg) ++
+      Seq.fill(exuParameters.AluCnt)(aluExeUnitCfg)
   )
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(fmacExeUnitCfg) ++
       Seq.fill(exuParameters.FmiscCnt)(fmiscExeUnitCfg)
 
-  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs
-
-
+  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
 }
