@@ -33,7 +33,7 @@ class LoadUnit_S0 extends XSModule {
   // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
   val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi = Mux(s0_vaddr_lo(12), 
+  val s0_vaddr_hi = Mux(s0_vaddr_lo(12),
     Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
     Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
   )
@@ -131,6 +131,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
+  io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
   io.in.ready := !io.in.valid || io.out.ready
@@ -169,6 +170,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.tlbFeedback.bits.flushState := io.in.bits.ptwBack
   io.needReplayFromRS := s2_cache_replay
 
   // merge forward result
@@ -225,7 +227,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // Such inst will be writebacked from load queue.
   io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
   // io.out.bits.forwardX will be send to lq
-  io.out.bits.forwardMask := forwardMask 
+  io.out.bits.forwardMask := forwardMask
   // data retbrived from dcache is also included in io.out.bits.forwardData
   io.out.bits.forwardData := rdataVec
 
@@ -283,10 +285,6 @@ class LoadUnit extends XSModule with HasLoadHelper {
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
   io.lsq.forward.sqIdxMask := sqIdxMaskReg
-
-  // use s2_hit_way to select data received in s1
-  load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
-  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

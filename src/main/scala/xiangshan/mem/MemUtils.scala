@@ -40,6 +40,7 @@ class LsPipelineBundle extends XSBundle {
 
   val miss = Bool()
   val tlbMiss = Bool()
+  val ptwBack = Bool()
   val mmio = Bool()
   val rsIdx = UInt(log2Up(IssQueSize).W)
 

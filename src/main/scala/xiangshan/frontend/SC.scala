@@ -294,7 +294,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       scUpdateTagePreds(w) := tagePred
       scUpdateTakens(w) := taken
       (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
-      
+
       update_sc_used(w) := true.B
       update_unconf(w) := sumAbs < useThresholds(w)
       update_conf(w) := sumAbs >= useThresholds(w)
@@ -307,7 +307,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
         XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
-        
+
         scUpdateMask.foreach(t => t(w) := true.B)
         XSDebug(sum < 0.S,
         p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
