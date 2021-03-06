@@ -198,20 +198,20 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setlru"),
+    replacer = Some("setplru"),
     nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 8
   )
 
   val dcacheParameters = DCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
+    tagECC = Some("none"),
+    dataECC = Some("none"),
     nMissEntries = 16,
     nProbeEntries = 16,
     nReleaseEntries = 16,
