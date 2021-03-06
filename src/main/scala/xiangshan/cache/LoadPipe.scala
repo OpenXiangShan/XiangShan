@@ -159,7 +159,7 @@ class LoadPipe extends DCacheModule {
   // val s2_decoded = cacheParams.dataCode.decode(s2_word)
   // val s2_word_decoded = s2_decoded.corrected
   val s2_word_decoded = s2_word(wordBits - 1, 0)
-  assert(RegNext(!(s2_valid && s2_tag_match && cacheParams.dataCode.decode(s2_word).uncorrectable)))
+  assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
 
 
   // only dump these signals when they are actually valid
