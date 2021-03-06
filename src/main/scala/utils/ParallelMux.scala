@@ -37,6 +37,12 @@ object ParallelANDR {
   def apply(in: Bits): Bool = apply(in.asBools)
 }
 
+object ParallelXOR {
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => (a.asUInt() ^ b.asUInt()).asTypeOf(xs.head))
+  }
+}
+
 object ParallelMux {
   def apply[T<:Data](in: Seq[(Bool, T)]): T = {
     val xs = in map { case (cond, x) => (Fill(x.getWidth, cond) & x.asUInt()).asTypeOf(in.head._2) }

@@ -1,19 +1,20 @@
-package system
+package top
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import chipsalliance.rocketchip.config.Parameters
+import system._
 import chisel3.stage.ChiselGeneratorAnnotation
+import chipsalliance.rocketchip.config
 import device.TLTimer
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import sifive.blocks.inclusivecache._
-import top.XiangShanStage
+import xiangshan.cache.prefetch.L2Prefetcher
 
 
-abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
+abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val mmioXbar = TLXbar()
 }
@@ -77,16 +78,17 @@ trait HaveAXI4MMIOPort { this: BaseXSSoc =>
 }
 
 
-class MySoc()(implicit p: Parameters) extends BaseXSSoc()
+class TopMain()(implicit p: config.Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4MMIOPort
   {
 
-  println(s"My Soc cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
+  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
 
   val l3_xbar = TLXbar()
   for (i <- 0 until NumCores) {
     val core = LazyModule(new XSCore())
+    val l2prefetcher = LazyModule(new L2Prefetcher())
     val l2 = LazyModule(new InclusiveCache(
       CacheParameters(
         level = 2,
@@ -106,7 +108,7 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc()
     l2_xbar := TLBuffer() := core.memBlock.dcache.clientNode
     l2_xbar := TLBuffer() := core.l1pluscache.clientNode
     l2_xbar := TLBuffer() := core.ptw.node
-    l2_xbar := TLBuffer() := core.l2Prefetcher.clientNode
+    l2_xbar := TLBuffer() := l2prefetcher.clientNode
     l2.node := TLBuffer() := l2_xbar
     l3_xbar := TLBuffer() := l2.node
   }
@@ -139,12 +141,19 @@ class MySoc()(implicit p: Parameters) extends BaseXSSoc()
   }
 }
 
-object MySoc extends App {
+object TopMain extends App {
   override def main(args: Array[String]): Unit = {
-    implicit val p = Parameters.empty
-    (new XiangShanStage).execute(Array(), Seq(
+    Parameters.set(
+      args.contains("--dual-core") match {
+        case false => Parameters()
+        case true  => Parameters.dualCoreParameters
+      }
+    )
+    val otherArgs = args.filterNot(_ == "--dual-core")
+    implicit val p = config.Parameters.empty
+    (new XiangShanStage).execute(otherArgs, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new MySoc())
+        val soc = LazyModule(new TopMain())
         soc.module
       })
     ))

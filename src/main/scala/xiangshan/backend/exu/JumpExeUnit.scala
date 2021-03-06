@@ -6,25 +6,11 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.IntToFP
-import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
+import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump, CSRFileIO}
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
-  val csrio = IO(new Bundle {
-    val fflags = Flipped(ValidIO(UInt(5.W)))
-    val dirty_fs = Input(Bool())
-    val frm = Output(UInt(3.W))
-    val exception = Flipped(ValidIO(new ExceptionInfo))
-    val trapTarget = Output(UInt(VAddrBits.W))
-    val isXRet = Output(Bool())
-    val interrupt = Output(Bool())
-    val memExceptionVAddr = Input(UInt(VAddrBits.W))
-    val externalInterrupt = new ExternalInterruptIO
-    val tlb = Output(new TlbCsrBundle)
-    val perfinfo = new Bundle {
-      val retiredInstr = Input(UInt(3.W))
-    }
-  })
+  val csrio = IO(new CSRFileIO)
   val fenceio = IO(new Bundle {
     val sfence = Output(new SfenceBundle)
     val fencei = Output(Bool())
@@ -69,19 +55,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     case i: IntToFP => i
   }.get
 
-  csr.csrio.perf <> DontCare
-  csr.csrio.perf.retiredInstr <> csrio.perfinfo.retiredInstr
-  csr.csrio.fpu.fflags <> csrio.fflags
-  csr.csrio.fpu.isIllegal := false.B
-  csr.csrio.fpu.dirty_fs <> csrio.dirty_fs
-  csr.csrio.fpu.frm <> csrio.frm
-  csr.csrio.exception <> csrio.exception
-  csr.csrio.trapTarget <> csrio.trapTarget
-  csr.csrio.isXRet <> csrio.isXRet
-  csr.csrio.interrupt <> csrio.interrupt
-  csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr
-  csr.csrio.externalInterrupt <> csrio.externalInterrupt
-  csr.csrio.tlb <> csrio.tlb
+  csr.csrio <> csrio
 
   if (!env.FPGAPlatform) {
     difftestIO.fromCSR <> csr.difftestIO
@@ -99,6 +73,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   val isDouble = !uop.ctrl.isRVF
 
 
-  io.toInt.bits.redirectValid := jmp.redirectOutValid
-  io.toInt.bits.redirect := jmp.redirectOut
+  io.out.bits.redirectValid := jmp.redirectOutValid
+  io.out.bits.redirect := jmp.redirectOut
 }

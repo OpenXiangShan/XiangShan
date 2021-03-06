@@ -158,8 +158,8 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid
   rrTable.io.w.req.bits.setIdx := idx(wAddr)
-  rrTable.io.w.req.bits.data.valid := true.B
-  rrTable.io.w.req.bits.data.tag := tag(wAddr)
+  rrTable.io.w.req.bits.data(0).valid := true.B
+  rrTable.io.w.req.bits.data(0).tag := tag(wAddr)
 
   val rAddr = io.r.req.bits.addr - (io.r.req.bits.testOffset << log2Up(blockBytes))
   val rData = Wire(rrTableEntry())

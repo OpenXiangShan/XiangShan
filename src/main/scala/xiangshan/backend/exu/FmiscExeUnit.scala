@@ -10,12 +10,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
 
   val frm = IO(Input(UInt(3.W)))
 
-  val f2i :: f2f :: fdivSqrt :: Nil = supportedFunctionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
-  val toFpUnits = Seq(f2f, fdivSqrt)
-  val toIntUnits = Seq(f2i)
-
-  assert(toFpUnits.size == 1 || fpArb.io.in.length == toFpUnits.size)
-  assert(toIntUnits.size == 1 || intArb.io.in.length == toIntUnits.size)
+  val fus = supportedFunctionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
 
   val input = io.fromFp
   val isRVF = input.bits.uop.ctrl.isRVF
@@ -28,15 +23,10 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
     module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   }
 
-  io.toFp.bits.fflags := MuxCase(
+  io.out.bits.fflags := MuxCase(
     0.U,
-    toFpUnits.map(x => x.io.out.fire() -> x.fflags)
+    fus.map(x => x.io.out.fire() -> x.fflags)
   )
-  val fpOutCtrl = io.toFp.bits.uop.ctrl.fpu
-  io.toFp.bits.data := box(fpArb.io.out.bits.data, fpOutCtrl.typeTagOut)
-
-  io.toInt.bits.fflags := MuxCase(
-    0.U,
-    toIntUnits.map(x => x.io.out.fire() -> x.fflags)
-  )
+  val fpOutCtrl = io.out.bits.uop.ctrl.fpu
+  io.out.bits.data := box(arb.io.out.bits.data, fpOutCtrl.typeTagOut)
 }

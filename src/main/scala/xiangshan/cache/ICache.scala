@@ -77,11 +77,9 @@ abstract class ICacheBundle extends XSBundle
 abstract class ICacheModule extends XSModule
   with HasICacheParameters
   with HasFrontEndExceptionNo
+  with HasIFUConst
 
 abstract class ICacheArray extends XSModule
-  with HasICacheParameters
-
-abstract class ICachArray extends XSModule
   with HasICacheParameters
 
 
@@ -122,6 +120,13 @@ class ICacheIO extends ICacheBundle
   val pd_out = Output(new PreDecodeResp)
 }
 
+class ICacheMetaReadBundle extends ICacheBundle
+{
+  val tags = Vec(nWays,UInt(tagBits.W))
+  val errors = Vec(nWays,Bool())
+
+}
+
 class ICacheMetaWriteBundle extends ICacheBundle
 {
   val virIdx = UInt(idxBits.W)
@@ -150,12 +155,19 @@ class ICacheDataWriteBundle extends ICacheBundle
 
 }
 
-class ICacheMetaArray extends ICachArray
+class ICacheDataReadBundle extends ICacheBundle
+{
+  val datas = Vec(nWays,Vec(blockRows,UInt(rowBits.W)))
+  val errors = Vec(nWays,Bool())
+
+}
+
+class ICacheMetaArray extends ICacheArray
 {
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
-    val readResp = Output(Vec(nWays,UInt(tagBits.W)))
+    val readResp = Output(new ICacheMetaReadBundle)
   }}
 
   val metaArray = Module(new SRAMTemplate(
@@ -172,13 +184,14 @@ class ICacheMetaArray extends ICachArray
   val readNextReg = RegNext(io.read.fire())
   val rtags = metaArray.io.r.resp.asTypeOf(Vec(nWays,UInt(encMetaBits.W)))
   val rtags_decoded = rtags.map{ wtag =>cacheParams.dataCode.decode(wtag)}
-  val rtags_wrong = rtags_decoded.map{ wtag_decoded => wtag_decoded.uncorrectable}
+  val rtags_wrong = rtags_decoded.map{ wtag_decoded => wtag_decoded.error}
   //assert(readNextReg && !ParallelOR(rtags_wrong))
   val rtags_corrected = VecInit(rtags_decoded.map{ wtag_decoded => wtag_decoded.corrected})
   metaArray.io.r.req.valid := io.read.valid
   metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
   io.read.ready := !io.write.valid
-  io.readResp := rtags_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
+  io.readResp.tags := rtags_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
+  (0 until nWays).map{ w => io.readResp.errors(w) := readNextReg && rtags_wrong(w)}
 
   //write
   val write = io.write.bits
@@ -190,12 +203,12 @@ class ICacheMetaArray extends ICachArray
 
 }
 
-class ICacheDataArray extends ICachArray
+class ICacheDataArray extends ICacheArray
 {
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
-    val readResp = Output(Vec(nWays,Vec(blockRows,UInt(rowBits.W))))
+    val readResp = Output(new ICacheDataReadBundle)
   }}
 
   //dataEntryBits = 144
@@ -210,6 +223,7 @@ class ICacheDataArray extends ICachArray
   // do Parity decoding after way choose
   // do not read and write in the same cycle: when write SRAM disable read
   val readNextReg = RegNext(io.read.fire())
+  val rdata_wrong = Wire(Vec(nWays, UInt((nBanks * bankUnitNum).W)))
   val rdatas = VecInit((0 until nWays).map( w =>
       VecInit( (0 until nBanks).map( b =>
             dataArray(w)(b).io.r.resp.asTypeOf(Vec( bankUnitNum, UInt(encDataBits.W)))
@@ -230,17 +244,25 @@ class ICacheDataArray extends ICachArray
       })
     })
 
+    (0 until nWays).map{ w =>
+      val wayWrong = Cat( (0 until nBanks).map{ b =>
+          val bankWrong = Cat( (0 until bankUnitNum).map{ i => rdatas_decoded(w)(b)(i).error}.reverse)
+          bankWrong
+      }.reverse)
+      rdata_wrong(w) := wayWrong
+    }
+
   (0 until nWays).map{ w =>
       (0 until blockRows).map{ r =>
-        io.readResp(w)(r) := Cat(
+        io.readResp.datas(w)(r) := Cat(
         (0 until bankUnitNum/2).map{ i =>
-          //println("result: ",r,i)
           rdata_corrected(w)(r >> 1)((r%2) * 8 + i).asUInt
         }.reverse )
       }
   }
 
   io.read.ready := !io.write.valid
+  (0 until nWays).map{ w => io.readResp.errors(w) := readNextReg && rdata_wrong(w).orR }
 
   //write
   val write = io.write.bits
@@ -261,7 +283,7 @@ class ICacheDataArray extends ICachArray
     for(b <- 0 until nBanks){
       dataArray(w)(b).io.w.req.valid := io.write.valid && w.U === write_way
       dataArray(w)(b).io.w.req.bits.setIdx := write.virIdx
-      dataArray(w)(b).io.w.req.bits.data := write_bank_data(b)
+      dataArray(w)(b).io.w.req.bits.data := VecInit(write_bank_data(b))
     }
   }
 
@@ -326,7 +348,7 @@ class ICache extends ICacheModule
 
   // SRAM(Meta and Data) read reseponse
   // TODO :Parity wrong excetion
-  val (metas, datas)  = {(metaArray.io.readResp , RegEnable(next=dataArray.io.readResp, enable=s2_fire))}
+  val (metas, datas)  = {(metaArray.io.readResp.tags , RegEnable(next=dataArray.io.readResp.datas, enable=s2_fire))}
   val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(log2Ceil(nWays).W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
@@ -351,10 +373,11 @@ class ICache extends ICacheModule
   val icacheExceptionVec = Wire(Vec(8,Bool()))
   val hasIcacheException = icacheExceptionVec.asUInt().orR()
   icacheExceptionVec := DontCare
-  icacheExceptionVec(accessFault) := s2_tlb_resp.excp.af.instr && s2_allValid
+  icacheExceptionVec(accessFault) := (s2_tlb_resp.excp.af.instr && s2_allValid)
   icacheExceptionVec(pageFault) := s2_tlb_resp.excp.pf.instr && s2_allValid
 
-  s2_mmio := s2_valid && io.tlb.resp.valid && s2_tlb_resp.mmio && !hasIcacheException
+  val addrIsMMIO = s2_valid && io.tlb.resp.valid && s2_tlb_resp.mmio
+  s2_mmio := addrIsMMIO && !hasIcacheException
   s2_hit := s2_valid && ParallelOR(hitVec)
 
   val waymask = Mux(hasIcacheException,1.U(nWays.W),Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask)))
@@ -377,6 +400,12 @@ class ICache extends ICacheModule
   val s3_has_exception = RegEnable(next= hasIcacheException,init=false.B,enable=s2_fire)
   val s3_idx = get_idx(s3_req_pc)
   val s3_data = datas
+  val s3_meta_errors = RegEnable(next=metaArray.io.readResp.errors, init= 0.U.asTypeOf(Vec(nWays,Bool())), enable=s2_fire)
+  val s3_data_errors = RegEnable(next=dataArray.io.readResp.errors, init= 0.U.asTypeOf(Vec(nWays,Bool())), enable=s2_fire)
+  val s3_meta_wrong = Mux1H(s3_wayMask, s3_meta_errors) && s3_hit
+  val s3_data_wrong = Mux1H(s3_wayMask, s3_data_errors) && s3_hit
+
+  val exception = (s3_has_exception || s3_meta_wrong || s3_data_wrong) && s3_valid
 
 
   when(s3_flush)                  { s3_valid := false.B }
@@ -408,13 +437,13 @@ class ICache extends ICacheModule
 
 
   /* icache miss
-   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking
+   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking  
    * block the pipeline until refill finishes
    */
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
-  icacheMissQueue.io.req.valid := s3_miss && !s3_has_exception && !s3_flush && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.valid := s3_miss && !exception && !s3_flush && !blocking//TODO: specificate flush condition
   icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := s3_flush
@@ -474,7 +503,7 @@ class ICache extends ICacheModule
   val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
   val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
 
-  s3_miss := s3_valid && !s3_hit && !s3_mmio && !s3_has_exception && !useRefillReg
+  s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !useRefillReg
 
 
 
@@ -491,8 +520,8 @@ class ICache extends ICacheModule
       }
     }
     val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
-    val insLenLog = log2Ceil(insLen)
-    val start = (pc >> insLenLog.U)(log2Ceil(mmioBeats * mmioBusBytes/instBytes) -1, 0)
+    val insLenLog = log2Ceil(insLen/8)
+    val start = Cat(0.U(2.W),(pc >> insLenLog.U)(log2Ceil(mmioBusBytes/instBytes) -1, 0))    //4bit
     val outMask = mask >> start
     (0 until PredictWidth ).foreach{ i =>
       cutPacket(i) := Mux(outMask(i).asBool,sourceVec_inst(start + i.U),0.U)
@@ -500,10 +529,9 @@ class ICache extends ICacheModule
     (cutPacket.asUInt, outMask.asUInt)
   }
   val mmioDataVec = io.mmio_grant.bits.data.asTypeOf(Vec(mmioBeats,UInt(mmioBusWidth.W)))
-  val (mmio_packet,mmio_mask)  = cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
+  val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
 
   XSDebug("mmio data  %x\n", mmio_packet)
-
 
 
 
@@ -514,9 +542,10 @@ class ICache extends ICacheModule
     val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
-    wayResp.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
+    wayResp.mask := s3_req_mask
     wayResp.ipf := s3_exception_vec(pageFault)
-    wayResp.acf := s3_exception_vec(accessFault)
+    wayResp.acf := s3_exception_vec(accessFault)  || s3_meta_wrong || s3_data_wrong
+    //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
     wayResp.mmio := s3_mmio
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
@@ -535,12 +564,13 @@ class ICache extends ICacheModule
   io.req.ready := s2_ready && metaArray.io.read.ready && dataArray.io.read.ready
 
   //icache response: to pre-decoder
-  io.resp.valid := s3_valid && (s3_hit || s3_has_exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
-  io.resp.bits.mask := Mux(s3_mmio,mmio_mask,s3_req_mask)
+  io.resp.valid := s3_valid && (s3_hit || exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
+  io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
-  io.resp.bits.acf := s3_exception_vec(accessFault)
+  io.resp.bits.acf := s3_exception_vec(accessFault) || s3_meta_wrong || s3_data_wrong
+  //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
   io.resp.bits.mmio := s3_mmio
 
   //to itlb
@@ -561,7 +591,7 @@ class ICache extends ICacheModule
   io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
   //To icache Uncache
-  io.mmio_acquire.valid := s3_mmio && s3_valid
+  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking 
   io.mmio_acquire.bits.addr := mmioBusAligned(s3_tlb_resp.paddr)
   io.mmio_acquire.bits.id := cacheID.U
 
@@ -629,9 +659,7 @@ class ICache extends ICacheModule
   dump_pipe_info()
 
   // Performance Counter
-  if (!env.FPGAPlatform && !env.DualCore) {
-    ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
-    ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
-    ExcitingUtils.addSource( s3_mmio && blocking && io.resp.fire(), "perfCntIcacheMMIOCnt", Perf)
-  }
+  XSPerf("req", s3_valid && !blocking)
+  XSPerf("miss", s3_miss && blocking && io.resp.fire())
+  XSPerf("mmio", s3_mmio && blocking && io.resp.fire())
 }

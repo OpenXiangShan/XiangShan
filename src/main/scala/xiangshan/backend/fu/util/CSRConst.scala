@@ -50,6 +50,14 @@ trait HasCSRConst {
   // Supervisor Protection and Translation
   val Satp          = 0x180
 
+  // Supervisor Custom Read/Write
+  val Sbpctl        = 0x5C0
+  val Spfctl        = 0x5C1
+  val Slvpredctl    = 0x5C2
+  val Smblockctl    = 0x5C3
+
+  val Sdsid         = 0x9C0
+
   // Machine Information Registers
   val Mvendorid     = 0xF11
   val Marchid       = 0xF12

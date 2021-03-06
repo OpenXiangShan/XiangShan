@@ -30,7 +30,6 @@ int main(int argc, const char** argv) {
   auto args = emu->get_args();
   uint64_t cycles = emu->execute(args.max_cycles, args.max_instr);
   bool is_good_trap = emu->is_good_trap();
-  int trapcode = emu->get_trapcode();
   delete emu;
 
   extern uint32_t uptime(void);
@@ -40,6 +39,5 @@ int main(int argc, const char** argv) {
       " (this will be different from cycleCnt if emu loads a snapshot)\n" ANSI_COLOR_RESET, args.seed, cycles);
   eprintf(ANSI_COLOR_BLUE "Host time spent: %'dms\n" ANSI_COLOR_RESET, ms);
 
-  // return !is_good_trap;
-  return trapcode;
+  return !is_good_trap;
 }

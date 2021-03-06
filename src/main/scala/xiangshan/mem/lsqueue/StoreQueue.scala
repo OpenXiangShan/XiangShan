@@ -38,12 +38,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val uncache = new DCacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
+    val issuePtrExt = Output(new SqPtr)
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
 
   val difftestIO = IO(new Bundle() {
@@ -61,13 +63,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   dataModule.io := DontCare
   val paddrModule = Module(new SQPaddrModule(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
   paddrModule.io := DontCare
-  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
 
   // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio data is valid
   val writebacked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been writebacked to CDB
+  val issued = Reg(Vec(StoreQueueSize, Bool())) // inst has been issued by rs
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
@@ -77,6 +80,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
@@ -104,7 +108,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
     paddrModule.io.raddr(i) := deqPtrExtNext(i).value
   }
-  vaddrModule.io.raddr(0) := cmtPtr + commitCount
+
+  // no inst will be commited 1 cycle before tval update
+  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount).value
 
   /**
     * Enqueue at dispatch
@@ -121,12 +127,44 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
+      issued(index) := false.B
       commited(index) := false.B
       pending(index) := false.B
     }
     io.enq.resp(i) := sqIdx
   }
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
+
+  /**
+    * Update issuePtr when issue from rs
+    */
+
+  // update state bit issued
+  for (i <- 0 until StorePipelineWidth) {
+    when (io.storeIssue(i).valid) {
+      issued(io.storeIssue(i).bits.uop.sqIdx.value) := true.B
+    }
+  }
+
+  // update issuePtr
+  val IssuePtrMoveStride = 4
+  require(IssuePtrMoveStride >= 2)
+
+  val issueLookupVec = (0 until IssuePtrMoveStride).map(issuePtrExt + _.U)
+  val issueLookup = issueLookupVec.map(ptr => allocated(ptr.value) && issued(ptr.value) && ptr =/= enqPtrExt(0))
+  val nextIssuePtr = issuePtrExt + PriorityEncoder(VecInit(issueLookup.map(!_) :+ true.B))
+  issuePtrExt := nextIssuePtr
+
+  when (io.brqRedirect.valid || io.flush) {
+    issuePtrExt := Mux(
+      isAfter(cmtPtrExt(0), deqPtrExt(0)),
+      cmtPtrExt(0),
+      deqPtrExtNext(0) // for mmio insts, deqPtr may be ahead of cmtPtr
+    )
+  }
+  // send issuePtrExt to rs
+  // io.issuePtrExt := cmtPtrExt(0)
+  io.issuePtrExt := issuePtrExt
 
   /**
     * Writeback store from store units
@@ -144,9 +182,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.wen(i) := false.B
     paddrModule.io.wen(i) := false.B
-    vaddrModule.io.wen(i) := false.B
+    val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
-      val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
       writebacked(stWbIndex) := !io.storeIn(i).bits.mmio
       pending(stWbIndex) := io.storeIn(i).bits.mmio
@@ -164,9 +201,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wen(i) := true.B
 
-      vaddrModule.io.waddr(i) := stWbIndex
-      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
-      vaddrModule.io.wen(i) := true.B
 
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
@@ -179,6 +213,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
         io.storeIn(i).bits.mmio
         )
     }
+    // vaddrModule write is delayed, as vaddrModule will not be read right after write
+    vaddrModule.io.waddr(i) := RegNext(stWbIndex)
+    vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
+    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
   }
 
   /**
@@ -199,7 +237,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
-    val forwardMask = UIntToMask(io.forward(i).sqIdx.value, StoreQueueSize)
+    val forwardMask = io.forward(i).sqIdxMask
     val storeWritebackedVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
     for (j <- 0 until StoreQueueSize) {
       storeWritebackedVec(j) := datavalid(j) && allocated(j) // all datavalid terms need to be checked
@@ -232,7 +270,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
-  val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
@@ -247,6 +285,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
     is(s_resp) {
       when(io.uncache.resp.fire()) {
+        uncacheState := s_wb
+      }
+    }
+    is(s_wb) {
+      when (io.mmioStout.fire()) {
         uncacheState := s_wait
       }
     }
@@ -284,7 +327,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // (4) writeback to ROB (and other units): mark as writebacked
-  io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
+  io.mmioStout.valid := uncacheState === s_wb // allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
@@ -387,6 +430,17 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
   io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
+
+  // perf counter
+  XSPerf("utilization", validCount)
+  XSPerf("full", !allowEnqueue)
+  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerf("mmioCnt", io.uncache.req.fire())
+  XSPerf("writeback", io.mmioStout.fire())
+  XSPerf("wbBlocked", io.mmioStout.valid && !io.mmioStout.ready)
+  XSPerf("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
+  XSPerf("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
+  XSPerf("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)

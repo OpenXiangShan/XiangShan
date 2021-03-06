@@ -4,14 +4,18 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.{ImmUnion, XDecode}
+import xiangshan.backend.decode.{ImmUnion, XDecode, WaitTableParameters}
 import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasTageParameter
+import xiangshan.frontend.HasSCParameter
 import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
+import xiangshan.frontend.BPUCtrl
 import utils._
 
 import scala.math.max
@@ -19,12 +23,13 @@ import Chisel.experimental.chiselName
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket extends XSBundle {
+class FetchPacket extends XSBundle with WaitTableParameters {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
   val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
+  val foldpc = Vec(PredictWidth, UInt(WaitTableAddrWidth.W))
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -46,19 +51,12 @@ object ValidUndirectioned {
   }
 }
 
-class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
-  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map { case (_, cb, _) => (1 << cb) - 1 }.reduce(_ + _)
-
-  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map { case (_, cb, _) => 1 << cb }.reduce(_ + _))
-
-  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal + 1)) + 1
-
+class SCMeta(val useSC: Boolean) extends XSBundle with HasSCParameter {
   val tageTaken = if (useSC) Bool() else UInt(0.W)
   val scUsed = if (useSC) Bool() else UInt(0.W)
   val scPred = if (useSC) Bool() else UInt(0.W)
   // Suppose ctrbits of all tables are identical
   val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-  val sumAbs = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
 }
 
 class TageMeta extends XSBundle with HasTageParameter {
@@ -115,8 +113,6 @@ class PredictorAnswer extends XSBundle {
 }
 
 class BpuMeta extends XSBundle with HasBPUParameter {
-  val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
-  val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
   val bimCtr = UInt(2.W)
   val tageMeta = new TageMeta
@@ -162,7 +158,7 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
   val predHist = new GlobalHistory
-  val specCnt = UInt(10.W)
+  val specCnt = Vec(PredictWidth, UInt(10.W))
   // need pipeline update
   val sawNotTakenBranch = Bool()
   val predTaken = Bool()
@@ -172,14 +168,16 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow extends XSBundle {
+class CtrlFlow extends XSBundle with WaitTableParameters {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  val foldpc = UInt(WaitTableAddrWidth.W)
   val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
+  val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
@@ -205,6 +203,9 @@ class FtqEntry extends XSBundle {
   // backend update
   val mispred = Vec(PredictWidth, Bool())
   val target = UInt(VAddrBits.W)
+
+  // For perf counters
+  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 
   def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
   def hasLastPrev = lastPacketPC.valid
@@ -393,6 +394,7 @@ class RoqCommitIO extends XSBundle {
 class TlbFeedback extends XSBundle {
   val rsIdx = UInt(log2Up(IssQueSize).W)
   val hit = Bool()
+  val flushState = Bool()
 }
 
 class RSFeedback extends TlbFeedback
@@ -438,6 +440,12 @@ class SfenceBundle extends XSBundle {
   override def toPrintable: Printable = {
     p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
   }
+}
+
+class WaitTableUpdateReq extends XSBundle with WaitTableParameters {
+  val valid = Bool()
+  val waddr = UInt(WaitTableAddrWidth.W)
+  val wdata = Bool() // true.B by default
 }
 
 class DifftestBundle extends XSBundle {
@@ -514,4 +522,25 @@ class TrapIO extends XSBundle {
   val pc = Output(UInt(VAddrBits.W))
   val cycleCnt = Output(UInt(XLEN.W))
   val instrCnt = Output(UInt(XLEN.W))
+}
+
+class PerfInfoIO extends XSBundle {
+  val clean = Input(Bool())
+  val dump = Input(Bool())
+}
+
+class CustomCSRCtrlIO extends XSBundle {
+  // Prefetcher
+  val l1plus_pf_enable = Output(Bool())
+  val l2_pf_enable = Output(Bool())
+  // Labeled XiangShan
+  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
+  // Load violation predictor
+  val lvpred_disable = Output(Bool())
+  val no_spec_load = Output(Bool())
+  val waittable_timeout = Output(UInt(5.W))
+  // Branch predictor
+  val bp_ctrl = Output(new BPUCtrl)
+  // Memory Block
+  val sbuffer_threshold = Output(UInt(4.W))
 }

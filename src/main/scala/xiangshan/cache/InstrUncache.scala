@@ -22,7 +22,7 @@ class InsUncacheResp extends ICacheBundle
 }
 
 // One miss entry deals with one mmio request
-class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
+class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters with HasIFUConst
 {
   val io = IO(new Bundle {
     val id = Input(UInt(log2Up(cacheParams.nMMIOs).W))
@@ -86,7 +86,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     io.mmio_acquire.valid := true.B
     io.mmio_acquire.bits  :=  edge.Get(
           fromSource      = io.id,
-          toAddress       = req.addr + (beatCounter.value << log2Ceil(mmioBusBytes).U),
+          toAddress       = packetAligned(req.addr) + (beatCounter.value << log2Ceil(mmioBusBytes).U),
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 
@@ -101,15 +101,17 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     io.mmio_grant.ready := true.B
 
     when (io.mmio_grant.fire()) {
+      // val realAddr = packetAligned(req.addr) + (beatCounter.value << log2Ceil(mmioBusBytes).U)
+      // val start = realAddr(5,3)
       respDataReg(beatCounter.value) := io.mmio_grant.bits.data
-      state := Mux(needFlush || io.flush, s_invalid,Mux(beatCounter.value === (mmioBeats - 1).U,s_send_resp,s_refill_req))
+      state :=Mux((beatCounter.value === (mmioBeats - 1).U) || needFlush || io.flush ,s_send_resp,s_refill_req)
       beatCounter.inc()
     }
   }
 
   // --------------------------------------------
   when (state === s_send_resp) {
-    io.resp.valid := true.B
+    io.resp.valid := !needFlush
     io.resp.bits.data := respDataReg.asUInt
     io.resp.bits.id := req.id
     // meta data should go with the response
@@ -153,7 +155,7 @@ class icacheUncacheImp(outer: InstrUncache)
   val io = IO(new icacheUncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
-  require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
+  //require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
   val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 

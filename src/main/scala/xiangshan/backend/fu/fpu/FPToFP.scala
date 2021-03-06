@@ -8,18 +8,18 @@ import chisel3.util._
 import hardfloat.CompareRecFN
 import xiangshan.backend.fu.FunctionUnit
 
-class FPToFP extends FPUPipelineModule{
+class FPToFPDataModule(latency: Int) extends FPUDataModule {
 
-  override def latency: Int = FunctionUnit.f2iCfg.latency.latencyVal.get
+  val regEnables = IO(Input(Vec(latency, Bool())))
 
-  val ctrlIn = io.in.bits.uop.ctrl.fpu
-  val ctrl = S1Reg(ctrlIn)
+  val ctrlIn = io.in.fpCtrl
+  val ctrl = RegEnable(ctrlIn, regEnables(0))
   val inTag = ctrl.typeTagIn
   val outTag = ctrl.typeTagOut
   val wflags = ctrl.wflags
-  val src1 = S1Reg(unbox(io.in.bits.src(0), ctrlIn.typeTagIn, None))
-  val src2 = S1Reg(unbox(io.in.bits.src(1), ctrlIn.typeTagIn, None))
-  val rmReg = S1Reg(rm)
+  val src1 = RegEnable(unbox(io.in.src(0), ctrlIn.typeTagIn, None), regEnables(0))
+  val src2 = RegEnable(unbox(io.in.src(1), ctrlIn.typeTagIn, None), regEnables(0))
+  val rmReg = RegEnable(rm, regEnables(0))
 
   val signNum = Mux(rmReg(1), src1 ^ src2, Mux(rmReg(0), ~src2, src2))
   val fsgnj = Cat(signNum(fLen), src1(fLen-1, 0))
@@ -79,6 +79,15 @@ class FPToFP extends FPUPipelineModule{
     }
   }
 
-  io.out.bits.data := S2Reg(mux.data)
-  fflags := S2Reg(mux.exc)
+  io.out.data := RegEnable(mux.data, regEnables(1))
+  fflags := RegEnable(mux.exc, regEnables(1))
+}
+
+class FPToFP extends FPUPipelineModule{
+
+  override def latency: Int = FunctionUnit.f2iCfg.latency.latencyVal.get
+
+  override val dataModule = Module(new FPToFPDataModule(latency))
+  connectDataModule
+  dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
 }
