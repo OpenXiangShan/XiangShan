@@ -88,6 +88,7 @@ class DCacheLoadIO extends DCacheWordIO
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr = Output(UInt(PAddrBits.W))
+  val s1_data  = Input(Vec(nWays, UInt(DataBits.W)))
   val s2_hit_way = Input(UInt(nWays.W))
 }
 
@@ -134,7 +135,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val dataArray = Module(new TransposeDuplicatedDataArray)
+  val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
   /*
   dataArray.dump()
@@ -163,8 +164,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // MainPipe contend MetaRead with Load 0
   // give priority to MainPipe
   val MetaReadPortCount = 2
-  val MainPipeMetaReadPort = 1
-  val LoadPipeMetaReadPort = 0
+  val MainPipeMetaReadPort = 0
+  val LoadPipeMetaReadPort = 1
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
@@ -190,8 +191,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // give priority to MainPipe
   val DataReadPortCount = 2
-  val MainPipeDataReadPort = 1
-  val LoadPipeDataReadPort = 0
+  val MainPipeDataReadPort = 0
+  val LoadPipeDataReadPort = 1
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
@@ -277,7 +278,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
   val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
 
-  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
+  mainPipeReqArb.io.out.ready := mainPipe.io.req.ready
   mainPipe.io.req.valid := mainPipeReq_valid
   mainPipe.io.req.bits  := mainPipeReq_req
 
@@ -312,18 +313,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire())
   }
-
-  //----------------------------------------
-  // update replacement policy
-  val replacer = cacheParams.replacement
-  val access_bundles = ldu.map(_.io.replace_access) ++ Seq(mainPipe.io.replace_access)
-  val sets = access_bundles.map(_.bits.set)
-  val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
-  (touch_ways zip access_bundles).map{ case (w, access) =>
-    w.valid := access.valid
-    w.bits := access.bits.way
-  }
-  replacer.access(sets, touch_ways)
 
 
   // dcache should only deal with DRAM addresses
