@@ -46,6 +46,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst with Has
   def insLen = if (HasCExtension) 16 else 32
   def RVCInsLen = 16
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  def plruAccessNum = 2  //hit and miss
   // def encRowBits = cacheParams.dataCode.width(rowBits)
   // def encTagBits = cacheParams.tagCode.width(tagBits)
 
@@ -366,8 +367,13 @@ class ICache extends ICacheModule
   val replacer = cacheParams.replacement
   val victimWayMask = UIntToOH(replacer.way(s2_idx))
 
-  when(s2_hit) {replacer.access(s2_idx, OHToUInt(hitVec))}
-
+  val (touch_sets, touch_ways) = ( Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets).W))),  Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
+  
+  touch_sets(0)       := s2_idx  
+  touch_ways(0).valid := s2_hit
+  touch_ways(0).bits  := OHToUInt(hitVec) 
+  
+  replacer.access(touch_sets, touch_ways)
 
   //deal with icache exception
   val icacheExceptionVec = Wire(Vec(8,Bool()))
@@ -472,6 +478,11 @@ class ICache extends ICacheModule
                                 waymask=metaWriteReq.meta_write_waymask)
 
   val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
+
+  touch_sets(1)       := metaWriteReq.meta_write_idx  
+  touch_ways(1).valid := icacheMissQueue.io.meta_write.valid
+  touch_ways(1).bits  := wayNum
+
   val validPtr = Cat(metaWriteReq.meta_write_idx,wayNum)
   when(icacheMissQueue.io.meta_write.valid && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)

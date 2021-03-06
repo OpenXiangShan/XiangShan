@@ -72,7 +72,6 @@ abstract class SetAssocReplacementPolicy {
   def access(set: UInt, touch_way: UInt): Unit
   def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]): Unit
   def way(set: UInt): UInt
-  def miss(set: UInt): Unit
 }
 
 
@@ -147,13 +146,8 @@ class TrueLRU(n_ways: Int) extends ReplacementPolicy {
     OHToUInt(mruWayDec)
   }
 
-  def way = {
-    val refillWay = get_replace_way(state_reg)
-    access(refillWay)
-    refillWay
-  }
-
-  def miss = {}
+  def way = get_replace_way(state_reg)
+  def miss = access(way)
   def hit = {}
   @deprecated("replace 'replace' with 'way' from abstract class ReplacementPolicy","Rocket Chip 2020.05")
   def replace: UInt = way
@@ -287,13 +281,9 @@ class PseudoLRU(n_ways: Int) extends ReplacementPolicy {
 
   def get_replace_way(state: UInt): UInt = get_replace_way(state, n_ways)
 
-  def way = {
-    val refillWay = get_replace_way(state_reg)
-    access(refillWay)
-    refillWay
-  }
+  def way = get_replace_way(state_reg)
+  def miss = access(way)
   def hit = {}
-  def miss = {}
 }
 
 class SeqPLRU(n_sets: Int, n_ways: Int) extends SeqReplacementPolicy {
@@ -340,12 +330,8 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
     }
   }
 
-  def way(set: UInt) = {
-    val refillWay = logic.get_replace_way(state_vec(set))
-    access(set, refillWay)
-    refillWay
-  }
-  def miss(set: UInt) = {}
+  def way(set: UInt) = logic.get_replace_way(state_vec(set))
+
 }
 
 class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolicy {

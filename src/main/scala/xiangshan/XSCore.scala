@@ -203,13 +203,14 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setlru"),
+    replacer = Some("setplru"),
     nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 8
   )
 
