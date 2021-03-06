@@ -139,8 +139,7 @@ class LoadPipe extends DCacheModule {
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
   // Bank conflict on data arrays
-  // For now, we use DuplicatedDataArray, so no bank conflicts
-  val s2_nack_data = false.B
+  val s2_nack_data = RegEnable(!io.data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
   // select the row we are interested in
