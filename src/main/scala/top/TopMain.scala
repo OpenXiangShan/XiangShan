@@ -17,6 +17,35 @@ import xiangshan.cache.prefetch.L2Prefetcher
 abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val mmioXbar = TLXbar()
+  val l3_xbar = TLXbar()
+}
+
+trait HaveSlaveAXI4Port {
+  this: BaseXSSoc =>
+
+  val idBits = 4
+
+  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    Seq(AXI4MasterParameters(
+      name = "slave_axi4_port",
+      id = IdRange(0, 1 << idBits),
+      maxFlight = Some(1 << idBits)
+    ))
+  )))
+
+  l3_xbar :=
+    TLBuffer() :=
+    TLFIFOFixer(TLFIFOFixer.all) :=
+    TLWidthWidget(L3BusWidth / 8) :=
+    AXI4ToTL() :=
+    AXI4UserYanker(Some(1)) :=
+    AXI4Fragmenter() :=
+    AXI4IdIndexer(1) :=
+    l3FrontendAXI4Node
+
+  val salve_axi4_port = InModuleBody {
+    l3FrontendAXI4Node.makeIOs()
+  }
 }
 
 trait HaveAXI4MemPort {
@@ -81,11 +110,11 @@ trait HaveAXI4MMIOPort { this: BaseXSSoc =>
 class TopMain()(implicit p: config.Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4MMIOPort
+  with HaveSlaveAXI4Port
   {
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
 
-  val l3_xbar = TLXbar()
   for (i <- 0 until NumCores) {
     val core = LazyModule(new XSCore())
     val l2prefetcher = LazyModule(new L2Prefetcher())
