@@ -249,8 +249,10 @@ class TlbResp extends TlbBundle {
       val instr = Bool()
     }
   }
+  val ptwBack = Bool() // when ptw back, wake up replay rs's state
+
   override def toPrintable: Printable = {
-    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr}"
+    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
   }
 }
 
@@ -439,6 +441,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := miss
+    resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
     val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception

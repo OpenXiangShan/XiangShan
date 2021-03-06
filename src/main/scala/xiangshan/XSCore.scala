@@ -50,7 +50,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
-  EnableSC: Boolean = false,
+  EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
@@ -203,13 +203,14 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setlru"),
+    replacer = Some("setplru"),
     nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 8
   )
 
@@ -347,7 +348,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
     fastWakeUpOut = Seq(),
-    slowWakeUpOut = loadExuConfigs
+    slowWakeUpOut = loadExuConfigs,
+    numIntWakeUpFp = intExuConfigs.count(_.writeFpRf)
   ))
 
   lazy val module = new XSCoreImp(this)
@@ -413,8 +415,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
   ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
+  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(WireInit(_))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(WireInit(_))
   memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
   memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
 
@@ -422,13 +424,13 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockWakeUpInt = fpExuConfigs
     .zip(floatBlock.io.wakeUpOut.slow)
     .filter(_._1.writeIntRf)
-    .map(_._2).map(x => intOutValid(x, connectReady = true))
+    .map(_._2)
 
   intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
     .zip(integerBlock.io.wakeUpOut.slow)
     .filter(_._1.writeFpRf)
-    .map(_._2).map(x => fpOutValid(x, connectReady = true))
+    .map(_._2)
 
   integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
@@ -446,6 +448,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // Note: 'WireInit' is used to block 'ready's from memBlock,
   // we don't need 'ready's from memBlock
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
+  memBlock.io.intWakeUpFp <> floatBlock.io.intWakeUpOut
 
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare
@@ -464,26 +467,27 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
-  memBlock.io.tlbCsr <> RegNext(integerBlock.io.csrio.tlb)
+  memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
-  val itlbRepester = Module(new PTWRepeater())
-  val dtlbRepester = Module(new PTWRepeater())
-  itlbRepester.io.tlb <> frontend.io.ptw
-  dtlbRepester.io.tlb <> memBlock.io.ptw
-  itlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
-  dtlbRepester.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.tlb(0) <> dtlbRepester.io.ptw
-  ptw.io.tlb(1) <> itlbRepester.io.ptw
+  val itlbRepeater = Module(new PTWRepeater())
+  val dtlbRepeater = Module(new PTWRepeater())
+  itlbRepeater.io.tlb <> frontend.io.ptw
+  dtlbRepeater.io.tlb <> memBlock.io.ptw
+  itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
+  dtlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
+  ptw.io.tlb(0) <> dtlbRepeater.io.ptw
+  ptw.io.tlb(1) <> itlbRepeater.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
-  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
+  io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()

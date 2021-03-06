@@ -30,6 +30,7 @@ class FloatBlock
     val intWakeUpFp = Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
+    val intWakeUpOut = Vec(intSlowWakeUpIn.size, DecoupledIO(new ExuOutput))
 
     // from csr
     val frm = Input(UInt(3.W))
@@ -39,24 +40,28 @@ class FloatBlock
   val flush = io.fromCtrlBlock.flush
 
   val intWakeUpFpReg = Wire(Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput))))
-  intWakeUpFpReg.zip(io.intWakeUpFp).foreach{
-    case (inReg, wakeUpIn) =>
-      val in = WireInit(wakeUpIn)
-      wakeUpIn.ready := in.ready
-      in.valid := wakeUpIn.valid && !wakeUpIn.bits.uop.roqIdx.needFlush(redirect, flush)
-      PipelineConnect(in, inReg,
-        inReg.fire() || inReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
-      )
+  for((w, r) <- io.intWakeUpFp.zip(intWakeUpFpReg)){
+    val in = WireInit(w)
+    w.ready := in.ready
+    in.valid := w.valid && !w.bits.uop.roqIdx.needFlush(redirect, flush)
+    PipelineConnect(in, r, r.fire() || r.bits.uop.roqIdx.needFlush(redirect, flush), false.B)
   }
-  val intRecoded = WireInit(intWakeUpFpReg)
-  for(((rec, reg), cfg) <- intRecoded.zip(intWakeUpFpReg).zip(intSlowWakeUpIn)){
-    rec.bits.data := Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
-      recode(reg.bits.data(31, 0), S),
-      recode(reg.bits.data(63, 0), D)
+  // to memBlock's store rs
+  io.intWakeUpOut <> intWakeUpFpReg.map(x => WireInit(x))
+
+  val intRecoded = intWakeUpFpReg.map(x => {
+    val rec = Wire(DecoupledIO(new ExuOutput))
+    rec.valid := x.valid && x.bits.uop.ctrl.fpWen
+    rec.bits := x.bits
+    rec.bits.data := Mux(x.bits.uop.ctrl.fpu.typeTagOut === S,
+      recode(x.bits.data(31, 0), S),
+      recode(x.bits.data(63, 0), D)
     )
     rec.bits.redirectValid := false.B
-    reg.ready := rec.ready || !rec.valid
-  }
+    x.ready := rec.ready || !rec.valid
+    rec
+  })
+
   val memRecoded = WireInit(io.memWakeUpFp)
   for((rec, reg) <- memRecoded.zip(io.memWakeUpFp)){
     rec.bits.data := fpRdataHelper(reg.bits.uop, reg.bits.data)
@@ -166,7 +171,9 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(
+    x => x._1 <> fpOutValid(x._2, connectReady = true)
+  )
 
   for((exu, i) <- exeUnits.zipWithIndex){
     val out, outReg = Wire(DecoupledIO(new ExuOutput))

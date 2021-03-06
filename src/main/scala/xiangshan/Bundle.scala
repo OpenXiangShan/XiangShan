@@ -52,18 +52,11 @@ object ValidUndirectioned {
 }
 
 class SCMeta(val useSC: Boolean) extends XSBundle with HasSCParameter {
-  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map { case (_, cb, _) => (1 << cb) - 1 }.reduce(_ + _)
-
-  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map { case (_, cb, _) => 1 << cb }.reduce(_ + _))
-
-  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal + 1)) + 1
-
   val tageTaken = if (useSC) Bool() else UInt(0.W)
   val scUsed = if (useSC) Bool() else UInt(0.W)
   val scPred = if (useSC) Bool() else UInt(0.W)
   // Suppose ctrbits of all tables are identical
   val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-  val sumAbs = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
 }
 
 class TageMeta extends XSBundle with HasTageParameter {
@@ -401,6 +394,7 @@ class RoqCommitIO extends XSBundle {
 class TlbFeedback extends XSBundle {
   val rsIdx = UInt(log2Up(IssQueSize).W)
   val hit = Bool()
+  val flushState = Bool()
 }
 
 class RSFeedback extends TlbFeedback
@@ -539,11 +533,14 @@ class CustomCSRCtrlIO extends XSBundle {
   // Prefetcher
   val l1plus_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  // Labeled XiangShan
   val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
-  // Load violation predict
+  // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
   val waittable_timeout = Output(UInt(5.W))
-  // Branch predicter
+  // Branch predictor
   val bp_ctrl = Output(new BPUCtrl)
+  // Memory Block
+  val sbuffer_threshold = Output(UInt(4.W))
 }

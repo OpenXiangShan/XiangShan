@@ -254,10 +254,13 @@ class IntegerBlock
   ))
   intWbArbiter.io.in <> exeUnits.map(e => {
     val w = WireInit(e.io.out)
-    val fpWen = if(e.config.writeFpRf) e.io.out.bits.uop.ctrl.fpWen else false.B
-    w.valid := e.io.out.valid && !fpWen
+    if(e.config.writeFpRf){
+      w.valid := e.io.out.valid && !e.io.out.bits.uop.ctrl.fpWen && io.wakeUpOut.slow(0).ready
+    } else {
+      w.valid := e.io.out.valid
+    }
     w
-  }) ++ io.wakeUpIn.slow
+  }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
   XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
   

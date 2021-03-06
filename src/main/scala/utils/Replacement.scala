@@ -72,7 +72,6 @@ abstract class SetAssocReplacementPolicy {
   def access(set: UInt, touch_way: UInt): Unit
   def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]): Unit
   def way(set: UInt): UInt
-  def miss(set: UInt): Unit
 }
 
 
@@ -332,7 +331,7 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
   }
 
   def way(set: UInt) = logic.get_replace_way(state_vec(set))
-  def miss(set: UInt) = {}
+
 }
 
 class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolicy {
