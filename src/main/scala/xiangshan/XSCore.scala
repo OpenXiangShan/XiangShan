@@ -215,8 +215,9 @@ trait HasXSParameter {
   )
 
   val dcacheParameters = DCacheParameters(
-    tagECC = Some("none"),
-    dataECC = Some("none"),
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
     nReleaseEntries = 16,
