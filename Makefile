@@ -35,7 +35,7 @@ $(TOP_V): $(SCALA_FILE)
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
 	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
+	@cat .__head__ .__diff__ $@ $(@D)/tsmc28_sram.v > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 
