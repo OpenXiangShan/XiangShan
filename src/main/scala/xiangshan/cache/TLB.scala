@@ -351,6 +351,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      nReplace.access(nRefillIdx)
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
       val refillIdx = sRefillIdx
@@ -367,6 +368,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      sReplace.access(sRefillIdx)
       XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }
   }

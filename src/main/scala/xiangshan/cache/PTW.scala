@@ -16,7 +16,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
   val ptwl1Replacer = Some("plru")
-  def ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -33,7 +32,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2SetIdxLen = log2Up(PtwL2LineNum)
   val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
   val ptwl2Replacer = Some("setplru")
-  def ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
 
   // ptwl3: 16-way group-associated
   val PtwL3WayNum = 16
@@ -46,12 +44,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3SetIdxLen = log2Up(PtwL3LineNum)
   val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
   val ptwl3Replacer = Some("setplru")
-  def ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
 
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
   val spReplacer = Some("plru")
-  def spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
@@ -385,6 +381,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
 
   // l1
+  val ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
   val l1HitReg = Reg(Bool())
   val l1HitPPNReg = Reg(UInt(ppnLen.W))
   val (l1Hit, l1HitPPN) = {
@@ -408,6 +405,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // l2
+  val ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
   val l2HitReg = Reg(Bool())
   val l2HitPPNReg = Reg(UInt(ppnLen.W))
   val (l2Hit, l2HitPPN) = {
@@ -441,6 +439,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // l3
+  val ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
   val l3HitReg = Reg(Bool())
   val (l3Hit, l3HitData) = {
     val ridx = genPtwL3SetIdx(vpn)
@@ -473,6 +472,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(vpn))
 
   // super page
+  val spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
   val spHitReg = Reg(Bool())
   val (spHit, spHitData) = {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn) && spv(i) }
@@ -591,6 +591,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
+      ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
 
@@ -614,6 +615,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl2replace.access(refillIdx, victimWay)
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
 
@@ -644,6 +646,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl3replace.access(refillIdx, victimWay)
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
 
@@ -665,6 +668,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
       sp(refillIdx).refill(vpn, memSelData, level)
+      spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
 
