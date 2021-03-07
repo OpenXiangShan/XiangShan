@@ -591,6 +591,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
+      ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
 
@@ -614,6 +615,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl2replace.access(refillIdx, victimWay)
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
 
@@ -644,6 +646,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl3replace.access(refillIdx, victimWay)
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
 
@@ -665,6 +668,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
       sp(refillIdx).refill(vpn, memSelData, level)
+      spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
 
