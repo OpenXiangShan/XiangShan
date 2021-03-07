@@ -21,6 +21,8 @@ abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule wit
   val l3_xbar = TLXbar()
 }
 
+// We adapt the following three traits from rocket-chip.
+// Source: rocket-chip/src/main/scala/subsystem/Ports.scala
 trait HaveSlaveAXI4Port {
   this: BaseXSSoc =>
 
