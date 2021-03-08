@@ -247,4 +247,13 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       freelist.deallocPregs(i) := io.roqCommits.info(i).old_pdest
     }
   }
+
+  XSPerf("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
+  XSPerf("utilization", PopCount(io.in.map(_.valid)))
+  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
+  XSPerf("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+
 }
