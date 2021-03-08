@@ -333,6 +333,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val nRefillIdx = replaceWrapper(nv, nReplace.way)
   val sRefillIdx = replaceWrapper(sv, sReplace.way)
 
+  for (i <- 0 until TlbEntrySize) {
+    XSPerf(s"NormalRefill${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
+  }
+  for (i <- 0 until TlbSPEntrySize) {
+    XSPerf(s"SuperRefill${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
+  }
+
   nMeta.w := DontCare
   nMeta.w.valid := false.B
   when (refill) {

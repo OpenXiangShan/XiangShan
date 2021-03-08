@@ -594,6 +594,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
 
+      for (i <- 0 until PtwL1EntrySize) {
+        XSPerf(s"L1Refill${i}", memRespFire && !memPte.isPf(level) && !sfenceLatch &&
+          level === 0.U && !memPte.isLeaf() &&
+          i.U === refillIdx)
+      }
+
       XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(vpn, memSelData)}\n")
       XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
@@ -616,6 +622,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       )
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+      for (i <- 0 until PtwL2LineNum) {
+        for (j <- 0 until PtwL2WayNum) {
+          XSPerf(s"L2RefillSet${i}Way:${j}", memRespFire && !memPte.isPf(level) && !sfenceLatch &&
+            level === 1.U && !memPte.isLeaf() &&
+            i.U === refillIdx && j.U === victimWay)
+        }
+      }
 
       XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l2 refill] refilldata:0x${
@@ -647,6 +661,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
 
+      for (i <- 0 until PtwL3LineNum) {
+        for (j <- 0 until PtwL3WayNum) {
+          XSPerf(s"L3RefillSet${i}Way:${j}", memRespFire && !memPte.isPf(level) && !sfenceLatch &&
+            level === 2.U && memPte.isLeaf() &&
+            i.U === refillIdx && j.U === victimWay)
+        }
+      }
+
       XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l3 refill] refilldata:0x${
         (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
@@ -668,6 +690,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
 
+      for (i <- 0 until PtwSPEntrySize) {
+        XSPerf(s"SPRefill${i}", memRespFire && !memPte.isPf(level) && !sfenceLatch &&
+          (level === 0.U || level === 1.U) && memPte.isLeaf() &&
+          i.U === refillIdx)
+      }
+
       XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(vpn, memSelData, level)}\n")
       XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
@@ -675,7 +703,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       rfOH.suggestName(s"sp_rfOH")
     }
   }
-
+  
   // sfence
   when (sfence.valid) {
     state := s_idle
@@ -721,6 +749,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSPerf("l1_hit", l1Hit)
   XSPerf("l2_hit", l2Hit)
   XSPerf("l3_hit", l3Hit)
+  XSPerf("sp_hit", spHit)
+  XSPerf("pte_hit", pteHit)
   XSPerf("mem_count", memReqFire)
   XSPerf("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
   XSPerf("mem_blocked_cycle", mem.a.valid && !memReqReady)
