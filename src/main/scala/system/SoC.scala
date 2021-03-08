@@ -188,6 +188,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2cache.zipWithIndex foreach { case (l2c, i) =>
       val name = s"C{i}.L2"
       XSPerf(s"C${i}.L2.n_active_mshrs", l2c.module.n_active_mshrs)(name)
+      XSPerf(s"C${i}.L2.c_has_active_mshrs", l2c.module.c_has_active_mshrs)(name)
+      XSPerf(s"C${i}.L2.max_active_mshrs", l2c.module.max_active_mshrs)(name)
     }
 
     difftestIO0 <> xs_core(0).module.difftestIO
