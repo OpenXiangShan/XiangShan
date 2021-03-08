@@ -390,6 +390,42 @@ class ReservationStationSelect
   io.numExist := RegNext(Mux(nextTailPtr.flag, if(isPow2(iqSize)) (iqSize-1).U else iqSize.U, nextTailPtr.value))
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
+
+  XSPerf("sizeMultiCycle", iqSize.U)
+  XSPerf("enq", io.enq.fire())
+  XSPerf("deq", io.deq.fire())
+  XSPerf("utilization", io.numExist)
+  XSPerf("validUtil", PopCount(validQueue))
+  XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
+  XSPerf("readyUtil", PopCount(readyIdxQueue))
+  XSPerf("selectUtil", PopCount(selectMask))
+  XSPerf("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
+  XSPerf("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
+  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
+  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
+
+  XSPerf("issueValid", issueValid)
+  XSPerf("issueFire", issueFire)
+  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
+  
+  if (!feedback && nonBlocked) {
+    XSPerf("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
+    XSPerf("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
+  }
+  if (feedback) {
+    XSPerf("ptwFlushState", io.flushState)
+    XSPerf("ptwFlushEntries", Mux(io.flushState, PopCount(stateQueue.map(_ === s_replay)), 0.U))
+    XSPerf("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
+    for (i <- 0 until iqSize) {
+      // NOTE: maybe useless, for logical queue and phyical queue make this no sense
+      XSPerf(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
+    }
+  }
+  for(i <- 0 until iqSize) {
+    if (i == 0) XSPerf("empty", io.numExist === 0.U)
+    else if (i == iqSize) XSPerf("full", isFull)
+    else XSPerf(s"numExistIs${i}", io.numExist === i.U)
+  }
 }
 
 class ReservationStationCtrl
