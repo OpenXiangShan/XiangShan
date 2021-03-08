@@ -119,4 +119,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
     }
   }
 
+  XSPerf("utilization", freeRegs)
+  XSPerf("allocation_blocked", !io.req.canAlloc)
+  XSPerf("can_alloc_wrong", !io.req.canAlloc && freeRegs >= RenameWidth.U)
 }

@@ -794,6 +794,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
+  XSPerf("clock_cycle", 1.U)
   XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))
