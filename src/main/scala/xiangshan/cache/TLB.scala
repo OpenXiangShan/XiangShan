@@ -531,8 +531,10 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       XSPerf("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i))
     }
   } else {
-    XSPerf("access", valid(0) && vmEnable)
-    XSPerf("miss", valid(0) && vmEnable && missVec(0))
+    // NOTE: ITLB is blocked, so every resp will be valid only when hit
+    // every req will be ready only when hit
+    XSPerf("access", io.requestor(0).req.fire() && vmEnable)
+    XSPerf("miss", ptw.req.fire())
   }
   val reqCycleCnt = Reg(UInt(16.W))
   when (ptw.req.fire()) {
