@@ -1,14 +1,13 @@
 package system
 
 import chipsalliance.rocketchip.config.Parameters
-import device.{AXI4Timer, TLTimer, AXI4Plic}
+import device.{AXI4Plic, AXI4Timer, TLTimer}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
-import utils.{DebugIdentityNode, DataDontCareNode}
-import utils.XSInfo
-import xiangshan.{HasXSParameter, XSCore, HasXSLog, DifftestBundle}
+import utils.{DataDontCareNode, DebugIdentityNode, XSInfo, XSPerf}
+import xiangshan.{DifftestBundle, HasXSLog, HasXSParameter, XSCore}
 import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -184,6 +183,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       l2prefetcher(i).module.io.enable := RegNext(xs_core(i).module.io.l2_pf_enable)
       l2prefetcher(i).module.io.in <> l2cache(i).module.io
+    }
+
+    l2cache.zipWithIndex foreach { case (l2c, i) =>
+      val name = s"C{i}.L2"
+      XSPerf(s"C${i}.L2.n_active_mshrs", l2c.module.n_active_mshrs)(name)
     }
 
     difftestIO0 <> xs_core(0).module.difftestIO
