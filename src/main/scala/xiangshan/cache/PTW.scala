@@ -45,12 +45,12 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
   val PtwL3SetIdxLen = log2Up(PtwL3LineNum)
   val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
-  val ptwl3Replacer = Some("setplru")
+  val ptwl3Replacer = Some("random")
   def ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
 
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
-  val spReplacer = Some("plru")
+  val spReplacer = Some("random")
   def spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
 
   def genPtwL2Idx(vpn: UInt) = {
