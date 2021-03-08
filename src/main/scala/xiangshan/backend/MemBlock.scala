@@ -162,7 +162,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
