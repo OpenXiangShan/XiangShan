@@ -82,6 +82,7 @@ class SingleSrcCAM[T <: Data](val gen: T, val set: Int, val readWidth: Int, rfZe
 
 class ReservationStation
 (
+  myName : String,
   val exuCfg: ExuConfig,
   srcLen: Int,
   fastPortsCfg: Seq[ExuConfig],
@@ -126,9 +127,9 @@ class ReservationStation
   val ctrl   = Module(new ReservationStationCtrl(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
   val data   = Module(new ReservationStationData(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
 
-  select.suggestName(s"${this.name}_select")
-  ctrl.suggestName(s"${this.name}_ctrl")
-  data.suggestName(s"${this.name}_data")
+  select.suggestName(s"${myName}_select")
+  ctrl.suggestName(s"${myName}_ctrl")
+  data.suggestName(s"${myName}_data")
 
   select.io.redirect := io.redirect
   select.io.flush := io.flush
