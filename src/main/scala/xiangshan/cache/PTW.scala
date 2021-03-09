@@ -383,6 +383,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val levelNext = level + 1.U
   val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
+  // Access Perf
+  val l1AccessPerf = Wire(Vec(PtwL1EntrySize, Bool()))
+  val l2AccessPerf = Wire(Vec(PtwL2WayNum, Bool()))
+  val l3AccessPerf = Wire(Vec(PtwL3WayNum, Bool()))
+  val spAccessPerf = Wire(Vec(PtwSPEntrySize, Bool()))
+  l1AccessPerf.map(_ := false.B)
+  l2AccessPerf.map(_ := false.B)
+  l3AccessPerf.map(_ := false.B)
+  spAccessPerf.map(_ := false.B)
 
   // l1
   val l1HitReg = Reg(Bool())
@@ -395,6 +404,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
 
+    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     for (i <- 0 until PtwL1EntrySize) {
       XSDebug(validOneCycle, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn)}\n")
     }
@@ -431,6 +441,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl2replace.access(genPtwL2SetIdx(vpn), hitWay) }
 
+    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     XSDebug(validOneCycle, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL2WayNum) {
       XSDebug(RegNext(validOneCycle), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
@@ -455,6 +466,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl3replace.access(genPtwL3SetIdx(vpn), hitWay) }
 
+    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     XSDebug(validOneCycle, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL3WayNum) {
       XSDebug(RegNext(validOneCycle), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
@@ -482,6 +494,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
 
+    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(validOneCycle) }
     for (i <- 0 until PtwSPEntrySize) {
       XSDebug(validOneCycle, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn)} spv:${spv(i)}\n")
     }
@@ -752,6 +765,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSPerf("mem_count", memReqFire)
   XSPerf("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
   XSPerf("mem_blocked_cycle", mem.a.valid && !memReqReady)
+  l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L1AccessIndex${i}", l) }
+  l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L2AccessIndex${i}", l) }
+  l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L3AccessIndex${i}", l) }
+  spAccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"SPAccessIndex${i}", l) }
   l1RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L1RefillIndex${i}", l) }
   l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L2RefillIndex${i}", l) }
   l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L3RefillIndex${i}", l) }
