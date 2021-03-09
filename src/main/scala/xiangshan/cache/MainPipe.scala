@@ -5,7 +5,7 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 
-import utils.{XSDebug, OneHot}
+import utils.{XSDebug, OneHot, ReplacementPolicy}
 
 class MainPipeReq extends DCacheBundle
 {
@@ -88,7 +88,7 @@ class MainPipe extends DCacheModule {
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
 
     // update state vec in replacement algo
-    val replace_access = ValidIO(new ReplacementAccessBundle)
+    val replace_access = Flipped(Vec(LoadPipelineWidth, ValidIO(new ReplacementAccessBundle)))
   })
 
   def getMeta(encMeta: UInt): UInt = {
@@ -250,7 +250,7 @@ class MainPipe extends DCacheModule {
   val s1_hit_coh = s1_hit_meta.coh
 
   // replacement policy
-  val replacer = cacheParams.replacement
+  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way(s1_set)), RegNext(s1_repl_way_en))
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
@@ -585,9 +585,18 @@ class MainPipe extends DCacheModule {
 
   // --------------------------------------------------------------------------------
   // update replacement policy
-  io.replace_access.valid := RegNext(s3_fire) && (RegNext(update_meta) || RegNext(need_write_data))
-  io.replace_access.bits.set := RegNext(get_idx(s3_req.addr))
-  io.replace_access.bits.way := RegNext(s3_way_en)
+  val access_bundle = Wire(ValidIO(new ReplacementAccessBundle))
+  access_bundle.valid := RegNext(s3_fire && (update_meta || need_write_data))
+  access_bundle.bits.set := RegNext(get_idx(s3_req.addr))
+  access_bundle.bits.way := RegNext(s3_way_en)
+  val access_bundles = io.replace_access.toSeq ++ Seq(access_bundle)
+  val sets = access_bundles.map(_.bits.set)
+  val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
+  (touch_ways zip access_bundles).map{ case (w, access) =>
+    w.valid := access.valid
+    w.bits := access.bits.way
+  }
+  replacer.access(sets, touch_ways)
 
   // --------------------------------------------------------------------------------
   // send store/amo miss to miss queue
