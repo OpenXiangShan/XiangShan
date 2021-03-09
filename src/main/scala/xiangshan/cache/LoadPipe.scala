@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 
-import utils.XSDebug
+import utils.{XSDebug, XSPerf}
 
 class LoadPipe extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
@@ -214,4 +214,14 @@ class LoadPipe extends DCacheModule {
       XSDebug(s"$pipeline_stage_name $signal_name\n")
     }
   }
+
+  // performance counters
+  XSPerf("load_req", io.lsu.req.fire())
+  XSPerf("load_s1_kill", s1_fire && io.lsu.s1_kill)
+  XSPerf("load_hit_way", s1_fire && s1_tag_match)
+  XSPerf("load_replay", io.lsu.resp.fire() && resp.bits.replay)
+  XSPerf("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
+  XSPerf("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
+  XSPerf("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerf("load_miss", io.lsu.resp.fire() && resp.bits.miss)
 }

@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, HasTLDump}
+import utils.{XSDebug, HasTLDump, XSPerf}
 import freechips.rocketchip.tilelink.{TLBundleC, TLBundleD, TLEdgeOut, TLPermissions, TLArbiter}
 
 class WritebackReq extends DCacheBundle {
@@ -129,6 +129,13 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
       state := s_invalid
     }
   }
+
+  // performance counters
+  XSPerf("wb_req", io.req.fire())
+  XSPerf("wb_release", state === s_release_req && release_done && req.voluntary)
+  XSPerf("wb_probe_resp", state === s_release_req && release_done && !req.voluntary)
+  XSPerf("penalty_blocked_by_channel_C", io.mem_release.valid && !io.mem_release.ready)
+  XSPerf("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_release_resp)
 }
 
 class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
@@ -203,4 +210,7 @@ class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   when (io.block_miss_req) {
     XSDebug("block_miss_req\n")
   }
+
+  // performance counters
+  XSPerf("wb_req", io.req.fire())
 }
