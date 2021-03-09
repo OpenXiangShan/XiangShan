@@ -102,9 +102,9 @@ class LoadPipe extends DCacheModule {
   data_read.rmask := UIntToOH(get_row(s1_addr))
   io.data_read.valid := s1_fire && !s1_nack
   
-  io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
-  io.replace_access.bits.set := get_idx(s1_req.addr)
-  io.replace_access.bits.way := OHToUInt(s1_tag_match_way)
+  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
+  io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
+  io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
   // tag ecc check
   (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
