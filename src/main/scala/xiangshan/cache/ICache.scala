@@ -483,6 +483,13 @@ class ICache extends ICacheModule
   touch_ways(1).valid := icacheMissQueue.io.meta_write.valid
   touch_ways(1).bits  := wayNum
 
+  (0 until nWays).map{ w => 
+    XSPerf("hit_way_" + Integer.toString(w, 10),  s2_hit && OHToUInt(hitVec)  === w.U)
+    XSPerf("refill_way_" + Integer.toString(w, 10), icacheMissQueue.io.meta_write.valid && wayNum === w.U)
+    XSPerf("access_way_" + Integer.toString(w, 10), (icacheMissQueue.io.meta_write.valid && wayNum === w.U) || (s2_hit && OHToUInt(hitVec)  === w.U))
+  }
+
+
   val validPtr = Cat(metaWriteReq.meta_write_idx,wayNum)
   when(icacheMissQueue.io.meta_write.valid && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)
