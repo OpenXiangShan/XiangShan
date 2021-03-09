@@ -351,6 +351,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      nReplace.access(nRefillIdx)
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
       val refillIdx = sRefillIdx
@@ -367,6 +368,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      sReplace.access(sRefillIdx)
       XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }
   }
@@ -465,13 +467,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
     // TODO: MMIO check
 
-    (hit, miss, pfHitVec, validReg)
+    (hit, miss, hitVec, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
   val hitVec = readResult.map(res => res._1)
   val missVec = readResult.map(res => res._2)
-  val pfHitVecVec = readResult.map(res => res._3)
+  val hitVecVec = readResult.map(res => res._3)
   val validRegVec = readResult.map(res => res._4)
   val hasMissReq = Cat(missVec).orR
 
@@ -547,6 +549,20 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSPerf("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerf("wait_blocked_count", waiting && hasMissReq)
   XSPerf("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  for (i <- 0 until TlbEntrySize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
+    XSPerf(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
+  }
+  for (i <- 0 until TlbSPEntrySize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + TlbEntrySize) && v }
+    XSPerf(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
+  }
+  for (i <- 0 until TlbEntrySize) {
+    XSPerf(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
+  }
+  for (i <- 0 until TlbSPEntrySize) {
+    XSPerf(s"SuperRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
+  }
 
   // Log
   for(i <- 0 until Width) {
