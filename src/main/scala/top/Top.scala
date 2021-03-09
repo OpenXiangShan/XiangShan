@@ -80,8 +80,6 @@ trait HaveAXI4MemPort {
   })
 
   memAXI4SlaveNode :=*
-    AXI4UserYanker() :=*
-    AXI4IdIndexer(12) :=*
     TLToAXI4() :=*
     TLWidthWidget(L3BusWidth / 8) :=*
     TLCacheCork() :=*
@@ -109,8 +107,6 @@ trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
   )))
 
   peripheralNode :=
-    AXI4UserYanker() :=
-    AXI4IdIndexer(14) :=*
     TLToAXI4() :=
     peripheralXbar
 
