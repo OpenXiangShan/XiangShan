@@ -161,7 +161,7 @@ class IntegerBlock
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(a => (a.config, a.io.out.bits.data))
     val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data)) ++
-      (if (cfg == Exu.aluExeUnitCfg) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
+      (if (cfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
     val fastPortsCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
@@ -217,7 +217,7 @@ class IntegerBlock
       raw
     })
     rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops ++
-      (if (rs.exuCfg == Exu.aluExeUnitCfg) io.memFastWakeUp.fastUops else Seq())
+      (if (rs.exuCfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) io.memFastWakeUp.fastUops else Seq())
   }
 
   io.wakeUpOut.fastUops <> reservationStations.filter(

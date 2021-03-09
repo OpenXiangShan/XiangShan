@@ -145,7 +145,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
       .map(a => (a._1, a._2.bits.data)) ++
-      (if (cfg == Exu.ldExeUnitCfg) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
+      (if (cfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
 
     val fastPortsCnt = fastDatas.length
 
@@ -202,7 +202,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
       .map(_._2) ++
-      (if (rs.exuCfg == Exu.ldExeUnitCfg) loadUnits.map(_.io.fastUop) else Seq())
+      (if (rs.exuCfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
