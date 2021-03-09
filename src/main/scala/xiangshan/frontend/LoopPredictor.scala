@@ -159,6 +159,10 @@ class LTBColumn extends LTBModule {
   val wen = WireInit(false.B)
   when(wen) {ltb.write(if4_rIdx, wEntry)}
 
+  val loop_entry_is_learned = WireInit(false.B)
+  val loop_learned_entry_conflict = WireInit(false.B)
+  val loop_conf_entry_evicted = WireInit(false.B)
+
   when(redirectValid && redirect.mispred && !isReplay && !doingReset) {
     wen := true.B
     when(tagMatch) {
@@ -170,6 +174,7 @@ class LTBColumn extends LTBModule {
         when(cntMatch) {
           XSDebug("[redirect] 1\n")
           wEntry.conf := if4_rEntry.conf + 1.U
+          loop_entry_is_learned := true.B
           wEntry.specCnt := 0.U
         }.otherwise {
           XSDebug("[redirect] 2\n")
@@ -194,10 +199,12 @@ class LTBColumn extends LTBModule {
       when(if4_rEntry.isLearned) {
         XSDebug("[redirect] 5\n")
         // do nothing? or release this entry
+        loop_learned_entry_conflict := true.B
       }.elsewhen(if4_rEntry.isConf) {
         when(if4_rEntry.age === 0.U) {
           XSDebug("[redirect] 6\n")
           wEntry.tag := redirectTag
+          loop_conf_entry_evicted := true.B
           wEntry.conf := 1.U
           wEntry.specCnt := 0.U
           wEntry.tripCnt := redirect.specCnt
@@ -266,6 +273,11 @@ class LTBColumn extends LTBModule {
   }
 
   if (BPUDebug && debug) {
+    // Perf counters
+    XSPerf("loop_entry_is_learned ", loop_entry_is_learned)
+    XSPerf("loop_learned_entry_conflict ", loop_learned_entry_conflict)
+    XSPerf("loop_conf_entry_evicted ", loop_conf_entry_evicted)
+
     //debug info
     XSDebug(doingReset, "Reseting...\n")
     XSDebug(io.repair, "Repair...\n")
@@ -338,9 +350,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val updateValid = io.update.valid
   val update = io.update.bits
 
-  val do_redirect = RegNext(io.redirect)
-  val redirectValid = do_redirect.valid
-  val redirect = do_redirect.bits.cfiUpdate
+  val redirectValid = io.redirect.valid
+  val redirect = io.redirect.bits.cfiUpdate
   val redirectPC = redirect.pc
   val redirectBank = ltbAddr.getBank(redirectPC)
  
@@ -363,7 +374,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.redirect.bits.specCnt := redirect.specCnt(i)
     ltbs(i).io.redirect.bits.mispred := redirect.isMisPred
     ltbs(i).io.redirect.bits.taken := redirect.taken
-    ltbs(i).io.redirect.bits.isReplay := do_redirect.bits.flushItself
+    ltbs(i).io.redirect.bits.isReplay := io.redirect.bits.flushItself
 
     ltbs(i).io.repair := redirectValid && redirectBank =/= i.U
   }
@@ -394,7 +405,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
     XSDebug("[IF4][req] updatePC=%x, updateValid=%d, isBr=%b\n", update.ftqPC, updateValid, update.br_mask.asUInt)
-    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, do_redirect.bits.flushItself)
+    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, io.redirect.bits.flushItself)
     XSDebug("[IF4][req] isMisPred=%d\n", redirect.isMisPred)
 
     XSDebug(redirectValid, "[redirect SpecCnt] ")

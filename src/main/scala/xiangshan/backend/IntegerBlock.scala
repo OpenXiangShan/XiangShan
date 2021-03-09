@@ -169,7 +169,7 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -260,7 +260,7 @@ class IntegerBlock
       w.valid := e.io.out.valid
     }
     w
-  }) ++ io.wakeUpIn.slow
+  }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
   XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
   

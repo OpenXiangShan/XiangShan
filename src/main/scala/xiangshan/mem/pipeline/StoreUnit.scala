@@ -78,6 +78,7 @@ class StoreUnit_S1 extends XSModule {
   // Send TLB feedback to store issue queue
   io.tlbFeedback.valid := io.in.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
+  io.tlbFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
   XSDebug(io.tlbFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",

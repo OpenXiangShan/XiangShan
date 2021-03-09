@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{ParallelOR, XSDebug}
+import utils._
 
 class BusyTableReadIO extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
@@ -48,4 +48,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   for (i <- 0 until NRPhyRegs) {
     XSDebug(table(i), "%d is busy\n", i.U)
   }
+
+  XSPerf("busy_count", PopCount(table))
 }

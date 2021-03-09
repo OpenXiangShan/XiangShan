@@ -60,9 +60,9 @@ class BIM extends BasePredictor with BimParams {
   val updateRow = bimAddr.getBankIdx(u.ftqPC)
 
 
-  val wrbypass_ctrs       = Reg(Vec(bypassEntries, Vec(BimBanks, UInt(2.W))))
-  val wrbypass_ctr_valids = Reg(Vec(bypassEntries, Vec(BimBanks, Bool())))
-  val wrbypass_rows     = Reg(Vec(bypassEntries, UInt(log2Up(nRows).W)))
+  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, UInt(2.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, Bool()))))
+  val wrbypass_rows     = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(nRows).W))))
   val wrbypass_enq_idx  = RegInit(0.U(log2Up(bypassEntries).W))
 
   val wrbypass_hits = VecInit((0 until bypassEntries).map( i => 
@@ -94,13 +94,13 @@ class BIM extends BasePredictor with BimParams {
         when (needToUpdate(b)) {
           wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
           wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
-          wrbypass_rows(wrbypass_enq_idx) := updateRow
         }
       }
     }
   }
   
   when (needToUpdate.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_rows(wrbypass_enq_idx) := updateRow
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
   }
 
@@ -110,6 +110,9 @@ class BIM extends BasePredictor with BimParams {
     setIdx = Mux(doing_reset, resetRow, updateRow),
     waymask = Mux(doing_reset, Fill(BimBanks, "b1".U).asUInt, needToUpdate.asUInt)
   )
+
+  XSPerf("bim_wrbypass_hit", needToUpdate.reduce(_||_) && wrbypass_hit)
+  XSPerf("bim_wrbypass_enq", needToUpdate.reduce(_||_) && !wrbypass_hit)
 
   if (BPUDebug && debug) {
     val u = io.update.bits

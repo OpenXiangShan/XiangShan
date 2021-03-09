@@ -147,6 +147,24 @@ class Dispatch2Ls extends XSModule {
 //  }
 
   XSPerf("in", PopCount(io.fromDq.map(_.valid)))
-  XSPerf("waitInstr", PopCount(io.fromDq.map(r => r.valid && !r.ready)))
-
+  XSPerf("out", PopCount(io.enqIQCtrl.map(_.fire())))
+  XSPerf("out_load0", io.enqIQCtrl(0).fire())
+  XSPerf("out_load1", io.enqIQCtrl(1).fire())
+  XSPerf("out_store0", io.enqIQCtrl(2).fire())
+  XSPerf("out_store1", io.enqIQCtrl(3).fire())
+  val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
+  XSPerf("blocked", block_num)
+  XSPerf("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))
+  XSPerf("load_deq", PopCount(loadCanAccept))
+  XSPerf("load_deq_exceed_limit", Mux(PopCount(loadCanAccept) >= 2.U, PopCount(loadCanAccept) - 2.U, 0.U))
+  XSPerf("store_deq", PopCount(storeCanAccept))
+  XSPerf("store_deq_exceed_limit", Mux(PopCount(storeCanAccept) >= 2.U, PopCount(storeCanAccept) - 2.U, 0.U))
+  XSPerf("load0_blocked_by_load0", loadIndexGen.io.mapping(0).valid && !io.enqIQCtrl(0).ready && io.enqIQCtrl(1).ready)
+  XSPerf("load0_blocked_by_load1", loadIndexGen.io.mapping(0).valid && io.enqIQCtrl(0).ready && !io.enqIQCtrl(1).ready)
+  XSPerf("load1_blocked_by_load0", loadIndexGen.io.mapping(1).valid && !io.enqIQCtrl(0).ready && io.enqIQCtrl(1).ready)
+  XSPerf("load1_blocked_by_load1", loadIndexGen.io.mapping(1).valid && io.enqIQCtrl(0).ready && !io.enqIQCtrl(1).ready)
+  XSPerf("store0_blocked_by_store0", storeIndexGen.io.mapping(0).valid && !io.enqIQCtrl(2).ready && io.enqIQCtrl(3).ready)
+  XSPerf("store0_blocked_by_store1", storeIndexGen.io.mapping(0).valid && io.enqIQCtrl(2).ready && !io.enqIQCtrl(3).ready)
+  XSPerf("store1_blocked_by_store0", storeIndexGen.io.mapping(1).valid && !io.enqIQCtrl(2).ready && io.enqIQCtrl(3).ready)
+  XSPerf("store1_blocked_by_store1", storeIndexGen.io.mapping(1).valid && io.enqIQCtrl(2).ready && !io.enqIQCtrl(3).ready)
 }

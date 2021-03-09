@@ -433,11 +433,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // perf counter
   XSPerf("utilization", validCount)
-  XSPerf("full", !allowEnqueue)
+  XSPerf("full", validCount === StoreQueueSize.U)
+  XSPerf("not_allow_enqueue", !allowEnqueue)
   XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerf("mmioCnt", io.uncache.req.fire())
-  XSPerf("writeback", io.mmioStout.fire())
-  XSPerf("wbBlocked", io.mmioStout.valid && !io.mmioStout.ready)
+  XSPerf("mmio_wb_success", io.mmioStout.fire())
+  XSPerf("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready)
+  XSPerf("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
   XSPerf("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerf("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 

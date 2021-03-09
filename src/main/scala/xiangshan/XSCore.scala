@@ -10,16 +10,11 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCache, InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, Uncache, MemoryOpConstants, MissReq}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
-import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import sifive.blocks.inclusivecache.PrefetcherIO
 import utils._
 
 object hartIdCore extends (() => Int) {
@@ -50,7 +45,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
-  EnableSC: Boolean = false,
+  EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
@@ -116,7 +111,7 @@ case class XSCoreParameters
 
 trait HasXSParameter {
 
-  val core = Parameters.get.coreParameters
+  val coreParams = Parameters.get.coreParameters
   val env = Parameters.get.envParameters
 
   val XLEN = 64
@@ -125,77 +120,77 @@ trait HasXSParameter {
 
   def xLen = 64
 
-  val HasMExtension = core.HasMExtension
-  val HasCExtension = core.HasCExtension
-  val HasDiv = core.HasDiv
-  val HasIcache = core.HasICache
-  val HasDcache = core.HasDCache
-  val EnableStoreQueue = core.EnableStoreQueue
-  val AddrBits = core.AddrBits // AddrBits is used in some cases
-  val VAddrBits = core.VAddrBits // VAddrBits is Virtual Memory addr bits
-  val PAddrBits = core.PAddrBits // PAddrBits is Phyical Memory addr bits
+  val HasMExtension = coreParams.HasMExtension
+  val HasCExtension = coreParams.HasCExtension
+  val HasDiv = coreParams.HasDiv
+  val HasIcache = coreParams.HasICache
+  val HasDcache = coreParams.HasDCache
+  val EnableStoreQueue = coreParams.EnableStoreQueue
+  val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
+  val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
-  val HasFPU = core.HasFPU
-  val FetchWidth = core.FetchWidth
+  val HasFPU = coreParams.HasFPU
+  val FetchWidth = coreParams.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
-  val EnableBPU = core.EnableBPU
-  val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
-  val EnableRAS = core.EnableRAS
-  val EnableLB = core.EnableLB
-  val EnableLoop = core.EnableLoop
-  val EnableSC = core.EnableSC
-  val EnbaleTlbDebug = core.EnbaleTlbDebug
-  val HistoryLength = core.HistoryLength
-  val BtbSize = core.BtbSize
+  val EnableBPU = coreParams.EnableBPU
+  val EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
+  val EnableRAS = coreParams.EnableRAS
+  val EnableLB = coreParams.EnableLB
+  val EnableLoop = coreParams.EnableLoop
+  val EnableSC = coreParams.EnableSC
+  val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
+  val HistoryLength = coreParams.HistoryLength
+  val BtbSize = coreParams.BtbSize
   // val BtbWays = 4
   val BtbBanks = PredictWidth
   // val BtbSets = BtbSize / BtbWays
-  val JbtacSize = core.JbtacSize
-  val JbtacBanks = core.JbtacBanks
-  val RasSize = core.RasSize
-  val CacheLineSize = core.CacheLineSize
+  val JbtacSize = coreParams.JbtacSize
+  val JbtacBanks = coreParams.JbtacBanks
+  val RasSize = coreParams.RasSize
+  val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
-  val UBtbWays = core.UBtbWays
-  val BtbWays = core.BtbWays
-  val EnableL1plusPrefetcher = core.EnableL1plusPrefetcher
-  val IBufSize = core.IBufSize
-  val DecodeWidth = core.DecodeWidth
-  val RenameWidth = core.RenameWidth
-  val CommitWidth = core.CommitWidth
-  val BrqSize = core.BrqSize
-  val FtqSize = core.FtqSize
-  val IssQueSize = core.IssQueSize
+  val UBtbWays = coreParams.UBtbWays
+  val BtbWays = coreParams.BtbWays
+  val EnableL1plusPrefetcher = coreParams.EnableL1plusPrefetcher
+  val IBufSize = coreParams.IBufSize
+  val DecodeWidth = coreParams.DecodeWidth
+  val RenameWidth = coreParams.RenameWidth
+  val CommitWidth = coreParams.CommitWidth
+  val BrqSize = coreParams.BrqSize
+  val FtqSize = coreParams.FtqSize
+  val IssQueSize = coreParams.IssQueSize
   val BrTagWidth = log2Up(BrqSize)
-  val NRPhyRegs = core.NRPhyRegs
+  val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val RoqSize = core.RoqSize
-  val LoadQueueSize = core.LoadQueueSize
-  val StoreQueueSize = core.StoreQueueSize
-  val dpParams = core.dpParams
-  val exuParameters = core.exuParameters
-  val NRIntReadPorts = core.NRIntReadPorts
-  val NRIntWritePorts = core.NRIntWritePorts
+  val RoqSize = coreParams.RoqSize
+  val LoadQueueSize = coreParams.LoadQueueSize
+  val StoreQueueSize = coreParams.StoreQueueSize
+  val dpParams = coreParams.dpParams
+  val exuParameters = coreParams.exuParameters
+  val NRIntReadPorts = coreParams.NRIntReadPorts
+  val NRIntWritePorts = coreParams.NRIntWritePorts
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
-  val NRFpReadPorts = core.NRFpReadPorts
-  val NRFpWritePorts = core.NRFpWritePorts
-  val LoadPipelineWidth = core.LoadPipelineWidth
-  val StorePipelineWidth = core.StorePipelineWidth
-  val StoreBufferSize = core.StoreBufferSize
-  val RefillSize = core.RefillSize
-  val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
-  val TlbEntrySize = core.TlbEntrySize
-  val TlbSPEntrySize = core.TlbSPEntrySize
-  val PtwL3EntrySize = core.PtwL3EntrySize
-  val PtwSPEntrySize = core.PtwSPEntrySize
-  val PtwL1EntrySize = core.PtwL1EntrySize
-  val PtwL2EntrySize = core.PtwL2EntrySize
-  val NumPerfCounters = core.NumPerfCounters
-  val NrExtIntr = core.NrExtIntr
-  val PerfRealTime = core.PerfRealTime
-  val PerfIntervalBits = core.PerfIntervalBits
+  val NRFpReadPorts = coreParams.NRFpReadPorts
+  val NRFpWritePorts = coreParams.NRFpWritePorts
+  val LoadPipelineWidth = coreParams.LoadPipelineWidth
+  val StorePipelineWidth = coreParams.StorePipelineWidth
+  val StoreBufferSize = coreParams.StoreBufferSize
+  val RefillSize = coreParams.RefillSize
+  val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val TlbEntrySize = coreParams.TlbEntrySize
+  val TlbSPEntrySize = coreParams.TlbSPEntrySize
+  val PtwL3EntrySize = coreParams.PtwL3EntrySize
+  val PtwSPEntrySize = coreParams.PtwSPEntrySize
+  val PtwL1EntrySize = coreParams.PtwL1EntrySize
+  val PtwL2EntrySize = coreParams.PtwL2EntrySize
+  val NumPerfCounters = coreParams.NumPerfCounters
+  val NrExtIntr = coreParams.NrExtIntr
+  val PerfRealTime = coreParams.PerfRealTime
+  val PerfIntervalBits = coreParams.PerfIntervalBits
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -203,19 +198,21 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
     dataECC = Some("parity"),
-    replacer = Some("setlru"),
+    replacer = Some("setplru"),
     nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 8
   )
 
   val dcacheParameters = DCacheParameters(
-    tagECC = Some("none"),
-    dataECC = Some("none"),
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
     nReleaseEntries = 16,
@@ -413,8 +410,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
   ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(x => intOutValid(x))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(x => fpOutValid(x))
+  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(WireInit(_))
+  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(WireInit(_))
   memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
   memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
 
@@ -422,7 +419,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val fpBlockWakeUpInt = fpExuConfigs
     .zip(floatBlock.io.wakeUpOut.slow)
     .filter(_._1.writeIntRf)
-    .map(_._2).map(x => intOutValid(x, connectReady = true))
+    .map(_._2)
 
   intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
   val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
@@ -466,7 +463,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
-  memBlock.io.tlbCsr <> RegNext(integerBlock.io.csrio.tlb)
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -485,7 +482,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
-  io.l2_pf_enable := RegNext(integerBlock.io.csrio.customCtrl.l2_pf_enable)
+  io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
 
   if (!env.FPGAPlatform) {
     val id = hartIdCore()
