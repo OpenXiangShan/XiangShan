@@ -3,9 +3,8 @@ package top
 import chisel3._
 import chipsalliance.rocketchip.config
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4MasterParameters, AXI4MasterPortParameters, AXI4SlaveNode, AXI4SlavePortParameters, AXI4ToTL, AXI4Xbar}
+import freechips.rocketchip.amba.axi4.AXI4Xbar
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLErrorEvaluator, TLMasterParameters, TLXbar}
 
 class SimMMIO()(implicit p: config.Parameters) extends LazyModule {
 

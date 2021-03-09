@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate}
+import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerf}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -49,6 +49,7 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   def bankNum = 2
   def bankRows = blockRows / bankNum
   def blockEcodedBits = blockRows * encRowBits
+  def plruAccessNum = 2  //hit and miss
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
   // def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
@@ -91,6 +92,11 @@ object L1plusCacheMetadata {
     meta
   }
 }
+
+
+/*  tagIdx is from the io.in.req (Wire)
+ *  validIdx is from s1_addr (Register)
+ */
 
 class L1plusCacheMetaReadReq extends L1plusCacheBundle {
   val tagIdx    = UInt(idxBits.W)
@@ -384,6 +390,8 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   pipe.io.data_resp <> dataArray.io.resp
   pipe.io.meta_read <> metaArray.io.read
   pipe.io.meta_resp <> metaArray.io.resp
+  pipe.io.miss_meta_write.valid := missQueue.io.meta_write.valid
+  pipe.io.miss_meta_write.bits <> missQueue.io.meta_write.bits
 
   missQueue.io.req <> pipe.io.miss_req
   bus.a <> missQueue.io.mem_acquire
@@ -479,6 +487,7 @@ class L1plusCachePipe extends L1plusCacheModule
     val meta_read  = DecoupledIO(new L1plusCacheMetaReadReq)
     val meta_resp  = Input(Vec(nWays, new L1plusCacheMetadata))
     val miss_req   = DecoupledIO(new L1plusCacheMissReq)
+    val miss_meta_write = Flipped(ValidIO(new L1plusCacheMetaWriteReq))
     val inflight_req_idxes = Output(Vec(2, Valid(UInt())))
     val empty = Output(Bool())
   })
@@ -557,7 +566,13 @@ class L1plusCachePipe extends L1plusCacheModule
 
   //replacement marker
   val replacer = cacheParams.replacement
-  when(s2_valid && s2_hit){ replacer.access(get_idx(s2_req.addr), s2_hit_way ) }
+  val (touch_sets, touch_ways) = ( Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets).W))),  Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
+
+  touch_sets(0)       := get_idx(s2_req.addr)  
+  touch_ways(0).valid := s2_valid && s2_hit
+  touch_ways(0).bits  := s2_hit_way
+
+  replacer.access(touch_sets, touch_ways)
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
@@ -590,6 +605,11 @@ class L1plusCachePipe extends L1plusCacheModule
   io.miss_req.bits.addr   := s2_req.addr
   io.miss_req.bits.way_en := replaced_way_en
 
+  touch_sets(1)       := io.miss_meta_write.bits.tagIdx
+  touch_ways(1).valid := io.miss_meta_write.valid
+  touch_ways(1).bits  := OHToUInt(io.miss_meta_write.bits.way_en.asUInt)
+
+
   s2_passdown := s2_valid && ((s2_hit && io.resp.ready) || (!s2_hit && io.miss_req.ready))
 
   val resp = io.resp
@@ -615,6 +635,10 @@ class L1plusCachePipe extends L1plusCacheModule
         )
       }
   }
+
+  XSPerf("req", s0_valid)
+  XSPerf("miss", s2_valid && !s2_hit)
+
 }
 
 class L1plusCacheMissReq extends L1plusCacheBundle

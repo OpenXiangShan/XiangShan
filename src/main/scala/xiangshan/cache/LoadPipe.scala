@@ -138,8 +138,7 @@ class LoadPipe extends DCacheModule {
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
   // Bank conflict on data arrays
-  // For now, we use DuplicatedDataArray, so no bank conflicts
-  val s2_nack_data = false.B
+  val s2_nack_data = RegEnable(!io.data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
   // select the row we are interested in
@@ -159,7 +158,7 @@ class LoadPipe extends DCacheModule {
   // val s2_decoded = cacheParams.dataCode.decode(s2_word)
   // val s2_word_decoded = s2_decoded.corrected
   val s2_word_decoded = s2_word(wordBits - 1, 0)
-  assert(RegNext(!(s2_valid && s2_tag_match && cacheParams.dataCode.decode(s2_word).uncorrectable)))
+  assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
 
 
   // only dump these signals when they are actually valid

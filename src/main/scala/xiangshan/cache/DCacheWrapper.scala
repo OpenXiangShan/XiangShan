@@ -134,7 +134,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val dataArray = Module(new TransposeDuplicatedDataArray)
+  val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
   /*
   dataArray.dump()
@@ -163,8 +163,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // MainPipe contend MetaRead with Load 0
   // give priority to MainPipe
   val MetaReadPortCount = 2
-  val MainPipeMetaReadPort = 1
-  val LoadPipeMetaReadPort = 0
+  val MainPipeMetaReadPort = 0
+  val LoadPipeMetaReadPort = 1
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
@@ -190,8 +190,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // give priority to MainPipe
   val DataReadPortCount = 2
-  val MainPipeDataReadPort = 1
-  val LoadPipeDataReadPort = 0
+  val MainPipeDataReadPort = 0
+  val LoadPipeDataReadPort = 1
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 

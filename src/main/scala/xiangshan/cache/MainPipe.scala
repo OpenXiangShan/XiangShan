@@ -156,9 +156,9 @@ class MainPipe extends DCacheModule {
 
   val meta_ready = io.meta_read.ready
   val data_ready = io.data_read.ready
-  io.req.ready := meta_ready && !set_conflict && s1_ready && !(s3_valid && update_meta)
+  io.req.ready := meta_ready && !set_conflict && s1_ready //&& !(s3_valid && update_meta)
 
-  io.meta_read.valid := io.req.valid && !set_conflict/* && s1_ready*/ && !(s3_valid && update_meta)
+  io.meta_read.valid := io.req.valid && !set_conflict && s1_ready
   val meta_read = io.meta_read.bits
   meta_read.idx := get_idx(s0_req.addr)
   meta_read.way_en := ~0.U(nWays.W)
@@ -208,7 +208,7 @@ class MainPipe extends DCacheModule {
   // read data, get meta, check hit or miss
   val s1_valid = RegInit(false.B)
   val s1_need_data = RegEnable(need_data, s0_fire)
-  val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.data_read.fire())
+  val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.data_read.ready)
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_set = get_idx(s1_req.addr)
 
@@ -264,7 +264,8 @@ class MainPipe extends DCacheModule {
   val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
 
   // read data
-  io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
+  // io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
+  io.data_read.valid := s1_fire && s1_need_data
   val data_read = io.data_read.bits
   data_read.rmask := s1_rmask
   data_read.way_en := s1_way_en
@@ -577,9 +578,10 @@ class MainPipe extends DCacheModule {
   wb_req.hasData := writeback_data
   wb_req.data := s3_data_decoded
 
-  s3_fire := s3_valid && (!need_writeback || io.wb_req.ready) &&
+  // for write has higher priority than read, meta/data array ready is not needed
+  s3_fire := s3_valid && (!need_writeback || io.wb_req.ready)/* &&
                          (!update_meta || io.meta_write.ready) &&
-                         (!need_write_data || io.data_write.ready)
+                         (!need_write_data || io.data_write.ready)*/
 
   // --------------------------------------------------------------------------------
   // update replacement policy

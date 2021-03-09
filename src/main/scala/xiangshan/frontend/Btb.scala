@@ -200,6 +200,11 @@ class BTB extends BasePredictor with BTBParams{
   data.io.w.apply(updateValid, dataWrite, updateRow, updateWayMask)
   edata.io.w.apply(updateValid && new_extended, u.target, updateRow, "b1".U)
 
+  val alloc_conflict =
+    VecInit((0 until BtbBanks).map(i =>
+      if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i) && if2_mask(i)))
+  XSPerf("btb_alloc_conflict", PopCount(alloc_conflict))
+
   if (BPUDebug && debug) {
     val debug_verbose = true
     val validLatch = RegNext(io.pc.valid)

@@ -114,7 +114,7 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN + 1,
       inBlockFastPorts.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -171,7 +171,9 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(
+    x => x._1 <> fpOutValid(x._2, connectReady = true)
+  )
 
   for((exu, i) <- exeUnits.zipWithIndex){
     val out, outReg = Wire(DecoupledIO(new ExuOutput))

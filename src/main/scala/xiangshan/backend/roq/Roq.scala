@@ -415,7 +415,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.roqIdx === deqPtr
-  val deqHasException = deqHasExceptionOrFlush && !exceptionDataRead.bits.flushPipe
+  val deqHasException = deqHasExceptionOrFlush && exceptionDataRead.bits.exceptionVec.asUInt.orR
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
   val isFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe
@@ -794,6 +794,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
+  XSPerf("clock_cycle", 1.U)
   XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))

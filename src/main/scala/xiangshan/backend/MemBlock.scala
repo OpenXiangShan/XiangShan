@@ -167,7 +167,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -230,7 +230,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
-  dtlb.io.csr    <> io.tlbCsr
+  dtlb.io.csr    <> RegNext(io.tlbCsr)
   if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
     difftestIO.fromSQ <> lsq.difftestIO.fromSQ

@@ -112,7 +112,7 @@ class ReplacementAccessBundle extends DCacheBundle {
   val way = UInt(log2Up(nWays).W)
 }
 
-abstract class TransposeAbstractDataArray extends DCacheModule {
+abstract class AbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
@@ -168,9 +168,9 @@ abstract class TransposeAbstractDataArray extends DCacheModule {
   }
 }
 
-class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
+class DuplicatedDataArray extends AbstractDataArray {
   val singlePort = true
-  val readHighPriority = true
+  val readHighPriority = false
   def eccBits = encWordBits - wordBits
 
   def getECCFromEncWord(encWord: UInt) = {
@@ -263,7 +263,7 @@ class TransposeDuplicatedDataArray extends TransposeAbstractDataArray {
 
         // data read
         // read all ways and choose one after resp
-        val ren = io.read(j).valid && rmask(r)
+        val ren = io.read(j).fire() && rmask(r)
         data_array.io.r.req.valid := ren
         data_array.io.r.req.bits.apply(setIdx = raddr)
         (0 until rowWords).foreach(k => resp(k)(w) := data_array.io.r.resp.data(0)(wordBits * (k + 1) - 1, wordBits * k))
@@ -306,7 +306,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     shouldReset=false, holdRead=false, singlePort=true))
 
   // tag write
-  val wen = rst || io.write.fire()
+  val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx=waddr,
@@ -319,8 +319,8 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
 
-  io.write.ready := !ren
-  io.read.ready := !rst
+  io.write.ready := !rst
+  io.read.ready := !wen
 
   def dumpRead() = {
     when (io.read.fire()) {
@@ -369,7 +369,8 @@ class DuplicatedMetaArray extends DCacheModule {
     meta(w).io.read  <> io.read(w)
     io.resp(w) <> meta(w).io.resp
   }
-  io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
+  // io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
+  io.write.ready := true.B
 
   def dumpRead() = {
     (0 until LoadPipelineWidth) map { w =>
