@@ -2,10 +2,8 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
+import utils._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-
-import utils.{XSDebug, OneHot, ReplacementPolicy, XSPerf}
 
 class MainPipeReq extends DCacheBundle
 {
