@@ -31,6 +31,9 @@ class LoadPipe extends DCacheModule {
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
+
+    // load fast wakeup should be disabled when data read is not ready
+    val disable_ld_fast_wakeup = Input(Bool())
   })
 
   val s1_ready = Wire(Bool())
@@ -197,6 +200,7 @@ class LoadPipe extends DCacheModule {
   }
 
   io.lsu.s1_hit_way := s1_tag_match_way
+  io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------

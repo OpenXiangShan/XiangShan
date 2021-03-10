@@ -89,6 +89,7 @@ class DCacheLoadIO extends DCacheWordIO
   // cycle 1: physical address: s1_paddr
   val s1_paddr = Output(UInt(PAddrBits.W))
   val s1_hit_way = Input(UInt(nWays.W))
+  val s1_disable_fast_wakeup = Input(Bool())
 }
 
 class DCacheLineIO extends DCacheBundle
@@ -218,6 +219,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // replay and nack not needed anymore
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
+
+    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup
   }
 
   //----------------------------------------

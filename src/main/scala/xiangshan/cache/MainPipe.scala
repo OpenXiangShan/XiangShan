@@ -89,6 +89,9 @@ class MainPipe extends DCacheModule {
 
     // update state vec in replacement algo
     val replace_access = Flipped(Vec(LoadPipelineWidth, ValidIO(new ReplacementAccessBundle)))
+
+    // load fast wakeup should be disabled when data read is not ready
+    val disable_ld_fast_wakeup = Output(Bool())
   })
 
   def getMeta(encMeta: UInt): UInt = {
@@ -582,6 +585,10 @@ class MainPipe extends DCacheModule {
   s3_fire := s3_valid && (!need_writeback || io.wb_req.ready)/* &&
                          (!update_meta || io.meta_write.ready) &&
                          (!need_write_data || io.data_write.ready)*/
+
+  // Technically, load fast wakeup should be disabled when data_write.valid is true,
+  // but for timing purpose, we loose the condition to s3_valid, ignoring whether wb is ready or not.
+  io.disable_ld_fast_wakeup := need_write_data && s3_valid
 
   // --------------------------------------------------------------------------------
   // update replacement policy
