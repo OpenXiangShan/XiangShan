@@ -65,6 +65,7 @@ case class XSCoreParameters
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
   FtqSize: Int = 48,
+  EnableLoadFastWakeUp: Boolean = false, // NOTE: not supported now, make it false
   IssQueSize: Int = 12,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
@@ -163,6 +164,7 @@ trait HasXSParameter {
   val BrqSize = coreParams.BrqSize
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
+  val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
@@ -377,6 +379,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val integerBlock = Module(new IntegerBlock(
     fastWakeUpIn = Seq(),
     slowWakeUpIn = fpExuConfigs.filter(_.writeIntRf) ++ loadExuConfigs,
+    memFastWakeUpIn  = loadExuConfigs,
     fastWakeUpOut = intBlockFastWakeUp,
     slowWakeUpOut = intBlockSlowWakeUp
   ))
@@ -429,6 +432,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
   integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
+  integerBlock.io.memFastWakeUp <> memBlock.io.ldFastWakeUpInt
 
   floatBlock.io.intWakeUpFp <> intBlockWakeUpFp
   floatBlock.io.memWakeUpFp <> memBlockWakeUpFp

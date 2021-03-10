@@ -291,8 +291,8 @@ class ReservationStationSelect
   val findBubble = Cat(bubbleMask).orR
   val haveBubble = findBubble && (bubblePtr < tailPtr.asUInt)
   val bubbleIndex = indexQueue(bubblePtr)
-  val bubbleValid = haveBubble  && (if (feedback) true.B 
-                                    else if (nonBlocked) !selectValid 
+  val bubbleValid = haveBubble  && (if (feedback) true.B
+                                    else if (nonBlocked) !selectValid
                                     else Mux(isFull, true.B, !selectValid))
   val bubbleReg = RegNext(bubbleValid)
   val bubblePtrReg = RegNext(Mux(moveMask(bubblePtr), bubblePtr-1.U, bubblePtr))
@@ -504,12 +504,14 @@ class ReservationStationCtrl
   val srcUpdate = Wire(Vec(iqSize, Vec(srcNum, Bool())))
   val srcUpdateListen = Wire(Vec(iqSize, Vec(srcNum, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
   srcUpdateListen.map(a => a.map(b => b.map(c => c := false.B )))
+  srcUpdateListen.suggestName(s"srcUpdateListen")
+  val srcUpdateVecReg = RegNext(srcUpdateListen)
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
       if (exuCfg == Exu.stExeUnitCfg && j == 0) {
-        srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j).zip(fastPortsCfg ++ slowPortsCfg).filter(_._2.writeIntRf).map(_._1)).orR
+        srcUpdate(i)(j) := Cat(srcUpdateVecReg(i)(j).zip(fastPortsCfg ++ slowPortsCfg).filter(_._2.writeIntRf).map(_._1)).orR
       } else {
-        srcUpdate(i)(j) := Cat(srcUpdateListen(i)(j)).orR
+        srcUpdate(i)(j) := Cat(srcUpdateVecReg(i)(j)).orR
       }
     }
   }
@@ -527,13 +529,19 @@ class ReservationStationCtrl
       srcQueue(enqPtrReg)(1) := true.B
     }
   }
+  val srcQueueWire = VecInit((0 until srcQueue.size).map(i => {
+    VecInit((0 until srcQueue(i).size).map{j =>
+      srcQueue(i)(j) || srcUpdate(i)(j)
+    })
+  }))
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
-      when (srcUpdate(i)(j)) { srcQueue(i)(j) := true.B }
+      when (srcQueueWire(i)(j) && !(enqPtr === i.U && io.in.valid)) { srcQueue(i)(j) := true.B }
     }
   }
+
   // load wait store
-  io.readyVec := srcQueue.map(Cat(_).andR)
+  io.readyVec := srcQueueWire.map(Cat(_).andR)
   if (exuCfg == Exu.ldExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
@@ -548,7 +556,7 @@ class ReservationStationCtrl
     }
     ldWait.suggestName(s"${this.name}_ldWait")
     sqIdx.suggestName(s"${this.name}_sqIdx")
-    io.readyVec := srcQueue.map(Cat(_).andR).zip(ldWait).map{ case (s, l) => s&l }
+    io.readyVec := srcQueueWire.map(Cat(_).andR).zip(ldWait).map{ case (s, l) => s&l }
   }
 
   val redirectHit = io.redirectVec(selPtr)
@@ -587,7 +595,7 @@ class ReservationStationCtrl
     val asynUop = Reg(Vec(iqSize, new fastSendUop))
     when (enqEn) { asynUop(enqPtr) := (Wire(new fastSendUop)).apply(enqUop) }
     val asynIdxUop = (0 until iqSize).map(i => asynUop(io.indexVec(i)) )
-    val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueue(io.indexVec(i))).andR )
+    val readyIdxVec = (0 until iqSize).map(i => io.validVec(i) && Cat(srcQueueWire(io.indexVec(i))).andR )
     val fastAsynUop = ParallelPriorityMux(readyIdxVec zip asynIdxUop)
     val fastRoqIdx = ParallelPriorityMux(readyIdxVec zip (0 until iqSize).map(i => roqIdx(io.indexVec(i))))
     val fastSentUop = Wire(new MicroOp)
@@ -717,7 +725,7 @@ class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int, writePort: I
   for (i <- 0 until numEntries) {
     when (Cat(wen(i)).orR) {
       value(i) := ParallelMux(wen(i) zip data)
-      assert(RegNext(PopCount(wen(i))===0.U || PopCount(wen(i))===1.U), s"${i}")
+      // assert(RegNext(PopCount(wen(i))===0.U || PopCount(wen(i))===1.U), s"${i}")
     }
   }
 
