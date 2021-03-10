@@ -31,7 +31,6 @@ case class DCacheParameters
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
-  def replacement = ReplacementPolicy.fromString(replacer, nWays, nSets)
 }
 
 trait HasDCacheParameters extends HasL1CacheParameters {

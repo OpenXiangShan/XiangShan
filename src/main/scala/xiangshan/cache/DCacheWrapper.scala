@@ -290,6 +290,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
 
+  for(i <- 0 until LoadPipelineWidth) {
+    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
+  }
+
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
@@ -312,19 +316,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire())
   }
-
-  //----------------------------------------
-  // update replacement policy
-  val replacer = cacheParams.replacement
-  val access_bundles = ldu.map(_.io.replace_access) ++ Seq(mainPipe.io.replace_access)
-  val sets = access_bundles.map(_.bits.set)
-  val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
-  (touch_ways zip access_bundles).map{ case (w, access) =>
-    w.valid := access.valid
-    w.bits := access.bits.way
-  }
-  replacer.access(sets, touch_ways)
-
 
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {
