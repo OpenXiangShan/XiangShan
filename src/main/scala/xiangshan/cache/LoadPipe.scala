@@ -101,7 +101,7 @@ class LoadPipe extends DCacheModule {
   // only needs to read the specific row
   data_read.rmask := UIntToOH(get_row(s1_addr))
   io.data_read.valid := s1_fire && !s1_nack
-  
+
   io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
@@ -121,7 +121,7 @@ class LoadPipe extends DCacheModule {
   .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
-  
+
   // hit, miss, nack, permission checking
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
@@ -190,13 +190,13 @@ class LoadPipe extends DCacheModule {
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
-  io.lsu.s2_hit_way := s2_tag_match_way
   assert(RegNext(!(resp.valid && !io.lsu.resp.ready)), "lsu should be ready in s2")
 
   when (resp.valid) {
     resp.bits.dump()
   }
 
+  io.lsu.s1_hit_way := s1_tag_match_way
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------

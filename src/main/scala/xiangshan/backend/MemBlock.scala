@@ -69,6 +69,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val wakeUpOutInt = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val wakeUpOutFp = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
+    val ldFastWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, 0))
+
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -142,6 +144,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // load has uncertain latency, so only use external wake up data
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
+      .map(a => (a._1, a._2.bits.data)) ++
+      (if (cfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
+
     val fastPortsCnt = fastDatas.length
 
     val slowPorts = (
@@ -181,7 +186,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 
-    rs.io.fastDatas <> fastDatas.map(_._2.bits.data)
+    rs.io.fastDatas <> fastDatas.map(_._2)
     rs.io.slowPorts <> slowPorts.map(_._2)
 
     // exeUnits(i).io.redirect <> redirect
@@ -196,7 +201,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for(rs <- reservationStations){
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
-      .map(_._2)
+      .map(_._2) ++
+      (if (rs.exuCfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
@@ -208,6 +214,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       assert(w.ready === true.B)
   }
 
+  io.ldFastWakeUpInt.fastUops <> loadUnits.map(_.io.fastUop)
+  io.ldFastWakeUpInt.fast <> loadUnits.map(_.io.ldout).map(decoupledIOToValidIO)
   io.wakeUpOutInt.slow <> exeWbReqs
   io.wakeUpOutFp.slow <> wakeUpFp
   io.wakeUpIn.slow.foreach(_.ready := true.B)
@@ -243,7 +251,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
- 
+
     // Lsq to load unit's rs
     reservationStations(i).io.stIssuePtr := lsq.io.issuePtrExt
 
@@ -272,7 +280,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
-    // sync issue info to rs 
+    // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
 
@@ -298,8 +306,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncache        <> uncache.io.lsq
   // delay dcache refill for 1 cycle for better timing
   // TODO: remove RegNext after fixing refill paddr timing
-  // lsq.io.dcache         <> dcache.io.lsu.lsq 
-  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq) 
+  // lsq.io.dcache         <> dcache.io.lsu.lsq
+  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in

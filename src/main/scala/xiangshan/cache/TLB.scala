@@ -481,9 +481,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val waiting = RegInit(false.B)
   when (ptw.req.fire()) {
     waiting := true.B
-  }.elsewhen (sfence.valid || ptw.resp.valid) {
+  }
+  when (sfence.valid || ptw.resp.valid) {
     waiting := false.B
   }
+  assert(!ptw.resp.valid || waiting)
+
   // ptw <> DontCare // TODO: need check it
   ptw.req.valid := hasMissReq && !waiting && !RegNext(refill)
   ptw.resp.ready := waiting
