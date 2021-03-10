@@ -605,10 +605,15 @@ class L1plusCachePipe extends L1plusCacheModule
   io.miss_req.bits.addr   := s2_req.addr
   io.miss_req.bits.way_en := replaced_way_en
 
+  val wayNum =  OHToUInt(io.miss_meta_write.bits.way_en.asUInt)
   touch_sets(1)       := io.miss_meta_write.bits.tagIdx
   touch_ways(1).valid := io.miss_meta_write.valid
-  touch_ways(1).bits  := OHToUInt(io.miss_meta_write.bits.way_en.asUInt)
-
+  touch_ways(1).bits  := wayNum
+  (0 until nWays).map{ w => 
+    XSPerf("hit_way_" + Integer.toString(w, 10),  s2_valid && s2_hit && s2_hit_way === w.U)
+    XSPerf("refill_way_" + Integer.toString(w, 10), io.miss_meta_write.valid && wayNum === w.U)
+    XSPerf("access_way_" + Integer.toString(w, 10), (io.miss_meta_write.valid && wayNum === w.U) || (s2_valid && s2_hit && s2_hit_way === w.U))
+  }
 
   s2_passdown := s2_valid && ((s2_hit && io.resp.ready) || (!s2_hit && io.miss_req.ready))
 

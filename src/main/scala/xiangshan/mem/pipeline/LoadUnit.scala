@@ -266,6 +266,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
+    val fastUop = ValidIO(new MicroOp) // early wakup signal generated in load_s1
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -300,6 +301,13 @@ class LoadUnit extends XSModule with HasLoadHelper {
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
   io.lsq.forward.sqIdxMask := sqIdxMaskReg
+
+  // // use s2_hit_way to select data received in s1
+  // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
+  // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
+
+  io.fastUop.valid := io.dcache.s1_hit_way.orR && load_s1.io.in.valid
+  io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
