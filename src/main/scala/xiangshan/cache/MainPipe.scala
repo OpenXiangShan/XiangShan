@@ -588,7 +588,7 @@ class MainPipe extends DCacheModule {
 
   // Technically, load fast wakeup should be disabled when data_write.valid is true,
   // but for timing purpose, we loose the condition to s3_valid, ignoring whether wb is ready or not.
-  io.disable_ld_fast_wakeup := need_write_data && s3_valid
+  io.disable_ld_fast_wakeup := need_write_data && s3_valid || s1_need_data && s1_valid
 
   // --------------------------------------------------------------------------------
   // update replacement policy
