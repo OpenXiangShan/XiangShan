@@ -415,6 +415,7 @@ class Tage extends BaseTage {
 
 
   val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i)))
+  val updateMisPreds = u.mispred zip u.valids map {case (m, v) => m && v}
 
   // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
@@ -469,7 +470,7 @@ class Tage extends BaseTage {
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
     val isUpdateTaken = updateValid && u.takens(w)
-    val updateMisPred = updateTageMisPreds(w)
+    val updateMisPred = updateMisPreds(w)
     when (updateValid) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits

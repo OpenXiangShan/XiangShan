@@ -34,21 +34,21 @@ class SCUpdate(val ctrBits: Int = 6) extends SCBundle {
   val takens = Vec(TageBanks, Bool())
 }
 
-class SCTableIO extends SCBundle {
+class SCTableIO(val ctrBits: Int = 6) extends SCBundle {
   val req = Input(Valid(new SCReq))
-  val resp = Output(Vec(TageBanks, new SCResp))
-  val update = Input(new SCUpdate)
+  val resp = Output(Vec(TageBanks, new SCResp(ctrBits)))
+  val update = Input(new SCUpdate(ctrBits))
 }
 
 @chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
   extends SCModule with HasFoldedHistory {
-  val io = IO(new SCTableIO)
+  val io = IO(new SCTableIO(ctrBits))
 
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
 
   def getIdx(hist: UInt, pc: UInt) = {
-    (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits.U))(log2Ceil(nRows)-1,0)
+    (compute_folded_hist(hist, log2Ceil(nRows)) ^ (pc >> (instOffsetBits+log2Ceil(TageBanks))))(log2Ceil(nRows)-1,0)
   }
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
@@ -163,9 +163,9 @@ class SCThreshold(val ctrBits: Int = 6) extends SCBundle {
   def satNeg(ctr: UInt = this.ctr) = ctr === 0.U
   def neutralVal = (1.U << (ctrBits - 1))
   val thres = UInt(8.W)
-  def initVal = 60.U
+  def initVal = 6.U
   def minThres = 6.U
-  def maxThres = 255.U
+  def maxThres = 31.U
   def update(cause: Bool): SCThreshold = {
     val res = Wire(new SCThreshold(this.ctrBits))
     val newCtr = satUpdate(this.ctr, this.ctrBits, cause)
@@ -205,7 +205,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
   
   val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
   val useThresholds = VecInit(scThresholds map (_.thres))
-  val updateThresholds = VecInit(useThresholds map (t => (t << 3) + 21.U))
+  val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
   
   val if3_scResps = VecInit(scTables.map(t => t.io.resp))
 
@@ -229,26 +229,23 @@ trait HasSC extends HasSCParameter { this: Tage =>
   // for sc ctrs
   def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
   // for tage ctrs
-  def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext - 4.S) << 1).asSInt + 1.S) << 3).asSInt
+  def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext -& 4.S) << 1).asSInt + 1.S) << 3).asSInt
 
   for (w <- 0 until TageBanks) {
     val scMeta = io.meta(w).scMeta
     scMeta := DontCare
     // do summation in if3
     val if3_scTableSums = VecInit(
-      (0 to 1) map { i => {
-          (0 until SCNTables) map { j => 
-            getCentered(if3_scResps(j)(w).ctr(i))
-          } reduce (_+_) // TODO: rewrite with adder tree
-        }
+      (0 to 1) map { i => 
+        ParallelSingedExpandingAdd(if3_scResps map (r => getCentered(r(w).ctr(i)))) // TODO: rewrite with wallace tree
       }
     )
 
     val providerCtr = if3_providerCtrs(w)
     val if3_pvdrCtrCentered = getPvdrCentered(providerCtr)
-    val if3_totalSums = VecInit(if3_scTableSums.map(_  + if3_pvdrCtrCentered))
+    val if3_totalSums = VecInit(if3_scTableSums.map(_  +& if3_pvdrCtrCentered))
     val if3_sumAbs = VecInit(if3_totalSums.map(_.abs.asUInt))
-    val if3_sumBelowThresholds = VecInit(if3_sumAbs zip useThresholds map {case (s, t) => s < t})
+    val if3_sumBelowThresholds = VecInit(if3_sumAbs map (_ <= useThresholds(w)))
     val if3_scPreds = VecInit(if3_totalSums.map (_ >= 0.S))
 
     val if4_sumBelowThresholds = RegEnable(if3_sumBelowThresholds, s3_fire)
@@ -289,7 +286,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       val taken = u.takens(w)
       val scOldCtrs = updateSCMeta.ctrs
       val pvdrCtr = updateTageMeta.providerCtr
-      val sum = scOldCtrs.map(getCentered).reduce(_+_) + getPvdrCentered(pvdrCtr)
+      val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
       val sumAbs = sum.abs.asUInt
       scUpdateTagePreds(w) := tagePred
       scUpdateTakens(w) := taken
@@ -303,11 +300,15 @@ trait HasSC extends HasSCParameter { this: Tage =>
       sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
       sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
-      when (scPred =/= taken || sumAbs < useThresholds(w)) {
+      val thres = useThresholds(w)
+      when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
         XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
+      }
 
+      val updateThres = updateThresholds(w)
+      when (scPred =/= taken || sumAbs < updateThres) {
         scUpdateMask.foreach(t => t(w) := true.B)
         XSDebug(sum < 0.S,
         p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
