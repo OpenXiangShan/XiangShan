@@ -2,10 +2,8 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
+import utils._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-
-import utils.{XSDebug, OneHot, ReplacementPolicy}
 
 class MainPipeReq extends DCacheBundle
 {
@@ -670,6 +668,30 @@ class MainPipe extends DCacheModule {
       XSDebug(s"$pipeline_stage_name ")
       req.dump()
     }
+  }
+
+  // performance counters
+  // penalty for each req in pipeline in average = pipe_total_penalty / pipe_req
+  XSPerf("pipe_req", s0_fire)
+  XSPerf("pipe_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
+
+  XSPerf("pipe_blocked_by_wbu", s3_valid && need_writeback && !io.wb_req.ready)
+  XSPerf("pipe_blocked_by_nack_data", s1_valid && s1_need_data && !io.data_read.ready)
+  XSPerf("pipe_reject_req_for_nack_meta", s0_valid && !meta_ready)
+  XSPerf("pipe_reject_req_for_set_conflict", s0_valid && set_conflict)
+
+  for (i <- 0 until LoadPipelineWidth) {
+    for (w <- 0 until nWays) {
+      XSPerf("load_pipe_" + Integer.toString(i,10) + "_access_way_" + Integer.toString(w, 10),
+        io.replace_access(i).valid && io.replace_access(i).bits.way === w.U)
+    }
+  }
+
+  for (w <- 0 until nWays) {
+    XSPerf("main_pipe_access_way_" + Integer.toString(w, 10),
+      access_bundle.valid && access_bundle.bits.way === w.U)
+    XSPerf("main_pipe_choose_way_" + Integer.toString(w, 10),
+      RegNext(s0_fire) && s1_repl_way_en === UIntToOH(w.U))
   }
 
 }

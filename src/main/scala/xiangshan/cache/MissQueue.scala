@@ -342,6 +342,15 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   when (state === s_release_entry) {
     state := s_invalid
   }
+
+  XSPerf("miss_req", io.req_valid && io.primary_ready)
+  XSPerf("miss_penalty", BoolStopWatch(io.req_valid && io.primary_ready, state === s_release_entry))
+  XSPerf("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req_valid && io.primary_ready, io.refill.valid, true))
+  XSPerf("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
+  XSPerf("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  XSPerf("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
+  XSPerf("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  XSPerf("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
 }
 
 
@@ -513,5 +522,6 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     XSDebug(p"block probe req ${Hexadecimal(io.probe_req)}\n")
   }
 
-  XSPerf("dcache_miss", io.req.fire())
+  XSPerf("miss_req", io.req.fire())
+  XSPerf("probe_blocked_by_miss", io.probe_block)
 }
