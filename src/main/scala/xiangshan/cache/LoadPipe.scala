@@ -219,6 +219,15 @@ class LoadPipe extends DCacheModule {
     }
   }
 
+  // performance counters
+  XSPerf("load_req", io.lsu.req.fire())
+  XSPerf("load_s1_kill", s1_fire && io.lsu.s1_kill)
+  XSPerf("load_hit_way", s1_fire && s1_tag_match)
+  XSPerf("load_replay", io.lsu.resp.fire() && resp.bits.replay)
+  XSPerf("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
+  XSPerf("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
+  XSPerf("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerf("load_miss", io.lsu.resp.fire() && resp.bits.miss)
   XSPerf("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerf("ideal_ld_fast_wakeup", io.data_read.fire() && s1_tag_match)
 }
