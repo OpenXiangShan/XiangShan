@@ -301,8 +301,8 @@ class ReservationStationSelect
                     Mux(RegNext(selectValid && (io.redirect.valid || io.flush)), 0.U, ~(0.U(iqSize.W))))
 
   // deq
-  val dequeue = if (feedback) bubbleReg
-                else          bubbleReg || issueFire
+  val dequeue = Mux(RegNext(io.flush), false.B,
+                    if (feedback) bubbleReg else bubbleReg || issueFire)
   val deqPtr = if (feedback) bubblePtrReg
                else if (nonBlocked) Mux(selectReg, selectPtrReg, bubblePtrReg)
                else Mux(bubbleReg, bubblePtrReg, selectPtrReg)
@@ -370,8 +370,9 @@ class ReservationStationSelect
   val enqueue = io.enq.fire() && !(io.redirect.valid || io.flush)
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
-  val nextTailPtr = Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
+  val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new CircularQueuePtr(iqSize)), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
   tailPtr := nextTailPtr
+  assert(!(tailPtr === 0.U.asTypeOf(new CircularQueuePtr(iqSize))) || Cat(stateQueue.map(_ === s_idle)).andR)
 
   val enqPtr = Mux(tailPtr.flag, deqPtr, tailPtr.value)
   val enqIdx = indexQueue(enqPtr)
