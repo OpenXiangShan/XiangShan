@@ -220,7 +220,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
 
-    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup
+    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup(w)
   }
 
   //----------------------------------------
