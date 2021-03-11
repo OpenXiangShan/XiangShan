@@ -169,15 +169,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
-  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(0).io.meta_read
+  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(LoadPipelineWidth - 1).io.meta_read
   metaReadArb.io.in(MainPipeMetaReadPort) <> mainPipe.io.meta_read
 
-  metaArray.io.read(0) <> metaReadArb.io.out
+  metaArray.io.read(LoadPipelineWidth - 1) <> metaReadArb.io.out
 
-  ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
-  mainPipe.io.meta_resp  <>  metaArray.io.resp(0)
+  ldu(LoadPipelineWidth - 1).io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
+  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
 
-  for (w <- 1 until LoadPipelineWidth) {
+  for (w <- 0 until (LoadPipelineWidth - 1)) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
     ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
@@ -196,15 +196,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
-  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
+  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.data_read
   dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.data_read
 
-  dataArray.io.read(0) <> dataReadArb.io.out
+  dataArray.io.read(LoadPipelineWidth - 1) <> dataReadArb.io.out
 
-  dataArray.io.resp(0) <> ldu(0).io.data_resp
-  dataArray.io.resp(0) <> mainPipe.io.data_resp
+  dataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.data_resp
+  dataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.data_resp
 
-  for (w <- 1 until LoadPipelineWidth) {
+  for (w <- 0 until (LoadPipelineWidth - 1)) {
     dataArray.io.read(w) <> ldu(w).io.data_read
     dataArray.io.resp(w) <> ldu(w).io.data_resp
   }
