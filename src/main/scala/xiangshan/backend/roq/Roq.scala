@@ -797,6 +797,12 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("clock_cycle", 1.U)
   XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
+  val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
+  XSPerf("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))
+  val commitSrc1MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src1MoveElim)
+  XSPerf("commitInstrSrc1MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc1MoveElim).map{ case (v, e) => v && e })))
+  val commitSrc2MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src2MoveElim)
+  XSPerf("commitInstrSrc2MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc2MoveElim).map{ case (v, e) => v && e })))
   val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
   val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
   XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(commitLoadValid)))
