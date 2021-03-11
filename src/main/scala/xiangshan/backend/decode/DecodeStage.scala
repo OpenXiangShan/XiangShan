@@ -36,8 +36,8 @@ class DecodeStage extends XSModule {
   }
   waittable.io.csrCtrl <> io.csrCtrl
 
-  val loadWaitBitSet = PopCount(VecInit((0 until DecodeWidth).map(i => waittable.io.rdata(i) && io.out(i).fire())))
-  XSPerf("loadWaitBitSet", loadWaitBitSet, acc = true) // rollback redirect generated
+  val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
+  XSPerf("loadWaitBitSet", loadWaitBitSet)
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
   XSPerf("utilization", PopCount(io.in.map(_.valid)))
