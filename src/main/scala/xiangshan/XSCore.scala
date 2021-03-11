@@ -65,7 +65,7 @@ case class XSCoreParameters
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
   FtqSize: Int = 48,
-  EnableLoadFastWakeUp: Boolean = false, // NOTE: not supported now, make it false
+  EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 12,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
