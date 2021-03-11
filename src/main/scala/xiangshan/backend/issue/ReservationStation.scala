@@ -393,8 +393,13 @@ class ReservationStationSelect
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
   XSPerf("sizeMultiCycle", iqSize.U)
-  XSPerf("enq", io.enq.fire())
-  XSPerf("deq", io.deq.fire())
+  XSPerf("enq", enqueue)
+  XSPerf("issueFire", issueFire)
+  XSPerf("issueValid", issueValid)
+  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
+  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
+  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
+  
   XSPerf("utilization", io.numExist)
   XSPerf("validUtil", PopCount(validQueue))
   XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
@@ -402,12 +407,7 @@ class ReservationStationSelect
   XSPerf("selectUtil", PopCount(selectMask))
   XSPerf("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
   XSPerf("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
-  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
-  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
 
-  XSPerf("issueValid", issueValid)
-  XSPerf("issueFire", issueFire)
-  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
   
   if (!feedback && nonBlocked) {
     XSPerf("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
