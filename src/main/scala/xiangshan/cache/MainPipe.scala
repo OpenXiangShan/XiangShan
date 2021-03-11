@@ -2,10 +2,8 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
+import utils._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-
-import utils.{XSDebug, OneHot}
 
 class MainPipeReq extends DCacheBundle
 {
@@ -88,7 +86,7 @@ class MainPipe extends DCacheModule {
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
 
     // update state vec in replacement algo
-    val replace_access = ValidIO(new ReplacementAccessBundle)
+    val replace_access = Flipped(Vec(LoadPipelineWidth, ValidIO(new ReplacementAccessBundle)))
   })
 
   def getMeta(encMeta: UInt): UInt = {
@@ -250,7 +248,7 @@ class MainPipe extends DCacheModule {
   val s1_hit_coh = s1_hit_meta.coh
 
   // replacement policy
-  val replacer = cacheParams.replacement
+  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way(s1_set)), RegNext(s1_repl_way_en))
   val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
@@ -585,9 +583,18 @@ class MainPipe extends DCacheModule {
 
   // --------------------------------------------------------------------------------
   // update replacement policy
-  io.replace_access.valid := RegNext(s3_fire) && (RegNext(update_meta) || RegNext(need_write_data))
-  io.replace_access.bits.set := RegNext(get_idx(s3_req.addr))
-  io.replace_access.bits.way := RegNext(s3_way_en)
+  val access_bundle = Wire(ValidIO(new ReplacementAccessBundle))
+  access_bundle.valid := RegNext(s3_fire && (update_meta || need_write_data))
+  access_bundle.bits.set := RegNext(get_idx(s3_req.addr))
+  access_bundle.bits.way := RegNext(s3_way_en)
+  val access_bundles = io.replace_access.toSeq ++ Seq(access_bundle)
+  val sets = access_bundles.map(_.bits.set)
+  val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
+  (touch_ways zip access_bundles).map{ case (w, access) =>
+    w.valid := access.valid
+    w.bits := access.bits.way
+  }
+  replacer.access(sets, touch_ways)
 
   // --------------------------------------------------------------------------------
   // send store/amo miss to miss queue
@@ -661,6 +668,30 @@ class MainPipe extends DCacheModule {
       XSDebug(s"$pipeline_stage_name ")
       req.dump()
     }
+  }
+
+  // performance counters
+  // penalty for each req in pipeline in average = pipe_total_penalty / pipe_req
+  XSPerf("pipe_req", s0_fire)
+  XSPerf("pipe_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
+
+  XSPerf("pipe_blocked_by_wbu", s3_valid && need_writeback && !io.wb_req.ready)
+  XSPerf("pipe_blocked_by_nack_data", s1_valid && s1_need_data && !io.data_read.ready)
+  XSPerf("pipe_reject_req_for_nack_meta", s0_valid && !meta_ready)
+  XSPerf("pipe_reject_req_for_set_conflict", s0_valid && set_conflict)
+
+  for (i <- 0 until LoadPipelineWidth) {
+    for (w <- 0 until nWays) {
+      XSPerf("load_pipe_" + Integer.toString(i,10) + "_access_way_" + Integer.toString(w, 10),
+        io.replace_access(i).valid && io.replace_access(i).bits.way === w.U)
+    }
+  }
+
+  for (w <- 0 until nWays) {
+    XSPerf("main_pipe_access_way_" + Integer.toString(w, 10),
+      access_bundle.valid && access_bundle.bits.way === w.U)
+    XSPerf("main_pipe_choose_way_" + Integer.toString(w, 10),
+      RegNext(s0_fire) && s1_repl_way_en === UIntToOH(w.U))
   }
 
 }

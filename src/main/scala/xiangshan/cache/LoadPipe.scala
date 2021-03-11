@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 
-import utils.XSDebug
+import utils.{XSDebug, XSPerf}
 
 class LoadPipe extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
@@ -101,10 +101,10 @@ class LoadPipe extends DCacheModule {
   // only needs to read the specific row
   data_read.rmask := UIntToOH(get_row(s1_addr))
   io.data_read.valid := s1_fire && !s1_nack
-  
-  io.replace_access.valid := RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid
-  io.replace_access.bits.set := get_idx(s1_req.addr)
-  io.replace_access.bits.way := OHToUInt(s1_tag_match_way)
+
+  io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
+  io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
+  io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
   // tag ecc check
   (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
@@ -121,7 +121,7 @@ class LoadPipe extends DCacheModule {
   .elsewhen(io.lsu.resp.fire()) { s2_valid := false.B }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
-  
+
   // hit, miss, nack, permission checking
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
@@ -190,13 +190,13 @@ class LoadPipe extends DCacheModule {
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
-  io.lsu.s2_hit_way := s2_tag_match_way
   assert(RegNext(!(resp.valid && !io.lsu.resp.ready)), "lsu should be ready in s2")
 
   when (resp.valid) {
     resp.bits.dump()
   }
 
+  io.lsu.s1_hit_way := s1_tag_match_way
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------
@@ -214,4 +214,14 @@ class LoadPipe extends DCacheModule {
       XSDebug(s"$pipeline_stage_name $signal_name\n")
     }
   }
+
+  // performance counters
+  XSPerf("load_req", io.lsu.req.fire())
+  XSPerf("load_s1_kill", s1_fire && io.lsu.s1_kill)
+  XSPerf("load_hit_way", s1_fire && s1_tag_match)
+  XSPerf("load_replay", io.lsu.resp.fire() && resp.bits.replay)
+  XSPerf("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
+  XSPerf("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
+  XSPerf("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerf("load_miss", io.lsu.resp.fire() && resp.bits.miss)
 }

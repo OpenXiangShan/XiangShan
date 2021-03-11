@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.XSDebug
+import utils.{XSDebug, XSPerf}
 import bus.tilelink._
 
 class StoreReplayEntry extends DCacheModule
@@ -117,6 +117,14 @@ class StoreReplayEntry extends DCacheModule
   when (io.lsu.resp.fire()) {
     XSDebug(s"StoreReplayEntryTransaction resp %d\n", io.id)
   }
+
+  // performance counters
+  XSPerf("store_req", io.lsu.req.fire())
+  XSPerf("store_penalty", state =/= s_invalid)
+  // this is useless
+  // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
+  XSPerf("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
+  XSPerf("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
 }
 
 
@@ -190,4 +198,7 @@ class StoreReplayQueue extends DCacheModule
   when (io.pipe_resp.fire()) {
     io.pipe_resp.bits.dump()
   }
+
+  // performance counters
+  XSPerf("store_req", io.lsu.req.fire())
 }

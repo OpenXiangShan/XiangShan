@@ -52,5 +52,6 @@ class WaitTable extends XSModule with WaitTableParameters {
       XSDebug("%d: waittable update: pc %x data: %x\n", GTimer(), io.update(i).waddr, io.update(i).wdata)
     }
   }
-}
 
+  XSPerf("wait_table_bit_set", PopCount(data))
+}
