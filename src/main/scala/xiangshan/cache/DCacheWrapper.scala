@@ -88,8 +88,8 @@ class DCacheLoadIO extends DCacheWordIO
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr = Output(UInt(PAddrBits.W))
-  val s1_data  = Input(Vec(nWays, UInt(DataBits.W)))
-  val s2_hit_way = Input(UInt(nWays.W))
+  val s1_hit_way = Input(UInt(nWays.W))
+  val s1_disable_fast_wakeup = Input(Bool())
 }
 
 class DCacheLineIO extends DCacheBundle
@@ -219,6 +219,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // replay and nack not needed anymore
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
+
+    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup
   }
 
   //----------------------------------------
@@ -278,7 +280,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
   val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
 
-  mainPipeReqArb.io.out.ready := mainPipe.io.req.ready
+  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
   mainPipe.io.req.valid := mainPipeReq_valid
   mainPipe.io.req.bits  := mainPipeReq_req
 
@@ -291,13 +293,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
 
+  for(i <- 0 until LoadPipelineWidth) {
+    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
+  }
+
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
   wb.io.req <> mainPipe.io.wb_req
   bus.c     <> wb.io.mem_release
 
-  // connect bus d 
+  // connect bus d
   missQueue.io.mem_grant.valid := false.B
   missQueue.io.mem_grant.bits  := DontCare
 
@@ -313,7 +319,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire())
   }
-
 
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {

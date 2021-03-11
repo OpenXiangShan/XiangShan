@@ -21,14 +21,14 @@ class DecodeStage extends XSModule {
   val waittable = Module(new WaitTable)
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
-    
+
     // read waittable, update loadWaitBit
     waittable.io.raddr(i) := io.in(i).bits.foldpc
     decoders(i).io.enq.ctrl_flow.loadWaitBit := waittable.io.rdata(i)
 
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
-    io.in(i).ready := io.out(i).ready
+    io.in(i).ready       := io.out(i).ready
   }
 
   for (i <- 0 until StorePipelineWidth) {
@@ -36,6 +36,11 @@ class DecodeStage extends XSModule {
   }
   waittable.io.csrCtrl <> io.csrCtrl
 
-  val loadWaitBitSet = PopCount(VecInit((0 until DecodeWidth).map(i => waittable.io.rdata(i) && io.out(i).fire())))
-  XSPerf("loadWaitBitSet", loadWaitBitSet, acc = true) // rollback redirect generated
+  val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
+  XSPerf("loadWaitBitSet", loadWaitBitSet)
+
+  val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
+  XSPerf("utilization", PopCount(io.in.map(_.valid)))
+  XSPerf("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
+  XSPerf("stall_cycle", hasValid && !io.out(0).ready)
 }

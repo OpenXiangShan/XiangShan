@@ -55,6 +55,7 @@ trait HasCSRConst {
   val Spfctl        = 0x5C1
   val Slvpredctl    = 0x5C2
   val Smblockctl    = 0x5C3
+  val Srnctl        = 0x5C4
 
   val Sdsid         = 0x9C0
 
@@ -93,7 +94,7 @@ trait HasCSRConst {
   // 0xB80 - 0x89F are also used as perfcnt csr
   val Mcycle   = 0xb00
   val Minstret = 0xb02
-  
+
   val Mhpmcounter3  = 0xB03
   val Mhpmcounter4  = 0xB04
   val Mhpmcounter5  = 0xB05
@@ -123,7 +124,7 @@ trait HasCSRConst {
   val Mhpmcounter29 = 0xB1D
   val Mhpmcounter30 = 0xB1E
   val Mhpmcounter31 = 0xB1F
-  
+
   // Machine Counter Setup (not implemented)
   val Mcountinhibit = 0x320
   val Mhpmevent3    = 0x323

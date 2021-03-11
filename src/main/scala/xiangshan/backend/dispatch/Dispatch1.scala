@@ -77,26 +77,37 @@ class Dispatch1 extends XSModule with HasExceptionNO {
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
-    updatedPsrc1(i) := io.fromRename.take(i).map(_.bits.pdest)
+    val pdestBypassedPsrc1 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc1) {
         (z, next) => Mux(next._2, next._1, z)
       }
-    updatedPsrc2(i) := io.fromRename.take(i).map(_.bits.pdest)
+    val pdestBypassedPsrc2 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc2_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc2) {
         (z, next) => Mux(next._2, next._1, z)
       }
-    updatedPsrc3(i) := io.fromRename.take(i).map(_.bits.pdest)
+    val pdestBypassedPsrc3 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc3_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc3) {
         (z, next) => Mux(next._2, next._1, z)
       }
-    updatedOldPdest(i) := io.fromRename.take(i).map(_.bits.pdest)
+    val pdestBypassedOldPdest = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.ldest_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.old_pdest) {
         (z, next) => Mux(next._2, next._1, z)
       }
+    if (i == 0) {
+      updatedPsrc1(i) := pdestBypassedPsrc1
+      updatedPsrc2(i) := pdestBypassedPsrc2
+    }
+    else {
+      // for move elimination, the psrc1/psrc2 of consumer instruction always come from psrc1 of move
+      updatedPsrc1(i) := Mux(io.renameBypass.move_eliminated_src1(i-1), updatedPsrc1(i-1), pdestBypassedPsrc1)
+      updatedPsrc2(i) := Mux(io.renameBypass.move_eliminated_src2(i-1), updatedPsrc1(i-1), pdestBypassedPsrc2)
+    }
+    updatedPsrc3(i) := pdestBypassedPsrc3
+    updatedOldPdest(i) := pdestBypassedOldPdest
 
     updatedUop(i) := io.fromRename(i).bits
     // update bypass psrc1/psrc2/psrc3/old_pdest
@@ -104,6 +115,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     updatedUop(i).psrc2 := updatedPsrc2(i)
     updatedUop(i).psrc3 := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
+    updatedUop(i).debugInfo.src1MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src1(i-1))
+    updatedUop(i).debugInfo.src2MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src2(i-1))
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update roqIdx, lqIdx, sqIdx
@@ -206,6 +219,13 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
-  XSPerf("in", PopCount(io.fromRename.map(_.valid)))
+  XSPerf("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
+  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
   XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
+  val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
+  XSPerf("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerf("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerf("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerf("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerf("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
 }

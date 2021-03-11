@@ -26,8 +26,13 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val in_fire = valid && io.in_ready
   val out_fire = io.out_ready && io.out_valid
 
-  val s_idle :: s_lzd :: s_normlize :: s_recurrence :: s_recovery_1 :: s_recovery_2 :: s_finish :: Nil = Enum(7)
+  // s_pad_* is not used
+  val s_idle :: s_lzd :: s_normlize :: s_recurrence :: s_recovery_1 :: s_recovery_2 :: s_pad_1 :: s_pad_2 :: s_finish :: Nil = Enum(9)
+  require(s_finish.litValue() == 8)
+
   val state = RegInit(s_idle)
+  val finished = state(3).asBool // state === s_finish
+
   val cnt_next = Wire(UInt(log2Up((len + 3) / 2).W))
   val cnt = RegEnable(cnt_next, state === s_normlize || state === s_recurrence)
   val rec_enough = cnt_next === 0.U
@@ -245,7 +250,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state === s_idle
-  io.out_valid := state === s_finish
+  io.out_valid := finished // state === s_finish
 }
 
 class SRT4Divider(len: Int) extends AbstractDivider(len) {
