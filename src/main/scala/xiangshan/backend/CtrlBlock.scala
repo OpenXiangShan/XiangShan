@@ -323,6 +323,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
   rename.io.dispatchInfo <> dispatch.io.preDpInfo
+  rename.io.csrCtrl <> RegNext(io.csrCtrl)
 
   dispatch.io.redirect <> backendRedirect
   dispatch.io.flush := flushReg
