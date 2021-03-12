@@ -243,6 +243,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
     loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.memfeedback
     loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
+    loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
@@ -276,6 +277,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.memfeedback
     stu.io.rsIdx       <> rs.io.rsIdx
+    stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
