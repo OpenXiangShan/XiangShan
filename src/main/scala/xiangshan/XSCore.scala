@@ -105,9 +105,7 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
   NumPerfCounters: Int = 16,
-  NrExtIntr: Int = 150,
-  PerfRealTime: Boolean = false,
-  PerfIntervalBits: Int = 15
+  NrExtIntr: Int = 150
 )
 
 trait HasXSParameter {
@@ -191,8 +189,6 @@ trait HasXSParameter {
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
   val NumPerfCounters = coreParams.NumPerfCounters
   val NrExtIntr = coreParams.NrExtIntr
-  val PerfRealTime = coreParams.PerfRealTime
-  val PerfIntervalBits = coreParams.PerfIntervalBits
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
