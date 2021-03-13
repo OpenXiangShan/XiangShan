@@ -128,7 +128,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
   val if2_valid = RegInit(init = false.B)
-  val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
+  val if2_allReady = WireInit(if2_ready && icache.io.req.ready && bpu.io.in_ready)
   val if1_fire = if1_valid &&  if2_allReady
 
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
@@ -428,8 +428,10 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val cfiIsCall = if4_pd.pd(if4_jmpIdx).isCall
   val cfiIsRet  = if4_pd.pd(if4_jmpIdx).isRet
   val cfiIsRVC  = if4_pd.pd(if4_jmpIdx).isRVC
+  val cfiIsJalr = if4_pd.pd(if4_jmpIdx).isJalr
   toFtqBuf.cfiIsCall := cfiIsCall
   toFtqBuf.cfiIsRet  := cfiIsRet
+  toFtqBuf.cfiIsJalr := cfiIsJalr
   toFtqBuf.cfiIsRVC  := cfiIsRVC
   toFtqBuf.cfiIndex.valid := if4_taken
   toFtqBuf.cfiIndex.bits  := if4_jmpIdx
@@ -558,6 +560,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   XSPerf("if1_total_stall", !if2_allReady && if1_valid)
   XSPerf("if1_stall_from_icache_req", !icache.io.req.ready && if1_valid)
   XSPerf("if1_stall_from_if2", !if2_ready && if1_valid)
+  XSPerf("if1_stall_from_bpu", !bpu.io.in_ready && if1_valid)
   XSPerf("itlb_stall", if2_valid && if3_ready && !icache.io.tlb.resp.valid)
   XSPerf("icache_resp_stall", if3_valid && if4_ready && !icache.io.resp.valid)
   XSPerf("if4_stall", if4_valid && !if4_fire)
@@ -618,8 +621,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
       )
     }
     val b = ftqEnqBuf
-    XSDebug("[FtqEnqBuf] v=%d r=%d pc=%x cfiIndex(%d)=%d cfiIsCall=%d cfiIsRet=%d cfiIsRVC=%d\n",
-      ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsRVC)
+    XSDebug("[FtqEnqBuf] v=%d r=%d pc=%x cfiIndex(%d)=%d cfiIsCall=%d cfiIsRet=%d cfiIsJalr=%d cfiIsRVC=%d\n",
+      ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsJalr, b.cfiIsRVC)
     XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x predHist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
       b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.predHist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
     XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)
