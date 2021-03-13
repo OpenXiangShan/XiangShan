@@ -104,38 +104,21 @@ object XSWarn extends LogHelper(XSLogLevel.WARN)
 object XSError extends LogHelper(XSLogLevel.ERROR)
 
 object XSPerf extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt, acc: Boolean = false)(implicit name: String) = {
-    val counter = RegInit(0.U(64.W))
-    val next_counter = WireInit(0.U(64.W))
-    val logTimestamp = WireInit(0.U(64.W))
+  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
     val env = Parameters.get.envParameters
-    next_counter := counter + perfCnt
-    counter := next_counter
-
-    if (env.EnablePerfDebug) {
-      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      val printCond = if (PerfIntervalBits == 0) true.B else (logTimestamp(PerfIntervalBits - 1, 0) === 0.U)
-      val printEnable = if (PerfRealTime) printCond else false.B
-      val xstrap = WireInit(false.B)
-      if (!env.FPGAPlatform && !env.DualCore) {
-        ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
-      }
+    if (env.EnablePerfDebug && !env.FPGAPlatform) {
+      val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
       val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
       ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
       ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
-      when (perfClean) {
-        counter := 0.U
-      }
-      when (printEnable) {  // interval print
-        if (acc) {
-          XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
-        } else {
-          XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $perfCnt\n")
-        }
-      }
-      when (xstrap || perfDump) {  // summary print
-        // dump acc counter by default
+
+      val counter = RegInit(0.U(64.W))
+      val next_counter = counter + perfCnt
+      counter := Mux(perfClean, 0.U, next_counter)
+
+      when (perfDump) {
         XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
       }
     }
