@@ -226,6 +226,7 @@ class TlbReq extends TlbBundle {
   val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
+    val isFirstIssue = Bool()
   }
 
   override def toPrintable: Printable = {
@@ -530,10 +531,10 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   if (isDtlb) {
     for (i <- 0 until Width) {
-      XSPerf("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable)
+      XSPerf("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
     }
     for (i <- 0 until Width) {
-      XSPerf("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i))
+      XSPerf("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
     }
   } else {
     // NOTE: ITLB is blocked, so every resp will be valid only when hit

@@ -121,6 +121,7 @@ class ReservationStation
 
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
     val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
+    val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
   val select = Module(new ReservationStationSelect(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
@@ -186,6 +187,7 @@ class ReservationStation
 
   if (feedback) {
     io.rsIdx := RegNext(select.io.deq.bits) // NOTE: just for feeback
+    io.isFirstIssue := select.io.isFirstIssue
   }
   io.deq.bits := DontCare
   io.deq.bits.uop  := ctrl.io.out.bits
@@ -236,6 +238,7 @@ class ReservationStationSelect
     val deq = DecoupledIO(UInt(iqIdxWidth.W))
 
     val flushState = if (feedback) Input(Bool()) else null
+    val isFirstIssue = if (feedback) Output(Bool()) else null
   })
 
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until iqSize).map(f))
@@ -422,6 +425,7 @@ class ReservationStationSelect
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
       XSPerf(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
+    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
   }
   for(i <- 0 until iqSize) {
     if (i == 0) XSPerf("empty", io.numExist === 0.U)
