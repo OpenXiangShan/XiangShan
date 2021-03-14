@@ -131,8 +131,9 @@ abstract class BasePredictor extends XSModule
     val inMask = Input(UInt(PredictWidth.W))
     val update = Flipped(ValidIO(new FtqEntry))
   }
-
   val io = new DefaultBasePredictorIO
+  val in_ready = IO(Output(Bool()))
+  in_ready := true.B
   val debug = true
 }
 
@@ -441,6 +442,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     // from if1
     val in = Input(new BPUReq)
     val inFire = Input(Vec(4, Bool()))
+    // to if1
+    val in_ready = Output(Bool())
     // to if2/if3/if4
     val out = Vec(3, Output(new BranchPrediction))
     // from if4
@@ -454,6 +457,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
     p.fires <> io.inFire
     p.ctrl <> io.ctrl
   })
+  
+  io.in_ready := preds.map(p => p.in_ready).reduce(_&&_)
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
@@ -528,6 +533,9 @@ class BPU extends BaseBPU {
 
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
+  for (i <- 0 until PredictWidth) {
+    s1_brInfo_in.metas(i).ubtbHit := ubtb.io.out.hits(i)
+  }
 
   btb.io.pc.valid := s1_fire
   btb.io.pc.bits := io.in.pc
@@ -539,6 +547,7 @@ class BPU extends BaseBPU {
   s1_resp_in.btb <> btb.io.resp
   for (i <- 0 until PredictWidth) {
     s1_brInfo_in.metas(i).btbWriteWay := btb.io.meta.writeWay(i)
+    s1_brInfo_in.metas(i).btbHit := btb.io.meta.hits(i)
   }
 
   bim.io.pc.valid := s1_fire

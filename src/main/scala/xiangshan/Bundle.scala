@@ -114,6 +114,7 @@ class PredictorAnswer extends XSBundle {
 
 class BpuMeta extends XSBundle with HasBPUParameter {
   val btbWriteWay = UInt(log2Up(BtbWays).W)
+  val btbHit = Bool()
   val bimCtr = UInt(2.W)
   val tageMeta = new TageMeta
   // for global history
@@ -123,6 +124,8 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
   val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
+
+  val ubtbHit = if (BPUDebug) UInt(1.W) else UInt(0.W)
 
   val ubtbAns = new PredictorAnswer
   val btbAns = new PredictorAnswer
@@ -194,7 +197,7 @@ class FtqEntry extends XSBundle {
   val specCnt = Vec(PredictWidth, UInt(10.W))
   val metas = Vec(PredictWidth, new BpuMeta)
 
-  val cfiIsCall, cfiIsRet, cfiIsRVC = Bool()
+  val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Bool()
   val rvc_mask = Vec(PredictWidth, Bool())
   val br_mask = Vec(PredictWidth, Bool())
   val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
@@ -214,7 +217,7 @@ class FtqEntry extends XSBundle {
     p"ftqPC: ${Hexadecimal(ftqPC)} lastPacketPC: ${Hexadecimal(lastPacketPC.bits)} hasLastPrev:$hasLastPrev " +
       p"rasSp:$rasSp specCnt:$specCnt brmask:${Binary(Cat(br_mask))} rvcmask:${Binary(Cat(rvc_mask))} " +
       p"valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
-      p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isRvc:$cfiIsRVC " +
+      p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isJalr:$cfiIsJalr, isRvc:$cfiIsRVC " +
       p"mispred:${Binary(Cat(mispred))} target:${Hexadecimal(target)}\n"
   }
 

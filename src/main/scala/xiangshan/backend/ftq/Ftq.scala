@@ -150,7 +150,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Up(PredictWidth).W))))
-  val cfiIsCall, cfiIsRet, cfiIsRVC = Reg(Vec(FtqSize, Bool()))
+  val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Reg(Vec(FtqSize, Bool()))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
 
   val s_invalid :: s_valid :: s_commited :: Nil = Enum(3)
@@ -164,6 +164,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     cfiIndex_vec(enqIdx) := io.enq.bits.cfiIndex
     cfiIsCall(enqIdx) := io.enq.bits.cfiIsCall
     cfiIsRet(enqIdx) := io.enq.bits.cfiIsRet
+    cfiIsJalr(enqIdx) := io.enq.bits.cfiIsJalr
     cfiIsRVC(enqIdx) := io.enq.bits.cfiIsRVC
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := io.enq.bits.target
@@ -183,6 +184,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
         cfiIndex_vec(wbIdx).bits := offset
         cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
         cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
+        cfiIsJalr(wbIdx) := wb.bits.uop.cf.pd.isJalr
         cfiIsRVC(wbIdx) := wb.bits.uop.cf.pd.isRVC
       }
       when (offset === cfiIndex_vec(wbIdx).bits) {
@@ -246,6 +248,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.cfiIndex := RegNext(RegNext(cfiIndex_vec(headPtr.value)))
   commitEntry.cfiIsCall := RegNext(RegNext(cfiIsCall(headPtr.value)))
   commitEntry.cfiIsRet := RegNext(RegNext(cfiIsRet(headPtr.value)))
+  commitEntry.cfiIsJalr := RegNext(RegNext(cfiIsJalr(headPtr.value)))
   commitEntry.cfiIsRVC := RegNext(RegNext(cfiIsRVC(headPtr.value)))
   commitEntry.target := RegNext(RegNext(update_target(headPtr.value)))
 
