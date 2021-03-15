@@ -26,6 +26,7 @@ class LoadUnit_S0 extends XSModule {
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
   })
 
   val s0_uop = io.in.bits.uop
@@ -46,6 +47,7 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   // query DCache
   io.dcacheReq.valid := io.in.valid
@@ -262,6 +264,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
@@ -277,6 +280,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s0.io.dtlbReq <> io.dtlb.req
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.rsIdx := io.rsIdx
+  load_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 

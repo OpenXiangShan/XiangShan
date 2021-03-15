@@ -228,6 +228,15 @@ class MicroBTB extends BasePredictor
         banks(b).update_write_data.bits := update_write_datas(b)
         banks(b).update_taken := update_takens(b)
     }
+
+    if (!env.FPGAPlatform) {
+        XSPerf("ubtb_commit_hits",
+            PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
+                case (((t, v), m), pd)  => t && v && m.ubtbHit.asBool && !pd.notCFI && update_valid}))
+        XSPerf("ubtb_commit_misses",
+            PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
+                case (((t, v), m), pd)  => t && v && !m.ubtbHit.asBool && !pd.notCFI && update_valid}))
+    }
     
     if (BPUDebug && debug) {
         val update_pcs  = VecInit((0 until PredictWidth).map(i => update_packet_pc + (i << instOffsetBits).U))

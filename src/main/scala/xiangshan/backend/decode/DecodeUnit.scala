@@ -33,7 +33,7 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  |  isRVF
     //   |            |            |            |           |           |  |  |  |  |  |  |  selImm
     List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
-  
+
     val table: Array[(BitPat, List[BitPat])]
 }
 
@@ -427,7 +427,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   // fill in exception vector
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
-  
+
   // fix frflags
   //                           fflags    zero csrrs rd    csr
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
@@ -447,6 +447,8 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
       x._1 -> minBits
     }
   ))
+
+  cs.isMove := BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
 
   cf_ctrl.ctrl := cs
 

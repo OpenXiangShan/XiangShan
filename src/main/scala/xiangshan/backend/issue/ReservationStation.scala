@@ -121,6 +121,7 @@ class ReservationStation
 
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
     val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
+    val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
   val select = Module(new ReservationStationSelect(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
@@ -187,6 +188,7 @@ class ReservationStation
 
   if (feedback) {
     io.rsIdx := RegNext(select.io.deq.bits) // NOTE: just for feeback
+    io.isFirstIssue := select.io.isFirstIssue
   }
   io.deq.bits := DontCare
   io.deq.bits.uop  := ctrl.io.out.bits
@@ -237,6 +239,7 @@ class ReservationStationSelect
     val deq = DecoupledIO(UInt(iqIdxWidth.W))
 
     val flushState = if (feedback) Input(Bool()) else null
+    val isFirstIssue = if (feedback) Output(Bool()) else null
   })
 
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until iqSize).map(f))
@@ -302,8 +305,8 @@ class ReservationStationSelect
                     Mux(RegNext(selectValid && (io.redirect.valid || io.flush)), 0.U, ~(0.U(iqSize.W))))
 
   // deq
-  val dequeue = if (feedback) bubbleReg
-                else          bubbleReg || issueFire
+  val dequeue = Mux(RegNext(io.flush), false.B,
+                    if (feedback) bubbleReg else bubbleReg || issueFire)
   val deqPtr = if (feedback) bubblePtrReg
                else if (nonBlocked) Mux(selectReg, selectPtrReg, bubblePtrReg)
                else Mux(bubbleReg, bubblePtrReg, selectPtrReg)
@@ -371,8 +374,9 @@ class ReservationStationSelect
   val enqueue = io.enq.fire() && !(io.redirect.valid || io.flush)
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
-  val nextTailPtr = Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
+  val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new CircularQueuePtr(iqSize)), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
   tailPtr := nextTailPtr
+  assert(!(tailPtr === 0.U.asTypeOf(new CircularQueuePtr(iqSize))) || Cat(stateQueue.map(_ === s_idle)).andR)
 
   val enqPtr = Mux(tailPtr.flag, deqPtr, tailPtr.value)
   val enqIdx = indexQueue(enqPtr)
@@ -394,8 +398,13 @@ class ReservationStationSelect
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
   XSPerf("sizeMultiCycle", iqSize.U)
-  XSPerf("enq", io.enq.fire())
-  XSPerf("deq", io.deq.fire())
+  XSPerf("enq", enqueue)
+  XSPerf("issueFire", issueFire)
+  XSPerf("issueValid", issueValid)
+  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
+  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
+  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
+  
   XSPerf("utilization", io.numExist)
   XSPerf("validUtil", PopCount(validQueue))
   XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
@@ -403,12 +412,7 @@ class ReservationStationSelect
   XSPerf("selectUtil", PopCount(selectMask))
   XSPerf("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
   XSPerf("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
-  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
-  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
 
-  XSPerf("issueValid", issueValid)
-  XSPerf("issueFire", issueFire)
-  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
   
   if (!feedback && nonBlocked) {
     XSPerf("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
@@ -422,6 +426,7 @@ class ReservationStationSelect
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
       XSPerf(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
+    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
   }
   for(i <- 0 until iqSize) {
     if (i == 0) XSPerf("empty", io.numExist === 0.U)
