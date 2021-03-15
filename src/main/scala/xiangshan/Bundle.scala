@@ -305,6 +305,11 @@ class MicroOp extends CfCtrl {
   val debugInfo = new PerfDebugInfo
 }
 
+class MicroOpRbExt extends XSBundle {
+  val uop = new MicroOp
+  val flag = UInt(1.W)
+}
+
 class Redirect extends XSBundle {
   val roqIdx = new RoqPtr
   val ftqIdx = new FtqPtr
@@ -313,6 +318,7 @@ class Redirect extends XSBundle {
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
 
+  val stFtqIdx = new FtqPtr // for load violation predict
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
