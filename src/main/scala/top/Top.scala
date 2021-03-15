@@ -141,6 +141,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
+      memCycles = 12,
       writeBytes = 32
     )
   )))
@@ -179,6 +180,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       cacheName = "L3"
     ),
     InclusiveCacheMicroParameters(
+      memCycles = 12,
       writeBytes = 32
     )
   )).node
