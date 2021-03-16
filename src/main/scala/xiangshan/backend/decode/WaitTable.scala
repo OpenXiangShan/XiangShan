@@ -5,19 +5,19 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-trait WaitTableParameters {
+trait MemPredParameters {
   val WaitTableSize = 1024
-  val WaitTableAddrWidth = log2Up(WaitTableSize)
+  val MemPredPCWidth = log2Up(WaitTableSize)
   val ResetTimeMax2Pow = 20 //1078576
   val ResetTimeMin2Pow = 10 //1024
 }
 
 // 21264-like wait table
-class WaitTable extends XSModule with WaitTableParameters {
+class WaitTable extends XSModule with MemPredParameters {
   val io = IO(new Bundle {
-    val raddr = Vec(DecodeWidth, Input(UInt(WaitTableAddrWidth.W))) // decode pc(VaddrBits-1, 1)
+    val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(Bool())) // loadWaitBit
-    val update = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq)) // RegNext should be added outside
+    val update = Vec(StorePipelineWidth, Input(new MemPredUpdateReq)) // RegNext should be added outside
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 

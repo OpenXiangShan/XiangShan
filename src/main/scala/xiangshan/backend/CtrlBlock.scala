@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
+import xiangshan.backend.decode.{DecodeStage, ImmUnion, MemPredParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -37,12 +37,12 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
-  val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
+  val memPredUpdate = Vec(StorePipelineWidth, Input(new MemPredUpdateReq))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
+class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with MemPredParameters {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
@@ -52,7 +52,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
     val stage2FtqRead = new FtqRead
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
-    val waitTableUpdate = Output(new WaitTableUpdateReq)
+    val memPredUpdate = Output(new MemPredUpdateReq)
+    val memPredFtqRead = new FtqRead // read req send form stage 2
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
@@ -140,12 +141,25 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
     )
   )
 
-  // update waittable if load violation redirect triggered
-  io.waitTableUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B)
-  io.waitTableUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), WaitTableAddrWidth))
-  io.waitTableUpdate.wdata := true.B
+  // get pc from ftq
+  io.memPredFtqRead.ptr := s1_redirect_bits_reg.stFtqIdx
+  // valid only if redirect is caused by load violation
+  // store_pc is used to update store set
+  val memPredFtqRead = io.memPredFtqRead.entry
+  val store_pc = GetPcByFtq(memPredFtqRead.ftqPC, RegNext(s1_redirect_bits_reg).stFtqOffset,
+    memPredFtqRead.lastPacketPC.valid,
+    memPredFtqRead.lastPacketPC.bits
+  )
 
-  io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
+  // update load violation predictor if load violation redirect triggered
+  io.memPredUpdate.valid := RegNext(RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B))
+  // update wait table
+  io.memPredUpdate.waddr := RegNext(RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth)))
+  io.memPredUpdate.wdata := true.B
+  // update store set
+  io.memPredUpdate.ldpc := RegNext(RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth)))
+  // store pc is ready 1 cycle after s1_isReplay is judged
+  io.memPredUpdate.stpc := RegNext(XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth))
 
   val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
   val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
@@ -247,7 +261,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     init = false.B
   )
   loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
-  VecInit(ftq.io.ftqRead.tail.dropRight(1)) <> redirectGen.io.stage1FtqRead
+  VecInit(ftq.io.ftqRead.tail.dropRight(2)) <> redirectGen.io.stage1FtqRead
+  ftq.io.ftqRead.dropRight(1).last <> redirectGen.io.memPredFtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
@@ -293,10 +308,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   decode.io.in <> io.frontend.cfVec
   // currently, we only update wait table when isReplay
-  decode.io.waitTableUpdate(0) <> RegNext(redirectGen.io.waitTableUpdate)
-  decode.io.waitTableUpdate(1) := DontCare
-  decode.io.waitTableUpdate(1).valid := false.B
-  // decode.io.waitTableUpdate <> io.toLsBlock.waitTableUpdate
+  decode.io.memPredUpdate(0) <> RegNext(redirectGen.io.memPredUpdate)
+  decode.io.memPredUpdate(1) := DontCare
+  decode.io.memPredUpdate(1).valid := false.B
+  // decode.io.memPredUpdate <> io.toLsBlock.memPredUpdate
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
 

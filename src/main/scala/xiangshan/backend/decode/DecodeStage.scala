@@ -10,7 +10,7 @@ class DecodeStage extends XSModule {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
     // from memblock
-    val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
+    val memPredUpdate = Vec(StorePipelineWidth, Input(new MemPredUpdateReq))
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
     // waitable ctrl
@@ -32,7 +32,7 @@ class DecodeStage extends XSModule {
   }
 
   for (i <- 0 until StorePipelineWidth) {
-    waittable.io.update(i) <> RegNext(io.waitTableUpdate(i))
+    waittable.io.update(i) <> RegNext(io.memPredUpdate(i))
   }
   waittable.io.csrCtrl <> io.csrCtrl
 

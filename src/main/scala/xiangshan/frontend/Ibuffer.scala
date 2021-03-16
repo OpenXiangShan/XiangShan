@@ -7,7 +7,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
-import xiangshan.backend.decode.WaitTableParameters
+import xiangshan.backend.decode.MemPredParameters
 
 class IbufPtr extends CircularQueuePtr(IbufPtr.IBufSize) { }
 
@@ -29,10 +29,10 @@ class IBufferIO extends XSBundle {
 class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new IBufferIO)
 
-  class IBufEntry extends XSBundle with WaitTableParameters {
+  class IBufEntry extends XSBundle with MemPredParameters {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
-    val foldpc = UInt(WaitTableAddrWidth.W)
+    val foldpc = UInt(MemPredPCWidth.W)
     val pd = new PreDecodeInfo
     val ipf = Bool()
     val acf = Bool()

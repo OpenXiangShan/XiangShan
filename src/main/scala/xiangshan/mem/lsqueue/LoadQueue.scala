@@ -477,6 +477,7 @@ class LoadQueue extends XSModule
   val rollbackLq = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
   // store ftq index for store set update
   val stFtqIdxS2 = Wire(Vec(StorePipelineWidth, new FtqPtr))
+  val stFtqOffsetS2 = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (i <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(i)
     rollbackLq(i).valid := detectedRollback._1._1 && RegNext(io.storeIn(i).valid)
@@ -491,6 +492,7 @@ class LoadQueue extends XSModule
     rollbackL1Wb(2*i) := rollbackL1(i)
     rollbackL1Wb(2*i+1) := rollbackWb(i)
     stFtqIdxS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqPtr)
+    stFtqOffsetS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqOffset)
   }
 
   val rollbackL1WbSelected = ParallelOperation(rollbackL1Wb, rollbackSel)
@@ -516,8 +518,10 @@ class LoadQueue extends XSModule
     rollbackUopExtVec(0),
     Mux(!oneAfterZero && mask(2)(1), rollbackUopExtVec(1), rollbackUopExtVec(2)))
   val stFtqIdxS3 = RegNext(stFtqIdxS2)
+  val stFtqOffsetS3 = RegNext(stFtqOffsetS2)
   val rollbackUop = rollbackUopExt.uop
   val rollbackStFtqIdx = stFtqIdxS3(rollbackUopExt.flag)
+  val rollbackStFtqOffset = stFtqOffsetS3(rollbackUopExt.flag)
 
   // check if rollback request is still valid in parallel
   val rollbackValidVecChecked = Wire(Vec(3, Bool()))
@@ -531,6 +535,7 @@ class LoadQueue extends XSModule
   io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
   io.rollback.bits.stFtqIdx := rollbackStFtqIdx
   io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
+  io.rollback.bits.stFtqOffset := rollbackStFtqOffset
   io.rollback.bits.level := RedirectLevel.flush
   io.rollback.bits.interrupt := DontCare
   io.rollback.bits.cfiUpdate := DontCare

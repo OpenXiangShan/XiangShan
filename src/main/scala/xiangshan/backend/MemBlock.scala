@@ -263,7 +263,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // update waittable
     // TODO: read pc
-    io.fromCtrlBlock.waitTableUpdate(i) := DontCare
+    io.fromCtrlBlock.memPredUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 

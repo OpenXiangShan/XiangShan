@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.{ImmUnion, XDecode, WaitTableParameters}
+import xiangshan.backend.decode.{ImmUnion, XDecode, MemPredParameters}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
@@ -23,13 +23,13 @@ import Chisel.experimental.chiselName
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket extends XSBundle with WaitTableParameters {
+class FetchPacket extends XSBundle with MemPredParameters {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
   val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val foldpc = Vec(PredictWidth, UInt(WaitTableAddrWidth.W))
+  val foldpc = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -171,10 +171,10 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow extends XSBundle with WaitTableParameters {
+class CtrlFlow extends XSBundle with MemPredParameters {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  val foldpc = UInt(WaitTableAddrWidth.W)
+  val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
@@ -319,6 +319,7 @@ class Redirect extends XSBundle {
   val cfiUpdate = new CfiUpdateInfo
 
   val stFtqIdx = new FtqPtr // for load violation predict
+  val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
@@ -454,10 +455,18 @@ class SfenceBundle extends XSBundle {
   }
 }
 
-class WaitTableUpdateReq extends XSBundle with WaitTableParameters {
+// Bundle for load violation predictor updating
+class MemPredUpdateReq extends XSBundle with MemPredParameters {
   val valid = Bool()
-  val waddr = UInt(WaitTableAddrWidth.W)
+
+  // wait table update
+  val waddr = UInt(MemPredPCWidth.W)
   val wdata = Bool() // true.B by default
+
+  // store set update
+  // by default, ldpc/stpc should be xor folded
+  val ldpc = UInt(MemPredPCWidth.W)
+  val stpc = UInt(MemPredPCWidth.W)
 }
 
 class DifftestBundle extends XSBundle {
