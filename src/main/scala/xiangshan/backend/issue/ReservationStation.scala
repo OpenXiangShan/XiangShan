@@ -105,7 +105,7 @@ class ReservationStation
     val deq = DecoupledIO(new ExuInput)
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
-    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg || exuCfg == Exu.stExeUnitCfg) Input(new SqPtr()) else null
 
     val fpRegValue = if (exuCfg == Exu.stExeUnitCfg) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
@@ -160,7 +160,7 @@ class ReservationStation
     c.valid := i.valid
     c.bits  := i.bits.uop
   }
-  if (exuCfg == Exu.ldExeUnitCfg) {
+  if (exuCfg == Exu.ldExeUnitCfg || exuCfg == Exu.stExeUnitCfg) {
     ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
 
@@ -476,7 +476,7 @@ class ReservationStationCtrl
     val listen = Output(Vec(srcNum, Vec(iqSize, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
     val enqSrcReady = Output(Vec(srcNum, Bool()))
 
-    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (exuCfg == Exu.ldExeUnitCfg || exuCfg == Exu.stExeUnitCfg) Input(new SqPtr()) else null
   })
 
   val selValid = io.sel.valid
@@ -547,7 +547,7 @@ class ReservationStationCtrl
 
   // load wait store
   io.readyVec := srcQueueWire.map(Cat(_).andR)
-  if (exuCfg == Exu.ldExeUnitCfg) {
+  if (exuCfg == Exu.ldExeUnitCfg || exuCfg == Exu.stExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
     ldWait.zip(sqIdx).map{ case (lw, sq) =>

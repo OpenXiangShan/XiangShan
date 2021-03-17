@@ -283,6 +283,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
+    // Lsq to load unit's rs
+    rs.io.stIssuePtr := lsq.io.issuePtrExt
+
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
