@@ -182,6 +182,7 @@ class CtrlFlow extends XSBundle  {
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
+  val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
@@ -302,7 +303,6 @@ class MicroOp extends CfCtrl {
   val roqIdx = new RoqPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
-  val ssid = UInt(SSIDWidth.W)
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
 }

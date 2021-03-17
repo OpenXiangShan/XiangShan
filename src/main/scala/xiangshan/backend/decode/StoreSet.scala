@@ -50,7 +50,7 @@ class SSIT extends XSModule {
 
   // update stage 0
   // RegNext(io.update) while reading SSIT entry for necessary information
-  val MemPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
+  val memPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
   // load has already been assigned with a store set
   val loadAssigned = RegNext(valid(io.update.ldpc))
   val loadOldSSID = RegNext(ssid(io.update.ldpc))
@@ -63,45 +63,45 @@ class SSIT extends XSModule {
   val winnerSSID = Mux(loadIsWinner, loadOldSSID, storeOldSSID)
 
   // for now we just use lowest bits of ldpc as store set id
-  val ssidAllocate = MemPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
+  val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
 
   // update stage 1
-  when(MemPredUpdateReqReg.valid){
+  when(memPredUpdateReqReg.valid){
     switch (Cat(loadAssigned, storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set, 
       // one is allocated and assigned to both instructions."
-      is (Cat(false.B, false.B)) {
-        valid(MemPredUpdateReqReg.ldpc) := true.B
-        isload(MemPredUpdateReqReg.ldpc) := true.B
-        ssid(MemPredUpdateReqReg.ldpc) := ssidAllocate
-        valid(MemPredUpdateReqReg.stpc) := true.B
-        isload(MemPredUpdateReqReg.stpc) := false.B
-        ssid(MemPredUpdateReqReg.stpc) := ssidAllocate
+      is ("b00".U(2.W)) {
+        valid(memPredUpdateReqReg.ldpc) := true.B
+        isload(memPredUpdateReqReg.ldpc) := true.B
+        ssid(memPredUpdateReqReg.ldpc) := ssidAllocate
+        valid(memPredUpdateReqReg.stpc) := true.B
+        isload(memPredUpdateReqReg.stpc) := false.B
+        ssid(memPredUpdateReqReg.stpc) := ssidAllocate
       }
       // 2. "If the load has been assigned a store set, but the store has not, 
       // the store is assigned the load’s store set."
-      is (Cat(true.B, false.B)) {
-        valid(MemPredUpdateReqReg.stpc) := true.B
-        isload(MemPredUpdateReqReg.stpc) := false.B
-        ssid(MemPredUpdateReqReg.stpc) := loadOldSSID
+      is ("b10".U(2.W)) {
+        valid(memPredUpdateReqReg.stpc) := true.B
+        isload(memPredUpdateReqReg.stpc) := false.B
+        ssid(memPredUpdateReqReg.stpc) := loadOldSSID
       }
       // 3. "If the store has been assigned a store set, but the load has not, 
       // the load is assigned the store’s store set."
-      is (Cat(false.B, true.B)) {
-        valid(MemPredUpdateReqReg.ldpc) := true.B
-        isload(MemPredUpdateReqReg.ldpc) := true.B
-        ssid(MemPredUpdateReqReg.ldpc) := storeOldSSID
+      is ("b01".U(2.W)) {
+        valid(memPredUpdateReqReg.ldpc) := true.B
+        isload(memPredUpdateReqReg.ldpc) := true.B
+        ssid(memPredUpdateReqReg.ldpc) := storeOldSSID
       }
       // 4. "If both the load and the store have already been assigned store sets, 
       // one of the two store sets is declared the "winner". 
       // The instruction belonging to the loser’s store set is assigned the winner’s store set."
-      is (Cat(true.B, true.B)) {
-        valid(MemPredUpdateReqReg.ldpc) := true.B
-        isload(MemPredUpdateReqReg.ldpc) := true.B
-        ssid(MemPredUpdateReqReg.ldpc) := winnerSSID
-        valid(MemPredUpdateReqReg.stpc) := true.B
-        isload(MemPredUpdateReqReg.stpc) := false.B
-        ssid(MemPredUpdateReqReg.stpc) := winnerSSID
+      is ("b11".U(2.W)) {
+        valid(memPredUpdateReqReg.ldpc) := true.B
+        isload(memPredUpdateReqReg.ldpc) := true.B
+        ssid(memPredUpdateReqReg.ldpc) := winnerSSID
+        valid(memPredUpdateReqReg.stpc) := true.B
+        isload(memPredUpdateReqReg.stpc) := false.B
+        ssid(memPredUpdateReqReg.stpc) := winnerSSID
       }
     }
   }
@@ -116,8 +116,8 @@ class SSIT extends XSModule {
 
   // debug
   for (i <- 0 until StorePipelineWidth) {
-    when (MemPredUpdateReqReg.valid) {
-      XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), MemPredUpdateReqReg.ldpc, MemPredUpdateReqReg.stpc)
+    when (memPredUpdateReqReg.valid) {
+      XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), memPredUpdateReqReg.ldpc, memPredUpdateReqReg.stpc)
       XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), loadAssigned, loadOldSSID, storeAssigned,storeOldSSID)
     }
   }
@@ -177,7 +177,7 @@ class LFST extends XSModule  {
   // when store is issued, mark it as invalid
   (0 until exuParameters.StuCnt).map(i => {
     when(io.storeIssue(i).valid){
-      valid(io.storeIssue(i).bits.uop.ssid) := false.B
+      valid(io.storeIssue(i).bits.uop.cf.ssid) := false.B
     }
   })
 

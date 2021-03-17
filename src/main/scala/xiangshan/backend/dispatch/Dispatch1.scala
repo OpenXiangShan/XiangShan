@@ -133,7 +133,7 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
     io.lfst(i).bits.roqIdx := updatedUop(i).roqIdx
     io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
-    io.lfst(i).bits.ssid := updatedUop(i).ssid
+    io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
   }
 
 

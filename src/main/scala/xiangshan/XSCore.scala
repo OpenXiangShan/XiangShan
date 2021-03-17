@@ -281,9 +281,9 @@ trait HasXSParameter {
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576
   val ResetTimeMin2Pow = 10 //1024
-  val MemPredPCWidth = log2Up(WaitTableSize)
   // wait table parameters
   val WaitTableSize = 1024
+  val MemPredPCWidth = log2Up(WaitTableSize)
   // store set parameters
   val SSITSize = WaitTableSize
   val LFSTSize = 32
