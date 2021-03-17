@@ -137,12 +137,16 @@ class DispatchToLFST extends XSBundle  {
   val ssid = UInt(SSIDWidth.W)
 }
 
+class LookupLFST extends XSBundle  {
+  val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
+  val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
+  val rdata = Vec(DecodeWidth, Output(Bool()))
+}
+
 // Last Fetched Store Table
 class LFST extends XSModule  {
   val io = IO(new Bundle {
-    val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
-    val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
-    val rdata = Vec(DecodeWidth, Output(Bool()))
+    val lookup = new LookupLFST
     // val update = Input(new MemPredUpdateReq) // RegNext should be added outside
     // when redirect, mark canceled store as invalid
     val redirect = Input(Valid(new Redirect))
@@ -161,7 +165,8 @@ class LFST extends XSModule  {
 
   // read LFST in rename stage
   for (i <- 0 until DecodeWidth) {
-    io.rdata(i) := (valid(io.raddr(i)) && io.ren(i) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
+    io.lookup.rdata(i) := (valid(io.lookup.raddr(i)) && io.lookup.ren(i) || 
+      io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
   }
 
   // when store is dispatched, mark it as valid

@@ -9,7 +9,7 @@ import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.decode.DispatchToLFST
+import xiangshan.backend.decode.{LFST, DispatchToLFST, LookupLFST}
 
 
 class PreDispatchInfo extends XSBundle {
@@ -47,8 +47,27 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     }
     // to store set LFST
     val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
+    // flush or replay, for LFST
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+    // LFST ctrl
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+    // LFST state sync
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
 
+
+  /**
+    * Store set LFST lookup
+    */
+  // store set LFST lookup may start from rename for better timing
+
+  val lfst = Module(new LFST)
+  lfst.io.redirect <> io.redirect
+  lfst.io.flush <> io.flush
+  lfst.io.dispatch := io.lfst
+  lfst.io.storeIssue <> io.storeIssue
+  lfst.io.csrCtrl <> io.csrCtrl
 
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
@@ -127,6 +146,11 @@ class Dispatch1 extends XSModule with HasExceptionNO {
 //    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
+
+    // lookup store set LFST
+    lfst.io.lookup.raddr(i) := updatedUop(i).cf.ssid
+    lfst.io.lookup.ren(i) := updatedUop(i).cf.storeSetHit
+    updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i)
 
     // update store set LFST
     io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
