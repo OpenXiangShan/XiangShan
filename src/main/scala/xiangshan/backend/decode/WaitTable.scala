@@ -5,13 +5,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-trait MemPredParameters {
-  val WaitTableSize = 1024
-  val MemPredPCWidth = log2Up(WaitTableSize)
-  val ResetTimeMax2Pow = 20 //1078576
-  val ResetTimeMin2Pow = 10 //1024
-}
-
 // 21264-like wait table
 class WaitTable extends XSModule with MemPredParameters {
   val io = IO(new Bundle {
