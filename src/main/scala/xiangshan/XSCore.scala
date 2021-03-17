@@ -277,6 +277,17 @@ trait HasXSParameter {
       nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
     ),
   )
+
+  // load violation predict
+  val ResetTimeMax2Pow = 20 //1078576
+  val ResetTimeMin2Pow = 10 //1024
+  val MemPredPCWidth = log2Up(WaitTableSize)
+  // wait table parameters
+  val WaitTableSize = 1024
+  // store set parameters
+  val SSITSize = WaitTableSize
+  val LFSTSize = 32
+  val SSIDWidth = log2Up(LFSTSize)
 }
 
 trait HasXSLog {

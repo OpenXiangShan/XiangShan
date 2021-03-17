@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 
 // 21264-like wait table
-class WaitTable extends XSModule with MemPredParameters {
+class WaitTable extends XSModule {
   val io = IO(new Bundle {
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(Bool())) // loadWaitBit

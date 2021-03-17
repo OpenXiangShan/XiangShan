@@ -9,6 +9,7 @@ import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.backend.decode.DispatchToLFST
 
 
 class PreDispatchInfo extends XSBundle {
@@ -44,6 +45,8 @@ class Dispatch1 extends XSModule with HasExceptionNO {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
+    // to store set LFST
+    val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
   })
 
 
@@ -124,6 +127,13 @@ class Dispatch1 extends XSModule with HasExceptionNO {
 //    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
+
+    // update store set LFST
+    io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
+    // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
+    io.lfst(i).bits.roqIdx := updatedUop(i).roqIdx
+    io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
+    io.lfst(i).bits.ssid := updatedUop(i).ssid
   }
 
 

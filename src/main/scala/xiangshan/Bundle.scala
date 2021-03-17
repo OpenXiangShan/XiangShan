@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.{ImmUnion, XDecode, MemPredParameters}
+import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
@@ -23,7 +23,7 @@ import Chisel.experimental.chiselName
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket extends XSBundle with MemPredParameters {
+class FetchPacket extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
   val pdmask = UInt(PredictWidth.W)
@@ -171,7 +171,7 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow extends XSBundle with MemPredParameters {
+class CtrlFlow extends XSBundle  {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
@@ -180,6 +180,7 @@ class CtrlFlow extends XSBundle with MemPredParameters {
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
+  val storeSetHit = Bool() // inst has been allocated an store set
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -301,6 +302,7 @@ class MicroOp extends CfCtrl {
   val roqIdx = new RoqPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
+  val ssid = UInt(SSIDWidth.W)
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
 }
@@ -456,7 +458,7 @@ class SfenceBundle extends XSBundle {
 }
 
 // Bundle for load violation predictor updating
-class MemPredUpdateReq extends XSBundle with MemPredParameters {
+class MemPredUpdateReq extends XSBundle  {
   val valid = Bool()
 
   // wait table update

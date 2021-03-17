@@ -10,7 +10,6 @@ import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
-import xiangshan.backend.decode.MemPredParameters
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -98,7 +97,7 @@ class PrevHalfInstr extends XSBundle {
 }
 
 @chiselName
-class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with MemPredParameters
+class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper 
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)

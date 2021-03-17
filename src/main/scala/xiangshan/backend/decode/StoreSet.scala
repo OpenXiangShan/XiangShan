@@ -4,19 +4,21 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.backend.roq.RoqPtr
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
 
 // Store Set Identifier Table Entry
-class SSITEntry extends XSBundle with MemPredParameters {
+class SSITEntry extends XSBundle {
   val valid = Bool()
   val isload = Bool()
   val ssid = UInt(SSIDWidth.W) // store set identifier
 }
 
 // Store Set Identifier Table
-class SSIT extends XSModule with MemPredParameters {
+class SSIT extends XSModule {
   val io = IO(new Bundle {
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(new SSITEntry))
@@ -32,7 +34,7 @@ class SSIT extends XSModule with MemPredParameters {
   val resetCounter = RegInit(0.U(ResetTimeMax2Pow.W))
   resetCounter := resetCounter + 1.U
 
-  // read SSIT in rename stage
+  // read SSIT in decode stage
   for (i <- 0 until DecodeWidth) {
     // io.rdata(i) := (data(io.raddr(i))(1) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
     io.rdata(i).valid := valid(io.raddr(i))
@@ -122,7 +124,67 @@ class SSIT extends XSModule with MemPredParameters {
 }
 
 
-// class StoreSet extends XSModule with MemPredParameters {
-//   val io = IO(new Bundle {
-//   })
-// }
+// Last Fetched Store Table Entry
+class LFSTEntry extends XSBundle  {
+  val valid = Bool()
+  val sqIdx = new SqPtr
+  val roqIdx = new RoqPtr
+}
+
+class DispatchToLFST extends XSBundle  {
+  val sqIdx = new SqPtr
+  val roqIdx = new RoqPtr
+  val ssid = UInt(SSIDWidth.W)
+}
+
+// Last Fetched Store Table
+class LFST extends XSModule  {
+  val io = IO(new Bundle {
+    val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
+    val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
+    val rdata = Vec(DecodeWidth, Output(Bool()))
+    // val update = Input(new MemPredUpdateReq) // RegNext should be added outside
+    // when redirect, mark canceled store as invalid
+    val redirect = Input(Valid(new Redirect))
+    val flush = Input(Bool())
+    // when store is dispatched, mark it as valid
+    val dispatch = Vec(RenameWidth, Flipped(Valid(new DispatchToLFST)))
+    // when store issued, mark store as invalid
+    val storeIssue = Vec(exuParameters.StuCnt, Flipped(Valid(new ExuInput)))
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+  })
+
+  // TODO: use MemTemplate
+  val valid = RegInit(VecInit(Seq.fill(LFSTSize)(false.B)))
+  val sqIdx = Reg(Vec(LFSTSize, new SqPtr))
+  val roqIdx = Reg(Vec(LFSTSize, new RoqPtr))
+
+  // read LFST in rename stage
+  for (i <- 0 until DecodeWidth) {
+    io.rdata(i) := (valid(io.raddr(i)) && io.ren(i) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
+  }
+
+  // when store is dispatched, mark it as valid
+  (0 until RenameWidth).map(i => {
+    when(io.dispatch(i).valid){
+      val waddr = io.dispatch(i).bits.ssid
+      valid(waddr) := true.B
+      sqIdx(waddr) := io.dispatch(i).bits.sqIdx
+      roqIdx(waddr) := io.dispatch(i).bits.roqIdx
+    }
+  })
+
+  // when store is issued, mark it as invalid
+  (0 until exuParameters.StuCnt).map(i => {
+    when(io.storeIssue(i).valid){
+      valid(io.storeIssue(i).bits.uop.ssid) := false.B
+    }
+  })
+
+  // when redirect, cancel store influenced
+  (0 until LFSTSize).map(i => {
+    when(roqIdx(i).needFlush(io.redirect, io.flush)){
+      valid(i) := false.B
+    }
+  })
+}

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeStage, ImmUnion, MemPredParameters}
+import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -42,7 +42,7 @@ class CtrlToLsBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with MemPredParameters {
+class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))

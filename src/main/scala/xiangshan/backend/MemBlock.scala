@@ -16,6 +16,7 @@ import xiangshan.backend.issue.{ReservationStation}
 import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
+  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
@@ -285,6 +286,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
+
+    // sync issue info to store set LFST
+    io.toCtrlBlock.stIn(i).valid := rs.io.deq.valid
+    io.toCtrlBlock.stIn(i).bits := rs.io.deq.bits
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
