@@ -106,6 +106,11 @@ class SSIT extends XSModule {
     }
   }
 
+  XSPerf("ssit_update_lxsx", memPredUpdateReqReg.valid && !loadAssigned && !storeAssigned)
+  XSPerf("ssit_update_lysx", memPredUpdateReqReg.valid && loadAssigned && !storeAssigned)
+  XSPerf("ssit_update_lxsy", memPredUpdateReqReg.valid && !loadAssigned && storeAssigned)
+  XSPerf("ssit_update_lysy", memPredUpdateReqReg.valid && loadAssigned && storeAssigned)
+
   // reset period: ResetTimeMax2Pow
   when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.waittable_timeout))) {
     for (j <- 0 until SSITSize) {
@@ -169,6 +174,13 @@ class LFST extends XSModule  {
       io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
   }
 
+  // when store is issued, mark it as invalid
+  (0 until exuParameters.StuCnt).map(i => {
+    when(io.storeIssue(i).valid){
+      valid(io.storeIssue(i).bits.uop.cf.ssid) := false.B
+    }
+  })
+
   // when store is dispatched, mark it as valid
   (0 until RenameWidth).map(i => {
     when(io.dispatch(i).valid){
@@ -176,13 +188,6 @@ class LFST extends XSModule  {
       valid(waddr) := true.B
       sqIdx(waddr) := io.dispatch(i).bits.sqIdx
       roqIdx(waddr) := io.dispatch(i).bits.roqIdx
-    }
-  })
-
-  // when store is issued, mark it as invalid
-  (0 until exuParameters.StuCnt).map(i => {
-    when(io.storeIssue(i).valid){
-      valid(io.storeIssue(i).bits.uop.cf.ssid) := false.B
     }
   })
 

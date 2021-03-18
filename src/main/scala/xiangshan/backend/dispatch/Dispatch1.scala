@@ -160,6 +160,32 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
   }
 
+  // store set perf count
+  XSPerf("waittable_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerf("storeset_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerf("storeset_store_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
+  )))
+  XSPerf("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerf("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerf("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerf("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
 
   /**
     * Part 3:
