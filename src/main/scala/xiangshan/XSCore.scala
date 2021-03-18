@@ -15,6 +15,7 @@ import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import system.L1CacheErrorInfo
 import utils._
 
 object hartIdCore extends (() => Int) {
@@ -314,22 +315,6 @@ case class EnviromentParameters
   DualCore: Boolean = false
 )
 
-// object AddressSpace extends HasXSParameter {
-//   // (start, size)
-//   // address out of MMIO will be considered as DRAM
-//   def mmio = List(
-//     (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
-//     (0x40000000L, 0x40000000L)   // external devices
-//   )
-
-//   def isMMIO(addr: UInt): Bool = mmio.map(range => {
-//     require(isPow2(range._2))
-//     val bits = log2Up(range._2)
-//     (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
-//   }).reduce(_ || _)
-// }
-
-
 class XSCore()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
   with HasExeBlockHelper {
@@ -355,7 +340,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
     val l2_pf_enable = Output(Bool())
+    val icache_error, dcache_error = Output(new L1CacheErrorInfo)
   })
+  //TODO: connect these signals
+  io.icache_error <> DontCare
+  io.dcache_error <> DontCare
 
   val difftestIO = IO(new DifftestBundle())
   difftestIO <> DontCare

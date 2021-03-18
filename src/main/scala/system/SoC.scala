@@ -43,15 +43,19 @@ class L1CacheErrorInfo extends XSBundle{
   val ecc_error = Valid(Bool())
 }
 
-class XSL1BusErrors extends BusErrors {
-  val icache = new L1CacheErrorInfo
-  val dcache = new L1CacheErrorInfo
-  override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] = List(
-    Some(icache.paddr, "IBUS", "Icache bus error"),
-    Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
-    Some(dcache.paddr, "DBUS", "Dcache bus error"),
-    Some(dcache.ecc_error, "D_ECC", "Dcache ecc error")
-  )
+class XSL1BusErrors(val nCores: Int) extends  BusErrors {
+  val icache = Vec(nCores, new L1CacheErrorInfo)
+  val dcache = Vec(nCores, new L1CacheErrorInfo)
+
+  override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
+    List.tabulate(nCores){i =>
+      List(
+        Some(icache(i).paddr, s"IBUS_$i", s"Icache_$i bus error"),
+        Some(icache(i).ecc_error, s"I_ECC_$i", s"Icache_$i ecc error"),
+        Some(dcache(i).paddr, s"DBUS_$i", s"Dcache_$i bus error"),
+        Some(dcache(i).ecc_error, s"D_ECC_$i", s"Dcache_$i ecc error")
+      )
+    }.flatten
 }
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
@@ -166,7 +170,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   val fakeTreeNode = new GenericLogicalTreeNode
 
   val beu = LazyModule(
-    new BusErrorUnit(new XSL1BusErrors(), BusErrorUnitParams(0x38010000), fakeTreeNode))
+    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
   beu.node := mmioXbar
 
   class BeuSinkNode()(implicit p: Parameters) extends LazyModule {
@@ -199,14 +203,14 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     val trapIO1 = IO(new xiangshan.TrapIO())
     val trapIO = Seq(trapIO0, trapIO1)
 
-    beu.module.io.errors.icache <> DontCare
-    beu.module.io.errors.dcache <> DontCare
     plic.module.io.extra.get.intrVec <> RegNext(beuSink.module.interrupt)
 
     for (i <- 0 until NumCores) {
       xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+      beu.module.io.errors.icache(i) := xs_core(i).module.io.icache_error
+      beu.module.io.errors.dcache(i) := xs_core(i).module.io.dcache_error
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       l2prefetcher(i).module.io.enable := RegNext(xs_core(i).module.io.l2_pf_enable)
