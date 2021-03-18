@@ -177,7 +177,8 @@ class LFST extends XSModule  {
 
   // when store is issued, mark it as invalid
   (0 until exuParameters.StuCnt).map(i => {
-    when(io.storeIssue(i).valid){
+    // TODO: opt timing
+    when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.asUInt === sqIdx(io.storeIssue(i).bits.uop.cf.ssid).asUInt){
       valid(io.storeIssue(i).bits.uop.cf.ssid) := false.B
     }
   })
