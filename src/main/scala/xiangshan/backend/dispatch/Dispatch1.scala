@@ -63,11 +63,11 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   // store set LFST lookup may start from rename for better timing
 
   val lfst = Module(new LFST)
-  lfst.io.redirect <> io.redirect
-  lfst.io.flush <> io.flush
+  lfst.io.redirect <> RegNext(io.redirect)
+  lfst.io.flush <> RegNext(io.flush)
+  lfst.io.storeIssue <> RegNext(io.storeIssue)
+  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
   lfst.io.dispatch := io.lfst
-  lfst.io.storeIssue <> io.storeIssue
-  lfst.io.csrCtrl <> io.csrCtrl
 
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
