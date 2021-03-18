@@ -49,6 +49,8 @@ class DecodeStage extends XSModule {
 
   val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
   XSPerf("loadWaitBitSet", loadWaitBitSet)
+  val storeSetHit = PopCount(io.out.map(o => o.fire() && o.bits.cf.storeSetHit))
+  XSPerf("storeset_ssit_hit", storeSetHit)
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
   XSPerf("utilization", PopCount(io.in.map(_.valid)))

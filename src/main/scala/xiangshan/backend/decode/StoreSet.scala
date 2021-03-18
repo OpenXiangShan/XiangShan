@@ -50,6 +50,7 @@ class SSIT extends XSModule {
 
   // update stage 0
   // RegNext(io.update) while reading SSIT entry for necessary information
+  val memPredUpdateReqValid = RegNext(io.update.valid)
   val memPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
   // load has already been assigned with a store set
   val loadAssigned = RegNext(valid(io.update.ldpc))
@@ -66,7 +67,7 @@ class SSIT extends XSModule {
   val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
 
   // update stage 1
-  when(memPredUpdateReqReg.valid){
+  when(memPredUpdateReqValid){
     switch (Cat(loadAssigned, storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set, 
       // one is allocated and assigned to both instructions."
@@ -106,10 +107,10 @@ class SSIT extends XSModule {
     }
   }
 
-  XSPerf("ssit_update_lxsx", memPredUpdateReqReg.valid && !loadAssigned && !storeAssigned)
-  XSPerf("ssit_update_lysx", memPredUpdateReqReg.valid && loadAssigned && !storeAssigned)
-  XSPerf("ssit_update_lxsy", memPredUpdateReqReg.valid && !loadAssigned && storeAssigned)
-  XSPerf("ssit_update_lysy", memPredUpdateReqReg.valid && loadAssigned && storeAssigned)
+  XSPerf("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
+  XSPerf("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
+  XSPerf("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
+  XSPerf("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
 
   // reset period: ResetTimeMax2Pow
   when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.waittable_timeout))) {
