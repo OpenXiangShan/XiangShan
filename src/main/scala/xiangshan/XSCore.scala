@@ -342,9 +342,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val l2_pf_enable = Output(Bool())
     val icache_error, dcache_error = Output(new L1CacheErrorInfo)
   })
-  //TODO: connect these signals
-  io.icache_error <> DontCare
-  io.dcache_error <> DontCare
 
   val difftestIO = IO(new DifftestBundle())
   difftestIO <> DontCare
@@ -379,6 +376,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
+
+  //TODO: connect these signals
+  io.icache_error <> DontCare
+  io.dcache_error <> memBlock.io.error
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence

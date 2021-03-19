@@ -5,14 +5,15 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
-import xiangshan.backend.roq.{RoqPtr, RoqLsqIO}
+import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
-import xiangshan.backend.fu.{HasExceptionNO, FenceToSbuffer}
-import xiangshan.backend.issue.{ReservationStation}
+import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
+import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
@@ -82,6 +83,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val error = new L1CacheErrorInfo
   })
   val difftestIO = IO(new Bundle() {
     val fromSbuffer = new Bundle() {
@@ -109,6 +111,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+
+  io.error <> dcache.io.error
 
   val redirect = io.fromCtrlBlock.redirect
 

@@ -6,8 +6,8 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters,
-  TLMasterParameters, TLMasterPortParameters, TLArbiter, TLMessages}
+import freechips.rocketchip.tilelink.{TLArbiter, TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLMessages}
+import system.L1CacheErrorInfo
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq  extends DCacheBundle
@@ -107,6 +107,7 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  val error = new L1CacheErrorInfo
 }
 
 
@@ -141,7 +142,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   dataArray.dump()
   metaArray.dump()
   */
-
+  val errors = dataArray.io.errors ++ metaArray.io.errors
+  io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
 
   //----------------------------------------
   // core modules
