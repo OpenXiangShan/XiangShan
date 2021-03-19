@@ -6,11 +6,15 @@ import xiangshan._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config
-import device.{TLTimer, AXI4Plic}
+import chipsalliance.rocketchip.config.Config
+import device.{AXI4Plic, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
+import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import sifive.blocks.inclusivecache._
 import xiangshan.cache.prefetch.L2Prefetcher
 
@@ -48,12 +52,15 @@ class XSCoreWithL2Imp(outer: XSCoreWithL2) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
+    val icache_error, dcache_error = new L1CacheErrorInfo
   })
 
   outer.core.module.io.hartId := io.hartId
   outer.core.module.io.externalInterrupt := io.externalInterrupt
   outer.l2prefetcher.module.io.enable := RegNext(outer.core.module.io.l2_pf_enable)
   outer.l2prefetcher.module.io.in <> outer.l2cache.module.io
+  io.icache_error <> outer.core.module.io.icache_error
+  io.dcache_error <> outer.core.module.io.dcache_error
 }
 
 
@@ -126,6 +133,7 @@ trait HaveAXI4MemPort {
     AXI4Deinterleaver(L3BlockSize) :=*
     TLToAXI4() :=*
     TLWidthWidget(L3BusWidth / 8) :=*
+    TLBuffer() :=*
     TLCacheCork() :=*
     bankedNode
 
@@ -167,7 +175,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
   with HaveSlaveAXI4Port
-  {
+{
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
 
@@ -184,6 +192,21 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
     sim = !env.FPGAPlatform
   ))
   clint.node := peripheralXbar
+
+  val fakeTreeNode = new GenericLogicalTreeNode
+  val beu = LazyModule(
+    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
+  beu.node := peripheralXbar
+
+  class BeuSinkNode()(implicit p: config.Parameters) extends LazyModule {
+    val intSinkNode = IntSinkNode(IntSinkPortSimple())
+    lazy val module = new LazyModuleImp(this){
+      val interrupt = IO(Output(Bool()))
+      interrupt := intSinkNode.in.head._1.head
+    }
+  }
+  val beuSink = LazyModule(new BeuSinkNode())
+  beuSink.intSinkNode := beu.intNode
 
   val plic = LazyModule(new AXI4Plic(
     Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
@@ -221,6 +244,8 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+      beu.module.io.errors.icache(i) := RegNext(core_with_l2(i).module.io.icache_error)
+      beu.module.io.errors.dcache(i) := RegNext(core_with_l2(i).module.io.dcache_error)
     }
 
     dontTouch(io.extIntrs)
@@ -236,7 +261,9 @@ object TopMain extends App {
       }
     )
     val otherArgs = args.filterNot(_ == "--dual-core")
-    implicit val p = config.Parameters.empty
+    implicit val p = new Config((_, _, _) => {
+      case XLen => 64
+    })
     XiangShanStage.execute(otherArgs, Seq(
       ChiselGeneratorAnnotation(() => {
         val soc = LazyModule(new XSTop())
