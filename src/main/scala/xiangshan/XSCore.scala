@@ -378,7 +378,15 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val ptw = outer.ptw.module
 
   //TODO: connect these signals
-  io.icache_error <> DontCare
+  def errorOR(src1: L1CacheErrorInfo, src2: L1CacheErrorInfo) : L1CacheErrorInfo = {
+    val out = Wire(new L1CacheErrorInfo)
+    out.ecc_error.valid := src1.ecc_error.valid || src2.ecc_error.valid
+    out.ecc_error.bits := true.B
+    out.paddr.valid := out.ecc_error.valid
+    out.paddr.bits := Mux(src1.ecc_error.valid, src1.paddr.bits, src2.paddr.bits)
+    out
+  }
+  io.icache_error <> errorOR(src1=frontend.io.error, src2=l1pluscache.io.error)
   io.dcache_error <> memBlock.io.error
 
   frontend.io.backend <> ctrlBlock.io.frontend

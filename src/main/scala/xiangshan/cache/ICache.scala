@@ -413,9 +413,9 @@ class ICache extends ICacheModule
 
   val errorArbiter = Module(new ICacheErrorAbiter)
   errorArbiter.io.meta_ways_error.valid := RegNext(s2_hit)
-  errorArbiter.io.meta_ways_error.bits  := RegNext(dataArray.io.readResp.errors)
+  errorArbiter.io.meta_ways_error.bits  := RegNext(metaArray.io.readResp.errors)
   errorArbiter.io.data_ways_error.valid := RegNext(s2_hit)
-  errorArbiter.io.meta_ways_error.bits  := RegNext(dataArray.io.readResp.errors)
+  errorArbiter.io.data_ways_error.bits  := RegNext(dataArray.io.readResp.errors)
   errorArbiter.io.way_enable            := RegNext(hitVec.asUInt)
   errorArbiter.io.paddr                 := RegNext(s2_tlb_resp.paddr)
 
@@ -592,7 +592,6 @@ class ICache extends ICacheModule
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
   io.resp.bits.acf := s3_exception_vec(accessFault) 
-  //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
   io.resp.bits.mmio := s3_mmio
 
   //to itlb
