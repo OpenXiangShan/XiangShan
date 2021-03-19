@@ -155,6 +155,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       AXI4UserYanker() :=
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
+      TLBuffer() :=
       TLCacheCork() :=
       bankedNode
   }
