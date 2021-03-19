@@ -15,6 +15,48 @@ import sifive.blocks.inclusivecache._
 import xiangshan.cache.prefetch.L2Prefetcher
 
 
+class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
+  with HasXSParameter {
+  val core = LazyModule(new XSCore())
+  val l2prefetcher = LazyModule(new L2Prefetcher())
+  val l2cache = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 2,
+      ways = L2NWays,
+      sets = L2NSets,
+      blockBytes = L2BlockSize,
+      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
+      cacheName = s"L2"
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 32
+    )
+  ))
+  private val l2xbar = TLXbar()
+
+  l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
+  l2xbar := TLBuffer() := core.l1pluscache.clientNode
+  l2xbar := TLBuffer() := core.ptw.node
+  l2xbar := TLBuffer() := l2prefetcher.clientNode
+  l2cache.node := TLBuffer() := l2xbar
+
+  lazy val module = new XSCoreWithL2Imp(this)
+}
+
+class XSCoreWithL2Imp(outer: XSCoreWithL2) extends LazyModuleImp(outer)
+  with HasXSParameter {
+  val io = IO(new Bundle {
+    val hartId = Input(UInt(64.W))
+    val externalInterrupt = new ExternalInterruptIO
+  })
+
+  outer.core.module.io.hartId := io.hartId
+  outer.core.module.io.externalInterrupt := io.externalInterrupt
+  outer.l2prefetcher.module.io.enable := RegNext(outer.core.module.io.l2_pf_enable)
+  outer.l2prefetcher.module.io.in <> outer.l2cache.module.io
+}
+
+
 abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
@@ -129,32 +171,12 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
 
-  val core = Seq.fill(NumCores)(LazyModule(new XSCore()))
-  val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
-  val l2cache = Seq.fill(NumCores)(LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 2,
-      ways = L2NWays,
-      sets = L2NSets,
-      blockBytes = L2BlockSize,
-      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2"
-    ),
-    InclusiveCacheMicroParameters(
-      writeBytes = 32
-    )
-  )))
-  val l2xbar = Seq.fill(NumCores)(TLXbar())
+  val core_with_l2 = Seq.fill(NumCores)(LazyModule(new XSCoreWithL2))
 
   for (i <- 0 until NumCores) {
-    peripheralXbar := TLBuffer() := core(i).frontend.instrUncache.clientNode
-    peripheralXbar := TLBuffer() := core(i).memBlock.uncache.clientNode
-    l2xbar(i) := TLBuffer() := core(i).memBlock.dcache.clientNode
-    l2xbar(i) := TLBuffer() := core(i).l1pluscache.clientNode
-    l2xbar(i) := TLBuffer() := core(i).ptw.node
-    l2xbar(i) := TLBuffer() := l2prefetcher(i).clientNode
-    l2cache(i).node := TLBuffer() := l2xbar(i)
-    l3_xbar := TLBuffer() := l2cache(i).node
+    peripheralXbar := TLBuffer() := core_with_l2(i).core.frontend.instrUncache.clientNode
+    peripheralXbar := TLBuffer() := core_with_l2(i).core.memBlock.uncache.clientNode
+    l3_xbar := TLBuffer() := core_with_l2(i).l2cache.node
   }
 
   private val clint = LazyModule(new TLTimer(
@@ -195,12 +217,10 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
     plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
 
     for (i <- 0 until NumCores) {
-      core(i).module.io.hartId := i.U
-      core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
-      core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
-      core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-      l2prefetcher(i).module.io.enable := RegNext(core(i).module.io.l2_pf_enable)
-      l2prefetcher(i).module.io.in <> l2cache(i).module.io
+      core_with_l2(i).module.io.hartId := i.U
+      core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
+      core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+      core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
     }
 
     dontTouch(io.extIntrs)
