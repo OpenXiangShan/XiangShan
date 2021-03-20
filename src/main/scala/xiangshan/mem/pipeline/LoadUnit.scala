@@ -26,6 +26,7 @@ class LoadUnit_S0 extends XSModule {
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
   })
 
   val s0_uop = io.in.bits.uop
@@ -46,6 +47,7 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   // query DCache
   io.dcacheReq.valid := io.in.valid
@@ -78,6 +80,9 @@ class LoadUnit_S0 extends XSModule {
   XSDebug(io.dcacheReq.fire(),
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
+  XSPerf("in", io.in.valid)
+  XSPerf("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
+  XSPerf("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
 }
 
 
@@ -136,6 +141,9 @@ class LoadUnit_S1 extends XSModule {
 
   io.in.ready := !io.in.valid || io.out.ready
 
+  XSPerf("in", io.in.valid)
+  XSPerf("tlb_miss", io.in.valid && s1_tlb_miss)
+  XSPerf("stall_out", io.out.valid && !io.out.ready)
 }
 
 
@@ -237,6 +245,15 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
     forwardData.asUInt, forwardMask.asUInt
   )
+
+  XSPerf("in", io.in.valid)
+  XSPerf("dcache_miss", io.in.valid && s2_cache_miss)
+  XSPerf("full_forward", io.in.valid && fullForward)
+  XSPerf("dcache_miss_full_forward", io.in.valid && s2_cache_miss && fullForward)
+  XSPerf("replay",  io.tlbFeedback.valid && !io.tlbFeedback.bits.hit)
+  XSPerf("replay_tlb_miss", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && s2_tlb_miss)
+  XSPerf("replay_cache", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
+  XSPerf("stall_out", io.out.valid && !io.out.ready)
 }
 
 class LoadUnit extends XSModule with HasLoadHelper {
@@ -247,10 +264,12 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
+    val fastUop = ValidIO(new MicroOp) // early wakup signal generated in load_s1
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -261,6 +280,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s0.io.dtlbReq <> io.dtlb.req
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.rsIdx := io.rsIdx
+  load_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
@@ -286,9 +306,12 @@ class LoadUnit extends XSModule with HasLoadHelper {
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
   io.lsq.forward.sqIdxMask := sqIdxMaskReg
 
-  // use s2_hit_way to select data received in s1
-  load_s2.io.dcacheResp.bits.data := Mux1H(io.dcache.s2_hit_way, RegNext(io.dcache.s1_data))
-  assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
+  // // use s2_hit_way to select data received in s1
+  // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
+  // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
+
+  io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid
+  io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

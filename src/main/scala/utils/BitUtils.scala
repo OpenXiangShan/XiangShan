@@ -133,8 +133,10 @@ object GetOddBits {
 }
 
 object XORFold {
-  def apply(input: UInt, reswidth: Int): UInt = {
-    require(input.getWidth*2>=reswidth)
-    input(reswidth-1, 0) ^ input(2*reswidth-1, reswidth)
+  def apply(input: UInt, resWidth: Int): UInt = {
+    require(resWidth > 0)
+    val fold_range = input.getWidth / resWidth
+    val value = ZeroExt(input, fold_range * resWidth)
+    ParallelXOR((0 until fold_range).map(i => value(i*resWidth+resWidth-1, i*resWidth)))
   }
 }

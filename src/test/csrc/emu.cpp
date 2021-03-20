@@ -16,6 +16,7 @@ static inline void print_help(const char *file) {
   printf("  -C, --max-cycles=NUM       execute at most NUM cycles\n");
   printf("  -I, --max-instr=NUM        execute at most NUM instructions\n");
   printf("  -W, --warmup-instr=NUM     the number of warmup instructions\n");
+  printf("  -D, --stat-cycles=NUM      the interval cycles of dumping statistics\n");
   printf("  -i, --image=FILE           run with this image file\n");
   printf("  -b, --log-begin=NUM        display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM          stop display log at NUM th cycle\n");
@@ -37,6 +38,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
     { "warmup-instr",   1, NULL, 'W' },
+    { "stat-cycles",    1, NULL, 'D' },
     { "image",          1, NULL, 'i' },
     { "log-begin",      1, NULL, 'b' },
     { "log-end",        1, NULL, 'e' },
@@ -67,6 +69,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
       case 'C': args.max_cycles = atoll(optarg);  break;
       case 'I': args.max_instr = atoll(optarg);  break;
       case 'W': args.warmup_instr = atoll(optarg);  break;
+      case 'D': args.stat_cycles = atoll(optarg);  break;
       case 'i': args.image = optarg; break;
       case 'b': args.log_begin = atoll(optarg);  break;
       case 'e': args.log_end = atoll(optarg); break;
@@ -467,8 +470,8 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
     uint64_t ret_temp;
     atomicAddr = (atomicAddr & 0xfffffffffffffff8);
     read_goldenmem(atomicAddr, &mem_temp, 8);
-    
-    if (atomicMask == 0xf) 
+
+    if (atomicMask == 0xf)
       mem = (uint32_t)mem_temp;
     else
       mem = (uint32_t)(mem_temp >> 32);
@@ -492,11 +495,11 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t* atomicData, uint64_t at
       default: printf("Unknown atomic fuOpType: 0x%x\n", atomicFuop);
     }
     ret_temp = ret;
-    if (atomicMask == 0xf0) 
+    if (atomicMask == 0xf0)
       ret_temp = (ret_temp << 32);
     update_goldenmem(atomicAddr, &ret_temp, atomicMask, 8);
   }
-  
+
 }
 
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
@@ -557,6 +560,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       dut_ptr->io_perfInfo_clean = 1;
       dut_ptr->io_perfInfo_dump = 1;
       args.warmup_instr = -1;
+    }
+    if (dut_ptr->io_trap_cycleCnt % args.stat_cycles == args.stat_cycles - 1) {
+      dut_ptr->io_perfInfo_clean = 1;
+      dut_ptr->io_perfInfo_dump = 1;
     }
 
     single_cycle();
@@ -796,7 +803,7 @@ inline void Emulator::save_coverage(time_t t) {
 }
 #endif
 
-void Emulator::trigger_perfDump() {
+void Emulator::trigger_stat_dump() {
   dut_ptr->io_perfInfo_dump = 1;
   single_cycle();
 }
@@ -817,15 +824,12 @@ void Emulator::display_trapinfo() {
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_LIMIT_EXCEEDED:
-      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     case STATE_SIG:
-      trigger_perfDump();
       eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
-      trigger_perfDump();
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
   }
 
@@ -833,6 +837,10 @@ void Emulator::display_trapinfo() {
   eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %'" PRIu64 "\n" ANSI_COLOR_RESET, instrCnt);
   eprintf(ANSI_COLOR_MAGENTA "instrCnt = %'" PRIu64 ", cycleCnt = %'" PRIu64 ", IPC = %lf\n" ANSI_COLOR_RESET,
       instrCnt, cycleCnt, ipc);
+
+  if (trapCode != STATE_ABORT) {
+    trigger_stat_dump();
+  }
 }
 
 #ifdef VM_SAVABLE

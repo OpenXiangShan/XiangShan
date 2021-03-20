@@ -415,7 +415,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.roqIdx === deqPtr
-  val deqHasException = deqHasExceptionOrFlush && !exceptionDataRead.bits.flushPipe
+  val deqHasException = deqHasExceptionOrFlush && exceptionDataRead.bits.exceptionVec.asUInt.orR
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
   val isFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe
@@ -794,10 +794,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
+  XSPerf("clock_cycle", 1.U)
   XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
-  XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.LOAD})))
-  XSPerf("commitInstrStore", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(io.commits.info.map(_.commitType)).map{ case (v, t) => v && t === CommitType.STORE})))
+  val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
+  XSPerf("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))
+  val commitSrc1MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src1MoveElim)
+  XSPerf("commitInstrSrc1MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc1MoveElim).map{ case (v, e) => v && e })))
+  val commitSrc2MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src2MoveElim)
+  XSPerf("commitInstrSrc2MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc2MoveElim).map{ case (v, e) => v && e })))
+  val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
+  val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
+  XSPerf("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(commitLoadValid)))
+  val commitLoadWaitBit = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).cf.loadWaitBit)
+  XSPerf("commitInstrLoadWait", Mux(io.commits.isWalk, 0.U, PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w })))
+  val commitIsStore = io.commits.info.map(_.commitType).map(_ === CommitType.STORE)
+  XSPerf("commitInstrStore", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsStore).map{ case (v, t) => v && t })))
   XSPerf("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
   // XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
   // XSPerf("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))

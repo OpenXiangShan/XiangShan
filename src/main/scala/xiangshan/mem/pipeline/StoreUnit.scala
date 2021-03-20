@@ -13,6 +13,7 @@ class StoreUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
   })
@@ -32,6 +33,7 @@ class StoreUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.roqIdx := io.in.bits.uop.roqIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
@@ -142,6 +144,7 @@ class StoreUnit extends XSModule {
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
@@ -154,6 +157,7 @@ class StoreUnit extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
   store_s0.io.rsIdx := io.rsIdx
+  store_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 

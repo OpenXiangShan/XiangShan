@@ -88,8 +88,8 @@ class DCacheLoadIO extends DCacheWordIO
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr = Output(UInt(PAddrBits.W))
-  val s1_data  = Input(Vec(nWays, UInt(DataBits.W)))
-  val s2_hit_way = Input(UInt(nWays.W))
+  val s1_hit_way = Input(UInt(nWays.W))
+  val s1_disable_fast_wakeup = Input(Bool())
 }
 
 class DCacheLineIO extends DCacheBundle
@@ -169,15 +169,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
-  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(0).io.meta_read
+  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(LoadPipelineWidth - 1).io.meta_read
   metaReadArb.io.in(MainPipeMetaReadPort) <> mainPipe.io.meta_read
 
-  metaArray.io.read(0) <> metaReadArb.io.out
+  metaArray.io.read(LoadPipelineWidth - 1) <> metaReadArb.io.out
 
-  ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
-  mainPipe.io.meta_resp  <>  metaArray.io.resp(0)
+  ldu(LoadPipelineWidth - 1).io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
+  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
 
-  for (w <- 1 until LoadPipelineWidth) {
+  for (w <- 0 until (LoadPipelineWidth - 1)) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
     ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
@@ -196,15 +196,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
-  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
+  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.data_read
   dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.data_read
 
-  dataArray.io.read(0) <> dataReadArb.io.out
+  dataArray.io.read(LoadPipelineWidth - 1) <> dataReadArb.io.out
 
-  dataArray.io.resp(0) <> ldu(0).io.data_resp
-  dataArray.io.resp(0) <> mainPipe.io.data_resp
+  dataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.data_resp
+  dataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.data_resp
 
-  for (w <- 1 until LoadPipelineWidth) {
+  for (w <- 0 until (LoadPipelineWidth - 1)) {
     dataArray.io.read(w) <> ldu(w).io.data_read
     dataArray.io.resp(w) <> ldu(w).io.data_resp
   }
@@ -219,6 +219,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // replay and nack not needed anymore
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
+
+    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup(w)
   }
 
   //----------------------------------------
@@ -278,7 +280,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
   val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
 
-  mainPipeReqArb.io.out.ready := mainPipe.io.req.ready
+  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
   mainPipe.io.req.valid := mainPipeReq_valid
   mainPipe.io.req.bits  := mainPipeReq_req
 
@@ -291,13 +293,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
 
+  for(i <- 0 until LoadPipelineWidth) {
+    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
+  }
+
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
   wb.io.req <> mainPipe.io.wb_req
   bus.c     <> wb.io.mem_release
 
-  // connect bus d 
+  // connect bus d
   missQueue.io.mem_grant.valid := false.B
   missQueue.io.mem_grant.bits  := DontCare
 
@@ -313,7 +319,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire())
   }
-
 
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {

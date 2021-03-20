@@ -12,6 +12,8 @@ class RenameBypassInfo extends XSBundle {
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val move_eliminated_src1 = Vec(RenameWidth-1, Bool())
+  val move_eliminated_src2 = Vec(RenameWidth-1, Bool())
 }
 
 class Rename extends XSModule with HasCircularQueuePtrHelper {
@@ -25,6 +27,7 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -202,6 +205,20 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       val intMatch = needIntDest(j) && needIntDest(i)
       (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
     }).reverse)
+    io.renameBypass.move_eliminated_src1(i-1) :=
+      // the producer move instruction writes to non-zero register
+      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
+      // the consumer instruction uses the move's destination register
+      io.in(i).bits.ctrl.src1Type === SrcType.reg && io.in(i).bits.ctrl.lsrc1 === io.in(i-1).bits.ctrl.ldest &&
+      // CSR control (by srnctl)
+      io.csrCtrl.move_elim_enable
+    io.renameBypass.move_eliminated_src2(i-1) :=
+      // the producer move instruction writes to non-zero register
+      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
+      // the consumer instruction uses the move's destination register
+      io.in(i).bits.ctrl.src2Type === SrcType.reg && io.in(i).bits.ctrl.lsrc2 === io.in(i-1).bits.ctrl.ldest &&
+      // CSR control (by srnctl)
+      io.csrCtrl.move_elim_enable
   }
 
   val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
@@ -247,4 +264,13 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       freelist.deallocPregs(i) := io.roqCommits.info(i).old_pdest
     }
   }
+
+  XSPerf("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
+  XSPerf("utilization", PopCount(io.in.map(_.valid)))
+  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
+  XSPerf("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerf("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+
 }

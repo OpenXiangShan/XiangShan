@@ -272,6 +272,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
   }
 
+  XSPerf("tage_table_wrbypass_hit", io.update.mask.reduce(_||_) && wrbypass_hit)
+  XSPerf("tage_table_wrbypass_enq", io.update.mask.reduce(_||_) && !wrbypass_hit)
+  XSPerf("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
 
   if (BPUDebug && debug) {
     val u = io.update
@@ -376,10 +379,12 @@ class Tage extends BaseTage {
   val debug_hist_s3 = RegEnable(debug_hist_s2, enable=s3_fire)
 
   val u = io.update.bits
-  val updateValids = u.valids.map(v => v && io.update.valid)
+  val updateValids =
+    VecInit(u.valids zip u.br_mask map {
+      case (v, b) => v && b && io.update.valid
+    })
   val updateHist = u.predHist.asUInt
 
-  val updateBrMask = u.br_mask
   val updateMetas = VecInit(u.metas.map(_.tageMeta))
   val updateMisPred = u.mispred
 
@@ -409,7 +414,8 @@ class Tage extends BaseTage {
   val if4_providerCtrs = RegEnable(if3_providerCtrs, s3_fire)
 
 
-  val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i) && updateBrMask(i)))
+  val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i)))
+  val updateMisPreds = u.mispred zip u.valids map {case (m, v) => m && v}
 
   // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
@@ -463,10 +469,9 @@ class Tage extends BaseTage {
 
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
-    val updateIsBr = updateBrMask(w)
-    val isUpdateTaken = updateValid && u.takens(w) && updateIsBr
-    val updateMisPred = updateTageMisPreds(w)
-    when (updateValid && updateIsBr) {
+    val isUpdateTaken = updateValid && u.takens(w)
+    val updateMisPred = updateMisPreds(w)
+    when (updateValid) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -491,6 +496,7 @@ class Tage extends BaseTage {
         updateUMask(allocate.bits)(w) := true.B
         updateU(allocate.bits)(w) := 0.U
       }.otherwise {
+        
         val provider = updateMeta.provider
         val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
         for (i <- 0 until TageNTables) {
@@ -518,6 +524,41 @@ class Tage extends BaseTage {
     tables(i).io.update.hist := RegNext(updateHist)
   }
 
+
+  def pred_perf(name: String, cnt: UInt)   = XSPerf(s"${name}_at_pred", cnt)
+  def commit_perf(name: String, cnt: UInt) = XSPerf(s"${name}_at_commit", cnt)
+  def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
+    pred_perf(name, pred_cnt)
+    commit_perf(name, commit_cnt)
+  }
+  for (i <- 0 until TageNTables) {
+    val pred_i_provided =
+      VecInit(io.meta map (m => m.provider.valid && m.provider.bits === i.U))
+    val commit_i_provided =
+      VecInit(updateMetas zip updateValids map {
+        case (m, v) => m.provider.valid && m.provider.bits === i.U && v
+      })
+    tage_perf(s"tage_table_${i}_provided",
+      PopCount(pred_i_provided),
+      PopCount(commit_i_provided))
+  }
+  tage_perf("tage_use_bim",
+    PopCount(VecInit(io.meta map (!_.provider.valid))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+        case (m, v) => !m.provider.valid && v}))
+    )
+  def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
+  tage_perf("tage_use_altpred",
+    PopCount(VecInit(io.meta map (
+      m => m.provider.valid && unconf(m.providerCtr)))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
+    })))
+  tage_perf("tage_provided",
+    PopCount(io.meta.map(_.provider.valid)),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && v
+    })))
 
   if (BPUDebug && debug) {
     for (b <- 0 until TageBanks) {
