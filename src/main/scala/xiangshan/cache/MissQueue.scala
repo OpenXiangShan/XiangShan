@@ -529,7 +529,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   when (num_valids > max_inflight) {
     max_inflight := num_valids
   }
-  // max inflight (average) = max_inflight_total / max_inflight_cycles
-  XSPerf("max_inflight_total", Fill(log2Up(cfg.nMissEntries) + 1, !primary_ready.asUInt.andR) & max_inflight)
-  XSPerf("max_inflight_cycles", !primary_ready.asUInt.andR)
+  // max inflight (average) = max_inflight_total / cycle cnt
+  XSPerf("max_inflight", max_inflight)
+  XSPerf("num_valids", num_valids)
 }
