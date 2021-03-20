@@ -81,6 +81,7 @@ class IntegerBlock
 (
   fastWakeUpIn: Seq[ExuConfig],
   slowWakeUpIn: Seq[ExuConfig],
+  memFastWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig]
 ) extends XSModule with HasExeBlockHelper {
@@ -91,6 +92,7 @@ class IntegerBlock
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
+    val memFastWakeUp = new WakeUpBundle(exuParameters.LduCnt, 0)
 
     val csrio = new CSRFileIO
     val fenceio = new Bundle {
@@ -157,11 +159,12 @@ class IntegerBlock
 
     val readIntRf = cfg.readIntRf
 
-    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency).map(a => (a.config, a.io.out.bits.data))
-    val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data))
+    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(a => (a.config, a.io.out.bits.data))
+    val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data)) ++
+      (if (cfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
     val fastPortsCnt = fastDatas.length
 
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(a => (a.config, a.io.out))
+    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
     val slowPorts = (inBlockListenPorts ++ slowWakeUpIn.zip(io.wakeUpIn.slow)).map(a => (a._1, decoupledIOToValidIO(a._2)))
     val extraListenPortsCnt = slowPorts.length
 
@@ -169,7 +172,7 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -213,7 +216,8 @@ class IntegerBlock
       raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.rfWen
       raw
     })
-    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops
+    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops ++
+      (if (rs.exuCfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) io.memFastWakeUp.fastUops else Seq())
   }
 
   io.wakeUpOut.fastUops <> reservationStations.filter(
@@ -262,8 +266,8 @@ class IntegerBlock
     w
   }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
-  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))  
-  
+  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+
   exeUnits.zip(intWbArbiter.io.in).foreach{
     case (exu, wInt) =>
       if(exu.config.writeFpRf){

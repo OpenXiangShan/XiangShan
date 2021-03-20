@@ -47,7 +47,7 @@ object ReplacementPolicy {
 
 class RandomReplacement(n_ways: Int) extends ReplacementPolicy {
   private val replace = Wire(Bool())
-  replace := true.B
+  replace := false.B
   def nBits = 16
   def perSet = false
   private val lfsr = LFSR(nBits, replace)
@@ -340,8 +340,8 @@ class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolic
   def miss(set: UInt) =  random.miss 
   def way(set: UInt) = random.way
 
-  def access(set: UInt, touch_way: UInt) = {}
-  def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]) = {}
+  def access(set: UInt, touch_way: UInt) = random.access(touch_way)
+  def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]) = random.access(touch_ways)
 
 }
 

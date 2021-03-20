@@ -256,6 +256,7 @@ class CtrlSignals extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
+  val isMove = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -274,6 +275,8 @@ class CfCtrl extends XSBundle {
 }
 
 class PerfDebugInfo extends XSBundle {
+  val src1MoveElim = Bool()
+  val src2MoveElim = Bool()
   // val fetchTime = UInt(64.W)
   val renameTime = UInt(64.W)
   val dispatchTime = UInt(64.W)
@@ -543,4 +546,6 @@ class CustomCSRCtrlIO extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  // Rename
+  val move_elim_enable = Output(Bool())
 }
