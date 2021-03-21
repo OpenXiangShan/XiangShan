@@ -144,7 +144,7 @@ class DispatchToLFST extends XSBundle  {
 }
 
 class LookupLFST extends XSBundle  {
-  val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
+  val raddr = Vec(DecodeWidth, Input(UInt(SSIDWidth.W))) // use ssid to llokup LFST
   val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
   val rdata = Vec(DecodeWidth, Output(Bool()))
 }
