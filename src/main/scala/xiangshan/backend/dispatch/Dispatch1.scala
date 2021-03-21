@@ -150,7 +150,9 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     // lookup store set LFST
     lfst.io.lookup.raddr(i) := updatedUop(i).cf.ssid
     lfst.io.lookup.ren(i) := updatedUop(i).cf.storeSetHit
-    updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i)
+    // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) // classic store set
+    updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && !isStore(i) // store set lite
+    // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // 2-bit store set
 
     // update store set LFST
     io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
