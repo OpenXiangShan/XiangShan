@@ -112,7 +112,7 @@ trait HaveAXI4MemPort {
   this: BaseXSSoc =>
   // 40-bit physical address
   val memRange = AddressSet(0x00000000L, 0xffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
-  val memAXI4SlaveNode = AXI4SlaveNode(Seq.tabulate(L3NBanks) { i =>
+  val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
         AXI4SlaveParameters(
@@ -126,16 +126,16 @@ trait HaveAXI4MemPort {
       ),
       beatBytes = L3BusWidth / 8
     )
-  })
+  ))
 
-  memAXI4SlaveNode :=*
-    AXI4UserYanker() :=*
-    AXI4Deinterleaver(L3BlockSize) :=*
-    TLToAXI4() :=*
-    TLWidthWidget(L3BusWidth / 8) :=*
-    TLBuffer() :=*
-    TLCacheCork() :=*
-    bankedNode
+  val mem_xbar = TLXbar()
+  mem_xbar :=* TLBuffer() :=* TLCacheCork() :=* bankedNode
+  memAXI4SlaveNode :=
+    AXI4UserYanker() :=
+    AXI4Deinterleaver(L3BlockSize) :=
+    TLToAXI4() :=
+    TLWidthWidget(L3BusWidth / 8) :=
+    mem_xbar
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
