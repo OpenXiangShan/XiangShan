@@ -116,8 +116,8 @@ VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   $(VEXTRA_FLAGS) \
   --assert \
   --stats-vars \
-  --output-split 5000 \
-  --output-split-cfuncs 5000
+  --output-split 30000 \
+  --output-split-cfuncs 30000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
@@ -174,12 +174,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	@echo "try to get emu.lock ..."
-	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
-	@echo "get lock"
 	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
-	@echo "release lock ..."
-	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
 	date -R
 
