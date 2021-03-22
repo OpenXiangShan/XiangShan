@@ -73,7 +73,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOut.cfiUpdate.predTaken := true.B
   redirectOut.cfiUpdate.taken := true.B
   redirectOut.cfiUpdate.target := jumpDataModule.io.target
-  redirectOut.cfiUpdate.isMisPred := jumpDataModule.io.target =/= jalr_target || !uop.cf.pred_taken
+  redirectOut.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrBits - 1, 0) =/= jalr_target || !uop.cf.pred_taken
 
   io.in.ready := io.out.ready
   io.out.valid := valid
