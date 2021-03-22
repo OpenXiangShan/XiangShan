@@ -45,6 +45,7 @@ class L1CacheErrorInfo extends XSBundle{
 
 class XSL1BusErrors(val nCores: Int) extends  BusErrors {
   val icache = Vec(nCores, new L1CacheErrorInfo)
+  val l1plus = Vec(nCores, new L1CacheErrorInfo)
   val dcache = Vec(nCores, new L1CacheErrorInfo)
 
   override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
@@ -52,6 +53,8 @@ class XSL1BusErrors(val nCores: Int) extends  BusErrors {
       List(
         Some(icache(i).paddr, s"IBUS_$i", s"Icache_$i bus error"),
         Some(icache(i).ecc_error, s"I_ECC_$i", s"Icache_$i ecc error"),
+        Some(l1plus(i).paddr, s"L1PLUS_$i", s"L1PLUS_$i bus error"),
+        Some(l1plus(i).ecc_error, s"L1PLUS_ECC_$i", s"L1PLUS_$i ecc error"),
         Some(dcache(i).paddr, s"DBUS_$i", s"Dcache_$i bus error"),
         Some(dcache(i).ecc_error, s"D_ECC_$i", s"Dcache_$i ecc error")
       )
@@ -210,6 +213,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+      beu.module.io.errors.l1plus(i) := RegNext(xs_core(i).module.io.l1plus_error)
       beu.module.io.errors.icache(i) := RegNext(xs_core(i).module.io.icache_error)
       beu.module.io.errors.dcache(i) := RegNext(xs_core(i).module.io.dcache_error)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))

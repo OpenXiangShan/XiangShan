@@ -340,7 +340,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
     val l2_pf_enable = Output(Bool())
-    val icache_error, dcache_error = Output(new L1CacheErrorInfo)
+    val l1plus_error, icache_error, dcache_error = Output(new L1CacheErrorInfo)
   })
 
   val difftestIO = IO(new DifftestBundle())
@@ -377,16 +377,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
 
-  //TODO: connect these signals
-  def errorOR(src1: L1CacheErrorInfo, src2: L1CacheErrorInfo) : L1CacheErrorInfo = {
-    val out = Wire(new L1CacheErrorInfo)
-    out.ecc_error.valid := src1.ecc_error.valid || src2.ecc_error.valid
-    out.ecc_error.bits := true.B
-    out.paddr.valid := out.ecc_error.valid
-    out.paddr.bits := Mux(src1.ecc_error.valid, src1.paddr.bits, src2.paddr.bits)
-    out
-  }
-  io.icache_error <> errorOR(src1=frontend.io.error, src2=l1pluscache.io.error)
+  io.l1plus_error <> l1pluscache.io.error
+  io.icache_error <> frontend.io.error
   io.dcache_error <> memBlock.io.error
 
   frontend.io.backend <> ctrlBlock.io.frontend
