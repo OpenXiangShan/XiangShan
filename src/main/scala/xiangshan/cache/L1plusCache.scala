@@ -408,7 +408,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
 
   // response
   io.resp           <> resp_arb.io.out
-  io.error          <> pipe.io.error
+  io.error          <> RegNext(pipe.io.error)
   resp_arb.io.in(0) <> pipe.io.resp
   resp_arb.io.in(1) <> missQueue.io.resp
 

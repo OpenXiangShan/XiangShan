@@ -52,13 +52,14 @@ class XSCoreWithL2Imp(outer: XSCoreWithL2) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val externalInterrupt = new ExternalInterruptIO
-    val icache_error, dcache_error = new L1CacheErrorInfo
+    val l1plus_error, icache_error, dcache_error = new L1CacheErrorInfo
   })
 
   outer.core.module.io.hartId := io.hartId
   outer.core.module.io.externalInterrupt := io.externalInterrupt
   outer.l2prefetcher.module.io.enable := RegNext(outer.core.module.io.l2_pf_enable)
   outer.l2prefetcher.module.io.in <> outer.l2cache.module.io
+  io.l1plus_error <> outer.core.module.io.l1plus_error
   io.icache_error <> outer.core.module.io.icache_error
   io.dcache_error <> outer.core.module.io.dcache_error
 }
@@ -244,6 +245,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
       core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+      beu.module.io.errors.l1plus(i) := RegNext(core_with_l2(i).module.io.l1plus_error)
       beu.module.io.errors.icache(i) := RegNext(core_with_l2(i).module.io.icache_error)
       beu.module.io.errors.dcache(i) := RegNext(core_with_l2(i).module.io.dcache_error)
     }
