@@ -1,19 +1,22 @@
 package system
 
 import chipsalliance.rocketchip.config.Parameters
-import device.{AXI4Timer, TLTimer, AXI4Plic}
+import device.{AXI4Plic, AXI4Timer, TLTimer}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
-import utils.{DebugIdentityNode, DataDontCareNode}
+import utils.{DataDontCareNode, DebugIdentityNode}
 import utils.XSInfo
-import xiangshan.{HasXSParameter, XSCore, HasXSLog, DifftestBundle}
+import xiangshan.{DifftestBundle, HasXSLog, HasXSParameter, XSBundle, XSCore}
 import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
+import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkParameters, IntSinkPortParameters, IntSinkPortSimple}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
 
 case class SoCParameters
 (
@@ -34,15 +37,26 @@ trait HasSoCParameter extends HasXSParameter{
 class ILABundle extends Bundle {}
 
 
-class DummyCore()(implicit p: Parameters) extends LazyModule {
-  val mem = TLFuzzer(nOperations = 10)
-  val mmio = TLFuzzer(nOperations = 10)
-
-  lazy val module = new LazyModuleImp(this){
-
-  }
+class L1CacheErrorInfo extends XSBundle{
+  val paddr = Valid(UInt(PAddrBits.W))
+  // for now, we only detect ecc
+  val ecc_error = Valid(Bool())
 }
 
+class XSL1BusErrors(val nCores: Int) extends  BusErrors {
+  val icache = Vec(nCores, new L1CacheErrorInfo)
+  val dcache = Vec(nCores, new L1CacheErrorInfo)
+
+  override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
+    List.tabulate(nCores){i =>
+      List(
+        Some(icache(i).paddr, s"IBUS_$i", s"Icache_$i bus error"),
+        Some(icache(i).ecc_error, s"I_ECC_$i", s"Icache_$i ecc error"),
+        Some(dcache(i).paddr, s"DBUS_$i", s"Dcache_$i bus error"),
+        Some(dcache(i).ecc_error, s"D_ECC_$i", s"Dcache_$i ecc error")
+      )
+    }.flatten
+}
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // CPU Cores
@@ -141,6 +155,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       AXI4UserYanker() :=
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
+      TLBuffer() :=
       TLCacheCork() :=
       bankedNode
   }
@@ -153,12 +168,27 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   clint.node := mmioXbar
   extDev := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
+  val fakeTreeNode = new GenericLogicalTreeNode
+
+  val beu = LazyModule(
+    new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
+  beu.node := mmioXbar
+
+  class BeuSinkNode()(implicit p: Parameters) extends LazyModule {
+    val intSinkNode = IntSinkNode(IntSinkPortSimple())
+    lazy val module = new LazyModuleImp(this){
+      val interrupt = IO(Output(Bool()))
+      interrupt := intSinkNode.in.head._1.head
+    }
+  }
+  val beuSink = LazyModule(new BeuSinkNode())
+  beuSink.intSinkNode := beu.intNode
+
   val plic = LazyModule(new AXI4Plic(
     Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
     sim = !env.FPGAPlatform
   ))
-  val plicIdentity = AXI4IdentityNode()
-  plic.node := plicIdentity := AXI4UserYanker() := TLToAXI4() := mmioXbar
+  plic.node := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
@@ -174,12 +204,14 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     val trapIO1 = IO(new xiangshan.TrapIO())
     val trapIO = Seq(trapIO0, trapIO1)
 
-    plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
+    plic.module.io.extra.get.intrVec <> RegNext(beuSink.module.interrupt)
 
     for (i <- 0 until NumCores) {
       xs_core(i).module.io.hartId := i.U
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+      beu.module.io.errors.icache(i) := RegNext(xs_core(i).module.io.icache_error)
+      beu.module.io.errors.dcache(i) := RegNext(xs_core(i).module.io.dcache_error)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
       l2prefetcher(i).module.io.enable := RegNext(xs_core(i).module.io.l2_pf_enable)
