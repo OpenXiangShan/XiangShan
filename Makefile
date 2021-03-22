@@ -174,7 +174,12 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
+	@echo "try to get emu.lock ..."
+	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
+	@echo "get lock"
 	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	@echo "release lock ..."
+	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
 	date -R
 
