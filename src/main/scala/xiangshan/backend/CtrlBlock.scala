@@ -152,14 +152,15 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // update load violation predictor if load violation redirect triggered
-  io.memPredUpdate.valid := RegNext(RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B))
+  io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B)
   // update wait table
-  io.memPredUpdate.waddr := RegNext(RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth)))
+  io.memPredUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   io.memPredUpdate.wdata := true.B
   // update store set
-  io.memPredUpdate.ldpc := RegNext(RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth)))
+  io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
-  io.memPredUpdate.stpc := RegNext(XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth))
+  io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
+
 
   val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
   val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>

@@ -165,9 +165,14 @@ class LFST extends XSModule  {
   })
 
   // TODO: use MemTemplate
-  val valid = RegInit(VecInit(Seq.fill(LFSTSize)(false.B)))
-  val sqIdx = Reg(Vec(LFSTSize, new SqPtr))
-  val roqIdx = Reg(Vec(LFSTSize, new RoqPtr))
+  val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
+  val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
+  val roqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RoqPtr)))
+  val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
+  val valid = Wire(Vec(LFSTSize, Bool()))
+  (0 until LFSTSize).map(i => {
+    valid(i) := validVec(i).asUInt.orR
+  })
 
   // read LFST in rename stage
   for (i <- 0 until DecodeWidth) {
@@ -178,25 +183,31 @@ class LFST extends XSModule  {
   // when store is issued, mark it as invalid
   (0 until exuParameters.StuCnt).map(i => {
     // TODO: opt timing
-    when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.asUInt === sqIdx(io.storeIssue(i).bits.uop.cf.ssid).asUInt){
-      valid(io.storeIssue(i).bits.uop.cf.ssid) := false.B
-    }
+    (0 until LFSTWidth).map(j => {
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.asUInt === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).asUInt){
+        validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
+      }
+    })
   })
 
   // when store is dispatched, mark it as valid
   (0 until RenameWidth).map(i => {
     when(io.dispatch(i).valid){
       val waddr = io.dispatch(i).bits.ssid
-      valid(waddr) := true.B
-      sqIdx(waddr) := io.dispatch(i).bits.sqIdx
-      roqIdx(waddr) := io.dispatch(i).bits.roqIdx
+      val wptr = allocPtr(waddr)
+      allocPtr(waddr) := allocPtr(waddr) + 1.U
+      validVec(waddr)(wptr) := true.B
+      sqIdxVec(waddr)(wptr) := io.dispatch(i).bits.sqIdx
+      roqIdxVec(waddr)(wptr) := io.dispatch(i).bits.roqIdx
     }
   })
 
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
-    when(roqIdx(i).needFlush(io.redirect, io.flush)){
-      valid(i) := false.B
-    }
+    (0 until LFSTWidth).map(j => {
+      when(roqIdxVec(i)(j).needFlush(io.redirect, io.flush)){
+        validVec(i)(j) := false.B
+      }
+    })
   })
 }

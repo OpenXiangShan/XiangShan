@@ -288,6 +288,7 @@ trait HasXSParameter {
   val SSITSize = WaitTableSize
   val LFSTSize = 32
   val SSIDWidth = log2Up(LFSTSize)
+  val LFSTWidth = 4
 }
 
 trait HasXSLog {
