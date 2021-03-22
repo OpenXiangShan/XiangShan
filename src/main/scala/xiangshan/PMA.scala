@@ -19,15 +19,15 @@ object MemMap {
 object AddressSpace {
   def SimpleMemMapList = List(
     //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
-    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
-    MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
-    MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    "RW"),
+    MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RWX"),
+    MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
     MemMap("h00_3001_0000", "h00_3004_FFFF",   "h0", "GPU",         "RWC"),
     MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
-    MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
-    MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
     MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
     MemMap("h00_3802_0000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
