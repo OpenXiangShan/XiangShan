@@ -25,11 +25,11 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
     val mtimecmp = Seq.fill(NumCores)(RegInit(0.U(64.W)))
     val msip = Seq.fill(NumCores)(RegInit(0.U(32.W)))
 
-    val clk = (if (!sim) 40 /* 40MHz / 1000000 */ else 100)
-    val freq = RegInit(clk.U(16.W))
-    val inc = RegInit(1.U(16.W))
+    val clk = (if (!sim) 40 /* 40MHz / 1000000 */ else 1000000)
+    val freq = RegInit(clk.U(64.W))
+    val inc = RegInit(1.U(64.W))
 
-    val cnt = RegInit(0.U(16.W))
+    val cnt = RegInit(0.U(64.W))
     val nextCnt = cnt + 1.U
     cnt := Mux(nextCnt < freq, nextCnt, 0.U)
     val tick = (nextCnt === freq)
@@ -54,9 +54,6 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
       XSDebug("[A] channel valid ready=%d ", in.a.ready)
       in.a.bits.dump
     }
-
-//    val gtime = GTimer()
-//    printf(p"[$gtime][Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
 
     for (i <- 0 until NumCores) {
       io.mtip(i) := RegNext(mtime >= mtimecmp(i))
