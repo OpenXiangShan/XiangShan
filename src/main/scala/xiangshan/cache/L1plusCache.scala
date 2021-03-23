@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerf}
 import xiangshan.{HasXSLog}
+import system.L1CacheErrorInfo
 
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
@@ -82,13 +83,15 @@ abstract class L1plusCacheBundle extends L1CacheBundle
 class L1plusCacheMetadata extends L1plusCacheBundle {
   val valid = Bool()
   val tag = UInt(tagBits.W)
+  val error = Bool()
 }
 
 object L1plusCacheMetadata {
-  def apply(tag: Bits, valid: Bool) = {
+  def apply(tag: Bits, valid: Bool, error :Bool) = {
     val meta = Wire(new L1plusCacheMetadata)
     meta.tag := tag
     meta.valid := valid
+    meta.error := error
     meta
   }
 }
@@ -271,10 +274,14 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   tag_array.io.r.req.bits.apply(setIdx=io.read.bits.tagIdx)
   val rtags = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected)
+  
+  val rtag_errors = tag_array.io.r.resp.data.map(rdata =>
+      cacheParams.tagCode.decode(rdata).error)
 
   for (i <- 0 until nWays) {
     io.resp(i).valid := valid_array(io.read.bits.validIdx)(i)
     io.resp(i).tag   := rtags(i)
+    io.resp(i).error := rtag_errors(i)
   }
 
   // we use single port SRAM
@@ -324,11 +331,10 @@ class L1plusCacheReq extends L1plusCacheBundle
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val eccWrong = Bool()
   val id   = UInt(idWidth.W)
 
   override def toPrintable: Printable = {
-    p"id=${Binary(id)} data=${Hexadecimal(data)} eccWrong=${Binary(eccWrong)}"
+    p"id=${Binary(id)} data=${Hexadecimal(data)} "
   }
 }
 
@@ -338,6 +344,7 @@ class L1plusCacheIO extends L1plusCacheBundle
   val resp = Flipped(DecoupledIO(new L1plusCacheResp))
   val flush = Output(Bool())
   val empty = Input(Bool())
+  val error = Flipped(new L1CacheErrorInfo)
 
   override def toPrintable: Printable = {
     p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
@@ -401,6 +408,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
 
   // response
   io.resp           <> resp_arb.io.out
+  io.error          <> RegNext(pipe.io.error)
   resp_arb.io.in(0) <> pipe.io.resp
   resp_arb.io.in(1) <> missQueue.io.resp
 
@@ -490,6 +498,7 @@ class L1plusCachePipe extends L1plusCacheModule
     val miss_meta_write = Flipped(ValidIO(new L1plusCacheMetaWriteReq))
     val inflight_req_idxes = Output(Vec(2, Valid(UInt())))
     val empty = Output(Bool())
+    val error = new L1CacheErrorInfo
   })
 
   val s0_passdown = Wire(Bool())
@@ -548,11 +557,14 @@ class L1plusCachePipe extends L1plusCacheModule
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).valid).asUInt
 
+  val s1_meta_ecc = VecInit(meta_resp.map{ w => w.error})
+
   s1_passdown := s1_valid && (!s2_valid || s2_passdown)
 
   // stage 2
   val s2_req   = RegEnable(s1_req, s1_passdown)
   val s2_valid_reg = RegEnable(s1_valid, init=false.B, enable=s1_passdown)
+  val s2_meta_ecc = RegEnable(s1_meta_ecc, init=0.U.asTypeOf(Vec(nWays, Bool())), enable=s1_passdown)
   when (s2_passdown && !s1_passdown) {
     s2_valid_reg := false.B
   }
@@ -587,14 +599,22 @@ class L1plusCachePipe extends L1plusCacheModule
   val s2_data_wrong =  Cat((0 until blockRows).reverse map { r =>
       val data = s2_data(r)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && s2_hit && decoded.error))
+      //assert(!(s2_valid && s2_hit && decoded.error))
       decoded.error
     })
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
-  io.resp.bits.eccWrong := s2_data_wrong.asUInt.orR
   io.resp.bits.id   := s2_req.id
+
+  val meta_error = s2_meta_ecc(s2_hit_way)
+  val data_error = s2_data_wrong.asUInt.orR
+  val pipe_enable = s2_valid && s2_hit
+
+  io.error.ecc_error.valid := (meta_error || data_error) && pipe_enable
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := s2_req.addr
 
   // replacement policy
   val replaced_way_en = UIntToOH(replacer.way(get_idx(s2_req.addr)))
