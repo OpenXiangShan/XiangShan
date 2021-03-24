@@ -196,6 +196,7 @@ class ReservationStation
   io.deq.bits.src1 := data.io.out(0)
   if (srcNum > 1) { io.deq.bits.src2 := data.io.out(1) }
   if (srcNum > 2) { io.deq.bits.src3 := data.io.out(2) }
+  if (exuCfg == Exu.jumpExeUnitCfg) { io.deq.bits.uop.cf.pc := data.io.pc }
 }
 
 class ReservationStationSelect
@@ -830,11 +831,7 @@ class ReservationStationData
       data(1).w(0).wdata := io.jalr_target
 
     case Exu.aluExeUnitCfg =>
-      val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
-                      SignExt(enqUopReg.cf.pc, XLEN),
-                      io.srcRegValue(0)
-                    )
-      data(0).w(0).wdata := src1Mux
+      data(0).w(0).wdata := io.srcRegValue(0)
       // alu only need U type and I type imm
       val imm32 = Mux(enqUopReg.ctrl.selImm === SelImm.IMM_U,
                     ImmUnion.U.toImm32(enqUopReg.ctrl.imm),
