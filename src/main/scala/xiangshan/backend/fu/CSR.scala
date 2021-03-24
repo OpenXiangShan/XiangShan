@@ -341,7 +341,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   // spfctl Bit 0: L1plusCache Prefetcher Enable
   // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "h3".U)
+  val spfctl = RegInit(UInt(XLEN.W), "h1".U)
   csrio.customCtrl.l1plus_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
 
