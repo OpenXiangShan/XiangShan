@@ -84,6 +84,7 @@ class ReservationStation
 (
   myName : String,
   val exuCfg: ExuConfig,
+  iqSize : Int,
   srcLen: Int,
   fastPortsCfg: Seq[ExuConfig],
   slowPortsCfg: Seq[ExuConfig],
@@ -91,7 +92,6 @@ class ReservationStation
   fastWakeup: Boolean,
   feedback: Boolean,
 ) extends XSModule {
-  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
@@ -124,9 +124,9 @@ class ReservationStation
     val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
-  val select = Module(new ReservationStationSelect(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
-  val ctrl   = Module(new ReservationStationCtrl(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
-  val data   = Module(new ReservationStationData(exuCfg, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
+  val select = Module(new ReservationStationSelect(exuCfg, iqSize, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
+  val ctrl   = Module(new ReservationStationCtrl(exuCfg, iqSize, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
+  val data   = Module(new ReservationStationData(exuCfg, iqSize, srcLen, fastPortsCfg, slowPortsCfg, fixedDelay, fastWakeup, feedback))
 
   select.suggestName(s"${myName}_select")
   ctrl.suggestName(s"${myName}_ctrl")
@@ -202,6 +202,7 @@ class ReservationStation
 class ReservationStationSelect
 (
   val exuCfg: ExuConfig,
+  iqSize: Int,
   srcLen: Int,
   fastPortsCfg: Seq[ExuConfig],
   slowPortsCfg: Seq[ExuConfig],
@@ -209,7 +210,6 @@ class ReservationStationSelect
   fastWakeup: Boolean,
   feedback: Boolean,
 ) extends XSModule with HasCircularQueuePtrHelper{
-  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
@@ -438,6 +438,7 @@ class ReservationStationSelect
 class ReservationStationCtrl
 (
   val exuCfg: ExuConfig,
+  iqSize: Int,
   srcLen: Int,
   fastPortsCfg: Seq[ExuConfig],
   slowPortsCfg: Seq[ExuConfig],
@@ -445,7 +446,6 @@ class ReservationStationCtrl
   fastWakeup: Boolean,
   feedback: Boolean,
 ) extends XSModule with HasCircularQueuePtrHelper {
-  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
@@ -741,6 +741,7 @@ class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int, writePort: I
 class ReservationStationData
 (
   val exuCfg: ExuConfig,
+  iqSize: Int,
   srcLen: Int,
   fastPortsCfg: Seq[ExuConfig],
   slowPortsCfg: Seq[ExuConfig],
@@ -748,7 +749,6 @@ class ReservationStationData
   fastWakeup: Boolean,
   feedback: Boolean,
 ) extends XSModule {
-  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val nonBlocked = fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
