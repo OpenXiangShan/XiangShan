@@ -3,7 +3,8 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, ReplacementPolicy, XSDebug, SRAMTemplate, ParallelOR}
+import system.L1CacheErrorInfo
+import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 
 import scala.math.max
 
@@ -126,6 +127,7 @@ abstract class AbstractDataArray extends DCacheModule {
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
     val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(encRowBits.W))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
+    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
@@ -265,6 +267,7 @@ class DuplicatedDataArray extends AbstractDataArray {
     assert(!(RegNext(io.read(j).fire() && PopCount(io.read(j).bits.way_en) > 1.U)))
     val way_en = RegNext(io.read(j).bits.way_en)
 
+    val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
     for (r <- 0 until blockRows) {
       val ecc_array = Module(new SRAMTemplate(
         Vec(rowWords, Bits(eccBits.W)),
@@ -308,8 +311,16 @@ class DuplicatedDataArray extends AbstractDataArray {
         ecc_resp_chosen(k) := Mux1H(way_en, ecc_resp(k))
       }
       io.resp(j)(r) := Cat((0 until rowWords) reverseMap {
-        k => Cat(ecc_resp_chosen(k), data_resp_chosen(k))
+        k => {
+          val data = Cat(ecc_resp_chosen(k), data_resp_chosen(k))
+          row_error(r)(k) := dcacheParameters.dataCode.decode(data).error && RegNext(rmask(r))
+          data
+        }
       })
+      io.errors(j).ecc_error.valid := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR()
+      io.errors(j).ecc_error.bits := true.B
+      io.errors(j).paddr.valid := io.errors(j).ecc_error.valid
+      io.errors(j).paddr.bits := RegNext(io.read(j).bits.addr)
     }
 
     io.nacks(j) := false.B
@@ -325,6 +336,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
     val read = Flipped(Decoupled(new L1MetaReadReq))
     val write = Flipped(Decoupled(new L1MetaWriteReq))
     val resp = Output(Vec(nWays, UInt(encMetaBits.W)))
+    val error = Output(new L1CacheErrorInfo)
   })
   val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
   val rst = rst_cnt < nSets.U
@@ -352,6 +364,13 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
+  val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
+    cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
+  })
+  io.error.ecc_error.valid := RegNext(io.read.fire()) && Cat(ecc_errors).orR()
+  io.error.ecc_error.bits := true.B
+  io.error.paddr.valid := io.error.ecc_error.valid
+  io.error.paddr.bits := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
   io.read.ready := !wen
@@ -394,6 +413,7 @@ class DuplicatedMetaArray extends DCacheModule {
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
     val resp = Output(Vec(LoadPipelineWidth, Vec(nWays, UInt(encMetaBits.W))))
+    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
   })
   val meta = Seq.fill(LoadPipelineWidth) {
     Module(new L1MetadataArray(onReset _))
@@ -405,6 +425,7 @@ class DuplicatedMetaArray extends DCacheModule {
     meta(w).io.write.bits := io.write.bits
     meta(w).io.read <> io.read(w)
     io.resp(w) <> meta(w).io.resp
+    io.errors(w) <> meta(w).io.error
   }
   // io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
   io.write.ready := true.B

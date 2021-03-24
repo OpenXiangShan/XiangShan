@@ -8,6 +8,8 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
 import xiangshan.backend.fu.HasExceptionNO
+import system.L1CacheErrorInfo
+
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
@@ -33,6 +35,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val error  = new L1CacheErrorInfo
   })
 
   val ifu = Module(new IFU)
@@ -92,6 +95,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.cfVec <> ibuffer.io.out
   // ifu to backend
   io.backend.fetchInfo <> ifu.io.toFtq
+
+  io.error <> RegNext(ifu.io.error)
 
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),
