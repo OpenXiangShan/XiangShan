@@ -203,7 +203,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   XSDebug(false, true.B, "\n")
 
 //  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
-  XSPerf("utilization", PopCount(stateEntries.map(_ =/= s_invalid)))
+  QueuePerf(size, PopCount(stateEntries.map(_ =/= s_invalid)), !canEnqueue)
   XSPerf("in", numEnq)
   XSPerf("out", PopCount(io.deq.map(_.fire())))
   XSPerf("out_try", PopCount(io.deq.map(_.valid)))

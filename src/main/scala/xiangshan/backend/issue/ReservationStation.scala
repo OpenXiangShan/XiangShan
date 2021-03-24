@@ -398,7 +398,6 @@ class ReservationStationSelect
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
-  XSPerf("sizeMultiCycle", iqSize.U)
   XSPerf("enq", enqueue)
   XSPerf("issueFire", issueFire)
   XSPerf("issueValid", issueValid)
@@ -406,7 +405,7 @@ class ReservationStationSelect
   XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
   XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
   
-  XSPerf("utilization", io.numExist)
+  QueuePerf(iqSize, io.numExist, !io.enq.ready)
   XSPerf("validUtil", PopCount(validQueue))
   XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
   XSPerf("readyUtil", PopCount(readyIdxQueue))
