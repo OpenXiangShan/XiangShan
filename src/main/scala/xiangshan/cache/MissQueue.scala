@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
-import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
+import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf, TransactionLatencyCounter}
 
 class MissReq extends DCacheBundle
 {
@@ -351,6 +351,17 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   XSPerf("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
   XSPerf("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerf("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
+
+
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(io.req_valid && io.primary_ready, state === s_release_entry)
+  XSPerf("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
+
+  val load_miss_begin = io.req_valid && (io.primary_ready || io.secondary_ready) && io.req.source === LOAD_SOURCE.U
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, io.refill.valid)
+  XSPerf("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
+
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  XSPerf("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
 }
 
 
@@ -532,4 +543,6 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // max inflight (average) = max_inflight_total / cycle cnt
   XSPerf("max_inflight", max_inflight)
   XSPerf("num_valids", num_valids)
+
+  XSPerf("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 }

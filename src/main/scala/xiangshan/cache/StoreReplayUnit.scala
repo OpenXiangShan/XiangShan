@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.{XSDebug, XSPerf}
+import utils.{XSDebug, XSPerf, TransactionLatencyCounter}
 import bus.tilelink._
 
 class StoreReplayEntry extends DCacheModule
@@ -125,6 +125,9 @@ class StoreReplayEntry extends DCacheModule
   // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
   XSPerf("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
   XSPerf("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
+
+  val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  XSPerf("store_latency", store_latency, store_latency_sample, 0, 100, 10)
 }
 
 
@@ -201,4 +204,6 @@ class StoreReplayQueue extends DCacheModule
 
   // performance counters
   XSPerf("store_req", io.lsu.req.fire())
+  val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
+  XSPerf("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 }
