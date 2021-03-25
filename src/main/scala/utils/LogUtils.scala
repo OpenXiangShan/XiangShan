@@ -123,4 +123,47 @@ object XSPerf extends HasXSParameter {
       }
     }
   }
+
+  // instead of simply accumulating counters
+  // this function draws a histogram
+  def apply(perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)(implicit name: String) = {
+    val env = Parameters.get.envParameters
+    if (env.EnablePerfDebug && !env.FPGAPlatform) {
+      val logTimestamp = WireInit(0.U(64.W))
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+
+      // drop each perfCnt value into a bin
+      val nBins = (stop - start) / step
+      require(start >= 0)
+      require(stop > start)
+      require(nBins > 0)
+
+      (0 until nBins) map { i =>
+        val binRangeStart = start + i * step
+        val binRangeStop = start + (i + 1) * step
+        val inRange = perfCnt >= binRangeStart.U && perfCnt < binRangeStop.U
+
+        // if perfCnt < start, it will go to the first bin
+        val leftOutOfRange = perfCnt < start.U && i.U === 0.U
+        // if perfCnt >= stop, it will go to the last bin
+        val rightOutOfRange = perfCnt >= stop.U && i.U === (nBins - 1).U
+        val inc = inRange || leftOutOfRange || rightOutOfRange
+
+        val counter = RegInit(0.U(64.W))
+        when (perfClean) {
+          counter := 0.U
+        } .elsewhen(enable && inc) {
+          counter := counter + 1.U
+        }
+
+        when (perfDump) {
+          XSLog(XSLogLevel.PERF)(true, true.B, p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
+        }
+      }
+    }
+  }
 }
