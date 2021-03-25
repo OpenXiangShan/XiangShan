@@ -483,7 +483,7 @@ class ReservationStationCtrl
   val enqPtr = io.in.bits.addr
   val enqPtrReg = RegNext(enqPtr)
   val enqEn  = io.in.valid
-  val enqEnReg = RegNext(enqEn, init = false.B)
+  val enqEnReg = RegNext(enqEn && !(io.redirect.valid || io.flush), init = false.B)
   val enqUop = io.in.bits.uop
   val enqUopReg = RegEnable(enqUop, selValid)
   val selPtr = io.sel.bits
@@ -527,11 +527,11 @@ class ReservationStationCtrl
   }
   // NOTE: delay one cycle for fp src will come one cycle later than usual
   if (exuCfg == Exu.stExeUnitCfg) {
-    when (enqEn) {
-      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
-    }
     when (enqEnReg && RegNext(enqUop.ctrl.src2Type === SrcType.fp && enqSrcReady(1))) {
       srcQueue(enqPtrReg)(1) := true.B
+    }
+    when (enqEn) {
+      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
     }
   }
   val srcQueueWire = VecInit((0 until srcQueue.size).map(i => {
@@ -687,7 +687,7 @@ class ReservationStationCtrl
       val lastFastHit = listenHitEnq(lastFastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && lastFastUops(k).valid
       when (fastHit || lastFastHit) { srcUpdateListen(enqPtr)(j)(k) := true.B }
       when (lastFastHit)            { data(j)(enqPtr)(k) := true.B }
-      when (RegNext(fastHit))       { data(j)(enqPtrReg)(k) := true.B }
+      when (RegNext(fastHit && !(io.redirect.valid || io.flush)))       { data(j)(enqPtrReg)(k) := true.B }
     }
     for (k <- 0 until slowPortsCnt) {
       val slowHit = listenHitEnq(slowUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && slowUops(k).valid
