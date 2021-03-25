@@ -196,6 +196,7 @@ class ReservationStation
   io.deq.bits.src1 := data.io.out(0)
   if (srcNum > 1) { io.deq.bits.src2 := data.io.out(1) }
   if (srcNum > 2) { io.deq.bits.src3 := data.io.out(2) }
+  if (exuCfg == Exu.jumpExeUnitCfg) { io.deq.bits.uop.cf.pc := data.io.pc }
 }
 
 class ReservationStationSelect
@@ -396,7 +397,6 @@ class ReservationStationSelect
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
-  XSPerf("sizeMultiCycle", iqSize.U)
   XSPerf("enq", enqueue)
   XSPerf("issueFire", issueFire)
   XSPerf("issueValid", issueValid)
@@ -404,7 +404,7 @@ class ReservationStationSelect
   XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
   XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
   
-  XSPerf("utilization", io.numExist)
+  QueuePerf(iqSize, io.numExist, !io.enq.ready)
   XSPerf("validUtil", PopCount(validQueue))
   XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
   XSPerf("readyUtil", PopCount(readyIdxQueue))
@@ -830,11 +830,7 @@ class ReservationStationData
       data(1).w(0).wdata := io.jalr_target
 
     case Exu.aluExeUnitCfg =>
-      val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
-                      SignExt(enqUopReg.cf.pc, XLEN),
-                      io.srcRegValue(0)
-                    )
-      data(0).w(0).wdata := src1Mux
+      data(0).w(0).wdata := io.srcRegValue(0)
       // alu only need U type and I type imm
       val imm32 = Mux(enqUopReg.ctrl.selImm === SelImm.IMM_U,
                     ImmUnion.U.toImm32(enqUopReg.ctrl.imm),

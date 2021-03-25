@@ -795,7 +795,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
 
   XSPerf("clock_cycle", 1.U)
-  XSPerf("utilization", PopCount((0 until RoqSize).map(valid(_))))
+  QueuePerf(RoqSize, PopCount((0 until RoqSize).map(valid(_))), !allowEnqueue)
   XSPerf("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
   XSPerf("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))

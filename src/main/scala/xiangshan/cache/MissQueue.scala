@@ -3,6 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import chisel3.ExcitingUtils._
+import utils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
 import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
@@ -531,5 +532,5 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   }
   // max inflight (average) = max_inflight_total / cycle cnt
   XSPerf("max_inflight", max_inflight)
-  XSPerf("num_valids", num_valids)
+  QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
 }

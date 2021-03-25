@@ -124,3 +124,14 @@ object XSPerf extends HasXSParameter {
     }
   }
 }
+
+object QueuePerf extends HasXSParameter {
+  def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
+    XSPerf("utilization", utilization)
+    XSPerf("full", full)
+    val exHalf = utilization > (size/2).U
+    val empty = utilization === 0.U
+    XSPerf("exHalf", exHalf)
+    XSPerf("empty", empty)
+  }
+}
