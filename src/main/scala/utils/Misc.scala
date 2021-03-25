@@ -66,16 +66,3 @@ object Transpose
     VecInit((0 until n).map(i => VecInit(in.map(row => row(i)))))
   }
 }
-
-object TransactionLatencyCounter
-{
-  // count the latency between start signal and stop signal
-  // whenever stop signals comes, we create a latency sample
-  def apply(start: Bool, stop: Bool): (Bool, UInt) = {
-    assert (!(start && stop))
-    val counter = RegInit(0.U(64.W))
-    val next_counter = counter + 1.U
-    counter := Mux(start || stop, 0.U, next_counter)
-    (stop, next_counter)
-  }
-}

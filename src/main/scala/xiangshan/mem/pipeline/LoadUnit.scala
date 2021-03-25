@@ -80,9 +80,9 @@ class LoadUnit_S0 extends XSModule {
   XSDebug(io.dcacheReq.fire(),
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
-  XSPerf("in", io.in.valid)
-  XSPerf("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
-  XSPerf("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
+  XSPerfAccumulate("in", io.in.valid)
+  XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
+  XSPerfAccumulate("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
 }
 
 
@@ -141,9 +141,9 @@ class LoadUnit_S1 extends XSModule {
 
   io.in.ready := !io.in.valid || io.out.ready
 
-  XSPerf("in", io.in.valid)
-  XSPerf("tlb_miss", io.in.valid && s1_tlb_miss)
-  XSPerf("stall_out", io.out.valid && !io.out.ready)
+  XSPerfAccumulate("in", io.in.valid)
+  XSPerfAccumulate("tlb_miss", io.in.valid && s1_tlb_miss)
+  XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
 
 
@@ -246,14 +246,14 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
     forwardData.asUInt, forwardMask.asUInt
   )
 
-  XSPerf("in", io.in.valid)
-  XSPerf("dcache_miss", io.in.valid && s2_cache_miss)
-  XSPerf("full_forward", io.in.valid && fullForward)
-  XSPerf("dcache_miss_full_forward", io.in.valid && s2_cache_miss && fullForward)
-  XSPerf("replay",  io.tlbFeedback.valid && !io.tlbFeedback.bits.hit)
-  XSPerf("replay_tlb_miss", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && s2_tlb_miss)
-  XSPerf("replay_cache", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
-  XSPerf("stall_out", io.out.valid && !io.out.ready)
+  XSPerfAccumulate("in", io.in.valid)
+  XSPerfAccumulate("dcache_miss", io.in.valid && s2_cache_miss)
+  XSPerfAccumulate("full_forward", io.in.valid && fullForward)
+  XSPerfAccumulate("dcache_miss_full_forward", io.in.valid && s2_cache_miss && fullForward)
+  XSPerfAccumulate("replay",  io.tlbFeedback.valid && !io.tlbFeedback.bits.hit)
+  XSPerfAccumulate("replay_tlb_miss", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && s2_tlb_miss)
+  XSPerfAccumulate("replay_cache", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
+  XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
 
 class LoadUnit extends XSModule with HasLoadHelper {

@@ -2,7 +2,7 @@ package xiangshan.backend.ftq
 
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerf}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
@@ -293,10 +293,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  XSPerf("entry", validEntries)
-  XSPerf("stall", io.enq.valid && !io.enq.ready)
-  XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
-  XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+  XSPerfAccumulate("entry", validEntries)
+  XSPerfAccumulate("stall", io.enq.valid && !io.enq.ready)
+  XSPerfAccumulate("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
+  XSPerfAccumulate("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
 
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
@@ -418,7 +418,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     )
 
     for((key, value) <- perfCountsMap) {
-      XSPerf(key, value)
+      XSPerfAccumulate(key, value)
     }
   }
 

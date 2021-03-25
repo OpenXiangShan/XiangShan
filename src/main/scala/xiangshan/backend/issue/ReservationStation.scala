@@ -397,41 +397,41 @@ class ReservationStationSelect
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
-  XSPerf("sizeMultiCycle", iqSize.U)
-  XSPerf("enq", enqueue)
-  XSPerf("issueFire", issueFire)
-  XSPerf("issueValid", issueValid)
-  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
-  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
-  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
+  XSPerfAccumulate("sizeMultiCycle", iqSize.U)
+  XSPerfAccumulate("enq", enqueue)
+  XSPerfAccumulate("issueFire", issueFire)
+  XSPerfAccumulate("issueValid", issueValid)
+  XSPerfAccumulate("exuBlockDeq", issueValid && !io.deq.ready)
+  XSPerfAccumulate("bubbleBlockEnq", haveBubble && !io.enq.ready)
+  XSPerfAccumulate("validButNotSel", PopCount(selectMask) - haveReady)
   
-  XSPerf("utilization", io.numExist)
-  XSPerf("validUtil", PopCount(validQueue))
-  XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
-  XSPerf("readyUtil", PopCount(readyIdxQueue))
-  XSPerf("selectUtil", PopCount(selectMask))
-  XSPerf("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
-  XSPerf("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
+  XSPerfAccumulate("utilization", io.numExist)
+  XSPerfAccumulate("validUtil", PopCount(validQueue))
+  XSPerfAccumulate("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
+  XSPerfAccumulate("readyUtil", PopCount(readyIdxQueue))
+  XSPerfAccumulate("selectUtil", PopCount(selectMask))
+  XSPerfAccumulate("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
+  XSPerfAccumulate("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
 
   
   if (!feedback && nonBlocked) {
-    XSPerf("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
-    XSPerf("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
+    XSPerfAccumulate("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
+    XSPerfAccumulate("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
   }
   if (feedback) {
-    XSPerf("ptwFlushState", io.flushState)
-    XSPerf("ptwFlushEntries", Mux(io.flushState, PopCount(stateQueue.map(_ === s_replay)), 0.U))
-    XSPerf("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
+    XSPerfAccumulate("ptwFlushState", io.flushState)
+    XSPerfAccumulate("ptwFlushEntries", Mux(io.flushState, PopCount(stateQueue.map(_ === s_replay)), 0.U))
+    XSPerfAccumulate("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
     for (i <- 0 until iqSize) {
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
-      XSPerf(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
+      XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
     io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
   }
   for(i <- 0 until iqSize) {
-    if (i == 0) XSPerf("empty", io.numExist === 0.U)
-    else if (i == iqSize) XSPerf("full", isFull)
-    else XSPerf(s"numExistIs${i}", io.numExist === i.U)
+    if (i == 0) XSPerfAccumulate("empty", io.numExist === 0.U)
+    else if (i == iqSize) XSPerfAccumulate("full", isFull)
+    else XSPerfAccumulate(s"numExistIs${i}", io.numExist === i.U)
   }
 }
 

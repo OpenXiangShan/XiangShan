@@ -346,5 +346,5 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // performance counters
   val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
-  XSPerf("num_loads", num_loads)
+  XSPerfAccumulate("num_loads", num_loads)
 }

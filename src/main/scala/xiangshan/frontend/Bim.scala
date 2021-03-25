@@ -111,8 +111,8 @@ class BIM extends BasePredictor with BimParams {
     waymask = Mux(doing_reset, Fill(BimBanks, "b1".U).asUInt, needToUpdate.asUInt)
   )
 
-  XSPerf("bim_wrbypass_hit", needToUpdate.reduce(_||_) && wrbypass_hit)
-  XSPerf("bim_wrbypass_enq", needToUpdate.reduce(_||_) && !wrbypass_hit)
+  XSPerfAccumulate("bim_wrbypass_hit", needToUpdate.reduce(_||_) && wrbypass_hit)
+  XSPerfAccumulate("bim_wrbypass_enq", needToUpdate.reduce(_||_) && !wrbypass_hit)
 
   if (BPUDebug && debug) {
     val u = io.update.bits
