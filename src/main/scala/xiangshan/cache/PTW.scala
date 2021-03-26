@@ -299,6 +299,27 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     val ptwData = Output(Vec(4, UInt(64.W)))
   })
 
+  /* Ptw processes multiple requests
+   * Divide Ptw procedure into two stages: cache access ; mem access if cache miss
+   *                     itlb       dtlb
+   *                       |         |
+   *                       --arbiter--
+   *                            |
+   *                     [][][][][][][] several mshr storing reqs to filter dup
+   *                            |
+   *                    l1 - l2 - l3 - sp
+   *                            |
+   *          -------------------------------------------
+   *    miss  |                                         | hit
+   *    [][][][][][] several mshr storing cache result  |
+   *          |                                         |
+   *    state machine accessing mem                     |
+   *          |                                         |
+   *          ---------------arbiter---------------------
+   *                 |                    |
+   *                itlb                 dtlb
+   */
+
   difftestIO <> DontCare
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
