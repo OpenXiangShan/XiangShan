@@ -513,9 +513,9 @@ class ICache extends ICacheModule
   touch_ways(1).bits  := wayNum
 
   (0 until nWays).map{ w => 
-    XSPerf("hit_way_" + Integer.toString(w, 10),  s2_hit && OHToUInt(hitVec)  === w.U)
-    XSPerf("refill_way_" + Integer.toString(w, 10), icacheMissQueue.io.meta_write.valid && wayNum === w.U)
-    XSPerf("access_way_" + Integer.toString(w, 10), (icacheMissQueue.io.meta_write.valid && wayNum === w.U) || (s2_hit && OHToUInt(hitVec)  === w.U))
+    XSPerfAccumulate("hit_way_" + Integer.toString(w, 10),  s2_hit && OHToUInt(hitVec)  === w.U)
+    XSPerfAccumulate("refill_way_" + Integer.toString(w, 10), icacheMissQueue.io.meta_write.valid && wayNum === w.U)
+    XSPerfAccumulate("access_way_" + Integer.toString(w, 10), (icacheMissQueue.io.meta_write.valid && wayNum === w.U) || (s2_hit && OHToUInt(hitVec)  === w.U))
   }
 
 
@@ -681,7 +681,7 @@ class ICache extends ICacheModule
   dump_pipe_info()
 
   // Performance Counter
-  XSPerf("req", s3_valid && !blocking)
-  XSPerf("miss", s3_miss && blocking && io.resp.fire())
-  XSPerf("mmio", s3_mmio && blocking && io.resp.fire())
+  XSPerfAccumulate("req", s3_valid && !blocking)
+  XSPerfAccumulate("miss", s3_miss && blocking && io.resp.fire())
+  XSPerfAccumulate("mmio", s3_mmio && blocking && io.resp.fire())
 }

@@ -204,7 +204,7 @@ class FloatBlock
     }
   }
 
-  XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+  XSPerfAccumulate("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out

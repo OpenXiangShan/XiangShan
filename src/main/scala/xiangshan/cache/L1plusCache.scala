@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerf}
+import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
 import xiangshan.{HasXSLog, ValidUndirectioned}
 import system.L1CacheErrorInfo
 
@@ -697,9 +697,9 @@ class L1plusCachePipe extends L1plusCacheModule
   touch_ways(1).valid := io.miss_meta_write.valid
   touch_ways(1).bits  := wayNum
   (0 until nWays).map{ w => 
-    XSPerf("hit_way_" + Integer.toString(w, 10),  s2_valid && s2_hit && s2_hit_way === w.U)
-    XSPerf("refill_way_" + Integer.toString(w, 10), io.miss_meta_write.valid && wayNum === w.U)
-    XSPerf("access_way_" + Integer.toString(w, 10), (io.miss_meta_write.valid && wayNum === w.U) || (s2_valid && s2_hit && s2_hit_way === w.U))
+    XSPerfAccumulate("hit_way_" + Integer.toString(w, 10),  s2_valid && s2_hit && s2_hit_way === w.U)
+    XSPerfAccumulate("refill_way_" + Integer.toString(w, 10), io.miss_meta_write.valid && wayNum === w.U)
+    XSPerfAccumulate("access_way_" + Integer.toString(w, 10), (io.miss_meta_write.valid && wayNum === w.U) || (s2_valid && s2_hit && s2_hit_way === w.U))
   }
 
   s2_passdown := s2_valid && ((s2_hit && io.resp.ready) || (!s2_hit && io.miss_req.ready))
@@ -732,8 +732,8 @@ class L1plusCachePipe extends L1plusCacheModule
       }
   }
 
-  XSPerf("req", s0_valid)
-  XSPerf("miss", s2_valid && !s2_hit)
+  XSPerfAccumulate("req", s0_valid)
+  XSPerfAccumulate("miss", s2_valid && !s2_hit)
 
 }
 

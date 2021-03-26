@@ -102,36 +102,3 @@ object XSInfo extends LogHelper(XSLogLevel.INFO)
 object XSWarn extends LogHelper(XSLogLevel.WARN)
 
 object XSError extends LogHelper(XSLogLevel.ERROR)
-
-object XSPerf extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
-    val env = Parameters.get.envParameters
-    if (env.EnablePerfDebug && !env.FPGAPlatform) {
-      val logTimestamp = WireInit(0.U(64.W))
-      val perfClean = WireInit(false.B)
-      val perfDump = WireInit(false.B)
-      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
-      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
-
-      val counter = RegInit(0.U(64.W))
-      val next_counter = counter + perfCnt
-      counter := Mux(perfClean, 0.U, next_counter)
-
-      when (perfDump) {
-        XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
-      }
-    }
-  }
-}
-
-object QueuePerf extends HasXSParameter {
-  def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
-    XSPerf("utilization", utilization)
-    XSPerf("full", full)
-    val exHalf = utilization > (size/2).U
-    val empty = utilization === 0.U
-    XSPerf("exHalf", exHalf)
-    XSPerf("empty", empty)
-  }
-}

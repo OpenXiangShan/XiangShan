@@ -30,7 +30,8 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
       sets = L2NSets,
       blockBytes = L2BlockSize,
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2"
+      cacheName = s"L2",
+      enablePerf = false
     ),
     InclusiveCacheMicroParameters(
       memCycles = 25,
@@ -223,7 +224,8 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       sets = L3NSets,
       blockBytes = L3BlockSize,
       beatBytes = L2BusWidth / 8,
-      cacheName = "L3"
+      cacheName = "L3",
+      enablePerf = false
     ),
     InclusiveCacheMicroParameters(
       memCycles = 25,

@@ -274,9 +274,9 @@ class LTBColumn extends LTBModule {
 
   if (BPUDebug && debug) {
     // Perf counters
-    XSPerf("loop_entry_is_learned ", loop_entry_is_learned)
-    XSPerf("loop_learned_entry_conflict ", loop_learned_entry_conflict)
-    XSPerf("loop_conf_entry_evicted ", loop_conf_entry_evicted)
+    XSPerfAccumulate("loop_entry_is_learned ", loop_entry_is_learned)
+    XSPerfAccumulate("loop_learned_entry_conflict ", loop_learned_entry_conflict)
+    XSPerfAccumulate("loop_conf_entry_evicted ", loop_conf_entry_evicted)
 
     //debug info
     XSDebug(doingReset, "Reseting...\n")
@@ -395,7 +395,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 
-  XSPerf("LoopExit", io.resp.exit.reduce(_||_))
+  XSPerfAccumulate("LoopExit", io.resp.exit.reduce(_||_))
 
   if (BPUDebug && debug) {
     // debug info
