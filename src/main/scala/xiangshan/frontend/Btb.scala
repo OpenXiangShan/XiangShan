@@ -210,14 +210,14 @@ class BTB extends BasePredictor with BTBParams{
     val alloc_conflict =
       VecInit((0 until BtbBanks).map(i =>
         if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i) && if2_mask(i)))
-    XSPerf("btb_alloc_conflict", PopCount(alloc_conflict))
-    XSPerf("btb_update_req", updateValid)
-    XSPerf("ebtb_update_req", updateValid && new_extended)
-    XSPerf("btb_wr_conflict", updateValid && io.pc.valid)
-    XSPerf("ebtb_wr_conflict", updateValid && new_extended && io.pc.valid)
-    XSPerf("btb_update_indirect_mispred", updateValid && updateIndirectMisPred)
+    XSPerfAccumulate("btb_alloc_conflict", PopCount(alloc_conflict))
+    XSPerfAccumulate("btb_update_req", updateValid)
+    XSPerfAccumulate("ebtb_update_req", updateValid && new_extended)
+    XSPerfAccumulate("btb_wr_conflict", updateValid && io.pc.valid)
+    XSPerfAccumulate("ebtb_wr_conflict", updateValid && new_extended && io.pc.valid)
+    XSPerfAccumulate("btb_update_indirect_mispred", updateValid && updateIndirectMisPred)
     def btb_perf(hit_cond: Bool)(str: String, cfi_cond: PreDecodeInfoForDebug => UInt): Unit = {
-      XSPerf(str, PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
+      XSPerfAccumulate(str, PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
           case (((t, v), m), pd)  => t && v && (m.btbHit.asBool === hit_cond) && cfi_cond(pd).asBool && do_update.valid && updateTaken}))
     }
     val btb_miss_perf = btb_perf(false.B)(_,_)

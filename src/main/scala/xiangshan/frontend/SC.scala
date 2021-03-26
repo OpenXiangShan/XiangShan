@@ -330,10 +330,10 @@ trait HasSC extends HasSCParameter { this: Tage =>
   tage_perf("sc_agree", PopCount(if4_agree), PopCount(update_agree))
   tage_perf("sc_disagree", PopCount(if4_disagree), PopCount(update_disagree))
   tage_perf("sc_used", PopCount(if4_sc_used), PopCount(update_sc_used))
-  XSPerf("sc_update_on_mispred", PopCount(update_on_mispred))
-  XSPerf("sc_update_on_unconf", PopCount(update_on_unconf))
-  XSPerf("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
-  XSPerf("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+  XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
+  XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
+  XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
+  XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
 
   for (i <- 0 until SCNTables) {
     scTables(i).io.update.mask := RegNext(scUpdateMask(i))

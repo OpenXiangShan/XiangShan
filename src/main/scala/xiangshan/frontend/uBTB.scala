@@ -230,10 +230,10 @@ class MicroBTB extends BasePredictor
     }
 
     if (!env.FPGAPlatform) {
-        XSPerf("ubtb_commit_hits",
+        XSPerfAccumulate("ubtb_commit_hits",
             PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
                 case (((t, v), m), pd)  => t && v && m.ubtbHit.asBool && !pd.notCFI && update_valid}))
-        XSPerf("ubtb_commit_misses",
+        XSPerfAccumulate("ubtb_commit_misses",
             PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
                 case (((t, v), m), pd)  => t && v && !m.ubtbHit.asBool && !pd.notCFI && update_valid}))
     }

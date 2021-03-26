@@ -553,25 +553,25 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   // TODO: perfs
   // frontend redirect from each stage
-  XSPerf("if2_redirect", if2_valid && if2_bp.taken && !if2_flush)
-  XSPerf("if2_redirect_fired", if2_fire && if2_bp.taken && !if2_flush)
-  XSPerf("if3_redirect", if3_valid && if3_redirect && !if3_flush)
-  XSPerf("if3_redirect_fired", if3_fire && if3_redirect && !if3_flush)
-  XSPerf("if4_redirect", if4_valid && if4_redirect && !if4_flush)
-  XSPerf("if4_redirect_fired", if4_fire && if4_redirect && !if4_flush)
+  XSPerfAccumulate("if2_redirect", if2_valid && if2_bp.taken && !if2_flush)
+  XSPerfAccumulate("if2_redirect_fired", if2_fire && if2_bp.taken && !if2_flush)
+  XSPerfAccumulate("if3_redirect", if3_valid && if3_redirect && !if3_flush)
+  XSPerfAccumulate("if3_redirect_fired", if3_fire && if3_redirect && !if3_flush)
+  XSPerfAccumulate("if4_redirect", if4_valid && if4_redirect && !if4_flush)
+  XSPerfAccumulate("if4_redirect_fired", if4_fire && if4_redirect && !if4_flush)
   
-  XSPerf("if1_total_stall", !if2_allReady && if1_valid)
-  XSPerf("if1_stall_from_icache_req", !icache.io.req.ready && if1_valid)
-  XSPerf("if1_stall_from_if2", !if2_ready && if1_valid)
-  XSPerf("if1_stall_from_bpu", !bpu.io.in_ready && if1_valid)
-  XSPerf("itlb_stall", if2_valid && if3_ready && !icache.io.tlb.resp.valid)
-  XSPerf("icache_resp_stall", if3_valid && if4_ready && !icache.io.resp.valid)
-  XSPerf("if4_stall", if4_valid && !if4_fire)
-  XSPerf("if4_stall_ibuffer", if4_valid && !io.fetchPacket.ready && ftqEnqBuf_ready)
-  XSPerf("if4_stall_ftq", if4_valid && io.fetchPacket.ready && !ftqEnqBuf_ready)
+  XSPerfAccumulate("if1_total_stall", !if2_allReady && if1_valid)
+  XSPerfAccumulate("if1_stall_from_icache_req", !icache.io.req.ready && if1_valid)
+  XSPerfAccumulate("if1_stall_from_if2", !if2_ready && if1_valid)
+  XSPerfAccumulate("if1_stall_from_bpu", !bpu.io.in_ready && if1_valid)
+  XSPerfAccumulate("itlb_stall", if2_valid && if3_ready && !icache.io.tlb.resp.valid)
+  XSPerfAccumulate("icache_resp_stall", if3_valid && if4_ready && !icache.io.resp.valid)
+  XSPerfAccumulate("if4_stall", if4_valid && !if4_fire)
+  XSPerfAccumulate("if4_stall_ibuffer", if4_valid && !io.fetchPacket.ready && ftqEnqBuf_ready)
+  XSPerfAccumulate("if4_stall_ftq", if4_valid && io.fetchPacket.ready && !ftqEnqBuf_ready)
 
-  XSPerf("if3_prevHalfConsumed", if3_prevHalfConsumed)
-  XSPerf("if4_prevHalfConsumed", if4_prevHalfConsumed)
+  XSPerfAccumulate("if3_prevHalfConsumed", if3_prevHalfConsumed)
+  XSPerfAccumulate("if4_prevHalfConsumed", if4_prevHalfConsumed)
   
 
   // debug info
