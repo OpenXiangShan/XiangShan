@@ -640,10 +640,8 @@ class LoadQueue extends XSModule
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
   // perf counter
-  XSPerfAccumulate("utilization", validCount)
+  QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
   XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
-  XSPerfAccumulate("full", validCount === LoadQueueSize.U)
-  XSPerfAccumulate("full", !allowEnqueue)
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
   XSPerfAccumulate("refill", io.dcache.valid)

@@ -34,6 +34,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
       enablePerf = false
     ),
     InclusiveCacheMicroParameters(
+      memCycles = 25,
       writeBytes = 32
     )
   ))
@@ -227,6 +228,7 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
       enablePerf = false
     ),
     InclusiveCacheMicroParameters(
+      memCycles = 25,
       writeBytes = 32
     )
   )).node

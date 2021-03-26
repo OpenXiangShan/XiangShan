@@ -92,6 +92,17 @@ object XSPerfMax extends HasXSParameter {
   }
 }
 
+object QueuePerf extends HasXSParameter {
+  def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
+    XSPerfAccumulate("utilization", utilization)
+    XSPerfAccumulate("full", full)
+    val exHalf = utilization > (size/2).U
+    val empty = utilization === 0.U
+    XSPerfAccumulate("exHalf", exHalf)
+    XSPerfAccumulate("empty", empty)
+  }
+}
+
 object TransactionLatencyCounter
 {
   // count the latency between start signal and stop signal

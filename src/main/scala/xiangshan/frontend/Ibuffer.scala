@@ -200,7 +200,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   }
   val instrHungry = afterInit && (validEntries === 0.U) && !headBubble
 
-  XSPerfAccumulate("utilization", validEntries)
+  QueuePerf(IBufSize, validEntries, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
 }

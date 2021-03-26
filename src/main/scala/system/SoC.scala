@@ -17,7 +17,6 @@ import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4Id
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkParameters, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import top.Parameters
 
 case class SoCParameters
 (
@@ -69,8 +68,6 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // L1 to L2 network
   // -------------------------------------------------
   private val l2_xbar = Seq.fill(NumCores)(TLXbar())
-
-  val env = Parameters.get.envParameters
 
   private val l2cache = Seq.fill(NumCores)(LazyModule(new InclusiveCache(
     CacheParameters(
