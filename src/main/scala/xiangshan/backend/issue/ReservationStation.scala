@@ -137,7 +137,7 @@ class ReservationStation
   io.numExist := select.io.numExist
   select.io.redirectVec := ctrl.io.redirectVec
   select.io.readyVec := ctrl.io.readyVec
-  select.io.enq.valid := io.fromDispatch.valid
+  select.io.enq.valid := io.fromDispatch.valid && !(io.redirect.valid || io.flush) 
   io.fromDispatch.ready := select.io.enq.ready
   select.io.deq.ready := io.deq.ready
   if (feedback) {
@@ -145,7 +145,7 @@ class ReservationStation
     select.io.flushState := io.memfeedback.bits.flushState
   }
 
-  ctrl.io.in.valid := select.io.enq.fire()// && !(io.redirect.valid || io.flush) // NOTE: same as select
+  ctrl.io.in.valid := select.io.enq.ready && io.fromDispatch.valid // NOTE: ctrl doesnt care redirect for timing optimization
   ctrl.io.flush := io.flush
   ctrl.io.in.bits.addr := select.io.enq.bits
   ctrl.io.in.bits.uop := io.fromDispatch.bits
@@ -164,9 +164,9 @@ class ReservationStation
     ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
 
-  data.io.in.valid := ctrl.io.in.valid
+  data.io.in.valid := select.io.enq.fire()
   data.io.in.addr := select.io.enq.bits
-  data.io.in.uop := io.fromDispatch.bits // NOTE: use for imm-pc src value mux
+  data.io.in.uop := io.fromDispatch.bits // NOTE: used for imm-pc src value mux
   data.io.in.enqSrcReady := ctrl.io.enqSrcReady
   data.io.srcRegValue := io.srcRegValue
   if(exuCfg == Exu.jumpExeUnitCfg) {
@@ -371,7 +371,7 @@ class ReservationStationSelect
   // enq
   isFull := tailPtr.flag
   // agreement with dispatch: don't fire when io.redirect.valid
-  val enqueue = io.enq.fire() && !(io.redirect.valid || io.flush)
+  val enqueue = io.enq.fire()
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
   val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new CircularQueuePtr(iqSize)), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
@@ -397,40 +397,40 @@ class ReservationStationSelect
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
-  XSPerf("enq", enqueue)
-  XSPerf("issueFire", issueFire)
-  XSPerf("issueValid", issueValid)
-  XSPerf("exuBlockDeq", issueValid && !io.deq.ready)
-  XSPerf("bubbleBlockEnq", haveBubble && !io.enq.ready)
-  XSPerf("validButNotSel", PopCount(selectMask) - haveReady)
+  XSPerfAccumulate("enq", enqueue)
+  XSPerfAccumulate("issueFire", issueFire)
+  XSPerfAccumulate("issueValid", issueValid)
+  XSPerfAccumulate("exuBlockDeq", issueValid && !io.deq.ready)
+  XSPerfAccumulate("bubbleBlockEnq", haveBubble && !io.enq.ready)
+  XSPerfAccumulate("validButNotSel", PopCount(selectMask) - haveReady)
   
   QueuePerf(iqSize, io.numExist, !io.enq.ready)
-  XSPerf("validUtil", PopCount(validQueue))
-  XSPerf("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
-  XSPerf("readyUtil", PopCount(readyIdxQueue))
-  XSPerf("selectUtil", PopCount(selectMask))
-  XSPerf("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
-  XSPerf("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
+  XSPerfAccumulate("validUtil", PopCount(validQueue))
+  XSPerfAccumulate("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
+  XSPerfAccumulate("readyUtil", PopCount(readyIdxQueue))
+  XSPerfAccumulate("selectUtil", PopCount(selectMask))
+  XSPerfAccumulate("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
+  XSPerfAccumulate("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
 
   
   if (!feedback && nonBlocked) {
-    XSPerf("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
-    XSPerf("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
+    XSPerfAccumulate("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
+    XSPerfAccumulate("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
   }
   if (feedback) {
-    XSPerf("ptwFlushState", io.flushState)
-    XSPerf("ptwFlushEntries", Mux(io.flushState, PopCount(stateQueue.map(_ === s_replay)), 0.U))
-    XSPerf("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
+    XSPerfAccumulate("ptwFlushState", io.flushState)
+    XSPerfAccumulate("ptwFlushEntries", Mux(io.flushState, PopCount(stateQueue.map(_ === s_replay)), 0.U))
+    XSPerfAccumulate("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
     for (i <- 0 until iqSize) {
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
-      XSPerf(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
+      XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
     io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
   }
   for(i <- 0 until iqSize) {
-    if (i == 0) XSPerf("empty", io.numExist === 0.U)
-    else if (i == iqSize) XSPerf("full", isFull)
-    else XSPerf(s"numExistIs${i}", io.numExist === i.U)
+    if (i == 0) XSPerfAccumulate("empty", io.numExist === 0.U)
+    else if (i == iqSize) XSPerfAccumulate("full", isFull)
+    else XSPerfAccumulate(s"numExistIs${i}", io.numExist === i.U)
   }
 }
 
@@ -483,7 +483,7 @@ class ReservationStationCtrl
   val enqPtr = io.in.bits.addr
   val enqPtrReg = RegNext(enqPtr)
   val enqEn  = io.in.valid
-  val enqEnReg = RegNext(enqEn, init = false.B)
+  val enqEnReg = RegNext(enqEn && !(io.redirect.valid || io.flush), init = false.B)
   val enqUop = io.in.bits.uop
   val enqUopReg = RegEnable(enqUop, selValid)
   val selPtr = io.sel.bits
@@ -527,11 +527,11 @@ class ReservationStationCtrl
   }
   // NOTE: delay one cycle for fp src will come one cycle later than usual
   if (exuCfg == Exu.stExeUnitCfg) {
-    when (enqEn) {
-      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
-    }
     when (enqEnReg && RegNext(enqUop.ctrl.src2Type === SrcType.fp && enqSrcReady(1))) {
       srcQueue(enqPtrReg)(1) := true.B
+    }
+    when (enqEn) {
+      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
     }
   }
   val srcQueueWire = VecInit((0 until srcQueue.size).map(i => {
@@ -687,7 +687,7 @@ class ReservationStationCtrl
       val lastFastHit = listenHitEnq(lastFastUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && lastFastUops(k).valid
       when (fastHit || lastFastHit) { srcUpdateListen(enqPtr)(j)(k) := true.B }
       when (lastFastHit)            { data(j)(enqPtr)(k) := true.B }
-      when (RegNext(fastHit))       { data(j)(enqPtrReg)(k) := true.B }
+      when (RegNext(fastHit && !(io.redirect.valid || io.flush)))       { data(j)(enqPtrReg)(k) := true.B }
     }
     for (k <- 0 until slowPortsCnt) {
       val slowHit = listenHitEnq(slowUops(k).bits, enqSrcSeq(j), enqSrcTypeSeq(j)) && enqEn && slowUops(k).valid

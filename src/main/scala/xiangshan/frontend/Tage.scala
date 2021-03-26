@@ -272,9 +272,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
   }
 
-  XSPerf("tage_table_wrbypass_hit", io.update.mask.reduce(_||_) && wrbypass_hit)
-  XSPerf("tage_table_wrbypass_enq", io.update.mask.reduce(_||_) && !wrbypass_hit)
-  XSPerf("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
+  XSPerfAccumulate("tage_table_wrbypass_hit", io.update.mask.reduce(_||_) && wrbypass_hit)
+  XSPerfAccumulate("tage_table_wrbypass_enq", io.update.mask.reduce(_||_) && !wrbypass_hit)
+  XSPerfAccumulate("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
 
   if (BPUDebug && debug) {
     val u = io.update
@@ -525,8 +525,8 @@ class Tage extends BaseTage {
   }
 
 
-  def pred_perf(name: String, cnt: UInt)   = XSPerf(s"${name}_at_pred", cnt)
-  def commit_perf(name: String, cnt: UInt) = XSPerf(s"${name}_at_commit", cnt)
+  def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
+  def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
   def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
     pred_perf(name, pred_cnt)
     commit_perf(name, commit_cnt)

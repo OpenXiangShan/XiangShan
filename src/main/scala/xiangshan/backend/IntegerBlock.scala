@@ -2,7 +2,7 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
-import utils.XSPerf
+import utils.{XSPerfAccumulate}
 import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
@@ -266,7 +266,7 @@ class IntegerBlock
     w
   }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
-  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+  XSPerfAccumulate("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   exeUnits.zip(intWbArbiter.io.in).foreach{
     case (exu, wInt) =>

@@ -53,5 +53,5 @@ class WaitTable extends XSModule with WaitTableParameters {
     }
   }
 
-  XSPerf("wait_table_bit_set", PopCount(data.map(d => d(1))))
+  XSPerfAccumulate("wait_table_bit_set", PopCount(data.map(d => d(1))))
 }
