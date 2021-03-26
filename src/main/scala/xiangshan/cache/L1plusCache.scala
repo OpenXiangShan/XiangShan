@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerf}
-import xiangshan.{HasXSLog}
+import xiangshan.{HasXSLog, ValidUndirectioned}
 import system.L1CacheErrorInfo
 
 import chipsalliance.rocketchip.config.Parameters
@@ -317,6 +317,11 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   }
 }
 
+class L1plusCacheMergeReq extends L1plusCacheBundle {
+  val id = UInt(idWidth.W)
+  val addr = UInt(PAddrBits.W)
+}
+
 class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
@@ -332,6 +337,7 @@ class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
   val id   = UInt(idWidth.W)
+  val wakeup_icache = ValidUndirectioned(new L1plusCacheMergeReq)
 
   override def toPrintable: Printable = {
     p"id=${Binary(id)} data=${Hexadecimal(data)} "
@@ -366,7 +372,6 @@ class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCac
   lazy val module = new L1plusCacheImp(this)
 }
 
-
 class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1plusCacheParameters with HasXSLog {
 
   val io = IO(Flipped(new L1plusCacheIO))
@@ -389,8 +394,22 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   val resp_arb = Module(new Arbiter(new L1plusCacheResp, 2))
 
   val flush_block_req = Wire(Bool())
-  val req_block = block_req(io.req.bits.addr) || flush_block_req
-  block_decoupled(io.req, pipe.io.req, req_block)
+  
+  val (merge_with_pipe, merge_with_mshr, should_block) = decide_req_flow(io.req.bits.addr, !MemoryOpConstants.isPrefetch(io.req.bits.cmd))
+
+  val req_block = should_block || flush_block_req
+  // block_decoupled(io.req, pipe.io.req, req_block)
+  pipe.io.req <> io.req
+  when (merge_with_pipe || merge_with_mshr) {
+    io.req.ready := pipe.io.merge.ready
+    pipe.io.req.valid := false.B
+  }
+  when (req_block) {
+    io.req.ready := false.B
+    pipe.io.req.valid := false.B
+  }
+  XSDebug(merge_with_pipe, "merge with pipe\n")
+  XSDebug(merge_with_mshr, "merge with mshr\n")
   XSDebug(req_block, "Request blocked\n")
 
   pipe.io.data_read <> dataArray.io.read
@@ -399,10 +418,16 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   pipe.io.meta_resp <> metaArray.io.resp
   pipe.io.miss_meta_write.valid := missQueue.io.meta_write.valid
   pipe.io.miss_meta_write.bits <> missQueue.io.meta_write.bits
+  pipe.io.merge.valid := merge_with_pipe
+  pipe.io.merge.bits.id := io.req.bits.id
+  pipe.io.merge.bits.addr := io.req.bits.addr
 
   missQueue.io.req <> pipe.io.miss_req
   bus.a <> missQueue.io.mem_acquire
   missQueue.io.mem_grant <> bus.d
+  missQueue.io.merge_req.valid := merge_with_mshr
+  missQueue.io.merge_req.bits.id := io.req.bits.id
+  missQueue.io.merge_req.bits.addr := io.req.bits.addr
   metaArray.io.write <> missQueue.io.meta_write
   dataArray.io.write <> missQueue.io.refill
 
@@ -459,6 +484,32 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
     pipe_idx_match || miss_idx_match
   }
 
+  // when idx does not match, enter l1plus cache;
+  // when both tag and idx match, and pipe/mshr is able to merge, and the coming req is from icache, merge the req;
+  // otherwise, block the req.
+  // this method returns (merge with pipe, merge with mshr, block).
+  def decide_req_flow(addr: UInt, isFromICache: Bool): (Bool, Bool, Bool) = {
+    val pipe_idx_matches = VecInit(pipe.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val pipe_idx_match = pipe_idx_matches.reduce(_||_)
+    val pipe_tag_matches = pipe.io.inflight_req_tags map (tag => tag === get_tag(addr))
+    val pipe_addr_matches = VecInit((pipe_idx_matches zip pipe_tag_matches).map { case (a, b) => a && b })
+
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+    val miss_tag_matches = missQueue.io.inflight_req_tags map (entry => entry.bits === get_tag(addr))
+    val miss_addr_matches = (miss_idx_matches zip miss_tag_matches).map { case (a, b) => a && b }
+    
+    val pipe_merge_vec = pipe_addr_matches
+    val mshr_merge_vec = VecInit((miss_addr_matches zip missQueue.io.merge_ready).map { case (a, b) => a && b })
+
+    val pipe_merge = pipe_merge_vec.reduce(_||_)
+    val mshr_merge = mshr_merge_vec.reduce(_||_)
+
+    val idx_match = pipe_idx_match || miss_idx_match
+
+    (pipe_merge && isFromICache, mshr_merge && isFromICache, idx_match && !(pipe_merge && isFromICache) && !(mshr_merge && isFromICache))
+  }
+
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
     sink.valid   := source.valid && !block_signal
     source.ready := sink.ready   && !block_signal
@@ -497,8 +548,10 @@ class L1plusCachePipe extends L1plusCacheModule
     val miss_req   = DecoupledIO(new L1plusCacheMissReq)
     val miss_meta_write = Flipped(ValidIO(new L1plusCacheMetaWriteReq))
     val inflight_req_idxes = Output(Vec(2, Valid(UInt())))
+    val inflight_req_tags = Output(Vec(2, UInt()))
     val empty = Output(Bool())
     val error = new L1CacheErrorInfo
+    val merge = Flipped(DecoupledIO(new L1plusCacheMergeReq))
   })
 
   val s0_passdown = Wire(Bool())
@@ -537,7 +590,7 @@ class L1plusCachePipe extends L1plusCacheModule
   assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR), "L1plusCachePipe only accepts read req")
 
   dump_pipeline_reqs("L1plusCachePipe s0", s0_valid, s0_req)
-// stage 1
+  // stage 1
   val s1_req = RegEnable(s0_req, s0_passdown)
   val s1_valid_reg = RegEnable(s0_valid, init = false.B, enable = s0_passdown)
   val s1_addr = s1_req.addr
@@ -561,20 +614,31 @@ class L1plusCachePipe extends L1plusCacheModule
 
   s1_passdown := s1_valid && (!s2_valid || s2_passdown)
 
+  val s1_merge_ready = s1_passdown && s1_addr === io.merge.bits.addr
+
   // stage 2
   val s2_req   = RegEnable(s1_req, s1_passdown)
   val s2_valid_reg = RegEnable(s1_valid, init=false.B, enable=s1_passdown)
   val s2_meta_ecc = RegEnable(s1_meta_ecc, init=0.U.asTypeOf(Vec(nWays, Bool())), enable=s1_passdown)
+  val s2_merge_req = RegInit(0.U.asTypeOf(ValidUndirectioned(new L1plusCacheMergeReq)))
   when (s2_passdown && !s1_passdown) {
     s2_valid_reg := false.B
   }
   s2_valid := s2_valid_reg
+  when (s1_passdown) {
+    s2_merge_req.valid := io.merge.valid && s1_merge_ready
+    s2_merge_req.bits := io.merge.bits
+  }.elsewhen (s2_passdown) {
+    s2_merge_req.valid := false.B
+  }
 
   dump_pipeline_reqs("L1plusCachePipe s2", s2_valid, s2_req)
 
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_passdown)
   val s2_hit           = s2_tag_match_way.orR
   val s2_hit_way       = OHToUInt(s2_tag_match_way, nWays)
+
+  val s2_merge_ready = s2_valid && !s2_hit && io.miss_req.ready && s2_req.addr === io.merge.bits.addr && !s2_merge_req.valid
 
   //replacement marker
   val replacer = cacheParams.replacement
@@ -606,6 +670,7 @@ class L1plusCachePipe extends L1plusCacheModule
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
   io.resp.bits.id   := s2_req.id
+  io.resp.bits.wakeup_icache := s2_merge_req
 
   val meta_error = s2_meta_ecc(s2_hit_way)
   val data_error = s2_data_wrong.asUInt.orR
@@ -624,6 +689,8 @@ class L1plusCachePipe extends L1plusCacheModule
   io.miss_req.bits.cmd    := M_XRD
   io.miss_req.bits.addr   := s2_req.addr
   io.miss_req.bits.way_en := replaced_way_en
+  io.miss_req.bits.wakeup_icache.valid := s2_merge_req.valid || io.merge.valid && s2_merge_ready
+  io.miss_req.bits.wakeup_icache.bits := Mux(s2_merge_req.valid, s2_merge_req.bits, io.merge.bits)
 
   val wayNum =  OHToUInt(io.miss_meta_write.bits.way_en.asUInt)
   touch_sets(1)       := io.miss_meta_write.bits.tagIdx
@@ -645,10 +712,14 @@ class L1plusCachePipe extends L1plusCacheModule
 
   io.inflight_req_idxes(0).valid := s1_valid
   io.inflight_req_idxes(0).bits := get_idx(s1_req.addr)
+  io.inflight_req_tags(0) := get_tag(s1_req.addr)
   io.inflight_req_idxes(1).valid := s2_valid
   io.inflight_req_idxes(1).bits := get_idx(s2_req.addr)
+  io.inflight_req_tags(1) := get_tag(s1_req.addr)
 
   io.empty := !s0_valid && !s1_valid && !s2_valid
+
+  io.merge.ready := s1_merge_ready || s2_merge_ready
 
   // -------
   // Debug logging functions
@@ -673,6 +744,9 @@ class L1plusCacheMissReq extends L1plusCacheBundle
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
   val way_en = UInt(nWays.W)
+  // icache req might be merged with prefetch req,
+  // so when l1+ responses to l1+prefetcher, it should wake up icache (resp to icache) at the same time
+  val wakeup_icache = ValidUndirectioned(new L1plusCacheMergeReq)
 }
 
 class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
@@ -690,6 +764,9 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
 
     val idx = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
+
+    val merge_ready = Output(Bool())
+    val merge_req   = Input(Valid(new L1plusCacheMergeReq))
   })
 
   val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: s_data_write_req :: s_meta_write_req :: Nil = Enum(6)
@@ -708,6 +785,12 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
   io.tag.valid := state =/= s_invalid
   io.idx.bits  := req_idx
   io.tag.bits  := req_tag
+
+  io.merge_ready := !req.wakeup_icache.valid && (state === s_refill_req || state === s_refill_resp/* || state === s_send_resp && !io.resp.ready*/)
+  when (io.merge_req.valid && io.merge_req.bits.addr === req.addr && io.merge_ready) {
+    req.wakeup_icache.valid := io.merge_req.valid
+    req.wakeup_icache.bits := io.merge_req.bits
+  }
 
   // assign default values to output signals
   io.req.ready           := false.B
@@ -785,6 +868,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
     io.resp.valid     := true.B
     io.resp.bits.data := resp_data
     io.resp.bits.id   := req.id
+    io.resp.bits.wakeup_icache := req.wakeup_icache
 
     when (io.resp.fire()) {
       state := s_data_write_req
@@ -834,6 +918,9 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
     val meta_write  = DecoupledIO(new L1plusCacheMetaWriteReq)
     val refill      = DecoupledIO(new L1plusCacheDataWriteReq)
     val inflight_req_idxes = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val inflight_req_tags = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val merge_ready = Output(Vec(cfg.nMissEntries, Bool()))
+    val merge_req   = Input(Valid(new L1plusCacheMergeReq))
     val empty       = Output(Bool())
   })
 
@@ -863,6 +950,9 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
     idx_matches(i) := entry.io.idx.valid && entry.io.idx.bits === get_idx(req.bits.addr)
     tag_matches(i) := entry.io.tag.valid && entry.io.tag.bits === get_tag(req.bits.addr)
     io.inflight_req_idxes(i) <> entry.io.idx
+    io.inflight_req_tags(i) <> entry.io.tag
+    io.merge_ready(i) <> entry.io.merge_ready
+    entry.io.merge_req := io.merge_req
 
     // req and resp
     entry.io.req.valid := (i.U === entry_alloc_idx) && pri_val

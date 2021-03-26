@@ -294,6 +294,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamCnt = p.streamCnt
   def streamSize = p.streamSize
   def ageWidth = p.ageWidth
+  def totalWidth = p.totalWidth
   // def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U(addr.getWidth.W))
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(p.blockBytes)), 0.U(log2Up(p.blockBytes).W))
   val streamBufs = Seq.fill(streamCnt) { Module(new StreamBuffer(p)) }
