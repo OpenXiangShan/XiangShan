@@ -17,6 +17,7 @@ import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4Id
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkParameters, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
+import top.Parameters
 
 case class SoCParameters
 (
@@ -69,6 +70,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // -------------------------------------------------
   private val l2_xbar = Seq.fill(NumCores)(TLXbar())
 
+  val env = Parameters.get.envParameters
+
   private val l2cache = Seq.fill(NumCores)(LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
@@ -76,7 +79,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       sets = L2NSets,
       blockBytes = L2BlockSize,
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2"
+      cacheName = s"L2",
+      enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
@@ -96,7 +100,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       sets = L3NSets,
       blockBytes = L3BlockSize,
       beatBytes = L2BusWidth / 8,
-      cacheName = "L3"
+      cacheName = "L3",
+      enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
