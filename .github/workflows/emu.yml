@@ -49,7 +49,7 @@ jobs:
           do
               t=${test%.c}
               echo $t
-              numactl -m 1 -C 64-79 make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run | grep "HIT GOOD TRAP"
+              numactl -m 1 -C 64-75 make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run | grep "HIT GOOD TRAP"
               if [[ $? != 0 ]];
               then
                   echo $t fail
@@ -59,28 +59,28 @@ jobs:
           exit $ret
       - name: Basic Test - riscv-tests
         run: |
-          numactl -m 1 -C 64-79 make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
+          numactl -m 1 -C 64-75 make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
       - name: Simple Test - microbench
         run: |
-          numactl -m 1 -C 64-79 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> perf.log
+          numactl -m 1 -C 64-75 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: Simple Test - CoreMark
         run: |
-          numactl -m 1 -C 64-79 make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> perf.log
+          numactl -m 1 -C 64-75 make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: System Test - Linux
         run: |
-          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin 2> perf.log
+          numactl -m 1 -C 64-75 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: Floating-point Test - povray
         run: |
-          numactl -m 1 -C 64-79 make emu IMAGE=/home/ci-runner/xsenv/workloads/povray/_3400001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          numactl -m 1 -C 64-75 make emu IMAGE=/home/ci-runner/xsenv/workloads/povray/_3400001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
@@ -101,25 +101,25 @@ jobs:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME DRAMSIM3_HOME=$DRAMSIM3_HOME -j220 EMU_THREADS=16 WITH_DRAMSIM3=1
       - name: SPEC06 Test - mcf
         run: |
-          numactl -m 1 -C 64-95 make emu IMAGE=/home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: SPEC06 Test - xalancbmk
         run: |
-          numactl -m 1 -C 64-95 make emu IMAGE=/home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: SPEC06 Test - gcc
         run: |
-          numactl -m 1 -C 64-95 make emu IMAGE=/home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret
       - name: SPEC06 Test - namd
         run: |
-          numactl -m 1 -C 64-95 make emu IMAGE=/home/ci-runner/xsenv/workloads/namd/_4850001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/namd/_4850001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
           cat perf.log | sort
           exit $ret

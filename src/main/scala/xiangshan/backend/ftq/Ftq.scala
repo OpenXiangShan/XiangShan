@@ -294,7 +294,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   XSPerf("entry", validEntries)
-  XSPerf("stall", io.enq.valid && !io.enq.ready)
+  XSPerf("leftOne", io.leftOne)
   XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
   XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
 

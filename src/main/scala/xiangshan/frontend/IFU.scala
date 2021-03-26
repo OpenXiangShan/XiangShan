@@ -11,6 +11,7 @@ import freechips.rocketchip.tile.HasLazyRoCC
 import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
+import system.L1CacheErrorInfo
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -79,6 +80,7 @@ class IFUIO extends XSBundle
   val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
   val l1plusFlush = Output(Bool())
   val prefetchTrainReq = ValidIO(new IcacheMissReq)
+  val error = new L1CacheErrorInfo
   // to tlb
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
@@ -480,6 +482,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
   io.prefetchTrainReq := icache.io.prefetchTrainReq
+  io.error <> icache.io.error
 
   bpu.io.ctrl := RegNext(io.bp_ctrl)
   bpu.io.commit <> io.commitUpdate

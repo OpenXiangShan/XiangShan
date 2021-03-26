@@ -3,6 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import chisel3.ExcitingUtils._
+import utils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
 import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
@@ -524,4 +525,12 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
   XSPerf("miss_req", io.req.fire())
   XSPerf("probe_blocked_by_miss", io.probe_block)
+  val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
+  val num_valids = PopCount(~primary_ready.asUInt)
+  when (num_valids > max_inflight) {
+    max_inflight := num_valids
+  }
+  // max inflight (average) = max_inflight_total / cycle cnt
+  XSPerf("max_inflight", max_inflight)
+  QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
 }
