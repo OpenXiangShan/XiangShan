@@ -418,14 +418,14 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   pipe.io.meta_resp <> metaArray.io.resp
   pipe.io.miss_meta_write.valid := missQueue.io.meta_write.valid
   pipe.io.miss_meta_write.bits <> missQueue.io.meta_write.bits
-  pipe.io.merge.valid := merge_with_pipe
+  pipe.io.merge.valid := merge_with_pipe && io.req.valid
   pipe.io.merge.bits.id := io.req.bits.id
   pipe.io.merge.bits.addr := io.req.bits.addr
 
   missQueue.io.req <> pipe.io.miss_req
   bus.a <> missQueue.io.mem_acquire
   missQueue.io.mem_grant <> bus.d
-  missQueue.io.merge_req.valid := merge_with_mshr
+  missQueue.io.merge_req.valid := merge_with_mshr && io.req.valid
   missQueue.io.merge_req.bits.id := io.req.bits.id
   missQueue.io.merge_req.bits.addr := io.req.bits.addr
   metaArray.io.write <> missQueue.io.meta_write
