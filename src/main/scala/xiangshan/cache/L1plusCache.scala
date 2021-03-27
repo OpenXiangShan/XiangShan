@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
+import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate, BoolStopWatch}
 import xiangshan.{HasXSLog, ValidUndirectioned}
 import system.L1CacheErrorInfo
 
@@ -400,8 +400,12 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   val req_block = should_block || flush_block_req
   // block_decoupled(io.req, pipe.io.req, req_block)
   pipe.io.req <> io.req
-  when (merge_with_pipe || merge_with_mshr) {
+  when (merge_with_pipe) {
     io.req.ready := pipe.io.merge.ready
+    pipe.io.req.valid := false.B
+  }
+  when (merge_with_mshr) {
+    io.req.ready := true.B
     pipe.io.req.valid := false.B
   }
   when (req_block) {
