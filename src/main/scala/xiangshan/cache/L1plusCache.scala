@@ -909,6 +909,10 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
       state := s_invalid
     }
   }
+
+  XSPerfAccumulate("miss_req", state === s_invalid && io.req.fire())
+  XSPerfAccumulate("merge_req", state === s_send_resp && io.resp.fire() && req.wakeup_icache.valid)
+  XSPerfAccumulate("miss_penalty", BoolStopWatch(state === s_invalid && io.req.fire(), state === s_meta_write_req && io.meta_write.fire()))
 }
 
 class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTLDump
