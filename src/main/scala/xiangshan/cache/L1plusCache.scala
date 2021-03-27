@@ -534,6 +534,11 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   when (io.empty) {
     XSDebug(s"L1plusCache empty\n")
   }
+
+  XSPerfAccumulate("merge_with_pipe", merge_with_pipe && !req_block && io.req.fire())
+  XSPerfAccumulate("merge_with_mshr", merge_with_mshr && !req_block && io.req.fire())
+  XSPerfAccumulate("block_for_same_idx_cycles", should_block && io.req.valid)
+  XSPerfAccumulate("block_for_flush", flush_block_req && io.req.valid)
 }
 
 class L1plusCachePipe extends L1plusCacheModule
