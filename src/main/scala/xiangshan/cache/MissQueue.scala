@@ -221,7 +221,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       fromSource      = io.id,
       toAddress       = req.addr,
       lgSize          = (log2Up(cfg.blockBytes)).U,
-      growPermissions = grow_param)._2
+      growPermissions = TLPermissions.toT)._2
     val acquirePerm = edge.AcquirePerm(
       fromSource      = io.id,
       toAddress       = req.addr,
