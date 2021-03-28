@@ -31,7 +31,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
       blockBytes = L2BlockSize,
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
       cacheName = s"L2",
-      uncachedGet = true,
+      uncachedGet = false,
       enablePerf = false
     ),
     InclusiveCacheMicroParameters(
