@@ -178,7 +178,7 @@ class LFST extends XSModule  {
     // If store-load pair is in the same dispatch bundle, loadWaitBit should also be set for load 
     val hitInDispatchBundle = if(i > 0){
       (0 until i).map(j =>
-        io.dispatch(i).valid && io.dispatch(i).bits.ssid === io.lookup.raddr(i)
+        io.dispatch(j).valid && io.dispatch(j).bits.ssid === io.lookup.raddr(i)
       ).reduce(_||_)
     } else {
       false.B
