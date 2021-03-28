@@ -432,16 +432,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
 
   // perf counter
-  XSPerf("utilization", validCount)
-  XSPerf("full", validCount === StoreQueueSize.U)
-  XSPerf("not_allow_enqueue", !allowEnqueue)
-  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
-  XSPerf("mmioCnt", io.uncache.req.fire())
-  XSPerf("mmio_wb_success", io.mmioStout.fire())
-  XSPerf("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready)
-  XSPerf("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
-  XSPerf("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
-  XSPerf("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
+  QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
+  XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
+  XSPerfAccumulate("mmio_wb_success", io.mmioStout.fire())
+  XSPerfAccumulate("mmio_wb_blocked", io.mmioStout.valid && !io.mmioStout.ready)
+  XSPerfAccumulate("validEntryCnt", distanceBetween(enqPtrExt(0), deqPtrExt(0)))
+  XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
+  XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)

@@ -163,28 +163,28 @@ class Dispatch1 extends XSModule with HasExceptionNO {
   }
 
   // store set perf count
-  XSPerf("waittable_load_wait", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
   )))
-  XSPerf("storeset_load_wait", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
   )))
-  XSPerf("storeset_store_wait", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
   )))
-  XSPerf("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
     !isStore(i) && isLs(i)
   )))
-  XSPerf("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
     !isStore(i) && isLs(i)
   )))
-  XSPerf("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
     !isStore(i) && isLs(i)
   )))
-  XSPerf("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i => 
+  XSPerfAccumulate("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
     !isStore(i) && isLs(i)
   )))
@@ -281,13 +281,13 @@ class Dispatch1 extends XSModule with HasExceptionNO {
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
-  XSPerf("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
-  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
-  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
+  XSPerfAccumulate("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
+  XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
+  XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
-  XSPerf("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerf("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerf("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerf("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerf("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
 }

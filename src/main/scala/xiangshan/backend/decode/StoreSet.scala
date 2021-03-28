@@ -106,10 +106,10 @@ class SSIT extends XSModule {
     }
   }
 
-  XSPerf("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
-  XSPerf("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
-  XSPerf("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
-  XSPerf("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
+  XSPerfAccumulate("ssit_update_lxsx", memPredUpdateReqValid && !loadAssigned && !storeAssigned)
+  XSPerfAccumulate("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
+  XSPerfAccumulate("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
+  XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
 
   // reset period: ResetTimeMax2Pow
   when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.waittable_timeout))) {

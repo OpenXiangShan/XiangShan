@@ -49,5 +49,5 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
     XSDebug(table(i), "%d is busy\n", i.U)
   }
 
-  XSPerf("busy_count", PopCount(table))
+  XSPerfAccumulate("busy_count", PopCount(table))
 }

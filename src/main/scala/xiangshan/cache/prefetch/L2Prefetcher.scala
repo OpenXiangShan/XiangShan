@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import xiangshan._
 import xiangshan.cache._
-import utils.{XSPerf, _}
+import utils.{XSPerfAccumulate, _}
 import chisel3.ExcitingUtils._
 
 import chipsalliance.rocketchip.config.Parameters
@@ -127,9 +127,9 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
   bus.e.valid := false.B
   bus.e.bits := DontCare
 
-  XSPerf("reqCnt", bus.a.fire())
+  XSPerfAccumulate("reqCnt", bus.a.fire())
   (0 until l2PrefetcherParameters.nEntries).foreach(i => {
-    XSPerf(
+    XSPerfAccumulate(
       "entryPenalty" + "%02d".format(i),
       BoolStopWatch(
         start = bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
@@ -137,7 +137,7 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
         startHighPriority = true
       )
     )
-    // XSPerf("entryReq" + "%02d".format(i), bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U)
+    // XSPerfAccumulate("entryReq" + "%02d".format(i), bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U)
   })
 }
 
