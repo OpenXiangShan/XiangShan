@@ -8,6 +8,8 @@ import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
 import bus.tilelink.TLParameters
+import system.L1CacheErrorInfo
+
 
 case class ICacheParameters(
     nSets: Int = 64,
@@ -119,6 +121,7 @@ class ICacheIO extends ICacheBundle
   val prev_pc = Input(UInt(VAddrBits.W))
   val prev_ipf = Input(Bool())
   val pd_out = Output(new PreDecodeResp)
+  val error = new L1CacheErrorInfo
 }
 
 class ICacheMetaReadBundle extends ICacheBundle
@@ -182,7 +185,6 @@ class ICacheMetaArray extends ICacheArray
   // read
   //do Parity decoding after way choose
   // do not read and write in the same cycle: when write SRAM disable read
-  val readNextReg = RegNext(io.read.fire())
   val rtags = metaArray.io.r.resp.asTypeOf(Vec(nWays,UInt(encMetaBits.W)))
   val rtags_decoded = rtags.map{ wtag =>cacheParams.dataCode.decode(wtag)}
   val rtags_wrong = rtags_decoded.map{ wtag_decoded => wtag_decoded.error}
@@ -192,7 +194,7 @@ class ICacheMetaArray extends ICacheArray
   metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
   io.read.ready := !io.write.valid
   io.readResp.tags := rtags_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
-  (0 until nWays).map{ w => io.readResp.errors(w) := readNextReg && rtags_wrong(w)}
+  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire()) && rtags_wrong(w)}
 
   //write
   val write = io.write.bits
@@ -223,7 +225,6 @@ class ICacheDataArray extends ICacheArray
   // read
   // do Parity decoding after way choose
   // do not read and write in the same cycle: when write SRAM disable read
-  val readNextReg = RegNext(io.read.fire())
   val rdata_wrong = Wire(Vec(nWays, UInt((nBanks * bankUnitNum).W)))
   val rdatas = VecInit((0 until nWays).map( w =>
       VecInit( (0 until nBanks).map( b =>
@@ -263,7 +264,7 @@ class ICacheDataArray extends ICacheArray
   }
 
   io.read.ready := !io.write.valid
-  (0 until nWays).map{ w => io.readResp.errors(w) := readNextReg && rdata_wrong(w).orR }
+  (0 until nWays).map{ w => io.readResp.errors(w) := RegNext(io.read.fire()) && rdata_wrong(w).orR }
 
   //write
   val write = io.write.bits
@@ -289,6 +290,26 @@ class ICacheDataArray extends ICacheArray
   }
 
   io.write.ready := DontCare
+}
+
+class ICacheErrorAbiter extends ICacheModule
+{
+  val io = IO(new Bundle{
+    val meta_ways_error = Flipped(Valid(Vec(nWays,Bool())))
+    val data_ways_error = Flipped(Valid(Vec(nWays,Bool())))
+    val way_enable   = Input(UInt(nWays.W))
+    val paddr = Input(UInt(VAddrBits.W))
+    val output = Output(new L1CacheErrorInfo)
+  })
+
+  val pipe_enable = io.meta_ways_error.valid   //only state 2 can generate error
+  val meta_error = Mux1H(io.way_enable, io.meta_ways_error.bits)
+  val data_error = Mux1H(io.way_enable, io.data_ways_error.bits)
+
+  io.output.ecc_error.valid := (meta_error || data_error) && pipe_enable
+  io.output.ecc_error.bits := true.B
+  io.output.paddr.valid := io.output.ecc_error.valid
+  io.output.paddr.bits := io.paddr
 }
 
 /* ------------------------------------------------------------
@@ -388,6 +409,18 @@ class ICache extends ICacheModule
 
   val waymask = Mux(hasIcacheException,1.U(nWays.W),Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask)))
 
+  //Parity/ECC error output
+
+  val errorArbiter = Module(new ICacheErrorAbiter)
+  errorArbiter.io.meta_ways_error.valid := RegNext(s2_hit)
+  errorArbiter.io.meta_ways_error.bits  := RegNext(metaArray.io.readResp.errors)
+  errorArbiter.io.data_ways_error.valid := RegNext(s2_hit)
+  errorArbiter.io.data_ways_error.bits  := RegNext(dataArray.io.readResp.errors)
+  errorArbiter.io.way_enable            := RegNext(hitVec.asUInt)
+  errorArbiter.io.paddr                 := RegNext(s2_tlb_resp.paddr)
+
+  io.error <> errorArbiter.io.output
+
   assert(!(s2_hit && s2_mmio),"MMIO address should not hit in icache")
 
   //----------------------------
@@ -406,12 +439,8 @@ class ICache extends ICacheModule
   val s3_has_exception = RegEnable(next= hasIcacheException,init=false.B,enable=s2_fire)
   val s3_idx = get_idx(s3_req_pc)
   val s3_data = datas
-  val s3_meta_errors = RegEnable(next=metaArray.io.readResp.errors, init= 0.U.asTypeOf(Vec(nWays,Bool())), enable=s2_fire)
-  val s3_data_errors = RegEnable(next=dataArray.io.readResp.errors, init= 0.U.asTypeOf(Vec(nWays,Bool())), enable=s2_fire)
-  val s3_meta_wrong = Mux1H(s3_wayMask, s3_meta_errors) && s3_hit
-  val s3_data_wrong = Mux1H(s3_wayMask, s3_data_errors) && s3_hit
 
-  val exception = (s3_has_exception || s3_meta_wrong || s3_data_wrong) && s3_valid
+  val exception = s3_has_exception  && s3_valid
 
 
   when(s3_flush)                  { s3_valid := false.B }
@@ -524,33 +553,9 @@ class ICache extends ICacheModule
   s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !useRefillReg
 
 
-
-
-  /* mmio response output
-   * cut the mmio response data cacheline into a fetch packet for responsing to predecoder
-   * TODO: no need to wait for a whole fetch packet(once per beat)?
-   */
-  def cutHelperMMIO(sourceVec: Vec[UInt], pc: UInt, mask: UInt) = {
-    val sourceVec_inst = Wire(Vec(mmioBeats * mmioBusBytes/instBytes,UInt(insLen.W)))
-    (0 until mmioBeats).foreach{ i =>
-      (0 until mmioBusBytes/instBytes).foreach{ j =>
-        sourceVec_inst(i*mmioBusBytes/instBytes + j) := sourceVec(i)(j*insLen+insLen-1, j*insLen)
-      }
-    }
-    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
-    val insLenLog = log2Ceil(insLen/8)
-    val start = Cat(0.U(2.W),(pc >> insLenLog.U)(log2Ceil(mmioBusBytes/instBytes) -1, 0))    //4bit
-    val outMask = mask >> start
-    (0 until PredictWidth ).foreach{ i =>
-      cutPacket(i) := Mux(outMask(i).asBool,sourceVec_inst(start + i.U),0.U)
-    }
-    (cutPacket.asUInt, outMask.asUInt)
-  }
-  val mmioDataVec = io.mmio_grant.bits.data.asTypeOf(Vec(mmioBeats,UInt(mmioBusWidth.W)))
   val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
 
   XSDebug("mmio data  %x\n", mmio_packet)
-
 
 
   val pds = Seq.fill(nWays)(Module(new PreDecode))
@@ -562,8 +567,7 @@ class ICache extends ICacheModule
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
     wayResp.mask := s3_req_mask
     wayResp.ipf := s3_exception_vec(pageFault)
-    wayResp.acf := s3_exception_vec(accessFault)  || s3_meta_wrong || s3_data_wrong
-    //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
+    wayResp.acf := s3_exception_vec(accessFault)
     wayResp.mmio := s3_mmio
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
@@ -587,8 +591,7 @@ class ICache extends ICacheModule
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
-  io.resp.bits.acf := s3_exception_vec(accessFault) || s3_meta_wrong || s3_data_wrong
-  //|| (icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.eccWrong)
+  io.resp.bits.acf := s3_exception_vec(accessFault) 
   io.resp.bits.mmio := s3_mmio
 
   //to itlb

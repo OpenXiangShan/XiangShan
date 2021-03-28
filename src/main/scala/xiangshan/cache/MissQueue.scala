@@ -524,4 +524,12 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
   XSPerf("miss_req", io.req.fire())
   XSPerf("probe_blocked_by_miss", io.probe_block)
+  val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
+  val num_valids = PopCount(~primary_ready.asUInt)
+  when (num_valids > max_inflight) {
+    max_inflight := num_valids
+  }
+  // max inflight (average) = max_inflight_total / cycle cnt
+  XSPerf("max_inflight", max_inflight)
+  XSPerf("num_valids", num_valids)
 }

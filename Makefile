@@ -116,8 +116,8 @@ VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   $(VEXTRA_FLAGS) \
   --assert \
   --stats-vars \
-  --output-split 5000 \
-  --output-split-cfuncs 5000
+  --output-split 30000 \
+  --output-split-cfuncs 30000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)

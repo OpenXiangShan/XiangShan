@@ -261,8 +261,8 @@ class ReservationStationSelect
   val indexQueue    = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val validQueue    = VecInit(stateQueue.map(_ === s_valid))
   val emptyQueue    = VecInit(stateQueue.map(_ === s_idle))
-  val countQueue    = Reg(Vec(iqSize, UInt(replayDelay(3).getWidth.W)))
-  val cntCountQueue = Reg(Vec(iqSize, UInt(2.W)))
+  val countQueue    = RegInit(VecInit(Seq.fill(iqSize)(0.U(replayDelay(3).getWidth.W))))
+  val cntCountQueue = RegInit(VecInit(Seq.fill(iqSize)(0.U(2.W))))
   val validIdxQueue = widthMap(i => validQueue(indexQueue(i)))
   val readyIdxQueue = widthMap(i => validQueue(indexQueue(i)) && io.readyVec(indexQueue(i)))
   val emptyIdxQueue = widthMap(i => emptyQueue(indexQueue(i)))
@@ -278,10 +278,10 @@ class ReservationStationSelect
   val selectIndex = ParallelPriorityMux(selectMask.asBools zip indexQueue) // NOTE: the idx in the indexQueue
   val selectPtr = ParallelPriorityMux(selectMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of indexQueue
   val haveReady = Cat(selectMask).orR
-  val selectIndexReg = RegNext(selectIndex)
+  val selectIndexReg = RegNext(selectIndex, init = 0.U)
   val selectValid = haveReady
-  val selectReg = RegNext(selectValid)
-  val selectPtrReg = RegNext(Mux(moveMask(selectPtr), selectPtr-1.U, selectPtr))
+  val selectReg = RegNext(selectValid, init = false.B)
+  val selectPtrReg = RegNext(Mux(moveMask(selectPtr), selectPtr-1.U, selectPtr), init = 0.U)
   lastSelMask := ~Mux(selectReg, UIntToOH(selectPtrReg), 0.U)
   assert(RegNext(!(haveReady && selectPtr >= tailPtr.asUInt)), "bubble should not have valid state like s_valid or s_wait")
 
@@ -297,8 +297,8 @@ class ReservationStationSelect
   val bubbleValid = haveBubble  && (if (feedback) true.B
                                     else if (nonBlocked) !selectValid
                                     else Mux(isFull, true.B, !selectValid))
-  val bubbleReg = RegNext(bubbleValid)
-  val bubblePtrReg = RegNext(Mux(moveMask(bubblePtr), bubblePtr-1.U, bubblePtr))
+  val bubbleReg = RegNext(bubbleValid, init = false.B)
+  val bubblePtrReg = RegNext(Mux(moveMask(bubblePtr), bubblePtr-1.U, bubblePtr), init = 0.U)
   lastbubbleMask := ~Mux(bubbleReg, UIntToOH(bubblePtrReg), 0.U) &
                     (if(feedback) ~(0.U(iqSize.W)) else
                     Mux(RegNext(selectValid && (io.redirect.valid || io.flush)), 0.U, ~(0.U(iqSize.W))))
@@ -392,7 +392,7 @@ class ReservationStationSelect
   io.deq.valid := selectValid
   io.deq.bits  := selectIndex
 
-  io.numExist := RegNext(Mux(nextTailPtr.flag, if(isPow2(iqSize)) (iqSize-1).U else iqSize.U, nextTailPtr.value))
+  io.numExist := RegNext(Mux(nextTailPtr.flag, if(isPow2(iqSize)) (iqSize-1).U else iqSize.U, nextTailPtr.value), init = (iqSize - 1).U)
 
   assert(RegNext(Mux(tailPtr.flag, tailPtr.value===0.U, true.B)))
 
@@ -483,7 +483,7 @@ class ReservationStationCtrl
   val enqPtr = io.in.bits.addr
   val enqPtrReg = RegNext(enqPtr)
   val enqEn  = io.in.valid
-  val enqEnReg = RegNext(enqEn)
+  val enqEnReg = RegNext(enqEn, init = false.B)
   val enqUop = io.in.bits.uop
   val enqUopReg = RegEnable(enqUop, selValid)
   val selPtr = io.sel.bits
@@ -510,7 +510,7 @@ class ReservationStationCtrl
   val srcUpdateListen = Wire(Vec(iqSize, Vec(srcNum, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
   srcUpdateListen.map(a => a.map(b => b.map(c => c := false.B )))
   srcUpdateListen.suggestName(s"srcUpdateListen")
-  val srcUpdateVecReg = RegNext(srcUpdateListen)
+  val srcUpdateVecReg = RegNext(srcUpdateListen, init = 0.U.asTypeOf(srcUpdateListen.cloneType))
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
       if (exuCfg == Exu.stExeUnitCfg && j == 0) {
@@ -521,7 +521,7 @@ class ReservationStationCtrl
     }
   }
 
-  val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, Bool())))
+  val srcQueue      = RegInit(VecInit(Seq.fill(iqSize)(VecInit(Seq.fill(srcNum)(false.B)))))
   when (enqEn) {
     srcQueue(enqPtr).zip(enqSrcReady).map{ case (s, e) => s := e }
   }
