@@ -60,8 +60,7 @@ class SSIT extends XSModule {
   val storeOldSSID = RegNext(ssid(io.update.stpc))
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
-  val loadIsWinner = RegNext(io.update.ldpc < io.update.stpc)
-  val winnerSSID = Mux(loadIsWinner, loadOldSSID, storeOldSSID)
+  val winnerSSID = Mux(loadOldSSID < storeOldSSID, loadOldSSID, storeOldSSID)
 
   // for now we just use lowest bits of ldpc as store set id
   val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
