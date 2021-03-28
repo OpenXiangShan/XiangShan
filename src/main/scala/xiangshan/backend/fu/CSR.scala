@@ -350,7 +350,7 @@ class CSR extends FunctionUnit with HasCSRConst
   csrio.customCtrl.dsid := sdsid
 
   // slvpredctl: load violation predict settings
-  val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
+  val slvpredctl = RegInit(UInt(XLEN.W), "hc0".U) // default reset period: 2^22
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
