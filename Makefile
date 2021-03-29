@@ -107,6 +107,11 @@ ifeq ($(DUALCORE),1)
 EMU_CXXFLAGS += -DDUALCORE
 endif
 
+USE_BIN ?= 1
+ifeq ($(USE_BIN),1)
+EMU_CXXFLAGS += -DUSE_BIN
+endif
+
 # --trace
 VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1 \
