@@ -56,7 +56,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val grantEntryId = entryId(io.icacheMemGrant.bits.id)
   ifu.io.icacheMemGrant.valid := io.icacheMemGrant.valid && (grantClientId === icacheMissQueueId.U || io.icacheMemGrant.bits.wakeup_icache.valid && clientId(io.icacheMemGrant.bits.wakeup_icache.bits.id) === icacheMissQueueId.U)
   ifu.io.icacheMemGrant.bits := io.icacheMemGrant.bits
-  ifu.io.icacheMemGrant.bits.id := Cat(0.U(clientIdWidth.W), Mux(grantClientId === icacheMissQueueId.U, grantEntryId, entryId(io.icacheMemGrant.bits.wakeup_icache.bits.id)))
+  ifu.io.icacheMemGrant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
+  ifu.io.icacheMemGrant.bits.wakeup_icache.bits.id := Cat(0.U(clientIdWidth.W), entryId(io.icacheMemGrant.bits.wakeup_icache.bits.id))
   l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
   l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
   l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)

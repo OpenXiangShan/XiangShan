@@ -227,6 +227,9 @@ class IcacheMissQueue extends ICacheMissQueueModule
     entry.io.mem_grant.bits  := DontCare
     when (io.mem_grant.bits.id === i.U) {
       entry.io.mem_grant <> io.mem_grant
+    }.elsewhen (io.mem_grant.bits.wakeup_icache.valid && io.mem_grant.bits.wakeup_icache.bits.id === i.U) {
+      entry.io.mem_grant <> io.mem_grant
+      entry.io.mem_grant.bits.id := i.U
     }
 
     XSPerfAccumulate(
