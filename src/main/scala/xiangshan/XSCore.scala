@@ -105,6 +105,7 @@ case class XSCoreParameters
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
+  PtwMSHRSize: Int = 4,
   NumPerfCounters: Int = 16,
   NrExtIntr: Int = 150
 )
@@ -188,6 +189,7 @@ trait HasXSParameter {
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
+  val PtwMSHRSize = coreParams.PtwMSHRSize
   val NumPerfCounters = coreParams.NumPerfCounters
   val NrExtIntr = coreParams.NrExtIntr
 

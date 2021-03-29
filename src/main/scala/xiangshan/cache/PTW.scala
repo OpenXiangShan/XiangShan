@@ -49,6 +49,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
   val spReplacer = Some("plru")
 
+  val MSHRSize = PtwMSHRSize
+
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
   }
@@ -305,7 +307,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
    *                       |         |
    *                       --arbiter--
    *                            |
-   *                     [][][][][][][] several mshr storing reqs to filter dup
+   *                     // [][][][][][][] several mshr storing reqs to filter dup
    *                            |
    *                    l1 - l2 - l3 - sp
    *                            |
@@ -322,9 +324,21 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   difftestIO <> DontCare
 
-  val arb = Module(new Arbiter(new PtwReq, PtwWidth))
-  arb.io.in <> VecInit(io.tlb.map(_.req))
-  val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
+  val missQueue = Module(new PtwMissQueue)
+  val arb = Module(new Arbiter(new PtwReq, 1 + PtwWidth))
+  val cache = Module(new PtwCache)
+  val fsm = Moudle(new PtwFsm)
+  arb.io.in(0) <> missQueue.io.out
+  arb.io.in.drop(1) <>  io.tlb.map(_.req)
+
+  arb.io.out <> cache.io.in
+  cache.io.mqout <> missQueue.io.in
+  cache.io.fsmout <> fsm.io.in
+
+  val isFirstSource = RegEnable((arb.io.chosen === 0.U && missQueue.io.outIsInstr || 
+    arb.io.chosen === 1.U), arb.io.out.fire())
+  val fromMissQueue = RegEnable(arb.io.chosen === 0.U, arb.io.out.fire())
+  
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
@@ -827,6 +841,62 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(RegNext(sfence.valid), p"[sfence] l3v:${Binary(l3v)}\n")
   XSDebug(RegNext(sfence.valid), p"[sfence] l3g:${Binary(l3g)}\n")
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
+}
+
+class PTWMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Bundle {
+      val vpn = UInt(vpnLen.W)
+      val instr = Bool()
+    }))
+    val sfence = Input(new SfenceBundle)
+    val out = Decoupled(new PtwReq)
+    val outIsInstr = Outptu(new Bool)
+  })
+
+  val s_idle :: s_valid :: Nil = Enum(2)
+
+  val state = RegInit(VecInit(Seq.fill(MSHRSize)(s_idle))) // entry state
+  val enqIdx = RegInit(0.U(log2Up(MSHRSize).W))
+  val deqIdx = RegInit(0.U(log2Up(MSHRSize).W))
+
+  val ptrMatch = enqIdx === deqIdx
+  val mayFull = RegInit(false.B)
+  val full = mayFull && enqIdx === deqIdx
+  val empty = !mayFull && enqIdx === deqIdx
+
+  val vpn = Reg(Vec(MSHRSize, UInt(vpnLen.W))) // request vpn
+  val instr = Reg(Vec(MSHRSize, Bool())) // is itlb
+
+  val addrDup = (0 until MSHRSize).map(i => state(i) =/= s_idle && vpn(i) === io.in.bits.vpn ) // addr match
+  val instrDup = (0 until MSHRSize).map(i => instr(i) === io.in.bits.instr) // same source
+  val dropIt = Cat(addrDup.zip(instrDup).map(_.1 && _.2)).orR // NOTE: let it in, but drop it
+
+  when (io.in.fire() && !dropIt) {
+    enqIdx := enqIdx + 1.U
+    state(enqIdx) := s_valid
+    vpn(enqIdx) := io.in.bits.vpn
+    instr(enqIdx) := io.in.bits.instr
+  }
+
+  when (io.out.fire()) {
+    deqIdx := deqIdx + 1.U
+    state(deqIdx) := s_idle
+  }
+
+  when (io.sfence.valid) {
+    enqIdx := 0.U
+    deqIdx := 0.U
+    mayFull := false.B
+    state.map(_ := s_idle)
+  }  
+
+  io.in.ready := !full
+  io.out.valid := !empty
+  assert(empty || !(state(deqIdx) === s_idle), "state must be valid when between enqIdx and deqIdx")
+
+  io.out.bits.vpn := vpn(deqIdx)
+  io.out.bits.instr := instr(deqIdx)
 }
 
 class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
