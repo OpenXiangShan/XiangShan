@@ -95,6 +95,7 @@ object XSPerfMax extends HasXSParameter {
 object QueuePerf extends HasXSParameter {
   def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
     XSPerfAccumulate("utilization", utilization)
+    XSPerfHistogram("util", utilization, true.B, 0, size, 1)
     XSPerfAccumulate("full", full)
     val exHalf = utilization > (size/2).U
     val empty = utilization === 0.U
