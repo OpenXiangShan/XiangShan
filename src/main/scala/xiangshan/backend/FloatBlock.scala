@@ -114,7 +114,7 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN + 1,
       inBlockFastPorts.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -204,7 +204,7 @@ class FloatBlock
     }
   }
 
-  XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+  XSPerfAccumulate("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out

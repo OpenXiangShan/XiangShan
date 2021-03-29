@@ -2,7 +2,7 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
-import utils.XSPerf
+import utils.{XSPerfAccumulate}
 import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
@@ -172,7 +172,7 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, XLEN,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -266,7 +266,7 @@ class IntegerBlock
     w
   }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
 
-  XSPerf("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+  XSPerfAccumulate("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   exeUnits.zip(intWbArbiter.io.in).foreach{
     case (exu, wInt) =>

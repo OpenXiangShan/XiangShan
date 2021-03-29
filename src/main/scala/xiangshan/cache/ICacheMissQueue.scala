@@ -229,14 +229,14 @@ class IcacheMissQueue extends ICacheMissQueueModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    XSPerf(
+    XSPerfAccumulate(
       "entryPenalty" + Integer.toString(i, 10),
       BoolStopWatch(
         start = entry.io.req.fire(),
         stop = entry.io.resp.fire() || entry.io.flush,
         startHighPriority = true)
     )
-    XSPerf("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
 
     entry
   }

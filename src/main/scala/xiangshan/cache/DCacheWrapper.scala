@@ -322,6 +322,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     assert (!bus.d.fire())
   }
 
+  //----------------------------------------
+  // assertions
   // dcache should only deal with DRAM addresses
   when (bus.a.fire()) {
     assert(bus.a.bits.address >= 0x80000000L.U)
@@ -333,9 +335,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     assert(bus.c.bits.address >= 0x80000000L.U)
   }
 
+  //----------------------------------------
+  // utility functions
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
     sink.valid   := source.valid && !block_signal
     source.ready := sink.ready   && !block_signal
     sink.bits    := source.bits
   }
+
+  //----------------------------------------
+  // performance counters
+  val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
+  XSPerfAccumulate("num_loads", num_loads)
 }

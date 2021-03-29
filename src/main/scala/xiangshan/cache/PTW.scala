@@ -760,23 +760,23 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // Perf Count
-  XSPerf("access", validOneCycle)
-  XSPerf("l1_hit", l1Hit)
-  XSPerf("l2_hit", l2Hit)
-  XSPerf("l3_hit", l3Hit)
-  XSPerf("sp_hit", spHit)
-  XSPerf("pte_hit", pteHit)
-  XSPerf("mem_count", memReqFire)
-  XSPerf("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
-  XSPerf("mem_blocked_cycle", mem.a.valid && !memReqReady)
-  l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L1AccessIndex${i}", l) }
-  l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L2AccessIndex${i}", l) }
-  l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L3AccessIndex${i}", l) }
-  spAccessPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"SPAccessIndex${i}", l) }
-  l1RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L1RefillIndex${i}", l) }
-  l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L2RefillIndex${i}", l) }
-  l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"L3RefillIndex${i}", l) }
-  spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerf(s"SPRefillIndex${i}", l) }
+  XSPerfAccumulate("access", validOneCycle)
+  XSPerfAccumulate("l1_hit", l1Hit)
+  XSPerfAccumulate("l2_hit", l2Hit)
+  XSPerfAccumulate("l3_hit", l3Hit)
+  XSPerfAccumulate("sp_hit", spHit)
+  XSPerfAccumulate("pte_hit", pteHit)
+  XSPerfAccumulate("mem_count", memReqFire)
+  XSPerfAccumulate("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
+  XSPerfAccumulate("mem_blocked_cycle", mem.a.valid && !memReqReady)
+  l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1AccessIndex${i}", l) }
+  l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2AccessIndex${i}", l) }
+  l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3AccessIndex${i}", l) }
+  spAccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPAccessIndex${i}", l) }
+  l1RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1RefillIndex${i}", l) }
+  l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2RefillIndex${i}", l) }
+  l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3RefillIndex${i}", l) }
+  spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPRefillIndex${i}", l) }
 
 
   // debug info

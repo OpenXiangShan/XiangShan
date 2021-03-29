@@ -3,9 +3,10 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import chisel3.ExcitingUtils._
+import utils._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
-import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerf}
+import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerfAccumulate, XSPerfHistogram, TransactionLatencyCounter}
 
 class MissReq extends DCacheBundle
 {
@@ -343,14 +344,25 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     state := s_invalid
   }
 
-  XSPerf("miss_req", io.req_valid && io.primary_ready)
-  XSPerf("miss_penalty", BoolStopWatch(io.req_valid && io.primary_ready, state === s_release_entry))
-  XSPerf("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req_valid && io.primary_ready, io.refill.valid, true))
-  XSPerf("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
-  XSPerf("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
-  XSPerf("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
-  XSPerf("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerf("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
+  XSPerfAccumulate("miss_req", io.req_valid && io.primary_ready)
+  XSPerfAccumulate("miss_penalty", BoolStopWatch(io.req_valid && io.primary_ready, state === s_release_entry))
+  XSPerfAccumulate("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req_valid && io.primary_ready, io.refill.valid, true))
+  XSPerfAccumulate("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
+  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
+  XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  XSPerfAccumulate("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
+
+
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(io.req_valid && io.primary_ready, state === s_release_entry)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
+
+  val load_miss_begin = io.req_valid && (io.primary_ready || io.secondary_ready) && io.req.source === LOAD_SOURCE.U
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, io.refill.valid)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
+
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
 }
 
 
@@ -522,14 +534,15 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     XSDebug(p"block probe req ${Hexadecimal(io.probe_req)}\n")
   }
 
-  XSPerf("miss_req", io.req.fire())
-  XSPerf("probe_blocked_by_miss", io.probe_block)
+  XSPerfAccumulate("miss_req", io.req.fire())
+  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~primary_ready.asUInt)
   when (num_valids > max_inflight) {
     max_inflight := num_valids
   }
   // max inflight (average) = max_inflight_total / cycle cnt
-  XSPerf("max_inflight", max_inflight)
-  XSPerf("num_valids", num_valids)
+  XSPerfAccumulate("max_inflight", max_inflight)
+  QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
+  XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 }

@@ -93,7 +93,8 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val data = dataModule.io.dataOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
-  val cohCount = Reg(Vec(StoreBufferSize, UInt(countBits.W)))
+  val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(countBits.W))))
+
   /*
        idle --[flush]--> drian_sbuffer --[buf empty]--> idle
             --[buf full]--> replace --[dcache resp]--> idle
