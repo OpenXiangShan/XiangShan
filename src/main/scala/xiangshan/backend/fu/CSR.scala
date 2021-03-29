@@ -112,7 +112,6 @@ class FpuCsrIO extends XSBundle {
 
 class PerfCounterIO extends XSBundle {
   val retiredInstr = Input(UInt(3.W))
-  val value = Input(UInt(XLEN.W))
 }
 
 class CSRFileIO extends XSBundle {
