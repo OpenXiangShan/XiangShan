@@ -107,7 +107,7 @@ ifeq ($(DUALCORE),1)
 EMU_CXXFLAGS += -DDUALCORE
 endif
 
-USE_BIN ?= 1
+USE_BIN ?= 0
 ifeq ($(USE_BIN),1)
 EMU_CXXFLAGS += -DUSE_BIN
 endif

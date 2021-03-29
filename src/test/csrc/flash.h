@@ -3,6 +3,4 @@
 
 #include "common.h"
 
-extern FILE *fp;
-
 #endif // __FLASH_H
