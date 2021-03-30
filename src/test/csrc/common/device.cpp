@@ -1,6 +1,7 @@
-#include "common.h"
 #include <sys/time.h>
 #include <SDL2/SDL.h>
+
+#include "device.h"
 
 void send_key(uint8_t, bool);
 void init_sdl(void);

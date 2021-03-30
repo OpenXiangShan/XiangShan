@@ -9,6 +9,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
 import xiangshan.backend.regfile.Regfile
+import difftest._
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -101,32 +102,6 @@ class IntegerBlock
       val sbuffer = new FenceToSbuffer // to mem
     }
   })
-  val difftestIO = IO(new Bundle() {
-    val fromCSR = new Bundle() {
-      val intrNO = Output(UInt(64.W))
-      val cause = Output(UInt(64.W))
-      val priviledgeMode = Output(UInt(2.W))
-      val mstatus = Output(UInt(64.W))
-      val sstatus = Output(UInt(64.W))
-      val mepc = Output(UInt(64.W))
-      val sepc = Output(UInt(64.W))
-      val mtval = Output(UInt(64.W))
-      val stval = Output(UInt(64.W))
-      val mtvec = Output(UInt(64.W))
-      val stvec = Output(UInt(64.W))
-      val mcause = Output(UInt(64.W))
-      val scause = Output(UInt(64.W))
-      val satp = Output(UInt(64.W))
-      val mip = Output(UInt(64.W))
-      val mie = Output(UInt(64.W))
-      val mscratch = Output(UInt(64.W))
-      val sscratch = Output(UInt(64.W))
-      val mideleg = Output(UInt(64.W))
-      val medeleg = Output(UInt(64.W))
-    }
-  })
-  difftestIO <> DontCare
-
   val redirect = io.fromCtrlBlock.redirect
   val flush = io.fromCtrlBlock.flush
 
@@ -243,9 +218,6 @@ class IntegerBlock
 
   jmpExeUnit.csrio <> io.csrio
   jmpExeUnit.fenceio <> io.fenceio
-  if (!env.FPGAPlatform) {
-    jmpExeUnit.difftestIO.fromCSR <> difftestIO.fromCSR
-  }
 
   // read int rf from ctrl block
   intRf.io.readPorts.zipWithIndex.map { case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
@@ -288,4 +260,16 @@ class IntegerBlock
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
+  intRf.io.debug_rports := DontCare
+
+  if (!env.FPGAPlatform) {
+    for ((rport, rat) <- intRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
+      rport.addr := rat
+    }
+    val difftest = Module(new DifftestArchIntRegState)
+    difftest.io.clock  := clock
+    difftest.io.coreid := 0.U
+    difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
+  }
+
 }

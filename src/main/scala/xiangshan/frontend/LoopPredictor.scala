@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import chisel3.experimental.chiselName
 
 trait LTBParams extends HasXSParameter with HasBPUParameter {

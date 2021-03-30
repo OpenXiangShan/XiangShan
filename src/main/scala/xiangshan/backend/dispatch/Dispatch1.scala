@@ -2,7 +2,6 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import chisel3.ExcitingUtils._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}

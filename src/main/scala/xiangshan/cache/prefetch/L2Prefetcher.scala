@@ -5,8 +5,8 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import xiangshan._
 import xiangshan.cache._
-import utils.{XSPerfAccumulate, _}
-import chisel3.ExcitingUtils._
+import utils._
+
 
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}

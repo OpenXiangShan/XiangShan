@@ -59,78 +59,16 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 	date -R
 
-EMU_TOP      = XSSimSoC
-EMU_CSRC_DIR = $(abspath ./src/test/csrc)
-EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
-EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
-EMU_VFILES   = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
+SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
+SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
 
-EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
-EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
-EMU_LDFLAGS  += -lpthread -lSDL2 -ldl -lz
+DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
+DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
 
-VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
+SIM_VSRC = $(shell find ./src/test/vsrc -name "*.v" -or -name "*.sv")
 
-# Verilator trace support
-EMU_TRACE ?=
-ifeq ($(EMU_TRACE),1)
-VEXTRA_FLAGS += --trace
-endif
+include Makefile.emu
 
-# Verilator multi-thread support
-EMU_THREADS  ?= 1
-ifneq ($(EMU_THREADS),1)
-VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi all
-endif
-
-# Verilator savable
-EMU_SNAPSHOT ?=
-ifeq ($(EMU_SNAPSHOT),1)
-VEXTRA_FLAGS += --savable
-EMU_CXXFLAGS += -DVM_SAVABLE
-endif
-
-# Verilator coverage
-EMU_COVERAGE ?=
-ifeq ($(EMU_COVERAGE),1)
-VEXTRA_FLAGS += --coverage-line --coverage-toggle
-endif
-
-# co-simulation with DRAMsim3
-ifeq ($(WITH_DRAMSIM3),1)
-EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
-EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
-EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
-endif
-
-ifeq ($(DUALCORE),1)
-EMU_CXXFLAGS += -DDUALCORE
-endif
-
-# --trace
-VERILATOR_FLAGS = --top-module $(EMU_TOP) \
-  +define+VERILATOR=1 \
-  +define+PRINTF_COND=1 \
-  +define+RANDOMIZE_REG_INIT \
-  +define+RANDOMIZE_MEM_INIT \
-  $(VEXTRA_FLAGS) \
-  --assert \
-  --stats-vars \
-  --output-split 30000 \
-  --output-split-cfuncs 30000
-
-EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
-EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
-EMU_HEADERS := $(shell find $(EMU_CSRC_DIR) -name "*.h")
-EMU := $(BUILD_DIR)/emu
-
-$(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
-	@mkdir -p $(@D)
-	date -R
-	verilator --cc --exe $(VERILATOR_FLAGS) \
-		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
-	date -R
-  
 EMU_VCS := simv
 
 VCS_SRC_FILE = $(TOP_V) \
@@ -163,60 +101,10 @@ REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
-LOCK = /var/emu/emu.lock
-LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
-
-$(LOCK_BIN): ./scripts/utils/lock-emu.c
-	gcc $^ -o $@
-
-$(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
-	date -R
-ifeq ($(REMOTE),localhost)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
-else
-	@echo "try to get emu.lock ..."
-	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
-	@echo "get lock"
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
-	@echo "release lock ..."
-	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
-endif
-	date -R
-
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
 VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
-VME_MODULES ?= 
-
-# log will only be printed when (B<=GTimer<=E) && (L < loglevel)
-# use 'emu -h' to see more details
-B ?= 0
-E ?= -1
-SNAPSHOT ?=
-
-# enable this runtime option if you want to generate a vcd file
-# use 'emu -h' to see more details
-#WAVEFORM = --dump-wave
-
-ifeq ($(SNAPSHOT),)
-SNAPSHOT_OPTION = 
-else
-SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
-endif
-
-ifndef NOOP_HOME
-$(error NOOP_HOME is not set)
-endif
-EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM) $(EMU_ARGS)
-
-emu: $(EMU)
-	ls build
-	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
-
-coverage:
-	verilator_coverage --annotate build/logs/annotated --annotate-min 1 build/logs/coverage.dat
-	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
-	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
+VME_MODULES ?=
 
 #-----------------------timing scripts-------------------------
 # run "make vme/tap help=1" to get help info
@@ -263,4 +151,6 @@ bump:
 
 bsp:
 	mill -i mill.contrib.BSP/install
+
 .PHONY: verilog emu clean help init bump bsp $(REF_SO)
+
