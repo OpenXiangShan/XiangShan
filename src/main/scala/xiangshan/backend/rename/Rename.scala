@@ -44,6 +44,8 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -67,6 +69,8 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   val intRat = Module(new RenameTable(float = false)).io
   val fpRat = Module(new RenameTable(float = true)).io
   val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
+  intRat.debug_rdata <> io.debug_int_rat
+  fpRat.debug_rdata <> io.debug_fp_rat
 
   allPhyResource.map{ case (rat, freelist, _) =>
     rat.redirect := io.redirect.valid
@@ -288,5 +292,6 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+
 
 }

@@ -22,7 +22,6 @@ import device._
 import xiangshan._
 import xiangshan.frontend._
 import utils._
-import chisel3.ExcitingUtils._
 import bus.tilelink.TLParameters
 import system.L1CacheErrorInfo
 

@@ -20,22 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 
-object hartIdRFInt extends (() => Int) {
-  var x = 0
-  def apply(): Int = {
-    x = x + 1
-    x-1
-  }
-}
-
-object hartIdRFFp extends (() => Int) {
-  var x = 0
-  def apply(): Int = {
-    x = x + 1
-    x-1
-  }
-}
-
 class RfReadPort(len: Int) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
@@ -57,6 +41,7 @@ class Regfile
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len))
     val writePorts = Vec(numWirtePorts, new RfWritePort(len))
+    val debug_rports = Vec(32, new RfReadPort(len))
   })
 
   val useBlackBox = false
@@ -72,27 +57,9 @@ class Regfile
       }
     }
 
-    if (!env.FPGAPlatform) {
-      val id = if (hasZero) hartIdRFInt() else hartIdRFFp()
-      val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-      ExcitingUtils.addSink(
-        debugArchRat,
-        if(hasZero) s"DEBUG_INI_ARCH_RAT$id" else s"DEBUG_FP_ARCH_RAT$id",
-        ExcitingUtils.Debug
-      )
-
-      val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(
-        x => if(hasZero){
-          if(x._2 == 0) 0.U else mem(x._1)
-        } else {
-          ieee(mem(x._1))
-        }
-      )))
-      ExcitingUtils.addSource(
-        debugArchReg,
-        if(hasZero) s"DEBUG_INT_ARCH_REG$id" else s"DEBUG_FP_ARCH_REG$id",
-        ExcitingUtils.Debug
-      )
+    for (rport <- io.debug_rports) {
+      val zero_rdata = Mux(rport.addr === 0.U, 0.U, mem(rport.addr))
+      rport.data := (if (hasZero) zero_rdata else mem(rport.addr))
     }
   } else {
 
@@ -173,6 +140,8 @@ class Regfile
     io.readPorts(11).data := regfile.io.rdata11
     io.readPorts(12).data := regfile.io.rdata12
     io.readPorts(13).data := regfile.io.rdata13
+
+    io.debug_rports := DontCare
   }
 
 }

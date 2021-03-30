@@ -18,12 +18,10 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
 import freechips.rocketchip.tile.HasLazyRoCC
-import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 import system.L1CacheErrorInfo

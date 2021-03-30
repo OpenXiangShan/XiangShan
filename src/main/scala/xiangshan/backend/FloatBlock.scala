@@ -24,7 +24,7 @@ import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
-
+import difftest._
 
 class FpBlockToCtrlIO extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
@@ -231,5 +231,15 @@ class FloatBlock
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
+  fpRf.io.debug_rports := DontCare
 
+  if (!env.FPGAPlatform) {
+    for ((rport, rat) <- fpRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
+      rport.addr := rat
+    }
+    val difftest = Module(new DifftestArchFpRegState)
+    difftest.io.clock  := clock
+    difftest.io.coreid := 0.U
+    difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(_.data))
+  }
 }

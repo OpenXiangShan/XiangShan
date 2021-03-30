@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
 import utils.{DataDontCareNode, DebugIdentityNode}
 import utils.XSInfo
-import xiangshan.{DifftestBundle, HasXSParameter, XSBundle, XSCore}
+import xiangshan.{HasXSParameter, XSBundle, XSCore}
 import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -197,13 +197,6 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
-    val difftestIO0 = IO(new DifftestBundle())
-    val difftestIO1 = IO(new DifftestBundle())
-    val difftestIO = Seq(difftestIO0, difftestIO1)
-
-    val trapIO0 = IO(new xiangshan.TrapIO())
-    val trapIO1 = IO(new xiangshan.TrapIO())
-    val trapIO = Seq(trapIO0, trapIO1)
 
     plic.module.io.extra.get.intrVec <> RegNext(beuSink.module.interrupt)
 
@@ -220,15 +213,6 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     }
     l2prefetcher.module.io.in <> l3_cache.module.io
 
-    difftestIO0 <> xs_core(0).module.difftestIO
-    difftestIO1 <> DontCare
-    trapIO0 <> xs_core(0).module.trapIO
-    trapIO1 <> DontCare
-
-    if (env.DualCore) {
-      difftestIO1 <> xs_core(1).module.difftestIO
-      trapIO1 <> xs_core(1).module.trapIO
-    }
     // do not let dma AXI signals optimized out
     dontTouch(dma.out.head._1)
     dontTouch(extDev.out.head._1)

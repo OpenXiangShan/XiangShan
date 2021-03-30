@@ -21,7 +21,6 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
 import utils._
-import chisel3.ExcitingUtils._
 
 case class L1plusPrefetcherParameters(
   enable: Boolean,

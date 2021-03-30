@@ -21,7 +21,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import chisel3.ExcitingUtils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.{RenameBypassInfo, BusyTableReadIO}
 import xiangshan.mem.LsqEnqIO

@@ -25,14 +25,7 @@ import xiangshan.backend.LSUOpType
 import xiangshan.backend.exu.Exu
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
-
-object roqDebugId extends Function0[Integer] {
-  var x = 0
-  def apply(): Integer = {
-    x = x + 1
-    return x
-  }
-}
+import difftest._
 
 class RoqPtr extends CircularQueuePtr[RoqPtr](RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
@@ -279,26 +272,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val csr = new RoqCSRIO
     val roqFull = Output(Bool())
   })
-
-  val difftestIO = IO(new Bundle() {
-    val commit = Output(UInt(32.W))
-    val thisPC = Output(UInt(XLEN.W))
-    val thisINST = Output(UInt(32.W))
-    val skip = Output(UInt(32.W))
-    val wen = Output(UInt(32.W))
-    val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-    val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
-    val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-    val isRVC = Output(UInt(32.W))
-    val scFailed = Output(Bool())
-    val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
-    val ltype = Output(Vec(CommitWidth, UInt(32.W)))
-    val lfu = Output(Vec(CommitWidth, UInt(4.W)))
-  })
-  difftestIO <> DontCare
-
-  val trapIO = IO(new TrapIO())
-  trapIO <> DontCare
 
   // instvalid field
   // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
@@ -903,24 +876,55 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
 
   if (!env.FPGAPlatform) {
-    difftestIO.commit := RegNext(retireCounterFix)
-    difftestIO.thisPC := RegNext(retirePCFix)
-    difftestIO.thisINST := RegNext(retireInstFix)
-    difftestIO.skip := RegNext(skip.asUInt)
-    difftestIO.wen := RegNext(wen.asUInt)
-    difftestIO.wdata := RegNext(wdata)
-    difftestIO.wdst := RegNext(wdst)
-    difftestIO.wpc := RegNext(wpc)
-    difftestIO.isRVC := RegNext(isRVC.asUInt)
-    difftestIO.scFailed := RegNext(scFailed)
-    difftestIO.lpaddr := RegNext(lpaddr)
-    difftestIO.ltype := RegNext(ltype)
-    difftestIO.lfu := RegNext(lfu)
+    for (i <- 0 until CommitWidth) {
+      val difftest = Module(new DifftestInstrCommit)
+      difftest.io.clock    := clock
+      difftest.io.coreid   := 0.U
+      difftest.io.index    := i.U
 
-    trapIO.valid := RegNext(hitTrap)
-    trapIO.code := RegNext(trapCode)
-    trapIO.pc := RegNext(trapPC)
-    trapIO.cycleCnt := RegNext(GTimer())
-    trapIO.instrCnt := RegNext(instrCnt)
+      val ptr = deqPtrVec(i).value
+      val uop = debug_microOp(ptr)
+      val exuOut = debug_exuDebug(ptr)
+      val exuData = debug_exuData(ptr)
+      difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
+      difftest.io.pc       := RegNext(uop.cf.pc)
+      difftest.io.instr    := RegNext(uop.cf.instr)
+      difftest.io.skip     := RegNext(exuOut.isMMIO || exuOut.isPerfCnt)
+      difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)
+      difftest.io.scFailed := RegNext(!uop.diffTestDebugLrScValid &&
+        uop.ctrl.fuType === FuType.mou &&
+        (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
+      difftest.io.wen      := RegNext(io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U)
+      difftest.io.wdata    := RegNext(exuData)
+      difftest.io.wdest    := RegNext(uop.ctrl.ldest)
+    }
+  }
+
+  if (!env.FPGAPlatform) {
+    for (i <- 0 until CommitWidth) {
+      val difftest = Module(new DifftestLoadEvent)
+      difftest.io.clock  := clock
+      difftest.io.coreid := 0.U
+      difftest.io.index  := i.U
+
+      val ptr = deqPtrVec(i).value
+      val uop = debug_microOp(ptr)
+      val exuOut = debug_exuDebug(ptr)
+      difftest.io.valid  := io.commits.valid(i) && !io.commits.isWalk
+      difftest.io.paddr  := exuOut.paddr
+      difftest.io.opType := uop.ctrl.fuOpType
+      difftest.io.fuType := uop.ctrl.fuType
+    }
+  }
+
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestTrapEvent)
+    difftest.io.clock    := clock
+    difftest.io.coreid   := 0.U
+    difftest.io.valid    := hitTrap
+    difftest.io.code     := trapCode
+    difftest.io.pc       := trapPC
+    difftest.io.cycleCnt := GTimer()
+    difftest.io.instrCnt := instrCnt
   }
 }

@@ -105,29 +105,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
   })
-  val difftestIO = IO(new Bundle() {
-    val fromSbuffer = new Bundle() {
-      val sbufferResp = Output(Bool())
-      val sbufferAddr = Output(UInt(64.W))
-      val sbufferData = Output(Vec(64, UInt(8.W)))
-      val sbufferMask = Output(UInt(64.W))
-    }
-    val fromSQ = new Bundle() {
-      val storeCommit = Output(UInt(2.W))
-      val storeAddr   = Output(Vec(2, UInt(64.W)))
-      val storeData   = Output(Vec(2, UInt(64.W)))
-      val storeMask   = Output(Vec(2, UInt(8.W)))
-    }
-    val fromAtomic = new Bundle() {
-      val atomicResp = Output(Bool())
-      val atomicAddr = Output(UInt(64.W))
-      val atomicData = Output(UInt(64.W))
-      val atomicMask = Output(UInt(8.W))
-      val atomicFuop = Output(UInt(8.W))
-      val atomicOut  = Output(UInt(64.W))
-    }
-  })
-  difftestIO <> DontCare
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -255,11 +232,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> RegNext(io.sfence)
   dtlb.io.csr    <> RegNext(io.tlbCsr)
-  if (!env.FPGAPlatform) {
-    difftestIO.fromSbuffer <> sbuffer.difftestIO
-    difftestIO.fromSQ <> lsq.difftestIO.fromSQ
-    difftestIO.fromAtomic <> atomicsUnit.difftestIO
-  }
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {

@@ -17,13 +17,13 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
+import difftest._
 
 trait HasExceptionNO {
   def instrAddrMisaligned = 0
@@ -182,29 +182,6 @@ class CSRFileIO extends XSBundle {
 class CSR extends FunctionUnit with HasCSRConst
 {
   val csrio = IO(new CSRFileIO)
-  val difftestIO = IO(new Bundle() {
-    val intrNO = Output(UInt(64.W))
-    val cause = Output(UInt(64.W))
-    val priviledgeMode = Output(UInt(2.W))
-    val mstatus = Output(UInt(64.W))
-    val sstatus = Output(UInt(64.W))
-    val mepc = Output(UInt(64.W))
-    val sepc = Output(UInt(64.W))
-    val mtval = Output(UInt(64.W))
-    val stval = Output(UInt(64.W))
-    val mtvec = Output(UInt(64.W))
-    val stvec = Output(UInt(64.W))
-    val mcause = Output(UInt(64.W))
-    val scause = Output(UInt(64.W))
-    val satp = Output(UInt(64.W))
-    val mip = Output(UInt(64.W))
-    val mie = Output(UInt(64.W))
-    val mscratch = Output(UInt(64.W))
-    val sscratch = Output(UInt(64.W))
-    val mideleg = Output(UInt(64.W))
-    val medeleg = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   val cfIn = io.in.bits.uop.cf
   val cfOut = Wire(new CtrlFlow)
@@ -916,25 +893,34 @@ class CSR extends FunctionUnit with HasCSRConst
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
   if (!env.FPGAPlatform) {
-    difftestIO.intrNO := RegNext(difftestIntrNO)
-    difftestIO.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
-    difftestIO.priviledgeMode := priviledgeMode
-    difftestIO.mstatus := mstatus
-    difftestIO.sstatus := mstatus & sstatusRmask
-    difftestIO.mepc := mepc
-    difftestIO.sepc := sepc
-    difftestIO.mtval:= mtval
-    difftestIO.stval:= stval
-    difftestIO.mtvec := mtvec
-    difftestIO.stvec := stvec
-    difftestIO.mcause := mcause
-    difftestIO.scause := scause
-    difftestIO.satp := satp
-    difftestIO.mip := mipReg
-    difftestIO.mie := mie
-    difftestIO.mscratch := mscratch
-    difftestIO.sscratch := sscratch
-    difftestIO.mideleg := mideleg
-    difftestIO.medeleg := medeleg
+    val difftest = Module(new DifftestArchEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.intrNO := RegNext(difftestIntrNO)
+    difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
+  }
+
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestCSRState)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.priviledgeMode := priviledgeMode
+    difftest.io.mstatus := mstatus
+    difftest.io.sstatus := mstatus & sstatusRmask
+    difftest.io.mepc := mepc
+    difftest.io.sepc := sepc
+    difftest.io.mtval:= mtval
+    difftest.io.stval:= stval
+    difftest.io.mtvec := mtvec
+    difftest.io.stvec := stvec
+    difftest.io.mcause := mcause
+    difftest.io.scause := scause
+    difftest.io.satp := satp
+    difftest.io.mip := mipReg
+    difftest.io.mie := mie
+    difftest.io.mscratch := mscratch
+    difftest.io.sscratch := sscratch
+    difftest.io.mideleg := mideleg
+    difftest.io.medeleg := medeleg
   }
 }

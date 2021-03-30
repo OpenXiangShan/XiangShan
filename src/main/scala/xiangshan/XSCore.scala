@@ -341,12 +341,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val l1plus_error, icache_error, dcache_error = Output(new L1CacheErrorInfo)
   })
 
-  val difftestIO = IO(new DifftestBundle())
-  difftestIO <> DontCare
-
-  val trapIO = IO(new TrapIO())
-  trapIO <> DontCare
-
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
   AddressSpace.checkMemmap()
   AddressSpace.printMemmap()
@@ -476,23 +470,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
-
-  if (!env.FPGAPlatform) {
-    val id = hartIdCore()
-    difftestIO.fromSbuffer <> memBlock.difftestIO.fromSbuffer
-    difftestIO.fromSQ <> memBlock.difftestIO.fromSQ
-    difftestIO.fromCSR <> integerBlock.difftestIO.fromCSR
-    difftestIO.fromRoq <> ctrlBlock.difftestIO.fromRoq
-    difftestIO.fromAtomic <> memBlock.difftestIO.fromAtomic
-    difftestIO.fromPtw <> ptw.difftestIO
-    trapIO <> ctrlBlock.trapIO
-
-    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-    ExcitingUtils.addSink(debugIntReg, s"DEBUG_INT_ARCH_REG$id", ExcitingUtils.Debug)
-    ExcitingUtils.addSink(debugFpReg, s"DEBUG_FP_ARCH_REG$id", ExcitingUtils.Debug)
-    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-    difftestIO.fromXSCore.r := debugArchReg
-  }
 
   val l1plus_reset_gen = Module(new ResetGen(1))
   l1pluscache.reset := l1plus_reset_gen.io.out

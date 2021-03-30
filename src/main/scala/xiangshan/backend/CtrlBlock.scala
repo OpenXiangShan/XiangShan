@@ -39,6 +39,7 @@ class CtrlToIntBlockIO extends XSBundle {
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
+  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -48,6 +49,7 @@ class CtrlToFpBlockIO extends XSBundle {
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
+  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
 class CtrlToLsBlockIO extends XSBundle {
@@ -223,28 +225,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     })
   })
 
-  val difftestIO = IO(new Bundle() {
-    val fromRoq = new Bundle() {
-      val commit = Output(UInt(32.W))
-      val thisPC = Output(UInt(XLEN.W))
-      val thisINST = Output(UInt(32.W))
-      val skip = Output(UInt(32.W))
-      val wen = Output(UInt(32.W))
-      val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-      val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
-      val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-      val isRVC = Output(UInt(32.W))
-      val scFailed = Output(Bool())
-      val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
-      val ltype = Output(Vec(CommitWidth, UInt(32.W)))
-      val lfu = Output(Vec(CommitWidth, UInt(4.W)))
-    }
-  })
-  difftestIO <> DontCare
-
   val ftq = Module(new Ftq)
-  val trapIO = IO(new TrapIO())
-  trapIO <> DontCare
 
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
@@ -393,15 +374,12 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
   io.toIntBlock.flush <> flushReg
+  io.toIntBlock.debug_rat <> rename.io.debug_int_rat
   io.toFpBlock.redirect <> backendRedirect
   io.toFpBlock.flush <> flushReg
+  io.toFpBlock.debug_rat <> rename.io.debug_fp_rat
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> flushReg
-
-  if (!env.FPGAPlatform) {
-    difftestIO.fromRoq <> roq.difftestIO
-    trapIO <> roq.trapIO
-  }
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
   dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex

@@ -22,6 +22,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
+import difftest._
 
 class AtomicsUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
@@ -36,16 +37,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
-
-  val difftestIO = IO(new Bundle() {
-    val atomicResp = Output(Bool())
-    val atomicAddr = Output(UInt(64.W))
-    val atomicData = Output(UInt(64.W))
-    val atomicMask = Output(UInt(8.W))
-    val atomicFuop = Output(UInt(8.W))
-    val atomicOut  = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
@@ -273,11 +264,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   }
 
   if (!env.FPGAPlatform) {
-    difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
-    difftestIO.atomicAddr := WireInit(paddr_reg)
-    difftestIO.atomicData := WireInit(data_reg)
-    difftestIO.atomicMask := WireInit(mask_reg)
-    difftestIO.atomicFuop := WireInit(fuop_reg)
-    difftestIO.atomicOut  := resp_data_wire
+    val difftest = Module(new DifftestAtomicEvent)
+    difftest.io.clock      := clock
+    difftest.io.coreid     := 0.U
+    difftest.io.atomicResp := io.dcache.resp.fire()
+    difftest.io.atomicAddr := paddr_reg
+    difftest.io.atomicData := data_reg
+    difftest.io.atomicMask := mask_reg
+    difftest.io.atomicFuop := fuop_reg
+    difftest.io.atomicOut  := resp_data_wire
   }
 }
