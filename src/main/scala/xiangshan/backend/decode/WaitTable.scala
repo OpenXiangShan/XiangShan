@@ -20,7 +20,7 @@ class WaitTable extends XSModule {
 
   // read ports
   for (i <- 0 until DecodeWidth) {
-    io.rdata(i) := (data(io.raddr(i))(1) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
+    io.rdata(i) := (data(io.raddr(i))(LWTUse2BitCounter.B.asUInt) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
   }
 
   // write ports (with priority)

@@ -285,11 +285,13 @@ trait HasXSParameter {
   // wait table parameters
   val WaitTableSize = 1024
   val MemPredPCWidth = log2Up(WaitTableSize)
+  val LWTUse2BitCounter = true
   // store set parameters
   val SSITSize = WaitTableSize
   val LFSTSize = 32
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
+  val StoreSetEnable = true // LWT will be disabled if SS is enabled
 }
 
 trait HasXSLog {
