@@ -485,4 +485,26 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     difftestIO.fromXSCore.r := debugArchReg
   }
 
+  val l1plus_reset_gen = Module(new ResetRegGen(1))
+  l1pluscache.reset := l1plus_reset_gen.io.out
+
+  val ptw_reset_gen = Module(new ResetRegGen(2))
+  ptw.reset := ptw_reset_gen.io.out
+  itlbRepeater.reset := ptw_reset_gen.io.out
+  dtlbRepeater.reset := ptw_reset_gen.io.out
+
+  val memBlock_reset_gen = Module(new ResetRegGen(3))
+  memBlock.reset := memBlock_reset_gen.io.out
+
+  val intBlock_reset_gen = Module(new ResetRegGen(4))
+  integerBlock.reset := intBlock_reset_gen.io.out
+
+  val fpBlock_reset_gen = Module(new ResetRegGen(5))
+  floatBlock.reset := fpBlock_reset_gen.io.out
+
+  val ctrlBlock_reset_gen = Module(new ResetRegGen(6))
+  ctrlBlock.reset := ctrlBlock_reset_gen.io.out
+
+  val frontend_reset_gen = Module(new ResetRegGen(7))
+  frontend.reset := frontend_reset_gen.io.out
 }
