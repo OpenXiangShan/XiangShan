@@ -5,7 +5,7 @@ import top.Parameters
 import xiangshan.HasXSParameter
 
 object XSPerfAccumulate extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
+  def apply(perfName: String, perfCnt: UInt) = {
     val env = Parameters.get.envParameters
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -29,7 +29,7 @@ object XSPerfAccumulate extends HasXSParameter {
 object XSPerfHistogram extends HasXSParameter {
   // instead of simply accumulating counters
   // this function draws a histogram
-  def apply(perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)(implicit name: String) = {
+  def apply(perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int) = {
     val env = Parameters.get.envParameters
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -71,7 +71,7 @@ object XSPerfHistogram extends HasXSParameter {
   }
 }
 object XSPerfMax extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit name: String) = {
+  def apply(perfName: String, perfCnt: UInt, enable: Bool) = {
     val env = Parameters.get.envParameters
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
@@ -93,7 +93,7 @@ object XSPerfMax extends HasXSParameter {
 }
 
 object QueuePerf extends HasXSParameter {
-  def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
+  def apply(size: Int, utilization: UInt, full: UInt) = {
     XSPerfAccumulate("utilization", utilization)
     XSPerfAccumulate("full", full)
     val exHalf = utilization > (size/2).U

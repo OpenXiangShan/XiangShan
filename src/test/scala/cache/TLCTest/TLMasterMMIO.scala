@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
-import xiangshan.HasXSLog
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 
 class TLCFakeBundle extends DCacheBundle
@@ -82,7 +81,7 @@ class TLCMasterMMIO()(implicit p: Parameters) extends LazyModule
   val node = TLClientNode(Seq(clientParameters))
 
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val (bus,edge) = node.out.head
 
