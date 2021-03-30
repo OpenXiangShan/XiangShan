@@ -280,15 +280,9 @@ trait HasXSParameter {
   )
 }
 
-trait HasXSLog {
-  this: RawModule =>
-  implicit val moduleName: String = this.name
-}
-
 abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters {
   def io: Record
 }

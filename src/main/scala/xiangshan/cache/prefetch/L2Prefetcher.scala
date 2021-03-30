@@ -61,7 +61,7 @@ class L2PrefetcherIO extends XSBundle with HasPrefetchParameters {
 }
 
 // prefetch DCache lines in L2 using StreamPrefetch
-class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasPrefetchParameters with HasXSLog {  
+class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasPrefetchParameters {  
   val io = IO(new L2PrefetcherIO)
 
   val (bus, edge) = outer.clientNode.out.head

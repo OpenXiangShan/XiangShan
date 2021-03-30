@@ -61,7 +61,8 @@ class L1plusPrefetcher extends PrefetchModule {
 
     pft.io.resp.valid := io.mem_grant.valid && io.enable
     pft.io.resp.bits.id := io.mem_grant.bits.id(streamParams.totalWidth - 1, 0)
-    io.mem_grant.ready := Mux(io.enable, pft.io.resp.ready, true.B)
+    // mem grant is always ready for timing optimization
+    io.mem_grant.ready := true.B // Mux(io.enable, pft.io.resp.ready, true.B)
 
     pft.io.finish.ready := true.B
 

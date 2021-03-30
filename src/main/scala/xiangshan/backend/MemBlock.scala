@@ -47,7 +47,6 @@ class MemBlock(
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters
   with HasExeBlockHelper
   with HasFpLoadHelper

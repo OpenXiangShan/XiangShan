@@ -7,7 +7,6 @@ import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.RegField
 import utils.{HasTLDump, XSDebug}
-import xiangshan.HasXSLog
 
 class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) extends LazyModule {
 
@@ -15,7 +14,7 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
   val node = TLRegisterNode(address, device, beatBytes = 8)
   val NumCores = top.Parameters.get.socParameters.NumCores
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog with HasTLDump{
+  lazy val module = new LazyModuleImp(this) with HasTLDump {
     val io = IO(new Bundle() {
       val mtip = Output(Vec(NumCores, Bool()))
       val msip = Output(Vec(NumCores, Bool()))

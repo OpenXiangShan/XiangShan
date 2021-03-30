@@ -8,7 +8,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
 import utils.{DataDontCareNode, DebugIdentityNode}
 import utils.XSInfo
-import xiangshan.{HasXSLog, HasXSParameter, XSBundle, XSCore}
+import xiangshan.{HasXSParameter, XSBundle, XSCore}
 import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}

@@ -149,7 +149,6 @@ class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICachePa
 class icacheUncacheImp(outer: InstrUncache)
   extends LazyModuleImp(outer)
     with HasICacheParameters
-    with HasXSLog
     with HasTLDump
 {
   val io = IO(new icacheUncacheIO)

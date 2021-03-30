@@ -8,7 +8,7 @@ import chisel3.util._
 import chisel3.util.random.LFSR
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property.cover
-import xiangshan.{HasXSLog, XSCoreParameters}
+import xiangshan.{XSCoreParameters}
 
 abstract class ReplacementPolicy {
   def nBits: Int
