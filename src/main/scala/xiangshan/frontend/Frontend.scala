@@ -23,7 +23,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasL1plusCacheParameters 
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
 {
   val io = IO(new Bundle() {
     val icacheMemAcq = DecoupledIO(new L1plusCacheReq)

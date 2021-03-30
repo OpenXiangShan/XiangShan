@@ -127,7 +127,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasXSLog {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
 
   val io = IO(new DCacheIO)
 
