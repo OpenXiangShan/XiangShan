@@ -111,39 +111,39 @@ class FpuCsrIO extends XSBundle {
 
 
 class PerfCounterIO extends XSBundle {
-  val retiredInstr = Input(UInt(3.W))
+  val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
-    val ibufFull  = Input(Bool())
+    val ibufFull  = Bool()
   }
   val ctrlInfo = new Bundle {
-    val roqFull   = Input(Bool())
-    val intdqFull = Input(Bool())
-    val fpdqFull  = Input(Bool())
-    val lsdqFull  = Input(Bool())
+    val roqFull   = Bool()
+    val intdqFull = Bool()
+    val fpdqFull  = Bool()
+    val lsdqFull  = Bool()
   }
   val memInfo = new Bundle {
-    val sqFull = Input(Bool())
-    val lqFull = Input(Bool())
-    val dcacheMSHRFull = Input(Bool())
+    val sqFull = Bool()
+    val lqFull = Bool()
+    val dcacheMSHRFull = Bool()
   }
   val bpuInfo = new Bundle {
-    val bpRight = Input(UInt(XLEN.W))
-    val bpWrong = Input(UInt(XLEN.W))
+    val bpRight = UInt(XLEN.W)
+    val bpWrong = UInt(XLEN.W)
   }
   val cacheInfo = new Bundle {
-    val l2MSHRFull = Input(Bool())
-    val l3MSHRFull = Input(Bool())
-    val l2nAcquire = Input(UInt(XLEN.W))
-    val l2nAcquireMiss = Input(UInt(XLEN.W))
-    val l3nAcquire = Input(UInt(XLEN.W))
-    val l3nAcquireMiss = Input(UInt(XLEN.W))
+    val l2MSHRFull = Bool()
+    val l3MSHRFull = Bool()
+    val l2nAcquire = UInt(XLEN.W)
+    val l2nAcquireMiss = UInt(XLEN.W)
+    val l3nAcquire = UInt(XLEN.W)
+    val l3nAcquireMiss = UInt(XLEN.W)
   }
 }
 
 class CSRFileIO extends XSBundle {
   val hartId = Input(UInt(64.W))
   // output (for func === CSROpType.jmp)
-  val perf = new PerfCounterIO
+  val perf = Input(new PerfCounterIO)
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)

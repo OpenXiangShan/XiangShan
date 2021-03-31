@@ -110,5 +110,5 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
 
-  io.frontendInfo.ibufFull := ibuffer.io.full
+  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 }
