@@ -173,11 +173,12 @@ trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
 
 }
 
+class XSTop()(implicit p: config.Parameters) extends XSTopWithoutDMA
+  with HaveSlaveAXI4Port
 
-class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
+class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
-  with HaveSlaveAXI4Port
 {
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
