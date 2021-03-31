@@ -60,14 +60,14 @@ case class XSCoreParameters
   BtbWays: Int = 2,
 
   EnableL1plusPrefetcher: Boolean = true,
-  IBufSize: Int = 32,
+  IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
   FtqSize: Int = 48,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IssQueSize: Int = 12,
+  IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
@@ -280,15 +280,9 @@ trait HasXSParameter {
   )
 }
 
-trait HasXSLog {
-  this: RawModule =>
-  implicit val moduleName: String = this.name
-}
-
 abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters {
   def io: Record
 }

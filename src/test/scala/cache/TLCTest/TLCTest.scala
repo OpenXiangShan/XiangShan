@@ -15,7 +15,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, XSDebug}
-import xiangshan.HasXSLog
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
@@ -86,7 +85,7 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
   val slave = LazyModule(new TLCSlaveMMIO())
   slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(new TLCCacheTestTopIO)
 

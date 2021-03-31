@@ -3,7 +3,6 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
-import xiangshan.{HasXSLog}
 import system.L1CacheErrorInfo
 
 import chipsalliance.rocketchip.config.Parameters
@@ -367,7 +366,7 @@ class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCac
 }
 
 
-class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1plusCacheParameters with HasXSLog {
+class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1plusCacheParameters {
 
   val io = IO(Flipped(new L1plusCacheIO))
 
