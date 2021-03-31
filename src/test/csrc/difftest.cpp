@@ -51,7 +51,11 @@ void init_difftest() {
   }
 
   for (int i = 0; i < NumCore; i++) {
-    nemu_this_pc[i] = 0x80000000;
+#ifdef USE_BIN
+      nemu_this_pc[i] = 0x10000000;
+#else
+      nemu_this_pc[i] = 0x80000000;
+#endif 
     pc_retire_pointer[i] = DEBUG_RETIRE_TRACE_SIZE-1;
   }
 }
