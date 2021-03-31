@@ -60,7 +60,7 @@ case class XSCoreParameters
   BtbWays: Int = 2,
 
   EnableL1plusPrefetcher: Boolean = true,
-  IBufSize: Int = 32,
+  IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
