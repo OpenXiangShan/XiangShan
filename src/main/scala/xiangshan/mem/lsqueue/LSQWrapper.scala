@@ -56,6 +56,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr)
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
+    val sqFull = Output(Bool())
+    val lqFull = Output(Bool())
   })
   val difftestIO = IO(new Bundle() {
     val fromSQ = new Bundle() {
@@ -168,4 +170,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
 
+  io.lqFull := loadQueue.io.lqFull
+  io.sqFull := storeQueue.io.sqFull
 }

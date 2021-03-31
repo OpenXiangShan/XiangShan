@@ -612,12 +612,22 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 
     for (int i = 0; i < NumCore; i++) {
+#ifdef USE_BIN
+#ifdef DUALCORE
+      int first_instr_commit = (i == 0) ? dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x10000000u :
+                                          dut_ptr->io_difftest2_commit && dut_ptr->io_difftest2_thisPC == 0x10000000u;
+#else
+      int first_instr_commit = dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x10000000u;
+#endif
+#else 
 #ifdef DUALCORE
       int first_instr_commit = (i == 0) ? dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u :
                                           dut_ptr->io_difftest2_commit && dut_ptr->io_difftest2_thisPC == 0x80000000u;
 #else
       int first_instr_commit = dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u;
+#endif  
 #endif
+
       if (!hascommit[i] && first_instr_commit) {
         hascommit[i] = 1;
 #ifdef DUALCORE
