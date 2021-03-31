@@ -179,6 +179,7 @@ class ICacheMetaArray extends ICacheArray
     set=nSets,
     way=nWays,
     shouldReset = true,
+    holdRead = true,
     singlePort = true
   ))
 
@@ -219,6 +220,7 @@ class ICacheDataArray extends ICacheArray
     UInt(dataEntryBits.W),
     set=nSets,
     way = 1,
+    holdRead = true,
     singlePort = true
   ))}}
 
