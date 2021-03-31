@@ -46,6 +46,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr)
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
+    val sqFull = Output(Bool())
   })
 
   val difftestIO = IO(new Bundle() {
@@ -433,6 +434,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // perf counter
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
+  io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
   XSPerfAccumulate("mmio_wb_success", io.mmioStout.fire())

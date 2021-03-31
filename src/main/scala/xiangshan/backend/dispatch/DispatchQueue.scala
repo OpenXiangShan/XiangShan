@@ -20,6 +20,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val flush = Input(Bool())
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
+  val dqFull = Output(Bool())
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -204,6 +205,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
 //  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
   QueuePerf(size, PopCount(stateEntries.map(_ =/= s_invalid)), !canEnqueue)
+  io.dqFull := !canEnqueue
   XSPerfAccumulate("in", numEnq)
   XSPerfAccumulate("out", PopCount(io.deq.map(_.fire())))
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
