@@ -67,7 +67,7 @@ case class XSCoreParameters
   BrqSize: Int = 32,
   FtqSize: Int = 48,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IssQueSize: Int = 12,
+  IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
