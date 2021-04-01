@@ -61,7 +61,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
-    l2prefetcher.module.io.enable := RegNext(core.module.io.l2_pf_enable)
+    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
     l2prefetcher.module.io.in <> l2cache.module.io
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
@@ -260,7 +260,9 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
     }
 
     withClockAndReset(childClock, childReset) {
-      plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
+      plic.module.io.extra.get.intrVec <> Cat(beuSink.module.interrupt, io.extIntrs)
+      require(io.extIntrs.getWidth + beuSink.module.interrupt.getWidth == NrPlicIntr)
+
       for (i <- 0 until NumCores) {
         val core_reset_gen = Module(new ResetGen())
         core_reset_gen.suggestName(s"core_${i}_reset_gen")
@@ -269,9 +271,9 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
         core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
         core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
         core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-        beu.module.io.errors.l1plus(i) := RegNext(core_with_l2(i).module.io.l1plus_error)
-        beu.module.io.errors.icache(i) := RegNext(core_with_l2(i).module.io.icache_error)
-        beu.module.io.errors.dcache(i) := RegNext(core_with_l2(i).module.io.dcache_error)
+        beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
+        beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
+        beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
       }
 
       val l3_reset_gen = Module(new ResetGen())
