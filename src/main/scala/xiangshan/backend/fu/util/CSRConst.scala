@@ -58,6 +58,7 @@ trait HasCSRConst {
   val Srnctl        = 0x5C4
 
   val Sdsid         = 0x9C0
+  val Smaskmip      = 0x9C1
 
   // Machine Information Registers
   val Mvendorid     = 0xF11

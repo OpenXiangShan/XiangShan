@@ -261,7 +261,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
   val mipReg  = RegInit(0.U.asTypeOf(new Interrupt).asUInt)
   val mipFixMask = GenMask(9) | GenMask(5) | GenMask(1)
-  val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
+  val selfDefinedMaskMip = WireInit(0.U.asTypeOf(new Interrupt))
+  val mip = ((mipWire.asUInt | mipReg) & selfDefinedMaskMip.asUInt).asTypeOf(new Interrupt)
 
   def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt()
   def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt()
@@ -370,10 +371,6 @@ class CSR extends FunctionUnit with HasCSRConst
   csrio.customCtrl.l1plus_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
 
-  // sdsid: Differentiated Services ID
-  val sdsid = RegInit(UInt(XLEN.W), 0.U)
-  csrio.customCtrl.dsid := sdsid
-
   // slvpredctl: load violation predict settings
   val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
@@ -387,6 +384,15 @@ class CSR extends FunctionUnit with HasCSRConst
 
   val srnctl = RegInit(UInt(XLEN.W), "h1".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
+
+  // sdsid: Differentiated Services ID
+  val sdsid = RegInit(UInt(XLEN.W), 0.U)
+  csrio.customCtrl.dsid := sdsid
+
+  // smaskmip: self-defined mip enable bits
+  // in case of PLIC doesn't work as expected
+  val smaskmip = RegInit(UInt(XLEN.W), "hfff".U)
+  selfDefinedMaskMip := smaskmip.asTypeOf(new Interrupt)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
@@ -537,10 +543,11 @@ class CSR extends FunctionUnit with HasCSRConst
     //--- Supervisor Custom Read/Write Registers
     MaskedRegMap(Sbpctl, sbpctl),
     MaskedRegMap(Spfctl, spfctl),
-    MaskedRegMap(Sdsid, sdsid),
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
+    MaskedRegMap(Sdsid, sdsid),
+    MaskedRegMap(Smaskmip, smaskmip),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
