@@ -129,6 +129,7 @@ VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+RANDOMIZE_GARBAGE_ASSIGN        \
   +define+RANDOMIZE_DELAY=0               \
   $(VEXTRA_FLAGS)                         \
+  -Wno-STMTDLY -Wno-WIDTH                 \
   --assert                                \
   --stats-vars                            \
   --output-split 30000                    \

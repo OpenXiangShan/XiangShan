@@ -592,12 +592,13 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mhpmevent11, bpRight),
     MaskedRegMap(Mhpmevent12, bpWrong),
   )
-  val MhpmcounterStart = Mhpmcounter3
-  val MhpmeventStart   = Mhpmevent3
-  for (i <- 0 until nrPerfCnts) {
-    perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
-    perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
-  }
+  // TODO: mechanism should be implemented later
+  // val MhpmcounterStart = Mhpmcounter3
+  // val MhpmeventStart   = Mhpmevent3
+  // for (i <- 0 until nrPerfCnts) {
+  //   perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
+  //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
+  // }
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
