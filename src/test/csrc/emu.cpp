@@ -383,6 +383,7 @@ inline void Emulator::reset_ncycles(size_t cycles) {
     dut_ptr->eval();
     dut_ptr->reset = 0;
   }
+  assert_count = 0;
 }
 
 inline void Emulator::single_cycle() {
