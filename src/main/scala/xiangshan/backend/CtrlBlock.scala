@@ -193,6 +193,18 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val lsq = new RoqLsqIO
     }
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val perfInfo = Output(new Bundle{
+      val ctrlInfo = new Bundle {
+        val roqFull   = Input(Bool())
+        val intdqFull = Input(Bool())
+        val fpdqFull  = Input(Bool())
+        val lsdqFull  = Input(Bool())
+      }
+      val bpuInfo = new Bundle {
+        val bpRight = Output(UInt(XLEN.W))
+        val bpWrong = Output(UInt(XLEN.W))
+      }
+    })
   })
 
   val difftestIO = IO(new Bundle() {
@@ -380,8 +392,15 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
+  io.roqio.toCSR.perfinfo.retiredInstr <> RegNext(roq.io.csr.perfinfo.retiredInstr)
   io.roqio.exception := roq.io.exception
   io.roqio.exception.bits.uop.cf.pc := flushPC
   // roq to mem block
   io.roqio.lsq <> roq.io.lsq
+
+  io.perfInfo.ctrlInfo.roqFull := RegNext(roq.io.roqFull)
+  io.perfInfo.ctrlInfo.intdqFull := RegNext(dispatch.io.ctrlInfo.intdqFull)
+  io.perfInfo.ctrlInfo.fpdqFull := RegNext(dispatch.io.ctrlInfo.fpdqFull)
+  io.perfInfo.ctrlInfo.lsdqFull := RegNext(dispatch.io.ctrlInfo.lsdqFull)
+  io.perfInfo.bpuInfo <> RegNext(ftq.io.bpuInfo)
 }

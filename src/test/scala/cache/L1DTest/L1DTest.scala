@@ -14,7 +14,7 @@ import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{EnviromentParameters, HasXSLog}
+import xiangshan.EnviromentParameters
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheToLsuIO, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -38,7 +38,7 @@ class L1DTestTop()(implicit p: Parameters) extends LazyModule {
   val c_buffer = TLBuffer(a = BufferParams.none, b = BufferParams.none, c = BufferParams.pipe, d = BufferParams.none, e = BufferParams.none)
   slave.node := dcache_outer.node := c_buffer := dcache.clientNode
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
     val io = IO(new L1DTestTopIO())
     dcache.module.io.lsu <> io.dcacheIO
     slave.module.io <> io.slaveIO

@@ -9,7 +9,6 @@ import chisel3.ExcitingUtils._
 
 abstract class ICacheMissQueueModule extends XSModule
   with HasICacheParameters 
-  with HasXSLog
 
 abstract class ICacheMissQueueBundle extends XSBundle
   with HasICacheParameters

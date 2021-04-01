@@ -106,6 +106,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: exceptions)
     val ftqRead = Vec(1 + 6 + 1, Flipped(new FtqRead))
     val cfiRead = Flipped(new FtqRead)
+    val bpuInfo = new Bundle {
+      val bpRight = Output(UInt(XLEN.W))
+      val bpWrong = Output(UInt(XLEN.W))
+    }
   })
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -298,11 +302,12 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   XSPerfAccumulate("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
   XSPerfAccumulate("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
 
+  val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+  val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     val fires = commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && !pd.notCFI}
-    val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
-    val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
     val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
     val isJTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJal}
     val isITypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJalr}
@@ -424,4 +429,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
+
+  io.bpuInfo.bpRight := PopCount(predRights)
+  io.bpuInfo.bpWrong := PopCount(predWrongs)
 }

@@ -382,6 +382,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     // block probe
     val probe_req = Input(UInt(PAddrBits.W))
     val probe_block = Output(Bool())
+
+    val full = Output(Bool())
   })
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
@@ -544,5 +546,6 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   // max inflight (average) = max_inflight_total / cycle cnt
   XSPerfAccumulate("max_inflight", max_inflight)
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
+  io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 }

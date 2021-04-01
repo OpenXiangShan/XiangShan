@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLClientNode, TLManagerNode, TLSlaveParameters, TLSlavePortParameters}
-import xiangshan.HasXSLog
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 
 class TLULMMIO extends DCacheBundle {
@@ -24,7 +23,7 @@ class TLCSnoopMMIONode()(implicit p: Parameters) extends LazyModule
 
   val node = TLAdapterNode()
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
     val io = IO(new TLULMMIO)
 
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
