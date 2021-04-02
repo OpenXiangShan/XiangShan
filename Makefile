@@ -54,7 +54,7 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
-	mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
