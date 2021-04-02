@@ -435,6 +435,7 @@ class ICache extends ICacheModule
   val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
   val s3_tag = RegEnable(s2_tag, s2_fire)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
+  val s3_realHit = !s3_miss && s3_valid
   val s3_mmio = RegEnable(next=s2_mmio,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_exception_vec = RegEnable(next= icacheExceptionVec,init=0.U.asTypeOf(Vec(8,Bool())), enable=s2_fire)
@@ -566,7 +567,7 @@ class ICache extends ICacheModule
     val wayData = cutHelper(s3_data(i), s3_req_pc, s3_req_mask)
     val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
-    wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
+    wayResp.data := Mux(s3_valid && s3_realHit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
     wayResp.mask := s3_req_mask
     wayResp.ipf := s3_exception_vec(pageFault)
     wayResp.acf := s3_exception_vec(accessFault)
@@ -588,7 +589,7 @@ class ICache extends ICacheModule
   io.req.ready := s2_ready && metaArray.io.read.ready && dataArray.io.read.ready
 
   //icache response: to pre-decoder
-  io.resp.valid := s3_valid && (s3_hit || exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
+  io.resp.valid := s3_valid && (s3_realHit || exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
