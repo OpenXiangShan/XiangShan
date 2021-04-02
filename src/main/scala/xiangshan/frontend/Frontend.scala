@@ -99,7 +99,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   // ifu to backend
   io.backend.fetchInfo <> ifu.io.toFtq
 
-  io.error <> RegNext(ifu.io.error)
+  io.error <> RegNext(RegNext(ifu.io.error))
 
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),

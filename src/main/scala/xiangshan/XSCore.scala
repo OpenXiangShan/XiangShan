@@ -190,6 +190,7 @@ trait HasXSParameter {
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
   val NumPerfCounters = coreParams.NumPerfCounters
   val NrExtIntr = coreParams.NrExtIntr
+  val NrPlicIntr = NrExtIntr + 1 // ExtIntr + ECC
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
