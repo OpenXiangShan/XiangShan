@@ -245,7 +245,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
-    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.memfeedback
+    loadUnits(i).io.rsFeedback    <> reservationStations(i).io.memfeedback
     loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
     loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
@@ -279,7 +279,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
-    stu.io.tlbFeedback <> rs.io.memfeedback
+    stu.io.rsFeedback <> rs.io.memfeedback
     stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
@@ -390,14 +390,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   when (state === s_atomics_0) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs0).io.memfeedback
+    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs0).io.memfeedback
 
-    assert(!storeUnits(0).io.tlbFeedback.valid)
+    assert(!storeUnits(0).io.rsFeedback.valid)
   }
   when (state === s_atomics_1) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs1).io.memfeedback
+    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs1).io.memfeedback
 
-    assert(!storeUnits(1).io.tlbFeedback.valid)
+    assert(!storeUnits(1).io.rsFeedback.valid)
   }
 
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx

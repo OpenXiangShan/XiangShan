@@ -153,7 +153,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    val tlbFeedback = ValidIO(new TlbFeedback)
+    val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
@@ -175,10 +175,11 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
 
   // feedback tlb result to RS
-  io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
-  io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.tlbFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception)
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss, RSFeedbackType.mshrFull)
   io.needReplayFromRS := s2_cache_replay
 
   // merge forward result
@@ -250,9 +251,9 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   XSPerfAccumulate("dcache_miss", io.in.valid && s2_cache_miss)
   XSPerfAccumulate("full_forward", io.in.valid && fullForward)
   XSPerfAccumulate("dcache_miss_full_forward", io.in.valid && s2_cache_miss && fullForward)
-  XSPerfAccumulate("replay",  io.tlbFeedback.valid && !io.tlbFeedback.bits.hit)
-  XSPerfAccumulate("replay_tlb_miss", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && s2_tlb_miss)
-  XSPerfAccumulate("replay_cache", io.tlbFeedback.valid && !io.tlbFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
+  XSPerfAccumulate("replay",  io.rsFeedback.valid && !io.rsFeedback.bits.hit)
+  XSPerfAccumulate("replay_tlb_miss", io.rsFeedback.valid && !io.rsFeedback.bits.hit && s2_tlb_miss)
+  XSPerfAccumulate("replay_cache", io.rsFeedback.valid && !io.rsFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
 
@@ -262,7 +263,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val tlbFeedback = ValidIO(new TlbFeedback)
+    val rsFeedback = ValidIO(new RSFeedback)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
@@ -298,8 +299,8 @@ class LoadUnit extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
-  io.tlbFeedback.bits := RegNext(load_s2.io.tlbFeedback.bits)
-  io.tlbFeedback.valid := RegNext(load_s2.io.tlbFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
+  io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding

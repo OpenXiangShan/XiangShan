@@ -51,6 +51,14 @@ object ValidUndirectioned {
   }
 }
 
+object RSFeedbackType {
+  val tlbMiss = 0.U(2.W)
+  val mshrFull = 1.U(2.W)
+  val dataInvalid = 2.U(2.W)
+
+  def apply() = UInt(2.W)
+}
+
 class SCMeta(val useSC: Boolean) extends XSBundle with HasSCParameter {
   val tageTaken = if (useSC) Bool() else UInt(0.W)
   val scUsed = if (useSC) Bool() else UInt(0.W)
@@ -397,13 +405,12 @@ class RoqCommitIO extends XSBundle {
   def hasCommitInstr = !isWalk && valid.asUInt.orR
 }
 
-class TlbFeedback extends XSBundle {
+class RSFeedback extends XSBundle {
   val rsIdx = UInt(log2Up(IssQueSize).W)
   val hit = Bool()
   val flushState = Bool()
+  val sourceType = RSFeedbackType()
 }
-
-class RSFeedback extends TlbFeedback
 
 class FrontendToBackendIO extends XSBundle {
   // to backend end

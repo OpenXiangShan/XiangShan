@@ -15,7 +15,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val dtlb          = new TlbRequestIO
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
-    val tlbFeedback   = ValidIO(new TlbFeedback)
+    val rsFeedback   = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
@@ -85,10 +85,11 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
-  io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
-  io.tlbFeedback.bits.flushState := DontCare
+  io.rsFeedback.valid       := RegNext(RegNext(io.in.valid))
+  io.rsFeedback.bits.hit    := true.B
+  io.rsFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.rsFeedback.bits.flushState := DontCare
+  io.rsFeedback.bits.sourceType := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
