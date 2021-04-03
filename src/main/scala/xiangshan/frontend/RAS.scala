@@ -131,6 +131,8 @@ class RAS extends BasePredictor
                         stack.write(do_top_ptr, do_top)
                     }
                 }
+                XSPerfAccumulate("ras_overflow", do_push && do_alloc_new && ptrInc(do_sp) === 0.U)
+                XSPerfAccumulate("ras_underflow", do_pop && do_top.ctr === 1.U && ptrDec(do_sp) === (rasSize-1).U)
             }
 
         update(io.recover_valid)(
