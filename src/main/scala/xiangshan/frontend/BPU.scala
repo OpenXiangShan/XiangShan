@@ -337,17 +337,18 @@ class BPUStage3 extends BPUStage {
       io.out.brInfo.rasSp :=  ras.io.meta.rasSp
       io.out.brInfo.rasTop :=  ras.io.meta.rasTop
     }
+    val rasEn = s3IO.ctrl.ras_enable
     takens := VecInit((0 until PredictWidth).map(i => {
       (jalrs(i) && btbHits(i)) ||
           jals(i) || brTakens(i) ||
-          (ras.io.out.valid && rets(i)) ||
-          (!ras.io.out.valid && rets(i) && btbHits(i))
+          (rasEn && rets(i)) ||
+          (!rasEn && rets(i) && btbHits(i))
       }
     ))
 
     for (i <- 0 until PredictWidth) {
-      when(rets(i) && ras.io.out.valid){
-        targets(i) := ras.io.out.bits.target
+      when(rets(i)){
+        targets(i) := ras.io.out.target
       }
     }
 
@@ -360,9 +361,9 @@ class BPUStage3 extends BPUStage {
         meta.tageAns.target := DontCare
 
         // record ras pred result
-        meta.rasAns.hit := ras.io.out.valid
+        meta.rasAns.hit := true.B
         meta.rasAns.taken := true.B
-        meta.rasAns.target := ras.io.out.bits.target
+        meta.rasAns.target := ras.io.out.target
 
         // record loop pred result
         meta.loopAns.hit := loopRes(i)
