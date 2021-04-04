@@ -430,11 +430,13 @@ class ICache extends ICacheModule
   //----------------------------
   val s3_valid = RegInit(false.B)
   val s3_miss  = WireInit(false.B)
+  val s3_passdown = WireInit(false.B)
   val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
   val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
   val s3_tag = RegEnable(s2_tag, s2_fire)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
+  val s3_sec_miss = RegInit(false.B)
   val s3_mmio = RegEnable(next=s2_mmio,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_exception_vec = RegEnable(next= icacheExceptionVec,init=0.U.asTypeOf(Vec(8,Bool())), enable=s2_fire)
@@ -451,7 +453,7 @@ class ICache extends ICacheModule
 
 
   /* icache hit
-   * simply cut the cacheline into a fetchpacket according to the req_pc
+   * simply cut the cacheline into: a fetchpacket according to the req_pc
    * use hitVec to do data way choosing
    */
   def cutHelper(sourceVec: Vec[UInt], pc: UInt, mask: UInt): UInt = {
@@ -480,7 +482,7 @@ class ICache extends ICacheModule
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
-  icacheMissQueue.io.req.valid := s3_miss && !exception && !s3_flush && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.valid := s3_miss && !s3_flush && !blocking//TODO: specificate flush condition
   icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := s3_flush
@@ -549,10 +551,15 @@ class ICache extends ICacheModule
 
   // deal with same cacheline miss in s3 and s2
   val is_same_cacheline = s3_miss && s2_valid  && (groupAligned(s2_req_pc) ===groupAligned(s3_req_pc))
-  val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
+  when(s3_flush) { s3_sec_miss := false.B }
+  .elsewhen(is_same_cacheline && !s3_flush && io.resp.fire()) { s3_sec_miss := true.B }
+  .elsewhen(s3_sec_miss && io.resp.fire()) { s3_sec_miss := false.B }
+
+  // val useRefillReg = RegNext(is_same_cacheline && icacheMissQueue.io.resp.fire())
   val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
 
-  s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !useRefillReg
+  s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !s3_sec_miss
+  s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss ) 
 
 
   val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
@@ -564,7 +571,7 @@ class ICache extends ICacheModule
   for (i <- 0 until nWays) {
     val wayResp = Wire(new ICacheResp)
     val wayData = cutHelper(s3_data(i), s3_req_pc, s3_req_mask)
-    val refillData = Mux(useRefillReg,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
+    val refillData = Mux(s3_sec_miss,cutHelper(refillDataVecReg, s3_req_pc,s3_req_mask),cutHelper(refillDataVec, s3_req_pc,s3_req_mask))
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_mmio ,mmio_packet ,refillData))
     wayResp.mask := s3_req_mask
@@ -588,7 +595,7 @@ class ICache extends ICacheModule
   io.req.ready := s2_ready && metaArray.io.read.ready && dataArray.io.read.ready
 
   //icache response: to pre-decoder
-  io.resp.valid := s3_valid && (s3_hit || exception || icacheMissQueue.io.resp.valid || io.mmio_grant.valid)
+  io.resp.valid := s3_passdown || icacheMissQueue.io.resp.valid || io.mmio_grant.valid
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
