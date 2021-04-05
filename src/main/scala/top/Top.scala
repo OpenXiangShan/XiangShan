@@ -40,7 +40,8 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
     InclusiveCacheMicroParameters(
       memCycles = 25,
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   ))
   val uncache = TLXbar()
 
@@ -240,7 +241,8 @@ class XSTop()(implicit p: config.Parameters) extends BaseXSSoc()
     InclusiveCacheMicroParameters(
       memCycles = 25,
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   ))
 
   bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
