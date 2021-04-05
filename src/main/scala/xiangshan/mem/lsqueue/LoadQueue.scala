@@ -13,7 +13,7 @@ import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
-class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
+class LqPtr extends CircularQueuePtr[LqPtr](LqPtr.LoadQueueSize) { }
 
 object LqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): LqPtr = {
