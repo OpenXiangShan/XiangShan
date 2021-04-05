@@ -10,17 +10,7 @@ trait HasFreeListConsts extends HasXSParameter {
   def PTR_WIDTH = log2Up(FL_SIZE)
 }
 
-class FreeListPtr extends CircularQueuePtr(FreeListPtr.FL_SIZE) {
-
-//  final def ===(that: FreeListPtr): Bool = {
-//    (this.value===that.value) && (this.flag===that.flag)
-//  }
-
-//  override def toPrintable: Printable = {
-//    p"$flag:$value"
-//  }
-
-}
+class FreeListPtr extends CircularQueuePtr[FreeListPtr](FreeListPtr.FL_SIZE)
 
 object FreeListPtr extends HasFreeListConsts {
   def apply(f: Bool, v:UInt): FreeListPtr = {

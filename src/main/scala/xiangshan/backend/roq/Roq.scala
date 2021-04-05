@@ -18,7 +18,7 @@ object roqDebugId extends Function0[Integer] {
   }
 }
 
-class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
+class RoqPtr extends CircularQueuePtr[RoqPtr](RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
     val flushItself = redirect.bits.flushItself() && this === redirect.bits.roqIdx
     flush || (redirect.valid && (flushItself || isAfter(this, redirect.bits.roqIdx)))

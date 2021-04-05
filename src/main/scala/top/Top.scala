@@ -3,6 +3,7 @@ package top
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import utils._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config
@@ -15,14 +16,16 @@ import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import sifive.blocks.inclusivecache._
+import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
 
 
 class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter {
-  val core = LazyModule(new XSCore())
-  val l2prefetcher = LazyModule(new L2Prefetcher())
+  private val core = LazyModule(new XSCore())
+  private val l2prefetcher = LazyModule(new L2Prefetcher())
+  private val l2xbar = TLXbar()
+
   val l2cache = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
@@ -31,6 +34,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
       blockBytes = L2BlockSize,
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
       cacheName = s"L2",
+      uncachedGet = true,
       enablePerf = false
     ),
     InclusiveCacheMicroParameters(
@@ -38,7 +42,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
       writeBytes = 32
     )
   ))
-  private val l2xbar = TLXbar()
+  val uncache = TLXbar()
 
   l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
   l2xbar := TLBuffer() := core.l1pluscache.clientNode
@@ -46,26 +50,32 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
   l2xbar := TLBuffer() := l2prefetcher.clientNode
   l2cache.node := TLBuffer() := l2xbar
 
-  lazy val module = new XSCoreWithL2Imp(this)
+  uncache := TLBuffer() := core.frontend.instrUncache.clientNode
+  uncache := TLBuffer() := core.memBlock.uncache.clientNode
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val hartId = Input(UInt(64.W))
+      val externalInterrupt = new ExternalInterruptIO
+      val l1plus_error, icache_error, dcache_error = new L1CacheErrorInfo
+    })
+
+    core.module.io.hartId := io.hartId
+    core.module.io.externalInterrupt := io.externalInterrupt
+    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
+    l2prefetcher.module.io.in <> l2cache.module.io
+    io.l1plus_error <> core.module.io.l1plus_error
+    io.icache_error <> core.module.io.icache_error
+    io.dcache_error <> core.module.io.dcache_error
+
+    val core_reset_gen = Module(new ResetGen())
+    core.module.reset := core_reset_gen.io.out
+
+    val l2_reset_gen = Module(new ResetGen())
+    l2prefetcher.module.reset := l2_reset_gen.io.out
+    l2cache.module.reset := l2_reset_gen.io.out
+  }
 }
-
-class XSCoreWithL2Imp(outer: XSCoreWithL2) extends LazyModuleImp(outer)
-  with HasXSParameter {
-  val io = IO(new Bundle {
-    val hartId = Input(UInt(64.W))
-    val externalInterrupt = new ExternalInterruptIO
-    val l1plus_error, icache_error, dcache_error = new L1CacheErrorInfo
-  })
-
-  outer.core.module.io.hartId := io.hartId
-  outer.core.module.io.externalInterrupt := io.externalInterrupt
-  outer.l2prefetcher.module.io.enable := RegNext(outer.core.module.io.l2_pf_enable)
-  outer.l2prefetcher.module.io.in <> outer.l2cache.module.io
-  io.l1plus_error <> outer.core.module.io.l1plus_error
-  io.icache_error <> outer.core.module.io.icache_error
-  io.dcache_error <> outer.core.module.io.dcache_error
-}
-
 
 abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
@@ -186,8 +196,7 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
   val core_with_l2 = Seq.fill(NumCores)(LazyModule(new XSCoreWithL2))
 
   for (i <- 0 until NumCores) {
-    peripheralXbar := TLBuffer() := core_with_l2(i).core.frontend.instrUncache.clientNode
-    peripheralXbar := TLBuffer() := core_with_l2(i).core.memBlock.uncache.clientNode
+    peripheralXbar := TLBuffer() := core_with_l2(i).uncache
     l3_xbar := TLBuffer() := core_with_l2(i).l2cache.node
   }
 
@@ -226,36 +235,54 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
       blockBytes = L3BlockSize,
       beatBytes = L2BusWidth / 8,
       cacheName = "L3",
+      uncachedGet = false,
       enablePerf = false
     ),
     InclusiveCacheMicroParameters(
       memCycles = 25,
       writeBytes = 32
     )
-  )).node
+  ))
 
-  bankedNode :*= l3cache :*= TLBuffer() :*= l3_xbar
+  bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyRawModuleImp(this) {
     val io = IO(new Bundle {
+      val clock = Input(Bool())
+      val reset = Input(Bool())
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
+    childClock := io.clock.asClock()
 
-    plic.module.io.extra.get.intrVec <> RegNext(RegNext(io.extIntrs))
-
-    for (i <- 0 until NumCores) {
-      core_with_l2(i).module.io.hartId := i.U
-      core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
-      core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
-      core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-      beu.module.io.errors.l1plus(i) := RegNext(core_with_l2(i).module.io.l1plus_error)
-      beu.module.io.errors.icache(i) := RegNext(core_with_l2(i).module.io.icache_error)
-      beu.module.io.errors.dcache(i) := RegNext(core_with_l2(i).module.io.dcache_error)
+    withClockAndReset(childClock, io.reset) {
+      val resetGen = Module(new ResetGen())
+      resetGen.suggestName("top_reset_gen")
+      childReset := resetGen.io.out
     }
 
-    dontTouch(io.extIntrs)
+    withClockAndReset(childClock, childReset) {
+      plic.module.io.extra.get.intrVec <> Cat(beuSink.module.interrupt, io.extIntrs)
+      require(io.extIntrs.getWidth + beuSink.module.interrupt.getWidth == NrPlicIntr)
+
+      for (i <- 0 until NumCores) {
+        val core_reset_gen = Module(new ResetGen())
+        core_reset_gen.suggestName(s"core_${i}_reset_gen")
+        core_with_l2(i).module.reset := core_reset_gen.io.out
+        core_with_l2(i).module.io.hartId := i.U
+        core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
+        core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+        core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+        beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
+        beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
+        beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
+      }
+
+      val l3_reset_gen = Module(new ResetGen())
+      l3_reset_gen.suggestName("l3_reset_gen")
+      l3cache.module.reset := l3_reset_gen.io.out
+    }
   }
 }
 

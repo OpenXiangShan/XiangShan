@@ -10,7 +10,7 @@ import xiangshan.backend.LSUOpType
 import xiangshan.backend.roq.RoqLsqIO
 
 
-class SqPtr extends CircularQueuePtr(SqPtr.StoreQueueSize) { }
+class SqPtr extends CircularQueuePtr[SqPtr](SqPtr.StoreQueueSize)
 
 object SqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): SqPtr = {

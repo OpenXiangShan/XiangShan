@@ -7,7 +7,7 @@ import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
 
-class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
+class FtqPtr extends CircularQueuePtr[FtqPtr](FtqPtr.FtqSize)
 
 object FtqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): FtqPtr = {

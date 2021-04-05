@@ -116,7 +116,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  io.error <> dcache.io.error
+  io.error <> RegNext(RegNext(dcache.io.error))
 
   val redirect = io.fromCtrlBlock.redirect
 

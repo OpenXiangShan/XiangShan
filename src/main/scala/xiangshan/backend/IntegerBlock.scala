@@ -243,6 +243,8 @@ class IntegerBlock
 
   jmpExeUnit.csrio <> io.csrio
   jmpExeUnit.csrio.perf <> RegNext(io.csrio.perf)
+  // RegNext customCtrl for better timing
+  io.csrio.customCtrl := RegNext(jmpExeUnit.csrio.customCtrl)
   jmpExeUnit.fenceio <> io.fenceio
   if (!env.FPGAPlatform) {
     jmpExeUnit.difftestIO.fromCSR <> difftestIO.fromCSR

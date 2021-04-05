@@ -35,11 +35,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   val debug_uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
+  class DispatchQueuePtr extends CircularQueuePtr[DispatchQueuePtr](size)
+
   // head: first valid entry (dispatched entry)
-  val headPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
+  val headPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new DispatchQueuePtr))))
   val headPtrMask = UIntToMask(headPtr(0).value, size)
   // tail: first invalid entry (free entry)
-  val tailPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
+  val tailPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new DispatchQueuePtr))))
   val tailPtrMask = UIntToMask(tailPtr(0).value, size)
   // valid entries counter
   val validCounter = RegInit(0.U(log2Ceil(size + 1).W))
@@ -118,10 +120,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // agreement with reservation station: don't dequeue when redirect.valid
-  val nextHeadPtr = Wire(Vec(deqnum, new CircularQueuePtr(size)))
+  val nextHeadPtr = Wire(Vec(deqnum, new DispatchQueuePtr))
   for (i <- 0 until deqnum) {
     nextHeadPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new CircularQueuePtr(size)),
+      i.U.asTypeOf(new DispatchQueuePtr),
       Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq))
     headPtr(i) := nextHeadPtr(i)
   }
@@ -136,14 +138,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   val hiValidBitVec = Cat((0 until size).map(i => validBitVec(i) && ~headPtrMask(i)))
   val flippedFlag = loValidBitVec.orR || validBitVec(size - 1)
   val lastOneIndex = size.U - PriorityEncoder(Mux(loValidBitVec.orR, loValidBitVec, hiValidBitVec))
-  val walkedTailPtr = Wire(new CircularQueuePtr(size))
+  val walkedTailPtr = Wire(new DispatchQueuePtr)
   walkedTailPtr.flag := flippedFlag ^ headPtr(0).flag
   walkedTailPtr.value := lastOneIndex
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   tailPtr(0) := Mux(io.flush,
-    0.U.asTypeOf(new CircularQueuePtr(size)),
+    0.U.asTypeOf(new DispatchQueuePtr),
     Mux(io.redirect.valid,
       tailPtr(0),
       Mux(lastCycleMisprediction,
@@ -153,7 +155,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   val lastLastCycleMisprediction = RegNext(lastCycleMisprediction && !io.flush)
   for (i <- 1 until enqnum) {
     tailPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new CircularQueuePtr(size)),
+      i.U.asTypeOf(new DispatchQueuePtr),
       Mux(io.redirect.valid,
         tailPtr(i),
         Mux(lastLastCycleMisprediction,

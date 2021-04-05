@@ -1,7 +1,7 @@
 #include <csignal>
 #include "common.h"
 
-int assert_count = 0;
+int assert_count = -1;
 static pthread_mutex_t assert_mutex;
 int signal_num = 0;
 
@@ -15,8 +15,10 @@ void assert_finish() {
 
 extern "C" void xs_assert(long long line) {
   pthread_mutex_lock(&assert_mutex);
-  printf("Assertion failed at line %lld.\n", line);
-  assert_count++;
+  if (assert_count >= 0) {
+    printf("Assertion failed at line %lld.\n", line);
+    assert_count++;
+  }
   pthread_mutex_unlock(&assert_mutex);
 }
 
