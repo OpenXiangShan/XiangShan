@@ -125,3 +125,22 @@ jobs:
           ret=${PIPESTATUS[0]}
           cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-namd.log
           exit $ret
+      - name: SPEC06 Test - milc
+        run: |
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/milc/_4150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          ret=${PIPESTATUS[0]}
+          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-milc.log
+          exit $ret
+      - name: SPEC06 Test - lbm
+        run: |
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/lbm/_7550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          ret=${PIPESTATUS[0]}
+          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-lbm.log
+          exit $ret
+      - name: SPEC06 Test - gromacs
+        run: |
+          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gromacs/_3150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
+          ret=${PIPESTATUS[0]}
+          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-gromacs.log
+          exit $ret
+

@@ -46,16 +46,24 @@ ifeq ($(DUALCORE),1)
 EMU_CXXFLAGS += -DDUALCORE
 endif
 
+USE_BIN ?= 0
+ifeq ($(USE_BIN),1)
+EMU_CXXFLAGS += -DUSE_BIN
+endif
+
 # --trace
-VERILATOR_FLAGS = --top-module $(EMU_TOP) \
-  +define+VERILATOR=1 \
-  +define+PRINTF_COND=1 \
-  +define+RANDOMIZE_REG_INIT \
-  +define+RANDOMIZE_MEM_INIT \
-  $(VEXTRA_FLAGS) \
-  --assert \
-  --stats-vars \
-  --output-split 30000 \
+VERILATOR_FLAGS =                   \
+  --top-module $(EMU_TOP)           \
+  +define+VERILATOR=1               \
+  +define+PRINTF_COND=1             \
+  +define+RANDOMIZE_REG_INIT        \
+  +define+RANDOMIZE_MEM_INIT        \
+  +define+RANDOMIZE_GARBAGE_ASSIGN  \
+  +define+RANDOMIZE_DELAY=0         \
+  $(VEXTRA_FLAGS)                   \
+  --assert                          \
+  --stats-vars                      \
+  --output-split 30000              \
   --output-split-cfuncs 30000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk

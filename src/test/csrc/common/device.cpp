@@ -8,6 +8,7 @@ void init_sdl(void);
 
 void init_uart(void);
 extern "C" void init_sd(void);
+extern "C" void init_flash(void);
 
 static struct timeval boot = {};
 
@@ -15,6 +16,7 @@ void init_device(void) {
   init_sdl();
   init_uart();
   init_sd();
+  init_flash();
   gettimeofday(&boot, NULL);
 }
 

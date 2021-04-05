@@ -83,12 +83,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val error = new L1CacheErrorInfo
+    val memInfo = new Bundle {
+      val sqFull = Output(Bool())
+      val lqFull = Output(Bool())
+      val dcacheMSHRFull = Output(Bool())
+    }
   })
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  io.error <> dcache.io.error
+  io.error <> RegNext(RegNext(dcache.io.error))
 
   val redirect = io.fromCtrlBlock.redirect
 
@@ -374,5 +379,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
+
+  io.memInfo.sqFull := RegNext(lsq.io.sqFull)
+  io.memInfo.lqFull := RegNext(lsq.io.lqFull)
+  io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 }
 

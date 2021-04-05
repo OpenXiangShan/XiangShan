@@ -9,7 +9,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 
-class IbufPtr extends CircularQueuePtr(IbufPtr.IBufSize) { }
+class IbufPtr extends CircularQueuePtr[IbufPtr](IbufPtr.IBufSize) { }
 
 object IbufPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): IbufPtr = {
@@ -24,6 +24,7 @@ class IBufferIO extends XSBundle {
   val flush = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchPacket))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val full = Output(Bool())
 }
 
 class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
@@ -201,6 +202,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val instrHungry = afterInit && (validEntries === 0.U) && !headBubble
 
   QueuePerf(IBufSize, validEntries, !allowEnq)
+  io.full := !allowEnq
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
 }

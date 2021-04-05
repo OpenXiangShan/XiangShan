@@ -35,6 +35,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val error  = new L1CacheErrorInfo
+    val frontendInfo = new Bundle {
+      val ibufFull  = Output(Bool())
+    }
   })
 
   val ifu = Module(new IFU)
@@ -96,7 +99,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   // ifu to backend
   io.backend.fetchInfo <> ifu.io.toFtq
 
-  io.error <> RegNext(ifu.io.error)
+  io.error <> RegNext(RegNext(ifu.io.error))
 
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),
@@ -106,4 +109,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
+
+  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 }

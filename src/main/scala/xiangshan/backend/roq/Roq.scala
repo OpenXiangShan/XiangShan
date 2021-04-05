@@ -11,7 +11,7 @@ import xiangshan.backend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import difftest._
 
-class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
+class RoqPtr extends CircularQueuePtr[RoqPtr](RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
     val flushItself = redirect.bits.flushItself() && this === redirect.bits.roqIdx
     flush || (redirect.valid && (flushItself || isAfter(this, redirect.bits.roqIdx)))
@@ -254,6 +254,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val bcommit = Output(UInt(BrTagWidth.W))
     val roqDeqPtr = Output(new RoqPtr)
     val csr = new RoqCSRIO
+    val roqFull = Output(Bool())
   })
 
   // instvalid field
@@ -769,6 +770,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RoqSize, PopCount((0 until RoqSize).map(valid(_))), !allowEnqueue)
+  io.roqFull := !allowEnqueue
   XSPerfAccumulate("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
   XSPerfAccumulate("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))

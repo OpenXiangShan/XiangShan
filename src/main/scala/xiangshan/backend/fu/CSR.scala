@@ -111,14 +111,39 @@ class FpuCsrIO extends XSBundle {
 
 
 class PerfCounterIO extends XSBundle {
-  val retiredInstr = Input(UInt(3.W))
-  val value = Input(UInt(XLEN.W))
+  val retiredInstr = UInt(3.W)
+  val frontendInfo = new Bundle {
+    val ibufFull  = Bool()
+  }
+  val ctrlInfo = new Bundle {
+    val roqFull   = Bool()
+    val intdqFull = Bool()
+    val fpdqFull  = Bool()
+    val lsdqFull  = Bool()
+  }
+  val memInfo = new Bundle {
+    val sqFull = Bool()
+    val lqFull = Bool()
+    val dcacheMSHRFull = Bool()
+  }
+  val bpuInfo = new Bundle {
+    val bpRight = UInt(XLEN.W)
+    val bpWrong = UInt(XLEN.W)
+  }
+  val cacheInfo = new Bundle {
+    val l2MSHRFull = Bool()
+    val l3MSHRFull = Bool()
+    val l2nAcquire = UInt(XLEN.W)
+    val l2nAcquireMiss = UInt(XLEN.W)
+    val l3nAcquire = UInt(XLEN.W)
+    val l3nAcquireMiss = UInt(XLEN.W)
+  }
 }
 
 class CSRFileIO extends XSBundle {
   val hartId = Input(UInt(64.W))
   // output (for func === CSROpType.jmp)
-  val perf = new PerfCounterIO
+  val perf = Input(new PerfCounterIO)
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
@@ -427,6 +452,26 @@ class CSR extends FunctionUnit with HasCSRConst
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
+  val ibufFull  = RegInit(0.U(XLEN.W))
+  ibufFull := ibufFull + RegNext(csrio.perf.frontendInfo.ibufFull)
+  val roqFull   = RegInit(0.U(XLEN.W))
+  roqFull := roqFull + RegNext(csrio.perf.ctrlInfo.roqFull)
+  val intdqFull = RegInit(0.U(XLEN.W))
+  intdqFull := intdqFull + RegNext(csrio.perf.ctrlInfo.intdqFull)
+  val fpdqFull  = RegInit(0.U(XLEN.W))
+  fpdqFull := fpdqFull + RegNext(csrio.perf.ctrlInfo.fpdqFull)
+  val lsdqFull  = RegInit(0.U(XLEN.W))
+  lsdqFull := lsdqFull + RegNext(csrio.perf.ctrlInfo.lsdqFull)
+  val sqFull    = RegInit(0.U(XLEN.W))
+  sqFull := sqFull + RegNext(csrio.perf.memInfo.sqFull)
+  val lqFull    = RegInit(0.U(XLEN.W))
+  lqFull := lqFull + RegNext(csrio.perf.memInfo.lqFull)
+  val dcacheMSHRFull = RegInit(0.U(XLEN.W))
+  dcacheMSHRFull := dcacheMSHRFull + RegNext(csrio.perf.memInfo.dcacheMSHRFull)
+  val bpRight   = RegInit(0.U(XLEN.W))
+  bpRight := bpRight + RegNext(csrio.perf.bpuInfo.bpRight)
+  val bpWrong   = RegInit(0.U(XLEN.W))
+  bpWrong := bpWrong + RegNext(csrio.perf.bpuInfo.bpWrong)
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -513,13 +558,24 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
+    MaskedRegMap(Mhpmevent3, ibufFull),
+    MaskedRegMap(Mhpmevent4, roqFull),
+    MaskedRegMap(Mhpmevent5, intdqFull),
+    MaskedRegMap(Mhpmevent6, fpdqFull),
+    MaskedRegMap(Mhpmevent7, lsdqFull),
+    MaskedRegMap(Mhpmevent8, sqFull),
+    MaskedRegMap(Mhpmevent9, lqFull),
+    MaskedRegMap(Mhpmevent10, dcacheMSHRFull),
+    MaskedRegMap(Mhpmevent11, bpRight),
+    MaskedRegMap(Mhpmevent12, bpWrong),
   )
-  val MhpmcounterStart = Mhpmcounter3
-  val MhpmeventStart   = Mhpmevent3
-  for (i <- 0 until nrPerfCnts) {
-    perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
-    perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
-  }
+  // TODO: mechanism should be implemented later
+  // val MhpmcounterStart = Mhpmcounter3
+  // val MhpmeventStart   = Mhpmevent3
+  // for (i <- 0 until nrPerfCnts) {
+  //   perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
+  //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
+  // }
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++

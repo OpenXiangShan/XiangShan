@@ -54,7 +54,15 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
+	@git log -n 1 >> .__head__
+	@git diff >> .__diff__
+	@sed -i 's/^/\/\// ' .__head__
+	@sed -i 's/^/\/\//' .__diff__
+	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
+	@mv .__out__ $@
+	@rm .__head__ .__diff__
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 	date -R

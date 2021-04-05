@@ -78,6 +78,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
       replacement = "plru",
       cacheName = s"L2",
+      uncachedGet = true,
       enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
@@ -100,6 +101,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       beatBytes = L2BusWidth / 8,
       replacement = "plru",
       cacheName = "L3",
+      uncachedGet = false,
       enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
