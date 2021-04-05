@@ -9,7 +9,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 
-class IbufPtr extends CircularQueuePtr(IbufPtr.IBufSize) { }
+class IbufPtr extends CircularQueuePtr[IbufPtr](IbufPtr.IBufSize) { }
 
 object IbufPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): IbufPtr = {
