@@ -99,9 +99,9 @@ endmodule
   input [63:0] cycleCnt,
   input [63:0] instrCnt
 );
-  `DIFFTEST_MOD_DPIC_CALL_BEGIN_WITH_EN(valid, TrapEvent) (
+  `DIFFTEST_MOD_DPIC_CALL_BEGIN(TrapEvent) (
     coreid, valid, {5'd0, code}, pc, cycleCnt, instrCnt
-  ) `DIFFTEST_MOD_DPIC_CALL_END_WITH_EN(TrapEvent)
+  ) `DIFFTEST_MOD_DPIC_CALL_END(TrapEvent)
 endmodule
 
 // DifftestCSRState

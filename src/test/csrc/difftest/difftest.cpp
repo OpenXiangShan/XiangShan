@@ -63,7 +63,8 @@ int difftest_step() {
 
 Difftest::Difftest(int coreid) : id(coreid) {
   proxy = new DIFF_PROXY(coreid);
-
+  state = new DiffState();
+  clear_step();
   // nemu_this_pc = 0x80000000;
   // pc_retire_pointer = DEBUG_RETIRE_TRACE_SIZE - 1;
 }
@@ -79,11 +80,6 @@ int Difftest::step() {
     return 1;
   }
   do_first_instr_commit();
-
-  if (!has_commit) {
-    return 0;
-  }
-
   if (do_store_check()) {
     return 1;
   }
@@ -91,14 +87,20 @@ int Difftest::step() {
     return 1;
   }
 
-  int i = 0;
+  if (!has_commit) {
+    return 0;
+  }
+
+  int num_commit = 0;
   // interrupt has the highest priority
   if (dut.event.interrupt) {
     do_interrupt();
   } else {
     // TODO: is this else necessary?
-    for (i = 0; i < DIFFTEST_COMMIT_WIDTH && dut.commit[i].valid; i++) {
-      do_instr_commit(i);
+    while (num_commit < DIFFTEST_COMMIT_WIDTH && dut.commit[num_commit].valid) {
+      do_instr_commit(num_commit);
+      dut.commit[num_commit].valid = 0;
+      num_commit++;
     }
   }
 
@@ -108,17 +110,15 @@ int Difftest::step() {
 
   proxy->get_regs(ref_regs_ptr);
 
-  // uint64_t next_pc = ref.csr.this_pc;
-  // pc_retire_pointer = (pc_retire_pointer + 1) % DEBUG_RETIRE_TRACE_SIZE;
-  // pc_retire_queue[pc_retire_pointer] = dut.commit[0].pc;
-  // inst_retire_queue[pc_retire_pointer] = dut.commit[0].pc;
-  // retire_cnt_queue[pc_retire_pointer] = i;
+  if (num_commit > 0) {
+    state->commit(dut.commit[0].pc, num_commit);
+  }
 
+  // swap nemu_pc and ref.csr.this_pc for comparison
   uint64_t nemu_next_pc = ref.csr.this_pc;
   ref.csr.this_pc = nemu_this_pc;
   nemu_this_pc = nemu_next_pc;
-
-  if (memcmp(dut_regs_ptr, ref_regs_ptr, DIFFTEST_NR_REG * sizeof(uint64_t)) != 0) {
+  if (memcmp(dut_regs_ptr, ref_regs_ptr, DIFFTEST_NR_REG * sizeof(uint64_t))) {
     display();
     for (int i = 0; i < DIFFTEST_NR_REG; i ++) {
       if (dut_regs_ptr[i] != ref_regs_ptr[i]) {
@@ -129,7 +129,7 @@ int Difftest::step() {
     return 1;
   }
 
-  clear_step();
+  // 
   return 0;
 }
 
@@ -142,13 +142,8 @@ void Difftest::do_instr_commit(int i) {
   progress = true;
   last_commit = ticks;
 
-  // printf("commit %d %lx\n", i, dut.commit[i].pc);
   // store the writeback info to debug array
-  // pc_wb_queue[wb_pointer]    = dut.commit[i].pc;
-  // wen_wb_queue[wb_pointer]   = dut.commit[i].wen;
-  // wdst_wb_queue[wb_pointer]  = dut.commit[i].wdest;
-  // wdata_wb_queue[wb_pointer] = dut.commit[i].wdata;
-  // wb_pointer = (wb_pointer + 1) % DEBUG_WB_TRACE_SIZE;
+  state->writeback(dut.commit[i].pc, dut.commit[i].inst, dut.commit[i].wen, dut.commit[i].wdest, dut.commit[i].wdata);
 
   // sync lr/sc reg status
   if (dut.commit[i].scFailed) {
@@ -266,12 +261,13 @@ int Difftest::do_store_check() {
     auto mask = dut.store[i].mask;
     if (proxy->store_commit(&addr, &data, &mask)) {
       display();
-      printf("Mismatch for store commits: \n");
-      printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
-      printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
+      printf("Mismatch for store commits %d: \n", i);
+      printf("  REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
+      printf("  DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
         dut.store[i].addr, dut.store[i].data, dut.store[i].mask);
       return 1;
     }
+    dut.store[i].valid = 0;
   }
   return 0;
 }
@@ -351,13 +347,13 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
 
 int Difftest::do_golden_memory_check() {
   // Update Golden Memory info
-  if (dut.sbuffer.resp) {
-    update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
-  }
+  // if (dut.sbuffer.resp) {
+  //   update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
+  // }
 
-  if (dut.atomic.resp) {
-    handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
-  }
+  // if (dut.atomic.resp) {
+  //   handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
+  // }
 
   // TODO
   return 0;
@@ -410,22 +406,31 @@ void Difftest::clear_step() {
 }
 
 void Difftest::display() {
-  printf("\n==============Retire Trace==============\n");
-  int j;
-  for(j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++){
-    printf("retire trace [%x]: pc %010lx inst %08x cmtcnt %d %s\n",
-        j, pc_retire_queue[j], inst_retire_queue[j], retire_cnt_queue[j],
-        (j==pc_retire_pointer)?"<--":"");
-  }
-  printf("\n==============  WB Trace  ==============\n");
-  for(j = 0; j < DEBUG_WB_TRACE_SIZE; j++){
-    printf("wb trace [%x]: pc %010lx wen %x dst %08x data %016lx %s\n",
-        j, pc_wb_queue[j], wen_wb_queue[j]!=0, wdst_wb_queue[j],
-        wdata_wb_queue[j],
-        (j==((wb_pointer-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
-  }
+  state->display();
+
   printf("\n==============  REF Regs  ==============\n");
   fflush(stdout);
   proxy->isa_reg_display();
   printf("priviledgeMode: %lu\n", dut.csr.priviledgeMode);
+}
+
+void DiffState::display() {
+  printf("\n==============Retire Trace==============\n");
+  for (int j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++) {
+    printf("retire trace [%x]: pc %010lx cmtcnt %d %s\n",
+        j, pc_retire_queue[j], retire_cnt_queue[j],
+        (j==retire_pointer)?"<--":"");
+  }
+  printf("\n==============  WB Trace  ==============\n");
+  for (int j = 0; j < DEBUG_WB_TRACE_SIZE; j++) {
+    printf("wb trace [%x]: pc %010lx inst %08x wen %x dst %08x data %016lx %s\n",
+        j, pc_wb_queue[j], inst_wb_queue[j], wen_wb_queue[j]!=0, wdst_wb_queue[j],
+        wdata_wb_queue[j],
+        (j==((wb_pointer-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
+  }
+  fflush(stdout);
+}
+
+DiffState::DiffState(int history_length) {
+
 }

@@ -24,8 +24,8 @@ int main(int argc, const char** argv) {
     printf("\ncan't catch SIGINT\n");
   }
 
-  difftest_init();
   auto emu = new Emulator(argc, argv);
+  difftest_init();
 
   init_goldenmem();
   // init device

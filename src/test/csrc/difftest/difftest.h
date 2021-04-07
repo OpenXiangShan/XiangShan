@@ -13,8 +13,7 @@
 
 #define DIFFTEST_STORE_COMMIT
 
-#define DEBUG_RETIRE_TRACE_SIZE 16
-#define DEBUG_WB_TRACE_SIZE 16
+
 
 // Difftest structures
 // trap events: self-defined traps
@@ -123,6 +122,40 @@ typedef struct {
   ptw_event_t      ptw;
 } difftest_core_state_t;
 
+class DiffState {
+public:
+  DiffState(int history_length = 32);
+  void commit(uint64_t pc, uint64_t count) {
+    pc_retire_queue [retire_pointer] = pc;
+    retire_cnt_queue[retire_pointer] = count;
+    retire_pointer = (retire_pointer + 1) % DEBUG_RETIRE_TRACE_SIZE;
+  };
+  void writeback(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint8_t data) {
+    pc_wb_queue   [wb_pointer] = pc;
+    inst_wb_queue [wb_pointer] = inst;
+    wen_wb_queue  [wb_pointer] = en;
+    wdst_wb_queue [wb_pointer] = dest;
+    wdata_wb_queue[wb_pointer] = data;
+    wb_pointer = (wb_pointer + 1) % DEBUG_WB_TRACE_SIZE;
+  };
+  void display();
+
+private:
+  const static size_t DEBUG_RETIRE_TRACE_SIZE = 16;
+  const static size_t DEBUG_WB_TRACE_SIZE = 16;
+
+  int retire_pointer = 0;
+  uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+  uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+
+  int wb_pointer = 0;
+  uint64_t pc_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  uint32_t inst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  uint64_t wen_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  uint32_t wdst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  uint64_t wdata_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+};
+
 class Difftest {
 public:
   // Difftest public APIs for testbench
@@ -190,15 +223,7 @@ private:
 
 
   uint64_t nemu_this_pc;
-  uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  int pc_retire_pointer;
-  uint64_t pc_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint64_t wen_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint32_t wdst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint64_t wdata_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  int wb_pointer = 0;
+  DiffState *state;
 
   int check_timeout();
   void do_first_instr_commit();

@@ -8,24 +8,28 @@ extern "C" int v_difftest_step() {
   return difftest_step();
 }
 
+#define RETURN_NO_NULL \
+  if (difftest == NULL) return;
+
 INTERFACE_TRAP_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_trap_event();
   packet->valid    = valid;
-  if (packet->valid) {
-    packet->code     = code;
-    packet->pc       = pc;
-    packet->cycleCnt = cycleCnt;
-    packet->instrCnt = instrCnt;
-  }
+  packet->code     = code;
+  packet->pc       = pc;
+  packet->cycleCnt = cycleCnt;
+  packet->instrCnt = instrCnt;
 }
 
 INTERFACE_ARCH_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_arch_event();
   packet->interrupt = intrNo;
   packet->exception = cause;
 }
 
 INTERFACE_INSTR_COMMIT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_instr_commit(index);
   packet->valid    = valid;
   if (packet->valid) {
@@ -41,6 +45,7 @@ INTERFACE_INSTR_COMMIT {
 }
 
 INTERFACE_CSR_STATE {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_csr_state();
   packet->priviledgeMode = priviledgeMode;
   packet->mstatus = mstatus;
@@ -63,6 +68,7 @@ INTERFACE_CSR_STATE {
 }
 
 INTERFACE_INT_REG_STATE {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_arch_reg_state();
   packet->gpr[ 0] = gpr_0;
   packet->gpr[ 1] = gpr_1;
@@ -96,11 +102,10 @@ INTERFACE_INT_REG_STATE {
   packet->gpr[29] = gpr_29;
   packet->gpr[30] = gpr_30;
   packet->gpr[31] = gpr_31;
-  // for(int i = 0;i<32;i++)
-  // printf("gpr[%d]=%lx\n", i, packet->gpr[i]);
 }
 
 INTERFACE_FP_REG_STATE {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_arch_reg_state();
   packet->fpr[ 0] = fpr_0;
   packet->fpr[ 1] = fpr_1;
@@ -137,6 +142,7 @@ INTERFACE_FP_REG_STATE {
 }
 
 INTERFACE_SBUFFER_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_sbuffer_state();
   packet->resp = sbufferResp;
   if (packet->resp) {
@@ -210,6 +216,7 @@ INTERFACE_SBUFFER_EVENT {
 }
 
 INTERFACE_STORE_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_store_event(index);
   packet->valid = valid;
   if (packet->valid) {
@@ -220,6 +227,7 @@ INTERFACE_STORE_EVENT {
 }
 
 INTERFACE_LOAD_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_load_event(index);
   packet->valid = valid;
   if (packet->valid) {
@@ -230,6 +238,7 @@ INTERFACE_LOAD_EVENT {
 }
 
 INTERFACE_ATOMIC_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_atomic_event();
   packet->resp = resp;
   if (packet->resp) {
@@ -242,6 +251,7 @@ INTERFACE_ATOMIC_EVENT {
 }
 
 INTERFACE_PTW_EVENT {
+  RETURN_NO_NULL
   auto packet = difftest[coreid]->get_ptw_event();
   packet->resp = resp;
   if (packet->resp) {
