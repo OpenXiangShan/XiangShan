@@ -1,33 +1,33 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 
-class ExceptionAddrIO extends XSBundle {
+class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val lsIdx = Input(new LSIdx)
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
 }
 
-class FwdEntry extends XSBundle {
+class FwdEntry extends Bundle {
   val valid = Bool()
   val data = UInt(8.W)
 }
 
 // inflight miss block reqs
-class InflightBlockInfo extends XSBundle {
+class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
   val block_addr = UInt(PAddrBits.W)
   val valid = Bool()
 }
 
-class LsqEnqIO extends XSBundle {
+class LsqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val needAlloc = Vec(RenameWidth, Input(UInt(2.W)))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
@@ -35,7 +35,7 @@ class LsqEnqIO extends XSBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrappper extends XSModule with HasDCacheParameters {
+class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))

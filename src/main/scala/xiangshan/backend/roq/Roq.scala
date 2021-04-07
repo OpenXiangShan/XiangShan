@@ -1,14 +1,12 @@
 package xiangshan.backend.roq
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.LSUOpType
-import xiangshan.backend.exu.Exu
 import xiangshan.backend.ftq.FtqPtr
-import xiangshan.mem.{LqPtr, SqPtr}
 
 object roqDebugId extends Function0[Integer] {
   var x = 0
@@ -18,15 +16,20 @@ object roqDebugId extends Function0[Integer] {
   }
 }
 
-class RoqPtr extends CircularQueuePtr[RoqPtr](RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
+class RoqPtr(implicit p: Parameters) extends CircularQueuePtr[RoqPtr](
+  p => p(XSCoreParamsKey).RoqSize
+) with HasCircularQueuePtrHelper {
+
   def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
     val flushItself = redirect.bits.flushItself() && this === redirect.bits.roqIdx
     flush || (redirect.valid && (flushItself || isAfter(this, redirect.bits.roqIdx)))
   }
+
+  override def cloneType = (new RoqPtr).asInstanceOf[this.type]
 }
 
-object RoqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): RoqPtr = {
+object RoqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): RoqPtr = {
     val ptr = Wire(new RoqPtr)
     ptr.flag := f
     ptr.value := v
@@ -34,7 +37,7 @@ object RoqPtr extends HasXSParameter {
   }
 }
 
-class RoqCSRIO extends XSBundle {
+class RoqCSRIO(implicit p: Parameters) extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
   val isXRet = Input(Bool())
@@ -46,7 +49,7 @@ class RoqCSRIO extends XSBundle {
   }
 }
 
-class RoqLsqIO extends XSBundle {
+class RoqLsqIO(implicit p: Parameters) extends XSBundle {
   val lcommit = Output(UInt(3.W))
   val scommit = Output(UInt(3.W))
   val pendingld = Output(Bool())
@@ -54,7 +57,7 @@ class RoqLsqIO extends XSBundle {
   val commit = Output(Bool())
 }
 
-class RoqEnqIO extends XSBundle {
+class RoqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val isEmpty = Output(Bool())
   // valid vector, for roqIdx gen and walk
@@ -63,11 +66,11 @@ class RoqEnqIO extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RoqPtr))
 }
 
-class RoqDispatchData extends RoqCommitInfo {
+class RoqDispatchData(implicit p: Parameters) extends RoqCommitInfo {
   val crossPageIPFFix = Bool()
 }
 
-class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
+class RoqDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
     val state = Input(UInt(2.W))
@@ -117,7 +120,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
-class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
+class RoqEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for exceptions and interrupts
     val state = Input(UInt(2.W))
@@ -161,7 +164,7 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
-class RoqExceptionInfo extends XSBundle {
+class RoqExceptionInfo(implicit p: Parameters) extends XSBundle {
   // val valid = Bool()
   val roqIdx = new RoqPtr
   val exceptionVec = ExceptionVec()
@@ -172,7 +175,7 @@ class RoqExceptionInfo extends XSBundle {
   def can_writeback = exceptionVec.asUInt.orR
 }
 
-class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
+class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Input(Valid(new Redirect))
     val flush = Input(Bool())
@@ -243,12 +246,12 @@ class ExceptionGen extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
-class RoqFlushInfo extends XSBundle {
+class RoqFlushInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
 
-class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
+class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
     val enq = new RoqEnqIO

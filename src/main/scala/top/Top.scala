@@ -21,7 +21,7 @@ import xiangshan.cache.prefetch.L2Prefetcher
 
 
 class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
-  with HasXSParameter {
+  with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore())
   private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val l2xbar = TLXbar()
@@ -68,10 +68,10 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
 
-    val core_reset_gen = Module(new ResetGen())
+    val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
     core.module.reset := core_reset_gen.io.out
 
-    val l2_reset_gen = Module(new ResetGen())
+    val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
     l2prefetcher.module.reset := l2_reset_gen.io.out
     l2cache.module.reset := l2_reset_gen.io.out
   }
@@ -101,7 +101,7 @@ trait HaveSlaveAXI4Port {
       address = Seq(AddressSet(0x0, 0x7fffffffL)),
       maxAtomic = 8,
       maxTransfer = 64),
-    beatBytes = L2BusWidth / 8
+    beatBytes = L3InnerBusWidth / 8
   ))
   private val error_xbar = TLXbar()
 
@@ -137,7 +137,7 @@ trait HaveAXI4MemPort {
           interleavedId = Some(0)
         )
       ),
-      beatBytes = L3BusWidth / 8
+      beatBytes = L3OuterBusWidth / 8
     )
   ))
 
@@ -147,7 +147,7 @@ trait HaveAXI4MemPort {
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
-    TLWidthWidget(L3BusWidth / 8) :=
+    TLWidthWidget(L3OuterBusWidth / 8) :=
     mem_xbar
 
   val memory = InModuleBody {
@@ -191,9 +191,13 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
   with HaveAXI4PeripheralPort
 {
 
-  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3BusWidth")
+  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
-  val core_with_l2 = Seq.fill(NumCores)(LazyModule(new XSCoreWithL2))
+  val core_with_l2 = soc.cores.map(coreParams =>
+    LazyModule(new XSCoreWithL2()(p.alterPartial({
+      case XSCoreParamsKey => coreParams
+    })))
+  )
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
@@ -202,7 +206,7 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
 
   private val clint = LazyModule(new TLTimer(
     Seq(AddressSet(0x38000000L, 0x0000ffffL)),
-    sim = !env.FPGAPlatform
+    sim = !debugOpts.FPGAPlatform, NumCores
   ))
   clint.node := peripheralXbar
 
@@ -223,7 +227,8 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
 
   val plic = LazyModule(new AXI4Plic(
     Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
-    sim = !env.FPGAPlatform
+    NumCores, NrExtIntr + 1,
+    !debugOpts.FPGAPlatform,
   ))
   plic.node := AXI4IdentityNode() := AXI4UserYanker() := TLToAXI4() := peripheralXbar
 
@@ -233,7 +238,7 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
       ways = L3NWays,
       sets = L3NSets,
       blockBytes = L3BlockSize,
-      beatBytes = L2BusWidth / 8,
+      beatBytes = L3InnerBusWidth / 8,
       cacheName = "L3",
       uncachedGet = false,
       enablePerf = false
@@ -252,22 +257,21 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
       val reset = Input(Bool())
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
-      val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
+      val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {
-      val resetGen = Module(new ResetGen())
+      val resetGen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
       resetGen.suggestName("top_reset_gen")
       childReset := resetGen.io.out
     }
 
     withClockAndReset(childClock, childReset) {
       plic.module.io.extra.get.intrVec <> Cat(beuSink.module.interrupt, io.extIntrs)
-      require(io.extIntrs.getWidth + beuSink.module.interrupt.getWidth == NrPlicIntr)
 
       for (i <- 0 until NumCores) {
-        val core_reset_gen = Module(new ResetGen())
+        val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
         core_reset_gen.suggestName(s"core_${i}_reset_gen")
         core_with_l2(i).module.reset := core_reset_gen.io.out
         core_with_l2(i).module.io.hartId := i.U
@@ -279,25 +283,26 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
       }
 
-      val l3_reset_gen = Module(new ResetGen())
+      val l3_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
       l3_reset_gen.suggestName("l3_reset_gen")
       l3cache.module.reset := l3_reset_gen.io.out
     }
   }
 }
 
+class DefaultConfig(n: Int) extends Config((site, here, up) => {
+  case XLen => 64
+  case DebugOptionsKey => DebugOptions()
+  case SoCParamsKey => SoCParameters(
+    cores = List.tabulate(n){ i => XSCoreParameters(HartId = i) }
+  )
+})
+
 object TopMain extends App {
   override def main(args: Array[String]): Unit = {
-    Parameters.set(
-      args.contains("--dual-core") match {
-        case false => Parameters()
-        case true  => Parameters.dualCoreParameters
-      }
-    )
+    val numCores = if(args.contains("--dual-core")) 2 else 1
     val otherArgs = args.filterNot(_ == "--dual-core")
-    implicit val p = new Config((_, _, _) => {
-      case XLen => 64
-    })
+    implicit val config = new DefaultConfig(numCores)
     XiangShanStage.execute(otherArgs, Seq(
       ChiselGeneratorAnnotation(() => {
         val soc = LazyModule(new XSTop())

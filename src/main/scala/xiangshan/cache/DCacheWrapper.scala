@@ -10,7 +10,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLClientNode, TLClientParameter
 import system.L1CacheErrorInfo
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
-class DCacheWordReq  extends DCacheBundle
+class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -24,7 +24,7 @@ class DCacheWordReq  extends DCacheBundle
 }
 
 // memory request in word granularity(store)
-class DCacheLineReq  extends DCacheBundle
+class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -37,7 +37,7 @@ class DCacheLineReq  extends DCacheBundle
   }
 }
 
-class DCacheWordResp extends DCacheBundle
+class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
   // cache req missed, send it to miss queue
@@ -51,7 +51,7 @@ class DCacheWordResp extends DCacheBundle
   }
 }
 
-class DCacheLineResp extends DCacheBundle
+class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
 {
   val data   = UInt((cfg.blockBytes * 8).W)
   // cache req missed, send it to miss queue
@@ -65,7 +65,7 @@ class DCacheLineResp extends DCacheBundle
   }
 }
 
-class Refill extends DCacheBundle
+class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
   val data   = UInt((cfg.blockBytes * 8).W)
@@ -74,14 +74,14 @@ class Refill extends DCacheBundle
   }
 }
 
-class DCacheWordIO extends DCacheBundle
+class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
 // used by load unit
-class DCacheLoadIO extends DCacheWordIO
+class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
@@ -92,20 +92,20 @@ class DCacheLoadIO extends DCacheWordIO
   val s1_disable_fast_wakeup = Input(Bool())
 }
 
-class DCacheLineIO extends DCacheBundle
+class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheLineReq )
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
-class DCacheToLsuIO extends DCacheBundle {
+class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = Flipped(new DCacheLineIO) // for sbuffer
   val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
 }
 
-class DCacheIO extends DCacheBundle {
+class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())

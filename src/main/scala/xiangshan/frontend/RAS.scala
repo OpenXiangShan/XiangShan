@@ -1,20 +1,20 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.ALUOpType
 import utils._
 import chisel3.experimental.chiselName
 import scala.tools.nsc.doc.base.comment.Bold
 
-class RASEntry() extends XSBundle {
+class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
 @chiselName
-class RAS extends BasePredictor
+class RAS(implicit p: Parameters) extends BasePredictor
 {
     class RASResp extends Resp
     {

@@ -1,5 +1,6 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -10,7 +11,7 @@ import xiangshan.backend.issue.ReservationStation
 import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
 
 
-class FpBlockToCtrlIO extends XSBundle {
+class FpBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
 }
@@ -21,7 +22,7 @@ class FloatBlock
   memSlowWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig],
-) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
+)(implicit p: Parameters) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO

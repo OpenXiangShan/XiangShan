@@ -1,16 +1,17 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-class BusyTableReadIO extends XSBundle {
+class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
   val resp = Output(Bool())
 }
 
-class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
+class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     // set preg state to busy

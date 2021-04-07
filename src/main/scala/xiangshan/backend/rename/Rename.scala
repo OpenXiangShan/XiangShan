@@ -1,5 +1,6 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -7,7 +8,7 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
 
-class RenameBypassInfo extends XSBundle {
+class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -16,7 +17,7 @@ class RenameBypassInfo extends XSBundle {
   val move_eliminated_src2 = Vec(RenameWidth-1, Bool())
 }
 
-class Rename extends XSModule with HasCircularQueuePtrHelper {
+class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())

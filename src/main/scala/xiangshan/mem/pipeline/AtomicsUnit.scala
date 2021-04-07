@@ -1,13 +1,13 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 
-class AtomicsUnit extends XSModule with MemoryOpConstants{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
     val out           = Decoupled(new ExuOutput)

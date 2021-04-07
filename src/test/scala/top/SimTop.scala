@@ -34,24 +34,14 @@ class SimTop(useDRAMSim: Boolean)(implicit p: config.Parameters) extends Module 
 object SimTop extends App {
   override def main(args: Array[String]): Unit = {
     val useDRAMSim = args.contains("--with-dramsim3")
+    val numCores = if(args.contains("--dual-core")) 2 else 1
+    val otherArgs = args.
+      filterNot(_ == "--disable-log").
+      filterNot(_ == "--fpga-platform").
+      filterNot(_ == "--dual-core")
 
-    // set soc parameters
-    val socArgs = args.filterNot(_ == "--with-dramsim3")
-    Parameters.set(
-      (socArgs.contains("--fpga-platform"), socArgs.contains("--dual-core"), socArgs.contains("--disable-log")) match {
-        case (true,  false, _)     => Parameters()
-        case (true,   true, _)     => Parameters.dualCoreParameters
-        case (false,  true,  true) => Parameters.simDualCoreParameters
-        case (false, false,  true) => Parameters.simParameters
-        case (false,  true, false) => Parameters.debugDualCoreParameters
-        case (false, false, false) => Parameters.debugParameters
-      }
-    )
+    implicit val config = new DefaultConfig(numCores)
 
-    val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")
-    implicit val p = new Config((_, _, _) => {
-      case XLen => 64
-    })
     // generate verilog
     XiangShanStage.execute(
       otherArgs,

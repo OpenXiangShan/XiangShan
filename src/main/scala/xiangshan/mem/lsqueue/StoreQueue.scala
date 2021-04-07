@@ -1,19 +1,23 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.backend.roq.RoqLsqIO
 
 
-class SqPtr extends CircularQueuePtr[SqPtr](SqPtr.StoreQueueSize)
+class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
+  p => p(XSCoreParamsKey).StoreQueueSize
+){
+  override def cloneType = (new SqPtr).asInstanceOf[this.type]
+}
 
-object SqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): SqPtr = {
+object SqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): SqPtr = {
     val ptr = Wire(new SqPtr)
     ptr.flag := f
     ptr.value := v
@@ -21,7 +25,7 @@ object SqPtr extends HasXSParameter {
   }
 }
 
-class SqEnqIO extends XSBundle {
+class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
@@ -30,7 +34,7 @@ class SqEnqIO extends XSBundle {
 }
 
 // Store Queue
-class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))

@@ -1,11 +1,11 @@
 package xiangshan.backend.exu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util._
-import xiangshan.backend.exu.Exu.fmacExeUnitCfg
+import xiangshan._
 import xiangshan.backend.fu.fpu._
 
-class FmacExeUnit extends Exu(fmacExeUnitCfg)
+class FmacExeUnit(implicit p: Parameters) extends Exu(FmacExeUnitCfg)
 {
   val frm = IO(Input(UInt(3.W)))
 

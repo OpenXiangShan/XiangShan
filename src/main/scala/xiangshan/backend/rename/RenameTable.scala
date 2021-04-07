@@ -1,15 +1,16 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 
-class RatReadPort extends XSBundle {
+class RatReadPort(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(5.W))
   val rdata = Output(UInt(PhyRegIdxWidth.W))
 }
 
-class RatWritePort extends XSBundle {
+class RatWritePort(implicit p: Parameters) extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(5.W))
   val wdata = Input(UInt(PhyRegIdxWidth.W))
@@ -31,7 +32,7 @@ object hartIdRTFp extends (() => Int) {
   }
 }
 
-class RenameTable(float: Boolean) extends XSModule {
+class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val flush = Input(Bool())

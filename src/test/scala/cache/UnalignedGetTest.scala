@@ -27,18 +27,18 @@ import utils.MaskExpand
 import scala.util.Random
 
 // GetGenerator: a tilelink module that generate get of different addr and sizes
-class GetGeneratorReq extends XSBundle
+class GetGeneratorReq(implicit p: Parameters) extends XSBundle
 {
   val address  = Output(UInt(PAddrBits.W))
   val size  = Output(UInt(8.W))
 }
 
-class GetGeneratorResp extends XSBundle
+class GetGeneratorResp(implicit p: Parameters) extends XSBundle
 {
   val data  = Output(UInt((64 * 8).W))
 }
 
-class GetGeneratorIO extends XSBundle
+class GetGeneratorIO(implicit p: Parameters) extends XSBundle
 {
   val req  = DecoupledIO(new GetGeneratorReq)
   val resp = Flipped(DecoupledIO(new GetGeneratorResp))
@@ -394,8 +394,6 @@ class UnalignedGetTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 }
 
 class UnalignedGetTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,

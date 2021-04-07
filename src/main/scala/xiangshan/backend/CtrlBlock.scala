@@ -1,5 +1,6 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -8,13 +9,11 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.exu.Exu.exuConfigs
-import xiangshan.backend.ftq.{Ftq, FtqRead, GetPcByFtq}
-import xiangshan.backend.regfile.RfReadPort
+import xiangshan.backend.ftq.{Ftq, FtqRead, HasFtqHelper}
 import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
-class CtrlToIntBlockIO extends XSBundle {
+class CtrlToIntBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   val jumpPc = Output(UInt(VAddrBits.W))
@@ -25,7 +24,7 @@ class CtrlToIntBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class CtrlToFpBlockIO extends XSBundle {
+class CtrlToFpBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   // fp block uses port 0~11
@@ -34,7 +33,7 @@ class CtrlToFpBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class CtrlToLsBlockIO extends XSBundle {
+class CtrlToLsBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
   val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
@@ -42,7 +41,8 @@ class CtrlToLsBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
+class RedirectGenerator(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper with WaitTableParameters with HasFtqHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
@@ -126,7 +126,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
     s1_redirect_bits_reg.ftqOffset,
     0.U(instOffsetBits.W)
   )
-  val real_pc = GetPcByFtq(ftqRead.ftqPC, s1_redirect_bits_reg.ftqOffset,
+  val real_pc = GetPcByFtq(
+    ftqRead.ftqPC, s1_redirect_bits_reg.ftqOffset,
     ftqRead.lastPacketPC.valid,
     ftqRead.lastPacketPC.bits
   )
@@ -176,7 +177,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
 }
 
-class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
+class CtrlBlock(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper with HasFtqHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)

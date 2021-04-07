@@ -1,5 +1,6 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
@@ -102,7 +103,7 @@ trait HasExceptionNO {
     partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
 }
 
-class FpuCsrIO extends XSBundle {
+class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
@@ -110,7 +111,7 @@ class FpuCsrIO extends XSBundle {
 }
 
 
-class PerfCounterIO extends XSBundle {
+class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -140,7 +141,7 @@ class PerfCounterIO extends XSBundle {
   }
 }
 
-class CSRFileIO extends XSBundle {
+class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val hartId = Input(UInt(64.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
@@ -163,7 +164,7 @@ class CSRFileIO extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
 }
 
-class CSR extends FunctionUnit with HasCSRConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 {
   val csrio = IO(new CSRFileIO)
   val difftestIO = IO(new Bundle() {

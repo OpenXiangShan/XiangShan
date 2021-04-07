@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -14,7 +15,7 @@ trait BimParams extends HasXSParameter {
 }
 
 @chiselName
-class BIM extends BasePredictor with BimParams {
+class BIM(implicit p: Parameters) extends BasePredictor with BimParams {
   class BIMResp extends Resp {
     val ctrs = Vec(PredictWidth, UInt(2.W))
   }
@@ -23,7 +24,7 @@ class BIM extends BasePredictor with BimParams {
   }
   class BIMFromOthers extends FromOthers {}
 
-  class BIMIO extends DefaultBasePredictorIO {
+  class BIMIO(implicit p: Parameters) extends DefaultBasePredictorIO {
     val resp = Output(new BIMResp)
     val meta = Output(new BIMMeta)
   }

@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -36,16 +37,16 @@ trait HasSbufferConst extends HasXSParameter {
   val WordOffsetWidth: Int = PAddrBits - WordsWidth
 }
 
-class SbufferBundle extends XSBundle with HasSbufferConst
+class SbufferBundle(implicit p: Parameters) extends XSBundle with HasSbufferConst
 
-class DataWriteReq extends SbufferBundle {
+class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   val idx = UInt(SbufferIndexWidth.W)
   val mask = UInt((DataBits/8).W)
   val data = UInt(DataBits.W)
   val wordOffset = UInt(WordOffsetWidth.W)
 }
 
-class SbufferData extends XSModule with HasSbufferConst {
+class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle(){
     val writeReq = Vec(StorePipelineWidth, Flipped(ValidIO(new DataWriteReq)))
     val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
@@ -68,7 +69,7 @@ class SbufferData extends XSModule with HasSbufferConst {
   io.dataOut := data
 }
 
-class NewSbuffer extends XSModule with HasSbufferConst {
+class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO

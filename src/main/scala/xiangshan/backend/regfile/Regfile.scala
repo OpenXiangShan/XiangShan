@@ -1,5 +1,6 @@
 package xiangshan.backend.regfile
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -20,14 +21,14 @@ object hartIdRFFp extends (() => Int) {
   }
 }
 
-class RfReadPort(len: Int) extends XSBundle {
+class RfReadPort(len: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Output(UInt(len.W))
   override def cloneType: RfReadPort.this.type =
     new RfReadPort(len).asInstanceOf[this.type]
 }
 
-class RfWritePort(len: Int) extends XSBundle {
+class RfWritePort(len: Int)(implicit p: Parameters) extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(PhyRegIdxWidth.W))
   val data = Input(UInt(len.W))
@@ -41,7 +42,7 @@ class Regfile
   numWirtePorts: Int,
   hasZero: Boolean,
   len: Int
-) extends XSModule {
+)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len))
     val writePorts = Vec(numWirtePorts, new RfWritePort(len))

@@ -9,7 +9,8 @@ import top.HaveAXI4MemPort
 import xiangshan.HasXSParameter
 import utils.MaskExpand
 
-class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
+class RAMHelper(memByte: BigInt) extends BlackBox {
+  val DataBits = 64
   val io = IO(new Bundle {
     val clk   = Input(Clock())
     val en    = Input(Bool())

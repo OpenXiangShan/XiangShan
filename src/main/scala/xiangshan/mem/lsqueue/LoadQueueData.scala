@@ -1,16 +1,16 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
-class LQDataEntry extends XSBundle {
+class LQDataEntry(implicit p: Parameters) extends XSBundle {
   // val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
@@ -20,7 +20,7 @@ class LQDataEntry extends XSBundle {
 
 // Data module define
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
-class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
+class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
@@ -66,7 +66,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModu
   }
 }
 
-class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule {
+class MaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt(8.W)))
@@ -152,7 +152,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule 
 //   }
 // }
 
-class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters {
+class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     // data io
     // read
@@ -237,7 +237,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int) extends XSMod
   }
 }
 
-class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val wb = new Bundle() {
       val wen = Vec(wbNumWrite, Input(Bool()))

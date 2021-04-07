@@ -1,9 +1,10 @@
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.{FPUCtrlSignals, XSModule}
-import xiangshan.backend.fu.{FuConfig, FunctionUnit, HasPipelineReg}
+import xiangshan.backend.fu.{FunctionUnit, HasPipelineReg}
 
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
@@ -11,7 +12,7 @@ trait HasUIntToSIntHelper {
   }
 }
 
-abstract class FPUDataModule extends XSModule {
+abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Input(new Bundle() {
       val src = Vec(3, UInt(65.W))
@@ -28,7 +29,7 @@ abstract class FPUDataModule extends XSModule {
   val fflags = io.out.fflags
 }
 
-abstract class FPUSubModule extends FunctionUnit(len = 65)
+abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit(len = 65)
   with HasUIntToSIntHelper
 {
   val rm = IO(Input(UInt(3.W)))
@@ -43,6 +44,6 @@ abstract class FPUSubModule extends FunctionUnit(len = 65)
   }
 }
 
-abstract class FPUPipelineModule
+abstract class FPUPipelineModule(implicit p: Parameters)
   extends FPUSubModule
   with HasPipelineReg

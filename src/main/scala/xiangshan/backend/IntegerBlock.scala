@@ -1,16 +1,16 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{XSPerfAccumulate}
+import utils.XSPerfAccumulate
 import xiangshan._
-import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
+import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer}
 import xiangshan.backend.regfile.Regfile
 
-class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
+class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
   val fast = Vec(numFast, Flipped(ValidIO(new ExuOutput))) //one cycle later than fastUops
   val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
@@ -19,7 +19,7 @@ class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
 
 }
 
-class IntBlockToCtrlIO extends XSBundle {
+class IntBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   // write back regfile signals after arbiter
   // used to update busytable and roq state
   val wbRegs = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
@@ -84,7 +84,7 @@ class IntegerBlock
   memFastWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper {
+)(implicit p: Parameters) extends XSModule with HasExeBlockHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
@@ -161,14 +161,14 @@ class IntegerBlock
 
     val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(a => (a.config, a.io.out.bits.data))
     val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data)) ++
-      (if (cfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
+      (if (cfg == AluExeUnitCfg && EnableLoadFastWakeUp) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
     val fastPortsCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
     val slowPorts = (inBlockListenPorts ++ slowWakeUpIn.zip(io.wakeUpIn.slow)).map(a => (a._1, decoupledIOToValidIO(a._2)))
     val extraListenPortsCnt = slowPorts.length
 
-    val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
+    val feedback = (cfg == LdExeUnitCfg) || (cfg == StExeUnitCfg)
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
@@ -190,7 +190,7 @@ class IntegerBlock
     val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
     rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
     if (cfg.intSrcCnt > 1) rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg == Exu.jumpExeUnitCfg) {
+    if (cfg == JumpExeUnitCfg) {
       rs.io.jumpPc := io.fromCtrlBlock.jumpPc
       rs.io.jalr_target := io.fromCtrlBlock.jalr_target
     }
@@ -217,7 +217,7 @@ class IntegerBlock
       raw
     })
     rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops ++
-      (if (rs.exuCfg == Exu.aluExeUnitCfg && EnableLoadFastWakeUp) io.memFastWakeUp.fastUops else Seq())
+      (if (rs.exuCfg == AluExeUnitCfg && EnableLoadFastWakeUp) io.memFastWakeUp.fastUops else Seq())
   }
 
   io.wakeUpOut.fastUops <> reservationStations.filter(

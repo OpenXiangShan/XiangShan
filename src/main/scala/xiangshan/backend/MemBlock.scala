@@ -7,7 +7,6 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.L1CacheErrorInfo
 import xiangshan._
-import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import xiangshan.backend.exu._
 import xiangshan.cache._
@@ -16,17 +15,17 @@ import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
 
-class LsBlockToCtrlIO extends XSBundle {
+class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
 }
 
-class IntBlockToMemBlockIO extends XSBundle {
+class IntBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readIntRf = Vec(NRMemReadPorts, new RfReadPort(XLEN))
 }
 
-class FpBlockToMemBlockIO extends XSBundle {
+class FpBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort(XLEN + 1))
 }
 
@@ -153,17 +152,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
       .map(a => (a._1, a._2.bits.data)) ++
-      (if (cfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
+      (if (cfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
 
     val fastPortsCnt = fastDatas.length
 
     val slowPorts = (
-      (loadExuConfigs.zip(if(cfg == Exu.stExeUnitCfg) wakeUpFp else exeWbReqs)) ++
+      (loadExuConfigs.zip(if(cfg == StExeUnitCfg) wakeUpFp else exeWbReqs)) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map{
-          case (Exu.jumpExeUnitCfg, _) if cfg == Exu.stExeUnitCfg =>
-            (Exu.jumpExeUnitCfg, io.intWakeUpFp.head)
+          case (JumpExeUnitCfg, _) if cfg == StExeUnitCfg =>
+            (JumpExeUnitCfg, io.intWakeUpFp.head)
           case (config, value) => (config, value)
         }
     ).map(a => (a._1, decoupledIOToValidIO(a._2)))
@@ -210,7 +209,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
       .map(_._2) ++
-      (if (rs.exuCfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
+      (if (rs.exuCfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
