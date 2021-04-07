@@ -83,7 +83,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   )))
 
   private val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
@@ -106,7 +107,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   )).node
 
   // L3 to memory network
