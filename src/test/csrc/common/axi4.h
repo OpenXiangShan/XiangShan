@@ -80,7 +80,7 @@ struct axi_channel {
 // dut helper for AXI
 
 // NOTE: change this when migrating between different hardware designs
-#define DUT_AXI(name) auto_axi_mem_out_##name
+#define DUT_AXI(name) io_memAXI_0_##name
 
 #define axi_aw_copy_from_dut_ptr(dut_ptr, aw)             \
   do {                                                    \

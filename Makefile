@@ -6,7 +6,7 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
-SIMTOP = top.TestMain
+SIMTOP = top.SimTop
 IMAGE ?= temp
 
 # co-simulation with DRAMsim3
@@ -49,7 +49,7 @@ build/top.zip: $(TOP_V)
 
 verilog: $(TOP_V)
 
-SIM_TOP   = XSSimTop
+SIM_TOP   = SimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
@@ -63,7 +63,6 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
-	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 	date -R
 

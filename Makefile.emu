@@ -1,4 +1,4 @@
-EMU_TOP      = XSSimSoC
+EMU_TOP      = SimTop
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc/verilator)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp") $(SIM_CXXFILES) $(DIFFTEST_CXXFILES)

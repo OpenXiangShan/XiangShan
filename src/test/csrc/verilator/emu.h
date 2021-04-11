@@ -3,7 +3,7 @@
 
 #include "common.h"
 #include "snapshot.h"
-#include "VXSSimSoC.h"
+#include "VSimTop.h"
 #include <verilated_vcd_c.h>	// Trace file format header
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
@@ -37,7 +37,7 @@ struct EmuArgs {
 
 class Emulator {
 private:
-  VXSSimSoC *dut_ptr;
+  VSimTop *dut_ptr;
   VerilatedVcdC* tfp;
   bool enable_waveform;
 #ifdef VM_SAVABLE

@@ -866,7 +866,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform && !env.DualCore) {
+  if (!env.FPGAPlatform) {
     ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
   }
 

@@ -83,7 +83,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
 
 Emulator::Emulator(int argc, const char *argv[]):
-  dut_ptr(new VXSSimSoC),
+  dut_ptr(new VSimTop),
   cycles(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);

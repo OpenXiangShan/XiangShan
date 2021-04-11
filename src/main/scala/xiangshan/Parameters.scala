@@ -117,7 +117,7 @@ case class DebugOptions
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
-  DualCore: Boolean = false
+  UseDRAMSim: Boolean = false
 )
 
 trait HasXSParameter {
