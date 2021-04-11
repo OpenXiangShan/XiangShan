@@ -3,7 +3,7 @@ package system
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import xiangshan.{DebugOptionsKey, DifftestBundle, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
+import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
 
 case object SoCParamsKey extends Field[SoCParameters]

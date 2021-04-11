@@ -3,7 +3,6 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.ExcitingUtils._
 import utils._
 import freechips.rocketchip.tilelink._
 

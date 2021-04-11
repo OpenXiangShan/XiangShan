@@ -6,8 +6,7 @@ import xiangshan._
 import utils._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Config
+import chipsalliance.rocketchip.config._
 import device.{AXI4Plic, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -20,7 +19,7 @@ import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParamete
 import xiangshan.cache.prefetch.L2Prefetcher
 
 
-class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
+class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore())
   private val l2prefetcher = LazyModule(new L2Prefetcher())
@@ -40,7 +39,8 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
     InclusiveCacheMicroParameters(
       memCycles = 25,
       writeBytes = 32
-    )
+    ),
+    fpga = debugOpts.FPGAPlatform
   ))
   val uncache = TLXbar()
 
@@ -77,7 +77,7 @@ class XSCoreWithL2()(implicit p: config.Parameters) extends LazyModule
   }
 }
 
-abstract class BaseXSSoc()(implicit p: config.Parameters) extends LazyModule with HasSoCParameter {
+abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
@@ -183,10 +183,10 @@ trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
 
 }
 
-class XSTop()(implicit p: config.Parameters) extends XSTopWithoutDMA
+class XSTop()(implicit p: Parameters) extends XSTopWithoutDMA
   with HaveSlaveAXI4Port
 
-class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
+class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
 {
@@ -215,7 +215,7 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
     new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
   beu.node := peripheralXbar
 
-  class BeuSinkNode()(implicit p: config.Parameters) extends LazyModule {
+  class BeuSinkNode()(implicit p: Parameters) extends LazyModule {
     val intSinkNode = IntSinkNode(IntSinkPortSimple())
     lazy val module = new LazyModuleImp(this){
       val interrupt = IO(Output(Bool()))
@@ -246,7 +246,8 @@ class XSTopWithoutDMA()(implicit p: config.Parameters) extends BaseXSSoc()
     InclusiveCacheMicroParameters(
       memCycles = 25,
       writeBytes = 32
-    )
+    ),
+    fpga = debugOpts.FPGAPlatform
   ))
 
   bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar

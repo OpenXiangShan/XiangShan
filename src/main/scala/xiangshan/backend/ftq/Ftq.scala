@@ -14,7 +14,6 @@ class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   override def cloneType = (new FtqPtr).asInstanceOf[this.type]
 }
 
-
 object FtqPtr {
   def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
     val ptr = Wire(new FtqPtr)

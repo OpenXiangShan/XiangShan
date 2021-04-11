@@ -1,7 +1,6 @@
 package xiangshan.backend.fu.util
 
 import chisel3._
-import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
 import utils._
 import xiangshan._

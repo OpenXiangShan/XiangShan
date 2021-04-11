@@ -6,7 +6,6 @@ import chisel3.util._
 import device._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 
 abstract class ICacheMissQueueModule(implicit p: Parameters) extends XSModule
   with HasICacheParameters 

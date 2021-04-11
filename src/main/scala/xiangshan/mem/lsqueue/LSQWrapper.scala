@@ -59,15 +59,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
   })
-  val difftestIO = IO(new Bundle() {
-    val fromSQ = new Bundle() {
-      val storeCommit = Output(UInt(2.W))
-      val storeAddr   = Output(Vec(2, UInt(64.W)))
-      val storeData   = Output(Vec(2, UInt(64.W)))
-      val storeMask   = Output(Vec(2, UInt(8.W)))
-    }
-  })
-  difftestIO <> DontCare
 
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
@@ -122,10 +113,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
 
   storeQueue.io.sqempty <> io.sqempty
-
-  if (!env.FPGAPlatform) {
-    difftestIO.fromSQ <> storeQueue.difftestIO
-  }
 
   io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 

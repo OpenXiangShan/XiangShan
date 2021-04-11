@@ -1,6 +1,7 @@
-#include "common.h"
 #include <sys/time.h>
 #include <SDL2/SDL.h>
+
+#include "device.h"
 
 void send_key(uint8_t, bool);
 void init_sdl(void);
@@ -15,7 +16,7 @@ void init_device(void) {
   init_sdl();
   init_uart();
   init_sd();
-  init_flash();
+  // init_flash();
   gettimeofday(&boot, NULL);
 }
 

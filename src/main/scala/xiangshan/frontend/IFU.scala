@@ -3,13 +3,11 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
-import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 import system.L1CacheErrorInfo
@@ -398,6 +396,9 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
   val ftqEnqBuf_valid = RegInit(false.B)
   val ftqLeftOne = WireInit(false.B) // TODO: to be replaced
   ftqEnqBuf_ready := io.toFtq.ready && !(io.ftqLeftOne && ftqEnqBuf_valid)
+  println(io.ftqEnqPtr)
+  val x = io.ftqEnqPtr + 1.U
+  println(x)
   if4_ftqEnqPtr := Mux(ftqEnqBuf_valid, io.ftqEnqPtr+1.U, io.ftqEnqPtr)
   when (io.redirect.valid)  { ftqEnqBuf_valid := false.B }
   .elsewhen (if4_fire)      { ftqEnqBuf_valid := true.B }
