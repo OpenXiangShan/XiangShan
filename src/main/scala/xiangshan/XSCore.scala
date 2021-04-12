@@ -60,12 +60,12 @@ case class XSCoreParameters
   BtbWays: Int = 2,
 
   EnableL1plusPrefetcher: Boolean = true,
-  IBufSize: Int = 48,
+  IBufSize: Int = 128,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
-  FtqSize: Int = 64,
+  FtqSize: Int = 128,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
