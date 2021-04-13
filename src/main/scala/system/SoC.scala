@@ -65,35 +65,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // CPU Cores
   private val xs_core = Seq.fill(NumCores)(LazyModule(new XSCore()))
 
-  // L1 to L2 network
-  // -------------------------------------------------
-  private val l2_xbar = Seq.fill(NumCores)(TLXbar())
-
-  private val l2cache = Seq.fill(NumCores)(LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 2,
-      ways = L2NWays,
-      sets = L2NSets,
-      blockBytes = L2BlockSize,
-      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      replacement = "plru",
-      cacheName = s"L2",
-      uncachedGet = true,
-      enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
-    ),
-    InclusiveCacheMicroParameters(
-      writeBytes = 32
-    ),
-    fpga = env.FPGAPlatform
-  )))
-
-  private val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
+  private val l2prefetcher = LazyModule(new L2Prefetcher())
 
   // L2 to L3 network
   // -------------------------------------------------
   private val l3_xbar = TLXbar()
 
-  private val l3_node = LazyModule(new InclusiveCache(
+  private val l3_cache = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 3,
       ways = L3NWays,
@@ -109,7 +87,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       writeBytes = 32
     ),
     fpga = env.FPGAPlatform
-  )).node
+  ))
 
   // L3 to memory network
   // -------------------------------------------------
@@ -124,16 +102,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // connections
   // -------------------------------------------------
   for (i <- 0 until NumCores) {
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := l2prefetcher(i).clientNode
-
+    l3_xbar := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
+    l3_xbar := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
+    l3_xbar := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).frontend.instrUncache.clientNode
-    l2cache(i).node := DataDontCareNode(a = true, b = true) := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
-    l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
   }
+  l3_xbar := TLBuffer() := DebugIdentityNode() := l2prefetcher.clientNode
 
   // DMA should not go to MMIO
   val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
@@ -159,7 +134,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     tlError_xbar
 
   val bankedNode =
-    BankBinder(L3NBanks, L3BlockSize) :*= l3_node :*= TLBuffer() :*= DebugIdentityNode() :*= l3_xbar
+    BankBinder(L3NBanks, L3BlockSize) :*= l3_cache.node :*= TLBuffer() :*= DebugIdentityNode() :*= l3_xbar
 
   for(i <- 0 until L3NBanks) {
     mem(i) :=
@@ -226,9 +201,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       beu.module.io.errors.dcache(i) := RegNext(xs_core(i).module.io.dcache_error)
       // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
       xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
-      l2prefetcher(i).module.io.enable := RegNext(xs_core(i).module.io.l2_pf_enable)
-      l2prefetcher(i).module.io.in <> l2cache(i).module.io
+      l2prefetcher.module.io.enable := RegNext(xs_core(i).module.io.l2_pf_enable)
     }
+    l2prefetcher.module.io.in <> l3_cache.module.io
 
     difftestIO0 <> xs_core(0).module.difftestIO
     difftestIO1 <> DontCare
