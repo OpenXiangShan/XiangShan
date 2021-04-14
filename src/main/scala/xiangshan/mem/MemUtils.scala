@@ -48,6 +48,12 @@ class LsPipelineBundle extends XSBundle {
   val forwardData = Vec(8, UInt(8.W))
 }
 
+class StoreDataBundle extends XSBundle {
+  val mask = UInt(8.W)
+  val data = UInt((XLEN+1).W)
+  val uop = new MicroOp
+}
+
 class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))

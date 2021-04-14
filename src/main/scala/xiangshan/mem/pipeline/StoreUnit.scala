@@ -38,7 +38,9 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
 
-  io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  // Now data use its own io
+  // io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.data := io.in.bits.src2 // FIXME: remove data from pipeline
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx

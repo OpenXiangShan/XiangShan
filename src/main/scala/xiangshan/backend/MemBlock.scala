@@ -286,6 +286,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
+    // rs.io.storeData <> lsq.io.storeDataIn(i)
+    // TODO: fix me
+    val sdata = Wire(Valid(new StoreDataBundle))
+    sdata.valid := stu.io.lsq.valid
+    sdata.bits.mask := stu.io.lsq.bits.mask
+    sdata.bits.data := stu.io.lsq.bits.data
+    sdata.bits.uop := stu.io.lsq.bits.uop
+    lsq.io.storeDataIn(i) := sdata
+
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
