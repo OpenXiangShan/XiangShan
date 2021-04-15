@@ -234,7 +234,7 @@ trait HasXSParameter {
 
   // L3 configurations
   val L2BusWidth = 256
-  val L3Size = 1 * 1024 * 1024 // 4MB
+  val L3Size = 1 * 1024 * 1024 // 1MB
   val L3BlockSize = 64
   val L3NBanks = 1
   val L3NWays = 8
