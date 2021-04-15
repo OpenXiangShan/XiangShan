@@ -237,7 +237,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   io.ptw         <> dtlb.io.ptw
-  dtlb.io.sfence <> io.sfence
+  dtlb.io.sfence <> RegNext(io.sfence)
   dtlb.io.csr    <> RegNext(io.tlbCsr)
   if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
@@ -333,11 +333,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  io.fenceToSbuffer.sbIsEmpty := sbuffer.io.flush.empty
+  io.fenceToSbuffer.sbIsEmpty := RegNext(sbuffer.io.flush.empty)
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
-  sbuffer.io.flush.valid := fenceFlush || atomicsFlush
+  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline

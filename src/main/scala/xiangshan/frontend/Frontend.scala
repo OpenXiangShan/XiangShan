@@ -49,7 +49,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // from backend
   ifu.io.redirect <> io.backend.redirect_cfiUpdate
-  ifu.io.bp_ctrl <> io.csrCtrl.bp_ctrl
+  ifu.io.bp_ctrl <> RegNext(io.csrCtrl.bp_ctrl)
   ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
   ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
   ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
@@ -66,15 +66,15 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.icacheMemGrant.ready := Mux(grantClientId === icacheMissQueueId.U,
     ifu.io.icacheMemGrant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
-  ifu.io.fencei := io.fencei
+  ifu.io.fencei := RegNext(io.fencei)
 
 
   instrUncache.io.req <> ifu.io.mmio_acquire
   instrUncache.io.resp <> ifu.io.mmio_grant
   instrUncache.io.flush <> ifu.io.mmio_flush
   // to tlb
-  ifu.io.sfence := io.sfence
-  ifu.io.tlbCsr := io.tlbCsr
+  ifu.io.sfence := RegNext(io.sfence)
+  ifu.io.tlbCsr := RegNext(io.tlbCsr)
   // from icache and l1plus prefetcher
   io.l1plusFlush := ifu.io.l1plusFlush
   l1plusPrefetcher.io.in.valid := ifu.io.prefetchTrainReq.valid
