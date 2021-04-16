@@ -39,7 +39,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq)) // write commited store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val uncache = new DCacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
@@ -260,10 +260,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
     val forwardMask = io.forward(i).sqIdxMask
-    val addrValidVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
-    for (j <- 0 until StoreQueueSize) {
-      addrValidVec(j) := addrvalid(j) && allocated(j) // all addrvalid terms need to be checked
-    }
+    // all addrvalid terms need to be checked
+    val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && allocated(i))))
+    val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => datavalid(i))))
     val needForward1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask) & addrValidVec.asUInt
     val needForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W)) & addrValidVec.asUInt
 
@@ -277,8 +276,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
 
+    // Forward result will be generated 1 cycle later
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
     io.forward(i).forwardData := dataModule.io.forwardData(i)
+
+    // If addr match, data not ready, mark it as dataInvalid
+    io.forward(i).dataInvalid := RegNext((addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt).orR)
   }
 
   /**

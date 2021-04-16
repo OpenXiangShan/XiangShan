@@ -389,6 +389,7 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     val selectedInflightMask = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
     val selectedInflightData = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
 
+    forward.dataInvalid := false.B // data in store line merge buffer is always ready
     for (j <- 0 until DataBytes) {
       forward.forwardMask(j) := false.B
       forward.forwardData(j) := DontCare
