@@ -120,6 +120,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
   val exeUnits = loadUnits ++ storeUnits
 
+  loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
+  storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
+
   val atomicsUnit = Module(new AtomicsUnit)
 
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
