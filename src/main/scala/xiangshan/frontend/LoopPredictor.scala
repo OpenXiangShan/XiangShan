@@ -11,7 +11,7 @@ trait LTBParams extends HasXSParameter with HasBPUParameter {
   //  +-----------+---------+--------------+-----------+
   //  |    tag    |   idx   |    4 bits    | 0 (1 bit) |
   //  +-----------+---------+--------------+-----------+
-  val tagLen = 24
+  val tagLen = 23
   val nRows = 16
   val idxLen = log2Up(nRows)
   val cntBits = 10
@@ -90,13 +90,13 @@ class LTBColumn extends LTBModule {
   val updateValid = RegNext(io.update.valid)
   val updatePC = RegNext(io.update.bits.pc)
   val updateIdx = ltbAddr.getBankIdx(io.update.bits.pc)
-  val updateTag = RegNext(ltbAddr.getTag(io.update.bits.pc)(tagLen - 1, 0))
+  val updateTag = RegNext(ltbAddr.getTag(io.update.bits.pc))
   // val update = RegNext(io.update.bits)
 
   val redirectValid = RegNext(io.redirect.valid)
   val redirectPC = RegNext(io.redirect.bits.pc)
   val redirectIdx = ltbAddr.getBankIdx(io.redirect.bits.pc)
-  val redirectTag = RegNext(ltbAddr.getTag(io.redirect.bits.pc)(tagLen - 1, 0))
+  val redirectTag = RegNext(ltbAddr.getTag(io.redirect.bits.pc))
   val redirect = RegNext(io.redirect.bits)
   val isReplay = RegNext(io.redirect.bits.isReplay)
 
@@ -110,7 +110,7 @@ class LTBColumn extends LTBModule {
   val if4_pc = RegEnable(if3_pc, io.if3_fire)
 
   val if3_entry = WireInit(ltb.read(if3_idx))
-  val if4_entry = Reg(new LoopEntry)
+  val if4_entry = RegInit(0.U.asTypeOf(new LoopEntry))
 
   val valid = RegInit(false.B)
   when (io.if4_fire) { valid := false.B }
