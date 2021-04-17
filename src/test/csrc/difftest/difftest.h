@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
   uint32_t interrupt = 0;
   uint32_t exception = 0;
+  uint64_t exceptionPC = 0;
 } arch_event_t;
 
 typedef struct {
@@ -228,6 +229,7 @@ private:
   int check_timeout();
   void do_first_instr_commit();
   void do_interrupt();
+  void do_exception();
   void do_instr_commit(int index);
   int do_store_check();
   int do_golden_memory_check();

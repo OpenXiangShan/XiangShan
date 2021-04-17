@@ -42,7 +42,8 @@ extern "C" int v_difftest_step();
   DIFFTEST_DPIC_FUNC_DECL(ArchEvent) (   \
     DPIC_ARG_BYTE coreid,                \
     DPIC_ARG_INT  intrNo,                \
-    DPIC_ARG_INT  cause                  \
+    DPIC_ARG_INT  cause,                 \
+    DPIC_ARG_LONG exceptionPC            \
   )
 
 // v_difftest_InstrCommit

@@ -26,6 +26,7 @@ INTERFACE_ARCH_EVENT {
   auto packet = difftest[coreid]->get_arch_event();
   packet->interrupt = intrNo;
   packet->exception = cause;
+  packet->exceptionPC = exceptionPC;
 }
 
 INTERFACE_INSTR_COMMIT {

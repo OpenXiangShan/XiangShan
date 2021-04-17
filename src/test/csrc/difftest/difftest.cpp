@@ -95,6 +95,10 @@ int Difftest::step() {
   // interrupt has the highest priority
   if (dut.event.interrupt) {
     do_interrupt();
+  } else if(dut.event.exception) {
+    // TODO: update NEMU, for now, NEMU will update pc when exception happen
+    dut.csr.this_pc = dut.event.exceptionPC;
+    do_exception();
   } else {
     // TODO: is this else necessary?
     while (num_commit < DIFFTEST_COMMIT_WIDTH && dut.commit[num_commit].valid) {
@@ -138,6 +142,20 @@ void Difftest::do_interrupt() {
   progress = true;
 }
 
+void Difftest::do_exception() {
+  if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
+    printf("exception cause: %ld\n", dut.event.exception);
+    struct DisambiguationState ds;
+    ds.exceptionNo = dut.event.exception;
+    ds.mtval = dut.csr.mtval;
+    ds.stval = dut.csr.stval;
+    proxy->disambiguate_exec(&ds);
+  } else {
+    proxy->exec(1);
+  }
+  progress = true;
+}
+
 void Difftest::do_instr_commit(int i) {
   progress = true;
   last_commit = ticks;
@@ -167,16 +185,16 @@ void Difftest::do_instr_commit(int i) {
   }
 
   // single step exec
+  proxy->exec(1);
   // IPF, LPF, SPF
-  if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
-    // printf("exception cause: %ld\n", dut.event.exception);
-    struct DisambiguationState ds;
-    ds.exceptionNo = dut.event.exception;
-    ds.mtval = dut.csr.mtval;
-    ds.stval = dut.csr.stval;
-    proxy->disambiguate_exec(&ds);
-  } else {
-    proxy->exec(1);
+  // if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
+  // printf("exception cause: %ld\n", dut.event.exception);
+  // struct DisambiguationState ds;
+  // ds.exceptionNo = dut.event.exception;
+  // ds.mtval = dut.csr.mtval;
+  // ds.stval = dut.csr.stval;
+  // proxy->disambiguate_exec(&ds);
+  // } else {
 
     // // Load instruction
     // if (dut.load[i].fuType == 0xC || dut.load[i].fuType == 0xF) {
@@ -233,7 +251,7 @@ void Difftest::do_instr_commit(int i) {
     //     }
       // }
     // }
-  }
+  // }
 }
 
 void Difftest::do_first_instr_commit() {
