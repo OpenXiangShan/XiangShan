@@ -123,38 +123,53 @@ typedef struct {
   ptw_event_t      ptw;
 } difftest_core_state_t;
 
+enum retire_inst_type {
+  RET_NORMAL=0,
+  RET_INT,
+  RET_EXC
+};
+
 class DiffState {
 public:
   DiffState(int history_length = 32);
-  void commit(uint64_t pc, uint64_t count) {
-    pc_retire_queue [retire_pointer] = pc;
-    retire_cnt_queue[retire_pointer] = count;
-    retire_pointer = (retire_pointer + 1) % DEBUG_RETIRE_TRACE_SIZE;
+  void record_group(uint64_t pc, uint64_t count) {
+    retire_group_pc_queue [retire_group_pointer] = pc;
+    retire_group_cnt_queue[retire_group_pointer] = count;
+    retire_group_pointer = (retire_group_pointer + 1) % DEBUG_GROUP_TRACE_SIZE;
   };
-  void writeback(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint8_t data) {
-    pc_wb_queue   [wb_pointer] = pc;
-    inst_wb_queue [wb_pointer] = inst;
-    wen_wb_queue  [wb_pointer] = en;
-    wdst_wb_queue [wb_pointer] = dest;
-    wdata_wb_queue[wb_pointer] = data;
-    wb_pointer = (wb_pointer + 1) % DEBUG_WB_TRACE_SIZE;
+  void record_inst(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint8_t data) {
+    retire_inst_pc_queue   [retire_inst_pointer] = pc;
+    retire_inst_inst_queue [retire_inst_pointer] = inst;
+    retire_inst_wen_queue  [retire_inst_pointer] = en;
+    retire_inst_wdst_queue [retire_inst_pointer] = dest;
+    retire_inst_wdata_queue[retire_inst_pointer] = data;
+    retire_inst_type_queue[retire_inst_pointer] = RET_NORMAL;
+    retire_inst_pointer = (retire_inst_pointer + 1) % DEBUG_INST_TRACE_SIZE;
+  };
+  void record_abnormal_inst(uint64_t pc, uint32_t inst, uint32_t abnormal_type, uint64_t cause) {
+    retire_inst_pc_queue   [retire_inst_pointer] = pc;
+    retire_inst_inst_queue [retire_inst_pointer] = inst;
+    retire_inst_wdata_queue[retire_inst_pointer] = cause; // write cause to data queue to save space
+    retire_inst_type_queue[retire_inst_pointer] = abnormal_type;
+    retire_inst_pointer = (retire_inst_pointer + 1) % DEBUG_INST_TRACE_SIZE;
   };
   void display();
 
 private:
-  const static size_t DEBUG_RETIRE_TRACE_SIZE = 16;
-  const static size_t DEBUG_WB_TRACE_SIZE = 16;
+  const static size_t DEBUG_GROUP_TRACE_SIZE = 16;
+  const static size_t DEBUG_INST_TRACE_SIZE = 16;
 
-  int retire_pointer = 0;
-  uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+  int retire_group_pointer = 0;
+  uint64_t retire_group_pc_queue[DEBUG_GROUP_TRACE_SIZE] = {0};
+  uint32_t retire_group_cnt_queue[DEBUG_GROUP_TRACE_SIZE] = {0};
 
-  int wb_pointer = 0;
-  uint64_t pc_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint32_t inst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint64_t wen_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint32_t wdst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
-  uint64_t wdata_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  int retire_inst_pointer = 0;
+  uint64_t retire_inst_pc_queue[DEBUG_INST_TRACE_SIZE] = {0};
+  uint32_t retire_inst_inst_queue[DEBUG_INST_TRACE_SIZE] = {0};
+  uint64_t retire_inst_wen_queue[DEBUG_INST_TRACE_SIZE] = {0};
+  uint32_t retire_inst_wdst_queue[DEBUG_INST_TRACE_SIZE] = {0};
+  uint64_t retire_inst_wdata_queue[DEBUG_INST_TRACE_SIZE] = {0};
+  uint32_t retire_inst_type_queue[DEBUG_INST_TRACE_SIZE] = {0};
 };
 
 class Difftest {

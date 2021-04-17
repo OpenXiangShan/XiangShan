@@ -66,7 +66,7 @@ Difftest::Difftest(int coreid) : id(coreid) {
   state = new DiffState();
   clear_step();
   // nemu_this_pc = 0x80000000;
-  // pc_retire_pointer = DEBUG_RETIRE_TRACE_SIZE - 1;
+  // pc_retire_pointer = DEBUG_GROUP_TRACE_SIZE - 1;
 }
 
 int Difftest::step() {
@@ -95,7 +95,9 @@ int Difftest::step() {
   // interrupt has the highest priority
   if (dut.event.interrupt) {
     do_interrupt();
-  } else if(dut.event.exception) {
+  } else if(dut.event.exception) { 
+    // We ignored instrAddrMisaligned exception (0) for better debug interface
+    // XiangShan should always support RVC, so instrAddrMisaligned will never happen
     // TODO: update NEMU, for now, NEMU will update pc when exception happen
     dut.csr.this_pc = dut.event.exceptionPC;
     do_exception();
@@ -115,7 +117,7 @@ int Difftest::step() {
   proxy->get_regs(ref_regs_ptr);
 
   if (num_commit > 0) {
-    state->commit(dut.commit[0].pc, num_commit);
+    state->record_group(dut.commit[0].pc, num_commit);
   }
 
   // swap nemu_pc and ref.csr.this_pc for comparison
@@ -138,13 +140,15 @@ int Difftest::step() {
 }
 
 void Difftest::do_interrupt() {
+  state->record_abnormal_inst(dut.commit[0].pc, dut.commit[0].inst, RET_INT, dut.event.interrupt);
   proxy->raise_intr(dut.event.interrupt);
   progress = true;
 }
 
 void Difftest::do_exception() {
+  state->record_abnormal_inst(dut.event.exceptionPC, dut.commit[0].inst, RET_EXC, dut.event.exception);
   if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
-    printf("exception cause: %ld\n", dut.event.exception);
+    printf("exception cause: %d\n", dut.event.exception);
     struct DisambiguationState ds;
     ds.exceptionNo = dut.event.exception;
     ds.mtval = dut.csr.mtval;
@@ -161,7 +165,7 @@ void Difftest::do_instr_commit(int i) {
   last_commit = ticks;
 
   // store the writeback info to debug array
-  state->writeback(dut.commit[i].pc, dut.commit[i].inst, dut.commit[i].wen, dut.commit[i].wdest, dut.commit[i].wdata);
+  state->record_inst(dut.commit[i].pc, dut.commit[i].inst, dut.commit[i].wen, dut.commit[i].wdest, dut.commit[i].wdata);
 
   // sync lr/sc reg status
   if (dut.commit[i].scFailed) {
@@ -433,18 +437,32 @@ void Difftest::display() {
 }
 
 void DiffState::display() {
-  printf("\n==============Retire Trace==============\n");
-  for (int j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++) {
-    printf("retire trace [%x]: pc %010lx cmtcnt %d %s\n",
-        j, pc_retire_queue[j], retire_cnt_queue[j],
-        (j==retire_pointer)?"<--":"");
+  printf("\n============== Commit Group Trace ==============\n");
+  for (int j = 0; j < DEBUG_GROUP_TRACE_SIZE; j++) {
+    printf("commit group [%x]: pc %010lx cmtcnt %d %s\n",
+        j, retire_group_pc_queue[j], retire_group_cnt_queue[j],
+        (j==((retire_group_pointer-1)%DEBUG_INST_TRACE_SIZE))?"<--":"");
   }
-  printf("\n==============  WB Trace  ==============\n");
-  for (int j = 0; j < DEBUG_WB_TRACE_SIZE; j++) {
-    printf("wb trace [%x]: pc %010lx inst %08x wen %x dst %08x data %016lx %s\n",
-        j, pc_wb_queue[j], inst_wb_queue[j], wen_wb_queue[j]!=0, wdst_wb_queue[j],
-        wdata_wb_queue[j],
-        (j==((wb_pointer-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
+  printf("\n============== Commit Instr Trace ==============\n");
+  for (int j = 0; j < DEBUG_INST_TRACE_SIZE; j++) {
+    switch(retire_inst_type_queue[j]){
+      case RET_NORMAL:
+        printf("commit inst [%x]: pc %010lx inst %08x wen %x dst %08x data %016lx %s\n",
+            j, retire_inst_pc_queue[j], retire_inst_inst_queue[j], retire_inst_wen_queue[j]!=0, retire_inst_wdst_queue[j],
+            retire_inst_wdata_queue[j],
+            (j==((retire_inst_pointer-1)%DEBUG_INST_TRACE_SIZE))?"<--":"");
+        break;
+      case RET_EXC:
+        printf("exception   [%x]: pc %010lx inst %08x cause %016lx %s\n",
+            j, retire_inst_pc_queue[j], retire_inst_inst_queue[j], retire_inst_wdata_queue[j],
+            (j==((retire_inst_pointer-1)%DEBUG_INST_TRACE_SIZE))?"<--":"");
+        break;
+      case RET_INT:
+        printf("interrupt   [%x]: pc %010lx inst %08x cause %016lx %s\n",
+            j, retire_inst_pc_queue[j], retire_inst_inst_queue[j], retire_inst_wdata_queue[j],
+            (j==((retire_inst_pointer-1)%DEBUG_INST_TRACE_SIZE))?"<--":"");
+        break;
+    }
   }
   fflush(stdout);
 }
