@@ -307,7 +307,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
-  val sfence = io.sfence
+  val sfence = RegNext(io.sfence)
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
@@ -815,7 +815,7 @@ class PTWRepeater extends XSModule with HasXSParameter with HasPtwConst {
     val sfence = Input(new SfenceBundle)
   })
 
-  val (tlb, ptw, sfence) = (io.tlb, io.ptw, io.sfence.valid)
+  val (tlb, ptw, sfence) = (io.tlb, io.ptw, RegNext(io.sfence.valid))
   val req = RegEnable(tlb.req.bits, tlb.req.fire())
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
   val haveOne = BoolStopWatch(tlb.req.fire(), tlb.resp.fire() || sfence)
