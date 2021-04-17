@@ -34,16 +34,18 @@
 `DIFFTEST_DPIC_FUNC_DECL(ArchEvent) (
   `DPIC_ARG_BYTE coreid,
   `DPIC_ARG_INT  intrNo,
-  `DPIC_ARG_INT  cause
+  `DPIC_ARG_INT  cause,
+  `DPIC_ARG_LONG exceptionPC
 );
 `DIFFTEST_MOD_DECL(ArchEvent) (
   input        clock,
   input [ 7:0] coreid,
   input [31:0] intrNO,
-  input [31:0] cause
+  input [31:0] cause,
+  input [63:0] exceptionPC
 );
   `DIFFTEST_MOD_DPIC_CALL_BEGIN(ArchEvent) (
-    coreid, intrNO, cause
+    coreid, intrNO, cause, exceptionPC
   ) `DIFFTEST_MOD_DPIC_CALL_END(ArchEvent)
 endmodule
 

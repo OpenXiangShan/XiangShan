@@ -873,6 +873,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     difftest.io.coreid := 0.U
     difftest.io.intrNO := RegNext(difftestIntrNO)
     difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
+    difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
   if (!env.FPGAPlatform) {

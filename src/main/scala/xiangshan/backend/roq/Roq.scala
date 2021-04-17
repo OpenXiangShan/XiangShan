@@ -882,7 +882,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       val exuOut = debug_exuDebug(ptr)
       val exuData = debug_exuData(ptr)
       difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
-      difftest.io.pc       := RegNext(uop.cf.pc)
+      difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
       difftest.io.instr    := RegNext(uop.cf.instr)
       difftest.io.skip     := RegNext(exuOut.isMMIO || exuOut.isPerfCnt)
       difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)

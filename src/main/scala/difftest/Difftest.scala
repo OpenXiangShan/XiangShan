@@ -27,6 +27,7 @@ abstract class DifftestBundle extends Bundle
 class DiffArchEventIO extends DifftestBundle {
   val intrNO = Input(UInt(32.W))
   val cause = Input(UInt(32.W))
+  val exceptionPC = Input(UInt(64.W))
 }
 
 class DiffInstrCommitIO extends DifftestBundle with DifftestWithIndex {
