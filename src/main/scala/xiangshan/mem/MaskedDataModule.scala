@@ -6,7 +6,9 @@ import xiangshan._
 import utils._
 import xiangshan.cache._
 
-class MaskedSyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, numMRead: Int = 0, numMWrite: Int = 0) extends XSModule with HasDCacheParameters {
+class MaskedSyncDataModuleTemplate[T <: Data](
+  gen: T, numEntries: Int, numRead: Int, numWrite: Int, numMRead: Int = 0, numMWrite: Int = 0
+) extends Module {
   val io = IO(new Bundle {
     // address indexed sync read
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))

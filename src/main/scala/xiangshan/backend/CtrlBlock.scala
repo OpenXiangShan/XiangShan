@@ -1,5 +1,6 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -8,13 +9,11 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion, WaitTableParameters}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.exu.Exu.exuConfigs
-import xiangshan.backend.ftq.{Ftq, FtqRead, GetPcByFtq}
-import xiangshan.backend.regfile.RfReadPort
+import xiangshan.backend.ftq.{Ftq, FtqRead, HasFtqHelper}
 import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
-class CtrlToIntBlockIO extends XSBundle {
+class CtrlToIntBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   val jumpPc = Output(UInt(VAddrBits.W))
@@ -23,18 +22,20 @@ class CtrlToIntBlockIO extends XSBundle {
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
+  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
-class CtrlToFpBlockIO extends XSBundle {
+class CtrlToFpBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
   // fp block uses port 0~11
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
   val flush = Output(Bool())
+  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
 }
 
-class CtrlToLsBlockIO extends XSBundle {
+class CtrlToLsBlockIO(implicit p: Parameters) extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqLsq = Flipped(new LsqEnqIO)
   val waitTableUpdate = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq))
@@ -42,7 +43,8 @@ class CtrlToLsBlockIO extends XSBundle {
   val flush = Output(Bool())
 }
 
-class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with WaitTableParameters {
+class RedirectGenerator(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper with WaitTableParameters with HasFtqHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
@@ -126,7 +128,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
     s1_redirect_bits_reg.ftqOffset,
     0.U(instOffsetBits.W)
   )
-  val real_pc = GetPcByFtq(ftqRead.ftqPC, s1_redirect_bits_reg.ftqOffset,
+  val real_pc = GetPcByFtq(
+    ftqRead.ftqPC, s1_redirect_bits_reg.ftqOffset,
     ftqRead.lastPacketPC.valid,
     ftqRead.lastPacketPC.bits
   )
@@ -176,7 +179,8 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
 }
 
-class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
+class CtrlBlock(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper with HasFtqHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)
@@ -207,28 +211,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
     })
   })
 
-  val difftestIO = IO(new Bundle() {
-    val fromRoq = new Bundle() {
-      val commit = Output(UInt(32.W))
-      val thisPC = Output(UInt(XLEN.W))
-      val thisINST = Output(UInt(32.W))
-      val skip = Output(UInt(32.W))
-      val wen = Output(UInt(32.W))
-      val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-      val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
-      val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
-      val isRVC = Output(UInt(32.W))
-      val scFailed = Output(Bool())
-      val lpaddr = Output(Vec(CommitWidth, UInt(64.W)))
-      val ltype = Output(Vec(CommitWidth, UInt(32.W)))
-      val lfu = Output(Vec(CommitWidth, UInt(4.W)))
-    }
-  })
-  difftestIO <> DontCare
-
   val ftq = Module(new Ftq)
-  val trapIO = IO(new TrapIO())
-  trapIO <> DontCare
 
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
@@ -377,15 +360,12 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   // TODO: is 'backendRedirect' necesscary?
   io.toIntBlock.redirect <> backendRedirect
   io.toIntBlock.flush <> flushReg
+  io.toIntBlock.debug_rat <> rename.io.debug_int_rat
   io.toFpBlock.redirect <> backendRedirect
   io.toFpBlock.flush <> flushReg
+  io.toFpBlock.debug_rat <> rename.io.debug_fp_rat
   io.toLsBlock.redirect <> backendRedirect
   io.toLsBlock.flush <> flushReg
-
-  if (!env.FPGAPlatform) {
-    difftestIO.fromRoq <> roq.difftestIO
-    trapIO <> roq.trapIO
-  }
 
   dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
   dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex

@@ -1,14 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.ExcitingUtils._
 import utils._
+import freechips.rocketchip.tilelink._
 
-import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleA, TLBundleD, TLBundleE, TLPermissions, TLArbiter, ClientMetadata}
-import utils.{HasTLDump, XSDebug, BoolStopWatch, OneHot, XSPerfAccumulate, XSPerfHistogram, TransactionLatencyCounter}
-
-class MissReq extends DCacheBundle
+class MissReq(implicit p: Parameters) extends DCacheBundle
 {
   val source = UInt(sourceTypeWidth.W)
   val cmd    = UInt(M_SZ.W)
@@ -35,7 +33,7 @@ class MissReq extends DCacheBundle
 }
 
 // One miss entry deals with one missed block
-class MissEntry(edge: TLEdgeOut) extends DCacheModule
+class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -366,7 +364,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 }
 
 
-class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
+class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val req    = Flipped(DecoupledIO(new MissReq))

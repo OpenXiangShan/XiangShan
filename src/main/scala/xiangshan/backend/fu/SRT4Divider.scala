@@ -1,5 +1,6 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
@@ -253,7 +254,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   io.out_valid := finished // state === s_finish
 }
 
-class SRT4Divider(len: Int) extends AbstractDivider(len) {
+class SRT4Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
 
   val newReq = io.in.fire()
 

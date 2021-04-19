@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -53,27 +54,27 @@ trait HasFoldedHistory {
   }
 }
 
-abstract class TageBundle extends XSBundle
+abstract class TageBundle(implicit p: Parameters) extends XSBundle
   with HasIFUConst with HasTageParameter
   with PredictorUtils
-abstract class TageModule extends XSModule
+abstract class TageModule(implicit p: Parameters) extends XSModule
   with HasIFUConst with HasTageParameter
   with PredictorUtils
   { val debug = true }
 
 
-class TageReq extends TageBundle {
+class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val mask = UInt(PredictWidth.W)
 }
 
-class TageResp extends TageBundle {
+class TageResp(implicit p: Parameters) extends TageBundle {
   val ctr = UInt(TageCtrBits.W)
   val u = UInt(2.W)
 }
 
-class TageUpdate extends TageBundle {
+class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   // update tag and ctr
@@ -86,7 +87,7 @@ class TageUpdate extends TageBundle {
   val u = Vec(TageBanks, UInt(2.W))
 }
 
-class FakeTageTable() extends TageModule {
+class FakeTageTable()(implicit p: Parameters) extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
@@ -96,7 +97,10 @@ class FakeTageTable() extends TageModule {
 
 }
 @chiselName
-class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int)
+class TageTable
+(
+  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int
+)(implicit p: Parameters)
   extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
@@ -322,7 +326,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
 }
 
-abstract class BaseTage extends BasePredictor with HasTageParameter {
+abstract class BaseTage(implicit p: Parameters) extends BasePredictor with HasTageParameter {
   class TAGEResp extends Resp {
     val takens = Vec(PredictWidth, Bool())
     val hits = Vec(PredictWidth, Bool())
@@ -342,13 +346,13 @@ abstract class BaseTage extends BasePredictor with HasTageParameter {
   override val io = IO(new TageIO)
 }
 
-class FakeTage extends BaseTage {
+class FakeTage(implicit p: Parameters) extends BaseTage {
   io.resp <> DontCare
   io.meta <> DontCare
 }
 
 @chiselName
-class Tage extends BaseTage {
+class Tage(implicit p: Parameters) extends BaseTage {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) =>
@@ -583,13 +587,4 @@ class Tage extends BaseTage {
 }
 
 
-class Tage_SC extends Tage with HasSC {}
-
-object TageTest extends App {
-  override def main(args: Array[String]): Unit = {
-    (new ChiselStage).execute(args, Seq(
-      ChiselGeneratorAnnotation(() => new Tage),
-      RunFirrtlTransformAnnotation(new RenameDesiredNames)
-    ))
-  }
-}
+class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}

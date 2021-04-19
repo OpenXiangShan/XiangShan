@@ -1,12 +1,12 @@
 package utils
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import top.Parameters
-import xiangshan.HasXSParameter
+import xiangshan.DebugOptionsKey
 
-object XSPerfAccumulate extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt) = {
-    val env = Parameters.get.envParameters
+object XSPerfAccumulate {
+  def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -26,11 +26,13 @@ object XSPerfAccumulate extends HasXSParameter {
   }
 }
 
-object XSPerfHistogram extends HasXSParameter {
+object XSPerfHistogram {
   // instead of simply accumulating counters
   // this function draws a histogram
-  def apply(perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int) = {
-    val env = Parameters.get.envParameters
+  def apply
+  (perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)
+  (implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -70,9 +72,9 @@ object XSPerfHistogram extends HasXSParameter {
     }
   }
 }
-object XSPerfMax extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt, enable: Bool) = {
-    val env = Parameters.get.envParameters
+object XSPerfMax {
+  def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -92,8 +94,8 @@ object XSPerfMax extends HasXSParameter {
   }
 }
 
-object QueuePerf extends HasXSParameter {
-  def apply(size: Int, utilization: UInt, full: UInt) = {
+object QueuePerf {
+  def apply(size: Int, utilization: UInt, full: UInt)(implicit p: Parameters) = {
     XSPerfAccumulate("utilization", utilization)
     XSPerfHistogram("util", utilization, true.B, 0, size, 1)
     XSPerfAccumulate("full", full)

@@ -1,36 +1,30 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
 import xiangshan._
 import utils._
-import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 
-class IbufPtr extends CircularQueuePtr[IbufPtr](IbufPtr.IBufSize) { }
-
-object IbufPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): IbufPtr = {
-    val ptr = Wire(new IbufPtr)
-    ptr.flag := f
-    ptr.value := v
-    ptr
-  }
+class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
+  p => p(XSCoreParamsKey).IBufSize
+){
+  override def cloneType = (new IbufPtr).asInstanceOf[this.type]
 }
 
-class IBufferIO extends XSBundle {
+class IBufferIO(implicit p: Parameters) extends XSBundle {
   val flush = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchPacket))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val full = Output(Bool())
 }
 
-class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
+class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new IBufferIO)
 
-  class IBufEntry extends XSBundle with WaitTableParameters {
+  class IBufEntry(implicit p: Parameters) extends XSBundle with WaitTableParameters {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
     val foldpc = UInt(WaitTableAddrWidth.W)

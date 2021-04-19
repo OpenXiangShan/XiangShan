@@ -1,10 +1,10 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.ALUOpType
 import utils._
 import chisel3.experimental.chiselName
 
@@ -18,13 +18,13 @@ trait BTBParams extends HasXSParameter with HasIFUConst {
   val extendedNRows = nRows
 }
 
-class BtbDataEntry extends XSBundle with BTBParams {
+class BtbDataEntry(implicit p: Parameters) extends XSBundle with BTBParams {
   val lower = UInt(lowerBitsSize.W)
   val extended = Bool()
 }
 
 object BtbDataEntry {
-  def apply(lower: UInt, extended: Bool) = {
+  def apply(lower: UInt, extended: Bool)(implicit p: Parameters) = {
     val e = Wire(new BtbDataEntry)
     e.lower := lower
     e.extended := extended
@@ -32,7 +32,7 @@ object BtbDataEntry {
   }
 }
 
-class BtbMetaEntry() extends XSBundle with BTBParams {
+class BtbMetaEntry()(implicit p: Parameters) extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
   val tag = UInt((VAddrBits - log2Ceil(nRows) - log2Ceil(PredictWidth) - instOffsetBits).W)
@@ -41,7 +41,7 @@ class BtbMetaEntry() extends XSBundle with BTBParams {
 }
 
 object BtbMetaEntry {
-  def apply(tag: UInt, isBr: UInt, isRVC: Bool) = {
+  def apply(tag: UInt, isBr: UInt, isRVC: Bool)(implicit p: Parameters) = {
     val e = Wire(new BtbMetaEntry)
     e.valid := true.B
     e.tag := tag
@@ -51,7 +51,7 @@ object BtbMetaEntry {
   }
 }
 
-class BTB extends BasePredictor with BTBParams{
+class BTB(implicit p: Parameters) extends BasePredictor with BTBParams{
   class BTBResp extends Resp {
     val targets = Vec(PredictWidth, UInt(VAddrBits.W))
     val hits = Vec(PredictWidth, Bool())

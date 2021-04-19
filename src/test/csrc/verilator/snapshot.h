@@ -2,7 +2,7 @@
 #define SNAPSHOT_H
 
 #ifdef VM_SAVABLE
-#include "VXSSimSoC.h"
+#include "VSimTop.h"
 #include <verilated_save.h>
 #include <sys/mman.h>
 #include "compress.h"
