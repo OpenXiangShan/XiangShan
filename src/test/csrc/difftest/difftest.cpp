@@ -91,7 +91,7 @@ int Difftest::step() {
     return 0;
   }
 
-  int num_commit = 0;
+  num_commit = 0; // reset num_commit this cycle to 0
   // interrupt has the highest priority
   if (dut.event.interrupt) {
     do_interrupt();

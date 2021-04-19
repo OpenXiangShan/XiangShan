@@ -178,6 +178,7 @@ public:
   // Its backend should be cross-platform (NEMU, Spike, ...)
   // Initialize difftest environments
   Difftest(int coreid);
+  uint32_t num_commit = 0; // # of commits if made progress
   // Trigger a difftest checking procdure
   int step();
   inline bool get_trap_valid() {

@@ -222,6 +222,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     // cycle limitation
     if (!max_cycle) {
       trapCode = STATE_LIMIT_EXCEEDED;
+      break;
     }
     // instruction limitation
     for (int i = 0; i < EMU_CORES; i++) {
@@ -264,6 +265,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     max_cycle --;
     dut_ptr->io_perfInfo_clean = 0;
     dut_ptr->io_perfInfo_dump = 0;
+
+    // Naive instr cnt, dual core is not supported
+    for (int i = 0; i < EMU_CORES; i++) {
+      // update instr_cnt
+      uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
+      core_max_instr[i] -= commit_count;
+    }
 
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
