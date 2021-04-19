@@ -53,6 +53,12 @@ class Dispatch extends XSModule {
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // LFST state sync
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
+    val ctrlInfo = new Bundle {
+      val roqFull   = Output(Bool())
+      val intdqFull = Output(Bool())
+      val fpdqFull  = Output(Bool())
+      val lsdqFull  = Output(Bool())
+    }
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -121,4 +127,9 @@ class Dispatch extends XSModule {
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 //  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+
+  io.ctrlInfo <> DontCare
+  io.ctrlInfo.intdqFull := intDq.io.dqFull
+  io.ctrlInfo.fpdqFull := fpDq.io.dqFull
+  io.ctrlInfo.lsdqFull := lsDq.io.dqFull
 }

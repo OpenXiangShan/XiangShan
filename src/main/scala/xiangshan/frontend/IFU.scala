@@ -396,6 +396,9 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
   val ftqEnqBuf_valid = RegInit(false.B)
   val ftqLeftOne = WireInit(false.B) // TODO: to be replaced
   ftqEnqBuf_ready := io.toFtq.ready && !(io.ftqLeftOne && ftqEnqBuf_valid)
+  println(io.ftqEnqPtr)
+  val x = io.ftqEnqPtr + 1.U
+  println(x)
   if4_ftqEnqPtr := Mux(ftqEnqBuf_valid, io.ftqEnqPtr+1.U, io.ftqEnqPtr)
   when (io.redirect.valid)  { ftqEnqBuf_valid := false.B }
   .elsewhen (if4_fire)      { ftqEnqBuf_valid := true.B }

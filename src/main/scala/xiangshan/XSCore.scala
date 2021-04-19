@@ -60,14 +60,14 @@ case class XSCoreParameters
   BtbWays: Int = 2,
 
   EnableL1plusPrefetcher: Boolean = true,
-  IBufSize: Int = 32,
+  IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
-  FtqSize: Int = 48,
+  FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IssQueSize: Int = 12,
+  IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
@@ -190,6 +190,7 @@ trait HasXSParameter {
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
   val NumPerfCounters = coreParams.NumPerfCounters
   val NrExtIntr = coreParams.NrExtIntr
+  val NrPlicIntr = NrExtIntr + 1 // ExtIntr + ECC
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -294,15 +295,9 @@ trait HasXSParameter {
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
 }
 
-trait HasXSLog {
-  this: RawModule =>
-  implicit val moduleName: String = this.name
-}
-
 abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters {
   def io: Record
 }
@@ -452,6 +447,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare
   integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  integerBlock.io.csrio.perf.bpuInfo <> ctrlBlock.io.perfInfo.bpuInfo
+  integerBlock.io.csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
+  integerBlock.io.csrio.perf.memInfo <> memBlock.io.memInfo
+  integerBlock.io.csrio.perf.frontendInfo <> frontend.io.frontendInfo
+
   integerBlock.io.csrio.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.fpu.isIllegal := false.B
   integerBlock.io.csrio.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
@@ -505,4 +505,26 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     difftestIO.fromXSCore.r := debugArchReg
   }
 
+  val l1plus_reset_gen = Module(new ResetGen(1))
+  l1pluscache.reset := l1plus_reset_gen.io.out
+
+  val ptw_reset_gen = Module(new ResetGen(2))
+  ptw.reset := ptw_reset_gen.io.out
+  itlbRepeater.reset := ptw_reset_gen.io.out
+  dtlbRepeater.reset := ptw_reset_gen.io.out
+
+  val memBlock_reset_gen = Module(new ResetGen(3))
+  memBlock.reset := memBlock_reset_gen.io.out
+
+  val intBlock_reset_gen = Module(new ResetGen(4))
+  integerBlock.reset := intBlock_reset_gen.io.out
+
+  val fpBlock_reset_gen = Module(new ResetGen(5))
+  floatBlock.reset := fpBlock_reset_gen.io.out
+
+  val ctrlBlock_reset_gen = Module(new ResetGen(6))
+  ctrlBlock.reset := ctrlBlock_reset_gen.io.out
+
+  val frontend_reset_gen = Module(new ResetGen(7))
+  frontend.reset := frontend_reset_gen.io.out
 }

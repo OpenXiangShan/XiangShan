@@ -14,7 +14,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
 
 
-class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
+class LqPtr extends CircularQueuePtr[LqPtr](LqPtr.LoadQueueSize) { }
 
 object LqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): LqPtr = {
@@ -78,6 +78,7 @@ class LoadQueue extends XSModule
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
+    val lqFull = Output(Bool())
   })
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
@@ -657,6 +658,7 @@ class LoadQueue extends XSModule
 
   // perf counter
   QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
+  io.lqFull := !allowEnqueue
   XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire())

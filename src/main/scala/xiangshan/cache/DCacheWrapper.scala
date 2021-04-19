@@ -108,6 +108,7 @@ class DCacheToLsuIO extends DCacheBundle {
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = new L1CacheErrorInfo
+  val mshrFull = Output(Bool())
 }
 
 
@@ -127,7 +128,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasXSLog {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
 
   val io = IO(new DCacheIO)
 
@@ -347,4 +348,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // performance counters
   val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
   XSPerfAccumulate("num_loads", num_loads)
+
+  io.mshrFull := missQueue.io.full
 }

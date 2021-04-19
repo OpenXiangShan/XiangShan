@@ -73,7 +73,7 @@ object PLICConsts
 }
 
 class PlicIO extends Bundle with xiangshan.HasXSParameter {
-  val intrVec = Input(UInt(NrExtIntr.W))
+  val intrVec = Input(UInt(NrPlicIntr.W))
   val meip = Output(Vec(top.Parameters.get.socParameters.NumCores, Bool()))
 }
 
@@ -86,17 +86,17 @@ class AXI4Plic
 {
   override lazy val module = new AXI4SlaveModuleImp[PlicIO](this) {
     val NumCores = top.Parameters.get.socParameters.NumCores
-    require(NrExtIntr <= PLICConsts.maxDevices)
+    require(NrPlicIntr <= PLICConsts.maxDevices)
     require(NumCores <= PLICConsts.maxHarts)
     val addressSpaceSize = 0x4000000
     val addressBits = log2Up(addressSpaceSize)
 
     def getOffset(addr: UInt) = addr(addressBits - 1, 0)
 
-    val priority = List.fill(NrExtIntr)(Reg(UInt(32.W)))
+    val priority = List.fill(NrPlicIntr)(Reg(UInt(32.W)))
     val priorityMap = priority.zipWithIndex.map { case (r, intr) => RegMap((intr + 1) * 4, r) }.toMap
 
-    val nrIntrWord = (NrExtIntr + 31) / 32 // roundup
+    val nrIntrWord = (NrPlicIntr + 31) / 32 // roundup
     // pending bits are updated in the unit of bit by PLIC,
     // so define it as vectors of bits, instead of UInt(32.W)
     val pending = List.fill(nrIntrWord)(RegInit(0.U.asTypeOf(Vec(32, Bool()))))
@@ -114,7 +114,7 @@ class AXI4Plic
       case (r, hart) => RegMap(0x200000 + hart * 0x1000, r)
     }.toMap
 
-    val inHandle = RegInit(0.U.asTypeOf(Vec(NrExtIntr + 1, Bool())))
+    val inHandle = RegInit(0.U.asTypeOf(Vec(NrPlicIntr + 1, Bool())))
 
     def completionFn(wdata: UInt) = {
       inHandle(wdata(31, 0)) := false.B
@@ -132,7 +132,9 @@ class AXI4Plic
       }
     }.toMap
 
-    io.extra.get.intrVec.asBools.zipWithIndex.map { case (intr, i) => {
+    val intrVecReg = Wire(UInt(NrPlicIntr.W))
+    intrVecReg := RegNext(RegNext(RegNext(io.extra.get.intrVec)))
+    intrVecReg.asBools.zipWithIndex.map { case (intr, i) => {
       val id = i + 1
       when(intr) {
         pending(id / 32)(id % 32) := true.B

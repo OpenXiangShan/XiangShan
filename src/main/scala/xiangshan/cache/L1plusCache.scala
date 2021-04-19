@@ -3,7 +3,6 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
-import xiangshan.{HasXSLog}
 import system.L1CacheErrorInfo
 
 import chipsalliance.rocketchip.config.Parameters
@@ -146,9 +145,9 @@ class L1plusCacheDataArray extends L1plusCacheModule {
 
   for (w <- 0 until nWays) {
     val array = List.fill(bankNum)(Module(new SRAMTemplate(UInt((bankRows * rowBits).W), set=nSets, way=1,
-      shouldReset=false, holdRead=false, singlePort=singlePort)))
+      shouldReset=false, holdRead=true, singlePort=singlePort)))
     val codeArray = Module(new SRAMTemplate(UInt((blockRows *codeWidth).W), set=nSets, way=1,
-      shouldReset=false, holdRead=false, singlePort=singlePort))
+      shouldReset=false, holdRead=true, singlePort=singlePort))
     // data write
     for (b <- 0 until bankNum){
       val respData = VecInit(io.write.bits.data.map{row => row(rowBits - 1, 0)}).asUInt
@@ -244,7 +243,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
-    shouldReset=false, holdRead=false, singlePort=true))
+    shouldReset=false, holdRead=true, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
     for (i <- 0 until nSets) {
@@ -367,7 +366,7 @@ class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCac
 }
 
 
-class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1plusCacheParameters with HasXSLog {
+class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1plusCacheParameters {
 
   val io = IO(Flipped(new L1plusCacheIO))
 
@@ -408,7 +407,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
 
   // response
   io.resp           <> resp_arb.io.out
-  io.error          <> RegNext(pipe.io.error)
+  io.error          <> RegNext(RegNext(pipe.io.error))
   resp_arb.io.in(0) <> pipe.io.resp
   resp_arb.io.in(1) <> missQueue.io.resp
 

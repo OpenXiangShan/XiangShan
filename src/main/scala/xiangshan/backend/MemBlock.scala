@@ -48,7 +48,6 @@ class MemBlock(
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters
   with HasExeBlockHelper
   with HasFpLoadHelper
@@ -85,6 +84,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val error = new L1CacheErrorInfo
+    val memInfo = new Bundle {
+      val sqFull = Output(Bool())
+      val lqFull = Output(Bool())
+      val dcacheMSHRFull = Output(Bool())
+    }
   })
   val difftestIO = IO(new Bundle() {
     val fromSbuffer = new Bundle() {
@@ -113,7 +117,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  io.error <> dcache.io.error
+  io.error <> RegNext(RegNext(dcache.io.error))
 
   val redirect = io.fromCtrlBlock.redirect
 
@@ -234,7 +238,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   io.ptw         <> dtlb.io.ptw
-  dtlb.io.sfence <> io.sfence
+  dtlb.io.sfence <> RegNext(io.sfence)
   dtlb.io.csr    <> RegNext(io.tlbCsr)
   if (!env.FPGAPlatform) {
     difftestIO.fromSbuffer <> sbuffer.difftestIO
@@ -337,11 +341,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  io.fenceToSbuffer.sbIsEmpty := sbuffer.io.flush.empty
+  io.fenceToSbuffer.sbIsEmpty := RegNext(sbuffer.io.flush.empty)
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
-  sbuffer.io.flush.valid := fenceFlush || atomicsFlush
+  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
@@ -411,5 +415,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
+
+  io.memInfo.sqFull := RegNext(lsq.io.sqFull)
+  io.memInfo.lqFull := RegNext(lsq.io.lqFull)
+  io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 }
 

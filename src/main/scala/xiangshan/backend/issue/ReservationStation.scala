@@ -242,6 +242,8 @@ class ReservationStationSelect
     val isFirstIssue = if (feedback) Output(Bool()) else null
   })
 
+  class IQPtr extends CircularQueuePtr[IQPtr](iqSize)
+
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until iqSize).map(f))
 
   /* queue in ctrl part
@@ -258,7 +260,7 @@ class ReservationStationSelect
    * s_replay   : replay after some particular cycle
    */
   val stateQueue    = RegInit(VecInit(Seq.fill(iqSize)(s_idle)))
-  val tailPtr       = RegInit(0.U.asTypeOf(new CircularQueuePtr(iqSize)))
+  val tailPtr       = RegInit(0.U.asTypeOf(new IQPtr))
   val indexQueue    = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val validQueue    = VecInit(stateQueue.map(_ === s_valid))
   val emptyQueue    = VecInit(stateQueue.map(_ === s_idle))
@@ -374,9 +376,9 @@ class ReservationStationSelect
   val enqueue = io.enq.fire()
   val tailInc = tailPtr + 1.U
   val tailDec = tailPtr - 1.U
-  val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new CircularQueuePtr(iqSize)), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
+  val nextTailPtr = Mux(io.flush, 0.U.asTypeOf(new IQPtr), Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc)))
   tailPtr := nextTailPtr
-  assert(!(tailPtr === 0.U.asTypeOf(new CircularQueuePtr(iqSize))) || Cat(stateQueue.map(_ === s_idle)).andR)
+  assert(!(tailPtr === 0.U.asTypeOf(new IQPtr)) || Cat(stateQueue.map(_ === s_idle)).andR)
 
   val enqPtr = Mux(tailPtr.flag, deqPtr, tailPtr.value)
   val enqIdx = indexQueue(enqPtr)

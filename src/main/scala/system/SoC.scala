@@ -8,7 +8,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLFuzzer, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
 import utils.{DataDontCareNode, DebugIdentityNode}
 import utils.XSInfo
-import xiangshan.{DifftestBundle, HasXSLog, HasXSParameter, XSBundle, XSCore}
+import xiangshan.{DifftestBundle, HasXSParameter, XSBundle, XSCore}
 import xiangshan.cache.prefetch._
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -78,11 +78,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
       replacement = "plru",
       cacheName = s"L2",
+      uncachedGet = true,
       enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   )))
 
   private val l2prefetcher = Seq.fill(NumCores)(LazyModule(new L2Prefetcher()))
@@ -100,11 +102,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       beatBytes = L2BusWidth / 8,
       replacement = "plru",
       cacheName = "L3",
+      uncachedGet = false,
       enablePerf = env.EnablePerfDebug && !env.FPGAPlatform
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 32
-    )
+    ),
+    fpga = env.FPGAPlatform
   )).node
 
   // L3 to memory network
