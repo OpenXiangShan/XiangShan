@@ -580,10 +580,12 @@ class ReservationStationCtrl
     val pdest = UInt(PhyRegIdxWidth.W)
     val rfWen = Bool()
     val fpWen = Bool()
+    val fuType = FuType()
     def apply(uop: MicroOp) = {
       this.pdest := uop.pdest
       this.rfWen := uop.ctrl.rfWen
       this.fpWen := uop.ctrl.fpWen
+      this.fuType := uop.ctrl.fuType
       this
     }
   }
@@ -616,7 +618,7 @@ class ReservationStationCtrl
       io.fastUopOut.bits  := fastSentUop
     } else {
       val bpQueue = Module(new BypassQueue(fixedDelay))
-      bpQueue.io.in.valid := selValid
+      bpQueue.io.in.valid := selValid && (if (exuCfg == Exu.mulDivExeUnitCfg) fastAsynUop.fuType === FuType.mul else true.B)
       bpQueue.io.in.bits  := fastSentUop
       bpQueue.io.in.bits.roqIdx := fastRoqIdx
       bpQueue.io.redirect := io.redirect

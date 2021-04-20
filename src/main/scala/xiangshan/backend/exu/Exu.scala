@@ -62,8 +62,9 @@ case class ExuConfig
       x
     }
   }
-  val hasCertainLatency = latency.latencyVal.nonEmpty
-  val hasUncertainlatency = latency.latencyVal.isEmpty
+  // NOTE: dirty code for MulDivExeUnit
+  val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
+  val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
@@ -195,7 +196,7 @@ object Exu {
 
   val aluExeUnitCfg = ExuConfig("AluExeUnit", Seq(aluCfg), 0, Int.MaxValue)
   val jumpExeUnitCfg = ExuConfig("JmpExeUnit", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val mulDivExeUnitCfg = ExuConfig("MulDivExeUnit", Seq(mulCfg, divCfg), 1, Int.MaxValue)
+  val mulDivExeUnitCfg = ExuConfig("MulDivExeUnit", Seq(mulCfg, divCfg), 0, Int.MaxValue)
   val fmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
   val fmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",

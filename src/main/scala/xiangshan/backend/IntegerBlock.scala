@@ -7,7 +7,7 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO}
+import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO, FunctionUnit}
 import xiangshan.backend.regfile.Regfile
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
@@ -153,7 +153,9 @@ class IntegerBlock
   val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
-    if (cfg.hasCertainLatency) {
+    if (cfg == Exu.mulDivExeUnitCfg) {// NOTE: dirty code, add mul to fast wake up, but leave div
+      certainLatency = FunctionUnit.mulCfg.latency.latencyVal.get
+    } else if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
     }
 
