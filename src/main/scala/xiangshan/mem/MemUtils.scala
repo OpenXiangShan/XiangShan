@@ -49,7 +49,6 @@ class LsPipelineBundle extends XSBundle {
 }
 
 class StoreDataBundle extends XSBundle {
-  val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
 }
