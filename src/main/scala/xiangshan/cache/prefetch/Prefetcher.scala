@@ -1,5 +1,6 @@
 package xiangshan.cache.prefetch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -7,13 +8,15 @@ import xiangshan.cache._
 import utils._
 
 trait HasPrefetchParameters extends HasXSParameter {
-  
+  val bopParams = p(BOPParamsKey)
+  val streamParams = p(StreamParamsKey)
 }
 
-abstract class PrefetchModule extends XSModule with HasPrefetchParameters
-abstract class PrefetchBundle extends XSBundle with HasPrefetchParameters
 
-class PrefetchReq extends PrefetchBundle {
+abstract class PrefetchModule(implicit p: Parameters) extends XSModule with HasPrefetchParameters
+abstract class PrefetchBundle(implicit p: Parameters) extends XSBundle with HasPrefetchParameters
+
+class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()
 
@@ -22,15 +25,15 @@ class PrefetchReq extends PrefetchBundle {
   }
 }
 
-class PrefetchResp extends PrefetchBundle {
+class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
   
 }
 
-class PrefetchFinish extends PrefetchBundle {
+class PrefetchFinish(implicit p: Parameters) extends PrefetchBundle {
   
 }
 
-class PrefetchTrain extends PrefetchBundle {
+class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()
   val miss = Bool() // TODO: delete this
@@ -39,19 +42,3 @@ class PrefetchTrain extends PrefetchBundle {
     p"addr=0x${Hexadecimal(addr)} w=${write} miss=${miss}"
   }
 }
-
-// class PrefetchIO extends PrefetchBundle {
-//   val train = Flipped(ValidIO(new PrefetchTrain))
-//   val req = DecoupledIO(new PrefetchReq)
-//   val resp = Flipped(DecoupledIO(new PrefetchResp))
-// }
-
-// class FakePrefetcher extends PrefetchModule {
-//   val io = IO(new PrefetchIO)
-
-//   io.req.valid := false.B
-//   io.req.bits := DontCare
-//   io.resp.ready := true.B
-
-//   assert(!io.resp.fire(), "FakePrefetcher should not receive resp")
-// }

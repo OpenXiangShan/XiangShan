@@ -1,14 +1,13 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
-import chisel3.ExcitingUtils._
 import xiangshan.backend.ftq.FtqPtr
 import xiangshan.backend.decode.WaitTableParameters
 import system.L1CacheErrorInfo
@@ -40,7 +39,7 @@ trait HasIFUConst extends HasXSParameter {
   val IFUDebug = true
 }
 
-class GlobalHistory extends XSBundle {
+class GlobalHistory(implicit p: Parameters) extends XSBundle {
   val predHist = UInt(HistoryLength.W)
   def update(sawNTBr: Bool, takenOnBr: Bool, hist: UInt = predHist): GlobalHistory = {
     val g = Wire(new GlobalHistory)
@@ -61,7 +60,7 @@ class GlobalHistory extends XSBundle {
 }
 
 
-class IFUIO extends XSBundle
+class IFUIO(implicit p: Parameters) extends XSBundle
 {
   // to ibuffer
   val fetchPacket = DecoupledIO(new FetchPacket)
@@ -92,7 +91,7 @@ class IFUIO extends XSBundle
   val mmio_flush = Output(Bool())
 }
 
-class PrevHalfInstr extends XSBundle {
+class PrevHalfInstr(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val npc = UInt(VAddrBits.W)
   val instr = UInt(16.W)
@@ -100,7 +99,7 @@ class PrevHalfInstr extends XSBundle {
 }
 
 @chiselName
-class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
+class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
@@ -397,9 +396,6 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val ftqEnqBuf_valid = RegInit(false.B)
   val ftqLeftOne = WireInit(false.B) // TODO: to be replaced
   ftqEnqBuf_ready := io.toFtq.ready && !(io.ftqLeftOne && ftqEnqBuf_valid)
-  println(io.ftqEnqPtr)
-  val x = io.ftqEnqPtr + 1.U
-  println(x)
   if4_ftqEnqPtr := Mux(ftqEnqBuf_valid, io.ftqEnqPtr+1.U, io.ftqEnqPtr)
   when (io.redirect.valid)  { ftqEnqBuf_valid := false.B }
   .elsewhen (if4_fire)      { ftqEnqBuf_valid := true.B }

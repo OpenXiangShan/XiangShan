@@ -25,7 +25,7 @@ import xstransforms.PrintModuleName
 
 import scala.util.Random
 
-class L2NonInclusiveGetTestTopIO extends Bundle {
+class L2NonInclusiveGetTestTopIO(implicit p: Parameters) extends Bundle {
   val l1plus = new L1plusCacheIO()
   val dcacheStore = new DCacheLineIO()
   val l2Flush = new DCacheWordIO
@@ -117,8 +117,6 @@ class L2NonInclusiveGetTest extends AnyFlatSpec with ChiselScalatestTester with 
   val FLUSH32_ADDR = L2_FLUSH_BASE_ADDR + 0x240
 
   val r = scala.util.Random
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,

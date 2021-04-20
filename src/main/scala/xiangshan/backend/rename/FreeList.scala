@@ -1,19 +1,17 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-trait HasFreeListConsts extends HasXSParameter {
-  def FL_SIZE: Int = NRPhyRegs-32
-  def PTR_WIDTH = log2Up(FL_SIZE)
-}
+class FreeListPtr(implicit val p: Parameters) extends CircularQueuePtr[FreeListPtr](
+  p => p(XSCoreParamsKey).NRPhyRegs - 32
+)
 
-class FreeListPtr extends CircularQueuePtr[FreeListPtr](FreeListPtr.FL_SIZE)
-
-object FreeListPtr extends HasFreeListConsts {
-  def apply(f: Bool, v:UInt): FreeListPtr = {
+object FreeListPtr {
+  def apply(f: Bool, v:UInt)(implicit p: Parameters): FreeListPtr = {
     val ptr = Wire(new FreeListPtr)
     ptr.flag := f
     ptr.value := v
@@ -21,7 +19,7 @@ object FreeListPtr extends HasFreeListConsts {
   }
 }
 
-class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrHelper{
+class FreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper{
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val flush = Input(Bool())
@@ -45,6 +43,8 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
     val deallocPregs = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
   })
+
+  val FL_SIZE = NRPhyRegs - 32
 
   // init: [32, 127]
   val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i+32).U(PhyRegIdxWidth.W))))

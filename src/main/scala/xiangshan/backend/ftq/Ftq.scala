@@ -1,5 +1,6 @@
 package xiangshan.backend.ftq
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate}
@@ -7,10 +8,14 @@ import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
 
-class FtqPtr extends CircularQueuePtr[FtqPtr](FtqPtr.FtqSize)
+class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
+  p => p(XSCoreParamsKey).FtqSize
+){
+  override def cloneType = (new FtqPtr).asInstanceOf[this.type]
+}
 
-object FtqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): FtqPtr = {
+object FtqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
     val ptr = Wire(new FtqPtr)
     ptr.flag := f
     ptr.value := v
@@ -18,8 +23,8 @@ object FtqPtr extends HasXSParameter {
   }
 }
 
-object GetPcByFtq extends HasXSParameter {
-  def apply(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
+trait HasFtqHelper { this: XSModule =>
+  def GetPcByFtq(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
     assert(ftqPC.getWidth == VAddrBits)
     assert(lastPacketPC.getWidth == VAddrBits)
     assert(ftqOffset.getWidth == log2Up(PredictWidth))
@@ -36,7 +41,7 @@ object GetPcByFtq extends HasXSParameter {
 }
 
 
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
     val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
@@ -59,7 +64,7 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
 
 }
 
-class Ftq_4R_SRAMEntry extends XSBundle {
+class Ftq_4R_SRAMEntry(implicit p: Parameters) extends XSBundle {
   val ftqPC = UInt(VAddrBits.W)
   val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
   val hist = new GlobalHistory
@@ -67,26 +72,26 @@ class Ftq_4R_SRAMEntry extends XSBundle {
 }
 
 // redirect and commit need read these infos
-class Ftq_2R_SRAMEntry extends XSBundle {
+class Ftq_2R_SRAMEntry(implicit p: Parameters) extends XSBundle {
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
   val predHist = new GlobalHistory
   val specCnt = Vec(PredictWidth, UInt(10.W))
 }
 
-class Ftq_1R_Commit_SRAMEntry extends XSBundle {
+class Ftq_1R_Commit_SRAMEntry(implicit p: Parameters) extends XSBundle {
   val metas = Vec(PredictWidth, new BpuMeta)
   val rvc_mask = Vec(PredictWidth, Bool())
 
   val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 }
 
-class FtqRead extends Bundle {
+class FtqRead(implicit val p: Parameters) extends Bundle {
   val ptr = Output(new FtqPtr)
   val entry = Input(new FtqEntry)
 }
 
-class Ftq extends XSModule with HasCircularQueuePtrHelper {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val enq = Flipped(DecoupledIO(new FtqEntry))
     val leftOne = Output(Bool())

@@ -1,19 +1,19 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import device._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 
-abstract class ICacheMissQueueModule extends XSModule
+abstract class ICacheMissQueueModule(implicit p: Parameters) extends XSModule
   with HasICacheParameters 
 
-abstract class ICacheMissQueueBundle extends XSBundle
+abstract class ICacheMissQueueBundle(implicit p: Parameters) extends XSBundle
   with HasICacheParameters
 
-class ICacheRefill extends ICacheMissQueueBundle
+class ICacheRefill(implicit p: Parameters) extends ICacheMissQueueBundle
 {
     val refill_idx = UInt(idxBits.W)
     val refill_data = UInt(blockBits.W)
@@ -26,7 +26,7 @@ class ICacheRefill extends ICacheMissQueueBundle
     }
 }
 
-class ICacheMetaWrite extends ICacheMissQueueBundle
+class ICacheMetaWrite(implicit p: Parameters) extends ICacheMissQueueBundle
 {
     val meta_write_idx = UInt(idxBits.W)
     val meta_write_tag = UInt(tagBits.W)
@@ -39,7 +39,7 @@ class ICacheMetaWrite extends ICacheMissQueueBundle
     }
 }
 
-class IcacheMissReq extends ICacheBundle
+class IcacheMissReq(implicit p: Parameters) extends ICacheBundle
 {
     val addr  = UInt(PAddrBits.W)
     val setIdx   = UInt(idxBits.W)
@@ -56,13 +56,13 @@ class IcacheMissReq extends ICacheBundle
     }
 }
 
-class IcacheMissResp extends ICacheBundle
+class IcacheMissResp(implicit p: Parameters) extends ICacheBundle
 {
     val data = UInt(blockBits.W)
     val clientID = UInt(2.W)
 }
 
-class IcacheMissEntry extends ICacheMissQueueModule
+class IcacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
@@ -176,7 +176,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
 }
 
-class IcacheMissQueue extends ICacheMissQueueModule 
+class IcacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
     val req = Flipped(DecoupledIO(new IcacheMissReq))

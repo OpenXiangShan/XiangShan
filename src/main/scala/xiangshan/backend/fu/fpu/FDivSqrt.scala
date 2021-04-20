@@ -1,11 +1,12 @@
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
 import hardfloat.{DivSqrtRecFNToRaw_small, DivSqrtRecFNToRaw_srt4, RoundAnyRawFNToRecFN}
 
-class FDivSqrtDataModule extends FPUDataModule {
+class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_valid, out_ready = IO(Input(Bool()))
   val in_ready, out_valid = IO(Output(Bool()))
   val kill_w = IO(Input(Bool()))
@@ -78,7 +79,7 @@ class FDivSqrtDataModule extends FPUDataModule {
 }
 
 
-class FDivSqrt extends FPUSubModule {
+class FDivSqrt(implicit p: Parameters) extends FPUSubModule {
 
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
   val kill_r = !io.in.ready && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)

@@ -70,23 +70,23 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
 }
 
-abstract class L1plusCacheModule extends L1CacheModule
+abstract class L1plusCacheModule(implicit p: Parameters) extends L1CacheModule
   with HasL1plusCacheParameters
 
-abstract class L1plusCacheBundle extends L1CacheBundle
+abstract class L1plusCacheBundle(implicit p: Parameters) extends L1CacheBundle
   with HasL1plusCacheParameters
 
 // basic building blocks for L1plusCache
 // MetaArray and DataArray
 // TODO: dedup with DCache
-class L1plusCacheMetadata extends L1plusCacheBundle {
+class L1plusCacheMetadata(implicit p: Parameters) extends L1plusCacheBundle {
   val valid = Bool()
   val tag = UInt(tagBits.W)
   val error = Bool()
 }
 
 object L1plusCacheMetadata {
-  def apply(tag: Bits, valid: Bool, error :Bool) = {
+  def apply(tag: Bits, valid: Bool, error: Bool)(implicit p: Parameters) = {
     val meta = Wire(new L1plusCacheMetadata)
     meta.tag := tag
     meta.valid := valid
@@ -100,18 +100,18 @@ object L1plusCacheMetadata {
  *  validIdx is from s1_addr (Register)
  */
 
-class L1plusCacheMetaReadReq extends L1plusCacheBundle {
+class L1plusCacheMetaReadReq(implicit p: Parameters) extends L1plusCacheBundle {
   val tagIdx    = UInt(idxBits.W)
   val validIdx  = UInt(idxBits.W)
   val way_en = UInt(nWays.W)
   val tag    = UInt(tagBits.W)
 }
 
-class L1plusCacheMetaWriteReq extends L1plusCacheMetaReadReq {
+class L1plusCacheMetaWriteReq(implicit p: Parameters) extends L1plusCacheMetaReadReq {
   val data = new L1plusCacheMetadata
 }
 
-class L1plusCacheDataReadReq extends L1plusCacheBundle {
+class L1plusCacheDataReadReq(implicit p: Parameters) extends L1plusCacheBundle {
   // you can choose which bank to read to save power
   val rmask  = Bits(blockRows.W)
   val way_en = Bits(nWays.W)
@@ -119,12 +119,12 @@ class L1plusCacheDataReadReq extends L1plusCacheBundle {
 }
 
 // Now, we can write a cache-block in a single cycle
-class L1plusCacheDataWriteReq extends L1plusCacheDataReadReq {
+class L1plusCacheDataWriteReq(implicit p: Parameters) extends L1plusCacheDataReadReq {
   val wmask  = Bits(blockRows.W)
   val data   = Vec(blockRows, Bits(encRowBits.W))
 }
 
-class L1plusCacheDataArray extends L1plusCacheModule {
+class L1plusCacheDataArray(implicit p: Parameters) extends L1plusCacheModule {
   val io = IO(new L1plusCacheBundle {
     val read  = Flipped(DecoupledIO(new L1plusCacheDataReadReq))
     val write = Flipped(DecoupledIO(new L1plusCacheDataWriteReq))
@@ -228,7 +228,7 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   }
 }
 
-class L1plusCacheMetadataArray extends L1plusCacheModule {
+class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule {
   val io = IO(new Bundle {
     val read = Flipped(Decoupled(new L1plusCacheMetaReadReq))
     val write = Flipped(Decoupled(new L1plusCacheMetaWriteReq))
@@ -316,7 +316,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   }
 }
 
-class L1plusCacheReq extends L1plusCacheBundle
+class L1plusCacheReq(implicit p: Parameters) extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
@@ -327,7 +327,7 @@ class L1plusCacheReq extends L1plusCacheBundle
   }
 }
 
-class L1plusCacheResp extends L1plusCacheBundle
+class L1plusCacheResp(implicit p: Parameters) extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
   val id   = UInt(idWidth.W)
@@ -337,7 +337,7 @@ class L1plusCacheResp extends L1plusCacheBundle
   }
 }
 
-class L1plusCacheIO extends L1plusCacheBundle
+class L1plusCacheIO(implicit p: Parameters) extends L1plusCacheBundle
 {
   val req  = DecoupledIO(new L1plusCacheReq)
   val resp = Flipped(DecoupledIO(new L1plusCacheResp))
@@ -484,7 +484,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   }
 }
 
-class L1plusCachePipe extends L1plusCacheModule
+class L1plusCachePipe(implicit p: Parameters) extends L1plusCacheModule
 {
   val io = IO(new L1plusCacheBundle{
     val req  = Flipped(DecoupledIO(new L1plusCacheReq))
@@ -665,7 +665,7 @@ class L1plusCachePipe extends L1plusCacheModule
 
 }
 
-class L1plusCacheMissReq extends L1plusCacheBundle
+class L1plusCacheMissReq(implicit p: Parameters) extends L1plusCacheBundle
 {
   // transaction id
   val id     = UInt(idWidth.W)
@@ -674,7 +674,7 @@ class L1plusCacheMissReq extends L1plusCacheBundle
   val way_en = UInt(nWays.W)
 }
 
-class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
+class L1plusCacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends L1plusCacheModule
 {
   val io = IO(new Bundle {
     val id          = Input(UInt())
@@ -821,7 +821,7 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
   }
 }
 
-class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTLDump
+class L1plusCacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends L1plusCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val req         = Flipped(DecoupledIO(new L1plusCacheMissReq))

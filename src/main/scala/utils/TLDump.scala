@@ -1,5 +1,6 @@
 package utils
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLMessages._
@@ -7,6 +8,8 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLBundle, TLBundleA, TLBundleB, TLBundleC, TLBundleD, TLBundleE, TLChannel}
 
 trait HasTLDump {
+
+  implicit val p: Parameters
 
   implicit class TLDump(channel: TLChannel) {
     def dump = channel match {

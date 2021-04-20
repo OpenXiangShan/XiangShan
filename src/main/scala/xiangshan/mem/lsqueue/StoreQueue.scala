@@ -1,19 +1,23 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.backend.roq.RoqLsqIO
+import difftest._
 
+class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
+  p => p(XSCoreParamsKey).StoreQueueSize
+){
+  override def cloneType = (new SqPtr).asInstanceOf[this.type]
+}
 
-class SqPtr extends CircularQueuePtr[SqPtr](SqPtr.StoreQueueSize)
-
-object SqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): SqPtr = {
+object SqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): SqPtr = {
     val ptr = Wire(new SqPtr)
     ptr.flag := f
     ptr.value := v
@@ -21,7 +25,7 @@ object SqPtr extends HasXSParameter {
   }
 }
 
-class SqEnqIO extends XSBundle {
+class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
@@ -30,7 +34,7 @@ class SqEnqIO extends XSBundle {
 }
 
 // Store Queue
-class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
@@ -48,14 +52,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     val sqFull = Output(Bool())
   })
-
-  val difftestIO = IO(new Bundle() {
-    val storeCommit = Output(UInt(2.W))
-    val storeAddr   = Output(Vec(2, UInt(64.W)))
-    val storeData   = Output(Vec(2, UInt(64.W)))
-    val storeMask   = Output(Vec(2, UInt(8.W)))
-  })
-  difftestIO <> DontCare
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
@@ -379,16 +375,22 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     assert(io.sbuffer(0).fire())
   }
 
-  val storeCommit = PopCount(io.sbuffer.map(_.fire()))
-  val waddr = VecInit(io.sbuffer.map(req => SignExt(req.bits.addr, 64)))
-  val wdata = VecInit(io.sbuffer.map(req => req.bits.data & MaskExpand(req.bits.mask)))
-  val wmask = VecInit(io.sbuffer.map(_.bits.mask))
-
   if (!env.FPGAPlatform) {
-    difftestIO.storeCommit := RegNext(storeCommit)
-    difftestIO.storeAddr   := RegNext(waddr)
-    difftestIO.storeData   := RegNext(wdata)
-    difftestIO.storeMask   := RegNext(wmask)
+    for (i <- 0 until StorePipelineWidth) {
+      val storeCommit = io.sbuffer(i).fire()
+      val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
+      val wdata = io.sbuffer(i).bits.data & MaskExpand(io.sbuffer(i).bits.mask)
+      val wmask = io.sbuffer(i).bits.mask
+
+      val difftest = Module(new DifftestStoreEvent)
+      difftest.io.clock       := clock
+      difftest.io.coreid      := 0.U
+      difftest.io.index       := i.U
+      difftest.io.valid       := storeCommit
+      difftest.io.storeAddr   := waddr
+      difftest.io.storeData   := wdata
+      difftest.io.storeMask   := wmask
+    }
   }
 
   // Read vaddr for mem exception

@@ -1,12 +1,13 @@
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan.backend.decode.Instructions._
 import xiangshan.{FPUCtrlSignals, XSModule}
 
-class FPDecoder extends XSModule{
+class FPDecoder(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle() {
     val instr = Input(UInt(32.W))
     val fpCtrl = Output(new FPUCtrlSignals)

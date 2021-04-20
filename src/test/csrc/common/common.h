@@ -4,9 +4,13 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-#include <stdint.h>
-#include <assert.h>
+#include <cstdint>
+#include <cassert>
 #include <pthread.h>
+
+#ifndef EMU_CORES
+#define EMU_CORES 1
+#endif
 
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
@@ -28,5 +32,10 @@ void assert_finish();
 
 extern int signal_num;
 void sig_handler(int signo);
+
+typedef uint64_t rtlreg_t;
+typedef uint64_t paddr_t;
+typedef uint64_t vaddr_t;
+typedef uint16_t ioaddr_t;
 
 #endif // __COMMON_H

@@ -1,10 +1,13 @@
 package xiangshan.cache.prefetch
 
+import chipsalliance.rocketchip.config.{Parameters, Field}
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
 import utils._
+
+case object BOPParamsKey extends Field[BOPParameters]
 
 case class BOPParameters(
   rrTableEntries: Int,
@@ -32,87 +35,87 @@ case class BOPParameters(
   def totalWidth = log2Up(nEntries) // id's width
 }
 
-class ScoreTableEntry(p: BOPParameters) extends PrefetchBundle {
-  val offset = UInt(p.offsetWidth.W)
-  val score = UInt(p.scoreBits.W)
+class ScoreTableEntry(implicit p: Parameters) extends PrefetchBundle {
+  val offset = UInt(bopParams.offsetWidth.W)
+  val score = UInt(bopParams.scoreBits.W)
 
   def apply(offset: UInt, score: UInt) = {
-    val entry = Wire(new ScoreTableEntry(p))
+    val entry = Wire(new ScoreTableEntry)
     entry.offset := offset
     entry.score := score
     entry
   }
 
   override def toPrintable: Printable = { p"${offset}:${score}" }
-  override def cloneType: this.type = (new ScoreTableEntry(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new ScoreTableEntry).asInstanceOf[this.type]
 }
 
-class TestOffsetReq(p: BOPParameters) extends PrefetchBundle {
+class TestOffsetReq(implicit p: Parameters) extends PrefetchBundle {
   // find whether (X-d) is in recent request table
   val addr = UInt(PAddrBits.W) // X
-  val testOffset = UInt(p.offsetWidth.W) // d
-  val ptr = UInt(log2Up(p.scores).W) // index of testOffset in offsetList
+  val testOffset = UInt(bopParams.offsetWidth.W) // d
+  val ptr = UInt(log2Up(bopParams.scores).W) // index of testOffset in offsetList
 
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} off=${testOffset} ptr=${ptr}"
   }
-  override def cloneType: this.type = (new TestOffsetReq(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TestOffsetReq).asInstanceOf[this.type]
 }
 
-class TestOffsetResp(p: BOPParameters) extends PrefetchBundle {
-  val testOffset = UInt(p.offsetWidth.W)
-  val ptr = UInt(log2Up(p.scores).W)
+class TestOffsetResp(implicit p: Parameters) extends PrefetchBundle {
+  val testOffset = UInt(bopParams.offsetWidth.W)
+  val ptr = UInt(log2Up(bopParams.scores).W)
   val hit = Bool()
 
   override def toPrintable: Printable = {
     p"pff=${testOffset} ptr=${ptr} hit=${hit}"
   }
-  override def cloneType: this.type = (new TestOffsetResp(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TestOffsetResp).asInstanceOf[this.type]
 }
 
-class TestOffsetBundle(p: BOPParameters) extends PrefetchBundle {
-  val req = DecoupledIO(new TestOffsetReq(p))
-  val resp = Flipped(DecoupledIO(new TestOffsetResp(p)))
+class TestOffsetBundle(implicit p: Parameters) extends PrefetchBundle {
+  val req = DecoupledIO(new TestOffsetReq)
+  val resp = Flipped(DecoupledIO(new TestOffsetResp))
 
   override def toPrintable: Printable = {
     p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
   }
-  override def cloneType: this.type = (new TestOffsetBundle(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TestOffsetBundle).asInstanceOf[this.type]
 }
 
-class BestOffsetPrefetchReq(p: BOPParameters) extends PrefetchReq {
-  val id = UInt(p.totalWidth.W)
+class BestOffsetPrefetchReq(implicit p: Parameters) extends PrefetchReq {
+  val id = UInt(bopParams.totalWidth.W)
 
   override def toPrintable: Printable = {
     p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchReq(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new BestOffsetPrefetchReq).asInstanceOf[this.type]
 }
 
-class BestOffsetPrefetchResp(p: BOPParameters) extends PrefetchResp {
-  val id = UInt(p.totalWidth.W)
+class BestOffsetPrefetchResp(implicit p: Parameters) extends PrefetchResp {
+  val id = UInt(bopParams.totalWidth.W)
 
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchResp(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new BestOffsetPrefetchResp).asInstanceOf[this.type]
 }
 
-class BestOffsetPrefetchFinish(p: BOPParameters) extends PrefetchFinish {
-  val id = UInt(p.totalWidth.W)
+class BestOffsetPrefetchFinish(implicit p: Parameters) extends PrefetchFinish {
+  val id = UInt(bopParams.totalWidth.W)
 
   override def toPrintable: Printable = {
     p"id=0x${Hexadecimal(id)}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchFinish(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new BestOffsetPrefetchFinish).asInstanceOf[this.type]
 }
 
-class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
+class BestOffsetPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val train = Flipped(ValidIO(new PrefetchTrain))
-  val req = DecoupledIO(new BestOffsetPrefetchReq(p))
-  val resp = Flipped(DecoupledIO(new BestOffsetPrefetchResp(p)))
-  val finish = DecoupledIO(new BestOffsetPrefetchFinish(p))
+  val req = DecoupledIO(new BestOffsetPrefetchReq)
+  val resp = Flipped(DecoupledIO(new BestOffsetPrefetchResp))
+  val finish = DecoupledIO(new BestOffsetPrefetchFinish)
 
   override def toPrintable: Printable = {
     p"train: v=${train.valid} ${train.bits} " +
@@ -120,18 +123,18 @@ class BestOffsetPrefetchIO(p: BOPParameters) extends PrefetchBundle {
       p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits} " +
       p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
-  override def cloneType: this.type = (new BestOffsetPrefetchIO(p)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new BestOffsetPrefetchIO).asInstanceOf[this.type]
 }
 
-class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
+class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new Bundle {
     val w = Flipped(DecoupledIO(UInt(PAddrBits.W)))
-    val r = Flipped(new TestOffsetBundle(p))
+    val r = Flipped(new TestOffsetBundle)
   })
-  def rrIdxBits = p.rrIdxBits
-  def rrTagBits = p.rrTagBits
-  def rrTableEntries = p.rrTableEntries
-  def blockBytes = p.blockBytes
+  def rrIdxBits = bopParams.rrIdxBits
+  def rrTagBits = bopParams.rrTagBits
+  def rrTableEntries = bopParams.rrTableEntries
+  def blockBytes = bopParams.blockBytes
   // RR table is direct mapped, accessed through a hash function, each entry holding a partial tag.
   //        +----------+---------------+---------------+----------------------+
   // paddr: |  ......  |  8-bit hash2  |  8-bit hash1  |  6-bit cache offset  |
@@ -193,30 +196,30 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
 
 }
 
-class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
+class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(UInt(PAddrBits.W))) // req addr from L1
-    val prefetchOffset = Output(UInt(p.offsetWidth.W))
-    val test = new TestOffsetBundle(p)
+    val prefetchOffset = Output(UInt(bopParams.offsetWidth.W))
+    val test = new TestOffsetBundle
   })
 
-  def offsetWidth = p.offsetWidth
-  def offsetList = p.offsetList
-  def scores = p.scores
-  def roundBits = p.roundBits
-  def roundMax = p.roundMax
-  def scoreMax = p.scoreMax
-  def badScore = p.badScore
+  def offsetWidth = bopParams.offsetWidth
+  def offsetList = bopParams.offsetList
+  def scores = bopParams.scores
+  def roundBits = bopParams.roundBits
+  def roundMax = bopParams.roundMax
+  def scoreMax = bopParams.scoreMax
+  def badScore = bopParams.badScore
 
   val prefetchOffset = RegInit(2.U(offsetWidth.W)) // best offset is 1, that is, a next-line prefetcher as initialization
-  val st = RegInit(VecInit(offsetList.map(off => new ScoreTableEntry(p).apply(off.U, 0.U))))
+  val st = RegInit(VecInit(offsetList.map(off => (new ScoreTableEntry).apply(off.U, 0.U))))
   val ptr = RegInit(0.U(log2Up(scores).W))
   val round = RegInit(0.U(roundBits.W))
 
-  val bestOffset = RegInit(new ScoreTableEntry(p).apply(2.U, 0.U)) // the entry with the highest score while traversing
+  val bestOffset = RegInit((new ScoreTableEntry).apply(2.U, 0.U)) // the entry with the highest score while traversing
   val testOffset = WireInit(st(ptr).offset)
   def winner(e1: ScoreTableEntry, e2: ScoreTableEntry): ScoreTableEntry = {
-    val w = Wire(new ScoreTableEntry(p))
+    val w = Wire(new ScoreTableEntry)
     w := Mux(e1.score > e2.score, e1, e2)
     w
   }
@@ -265,7 +268,7 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
       val newScore = oldScore + 1.U
       val offset = oldEntry.offset
       st(io.test.resp.bits.ptr).score := newScore
-      bestOffset := winner(new ScoreTableEntry(p).apply(offset, newScore), bestOffset)
+      bestOffset := winner((new ScoreTableEntry).apply(offset, newScore), bestOffset)
       // (1) one of the score equals SCOREMAX
       when (newScore >= scoreMax.U) {
         state := s_idle
@@ -295,16 +298,16 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   XSDebug(io.req.fire(), p"receive req from L1. io.req.bits=0x${Hexadecimal(io.req.bits)}\n")
 }
 
-class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule with HasTlbConst {
+class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule with HasTlbConst {
   val io = IO(new Bundle {
-    val id = Input(UInt(p.totalWidth.W))
-    val prefetchOffset = Input(UInt(p.offsetWidth.W))
-    val pft = new BestOffsetPrefetchIO(p)
+    val id = Input(UInt(bopParams.totalWidth.W))
+    val prefetchOffset = Input(UInt(bopParams.offsetWidth.W))
+    val pft = new BestOffsetPrefetchIO
     val inflight = ValidIO(UInt(PAddrBits.W))
     val writeRRTable = DecoupledIO(UInt(PAddrBits.W))
   })
 
-  def blockBytes = p.blockBytes
+  def blockBytes = bopParams.blockBytes
   def getBlock(addr: UInt) = addr(PAddrBits - 1, log2Up(blockBytes))
   def getBlockAddr(addr: UInt) = Cat(getBlock(addr), 0.U(log2Up(blockBytes).W))
   def getPageNum(addr: UInt) = addr(PAddrBits - 1, offLen)
@@ -369,23 +372,23 @@ class BestOffsetPrefetchEntry(p: BOPParameters) extends PrefetchModule with HasT
   XSDebug(p"bopEntry ${io.id}: io.pft: ${io.pft}\n")
 }
 
-class BestOffsetPrefetch(p: BOPParameters) extends PrefetchModule {
-  val io = IO(new BestOffsetPrefetchIO(p))
+class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
+  val io = IO(new BestOffsetPrefetchIO)
 
-  def nEntries = p.nEntries
-  def blockBytes = p.blockBytes
+  def nEntries = bopParams.nEntries
+  def blockBytes = bopParams.blockBytes
   def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(blockBytes)), 0.U(log2Up(blockBytes).W))
-  val scoreTable = Module(new OffsetScoreTable(p))
-  val rrTable = Module(new RecentRequestTable(p))
-  val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq(p), nEntries))
-  val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish(p), nEntries))
+  val scoreTable = Module(new OffsetScoreTable)
+  val rrTable = Module(new RecentRequestTable)
+  val reqArb = Module(new Arbiter(new BestOffsetPrefetchReq, nEntries))
+  val finishArb = Module(new Arbiter(new BestOffsetPrefetchFinish, nEntries))
   val writeRRTableArb = Module(new Arbiter(UInt(PAddrBits.W), nEntries))
 
   val entryReadyIdx = Wire(UInt(log2Up(nEntries).W))
   val inflightMatchVec = Wire(Vec(nEntries, Bool()))
 
   val bopEntries = (0 until nEntries).map { i =>
-    val bopEntry = Module(new BestOffsetPrefetchEntry(p))
+    val bopEntry = Module(new BestOffsetPrefetchEntry)
     
     bopEntry.io.id := i.U
     bopEntry.io.prefetchOffset := scoreTable.io.prefetchOffset
