@@ -1,15 +1,14 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-// import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
-import xiangshan.backend.LSUOpType
 
-class LoadToLsqIO extends XSBundle {
+class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val loadDataForwarded = Output(Bool())
@@ -19,7 +18,7 @@ class LoadToLsqIO extends XSBundle {
 
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0 extends XSModule {
+class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
@@ -88,7 +87,7 @@ class LoadUnit_S0 extends XSModule {
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class LoadUnit_S1 extends XSModule {
+class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -149,7 +148,7 @@ class LoadUnit_S1 extends XSModule {
 
 // Load Pipeline Stage 2
 // DCache resp
-class LoadUnit_S2 extends XSModule with HasLoadHelper {
+class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -256,7 +255,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
 
-class LoadUnit extends XSModule with HasLoadHelper {
+class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)

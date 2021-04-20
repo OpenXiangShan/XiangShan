@@ -1,11 +1,10 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.ALUOpType
-import xiangshan.backend.JumpOpType
 import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
@@ -16,7 +15,7 @@ trait HasBPUParameter extends HasXSParameter {
   val EnableCommit = false
 }
 
-class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle with HasIFUConst {
+class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extends XSBundle with HasIFUConst {
   def tagBits = VAddrBits - idxBits - instOffsetBits
 
   val tag = UInt(tagBits.W)
@@ -30,7 +29,7 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle with HasIFUCo
   def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
-class PredictorResponse extends XSBundle {
+class PredictorResponse(implicit p: Parameters) extends XSBundle {
   class UbtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
     val targets = Vec(PredictWidth, UInt(VAddrBits.W))
@@ -113,7 +112,7 @@ trait HasCtrl { this: BasePredictor =>
   val ctrl = IO(Input(new BPUCtrl))
 }
 
-abstract class BasePredictor extends XSModule
+abstract class BasePredictor(implicit p: Parameters) extends XSModule
   with HasBPUParameter with HasIFUConst with PredictorUtils
   with HasIFUFire with HasCtrl {
   val metaLen = 0
@@ -137,13 +136,13 @@ abstract class BasePredictor extends XSModule
   val debug = true
 }
 
-class BrInfo extends XSBundle {
+class BrInfo(implicit p: Parameters) extends XSBundle {
   val metas = Vec(PredictWidth, new BpuMeta)
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
   val specCnt = Vec(PredictWidth, UInt(10.W))
 }
-class BPUStageIO extends XSBundle {
+class BPUStageIO(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
@@ -151,7 +150,7 @@ class BPUStageIO extends XSBundle {
 }
 
 
-abstract class BPUStage extends XSModule with HasBPUParameter
+abstract class BPUStage(implicit p: Parameters) extends XSModule with HasBPUParameter
   with HasIFUConst with HasIFUFire {
   class DefaultIO extends XSBundle {
     val in = Input(new BPUStageIO)
@@ -195,12 +194,12 @@ abstract class BPUStage extends XSModule with HasBPUParameter
     XSDebug("inLatch: pc=%x, mask=%b\n", inLatch.pc, inLatch.mask)
     XSDebug("out(%d): pc=%x, mask=%b, taken=%d, jmpIdx=%d, target=%x, hasHalfRVI=%d\n",
       io.outFire, io.out.pc, io.out.mask, taken, jmpIdx, target, hasHalfRVI)
-    val p = io.pred
+    //val p = io.pred
   }
 }
 
 @chiselName
-class BPUStage1 extends BPUStage {
+class BPUStage1(implicit p: Parameters) extends BPUStage {
 
   // ubtb is accessed with inLatch pc in s1,
   // so we use io.in instead of inLatch
@@ -238,7 +237,7 @@ class BPUStage1 extends BPUStage {
   }
 }
 @chiselName
-class BPUStage2 extends BPUStage {
+class BPUStage2(implicit p: Parameters) extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
@@ -268,7 +267,7 @@ class BPUStage2 extends BPUStage {
   }
 }
 @chiselName
-class BPUStage3 extends BPUStage {
+class BPUStage3(implicit p: Parameters) extends BPUStage {
   class S3IO extends XSBundle {
     val predecode = Input(new Predecode)
     val redirect =  Flipped(ValidIO(new Redirect))
@@ -386,9 +385,9 @@ class BPUStage3 extends BPUStage {
   if (BPUDebug) {
     XSDebug(io.inFire, "predecode: pc:%x, mask:%b\n", inLatch.pc, s3IO.predecode.mask)
     for (i <- 0 until PredictWidth) {
-      val p = s3IO.predecode.pd(i)
+      val pd = s3IO.predecode.pd(i)
       XSDebug(io.inFire && s3IO.predecode.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
-        i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
+        i.U, pd.brType, pd.isBr, pd.isJal, pd.isJalr, pd.isCall, pd.isRet, pd.isRVC, pd.excType)
     }
     XSDebug(p"brs:${Binary(brs)} jals:${Binary(jals)} jalrs:${Binary(jalrs)} calls:${Binary(calls)} rets:${Binary(rets)} rvcs:${Binary(RVCs)}\n")
     XSDebug(p"callIdx:${callIdx} retIdx:${retIdx}\n")
@@ -417,13 +416,13 @@ trait BranchPredictorComponents extends HasXSParameter {
   preds.map(_.io := DontCare)
 }
 
-class BPUReq extends XSBundle {
+class BPUReq(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val inMask = UInt(PredictWidth.W)
 }
 
-class BPUCtrl extends XSBundle {
+class BPUCtrl(implicit p: Parameters) extends XSBundle {
   val ubtb_enable = Bool()
   val btb_enable  = Bool()
   val bim_enable  = Bool()
@@ -433,7 +432,7 @@ class BPUCtrl extends XSBundle {
   val loop_enable = Bool()
 }
 
-abstract class BaseBPU extends XSModule with BranchPredictorComponents
+abstract class BaseBPU(implicit p: Parameters) extends XSModule with BranchPredictorComponents
   with HasBPUParameter with HasIFUConst {
   val io = IO(new Bundle() {
     // from backend
@@ -505,7 +504,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents
 }
 
 
-class FakeBPU extends BaseBPU {
+class FakeBPU(implicit p: Parameters) extends BaseBPU {
   io.out.foreach(i => {
     // Provide not takens
     i <> DontCare
@@ -514,7 +513,7 @@ class FakeBPU extends BaseBPU {
   io.brInfo <> DontCare
 }
 @chiselName
-class BPU extends BaseBPU {
+class BPU(implicit p: Parameters) extends BaseBPU {
 
   //**********************Stage 1****************************//
 
@@ -639,7 +638,7 @@ class BPU extends BaseBPU {
 }
 
 object BPU{
-  def apply(enableBPU: Boolean = true) = {
+  def apply(enableBPU: Boolean = true)(implicit p: Parameters) = {
       if(enableBPU) {
         val BPU = Module(new BPU)
         BPU

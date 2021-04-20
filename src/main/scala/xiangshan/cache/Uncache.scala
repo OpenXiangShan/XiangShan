@@ -9,7 +9,7 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientN
 import xiangshan.{MicroOp, Redirect}
 
 // One miss entry deals with one mmio request
-class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
+class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -118,7 +118,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
   }
 }
 
-class UncacheIO extends DCacheBundle {
+class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = Flipped(new DCacheWordIO)
 }
 

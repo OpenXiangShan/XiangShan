@@ -3,12 +3,14 @@
 
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import hardfloat.INToRecFN
 import utils.{SignExt, ZeroExt}
+import xiangshan._
 
-class IntToFPDataModule extends FPUDataModule {
+class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
 
   val in_valid, out_ready = IO(Input(Bool()))
   val in_ready, out_valid = IO(Output(Bool()))
@@ -93,7 +95,7 @@ class IntToFPDataModule extends FPUDataModule {
   io.out.data := muxReg.data
 }
 
-class IntToFP extends FPUSubModule {
+class IntToFP(implicit p: Parameters) extends FPUSubModule {
   override val dataModule = Module(new IntToFPDataModule)
   dataModule.in_valid := io.in.valid
   dataModule.out_ready := io.out.ready

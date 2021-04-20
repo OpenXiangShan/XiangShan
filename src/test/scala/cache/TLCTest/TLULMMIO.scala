@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, Re
 import freechips.rocketchip.tilelink.{TLAdapterNode, TLClientNode, TLManagerNode, TLSlaveParameters, TLSlavePortParameters}
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 
-class TLULMMIO extends DCacheBundle {
+class TLULMMIO(implicit p: Parameters) extends DCacheBundle {
   val AChannel = Output(new TLCFakeABundle())
   val AFire = Output(new Bool())
   val DChannel = Output(new TLCFakeDBundle())

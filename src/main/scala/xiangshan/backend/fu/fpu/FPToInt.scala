@@ -3,15 +3,17 @@
 
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
 import hardfloat.RecFNToIN
 import utils.SignExt
 import xiangshan.backend.fu.FunctionUnit
+import xiangshan._
 
 
-class FPToIntDataModule(latency: Int) extends FPUDataModule {
+class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
   val regEnables = IO(Input(Vec(latency, Bool())))
   val (src1, src2) = (io.in.src(0), io.in.src(1))
 
@@ -89,9 +91,9 @@ class FPToIntDataModule(latency: Int) extends FPUDataModule {
   fflags := exc
 }
 
-class FPToInt extends FPUPipelineModule {
+class FPToInt(implicit p: Parameters) extends FPUPipelineModule {
 
-  override def latency = FunctionUnit.f2iCfg.latency.latencyVal.get
+  override def latency = f2iCfg.latency.latencyVal.get
 
   override val dataModule = Module(new FPToIntDataModule(latency))
   connectDataModule

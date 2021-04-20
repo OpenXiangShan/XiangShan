@@ -36,7 +36,7 @@ case class TLCCacheTestParams
 
 case object TLCCacheTestKey extends Field[TLCCacheTestParams]
 
-class TLCCacheTestTopIO extends Bundle {
+class TLCCacheTestTopIO(implicit p: Parameters) extends Bundle {
   val mastersIO = Vec(2, new TLCTestMasterMMIO())
   val ulIO = new TLULMMIO()
   val slaveIO = new TLCTestSlaveMMIO()
@@ -132,8 +132,6 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
   val slave_safe = 0
   val slave_granting = 1
   val slave_probing = 2
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   it should "run" in {
 

@@ -254,8 +254,6 @@ class L2TestTopWrapper()(implicit p: Parameters) extends LazyModule {
 
 class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
 
-  top.Parameters.set(top.Parameters.debugParameters)
-
   val annos = Seq(
     VerilatorBackendAnnotation,
     LineCoverageAnnotation,

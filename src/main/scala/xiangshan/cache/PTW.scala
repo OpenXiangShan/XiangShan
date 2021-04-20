@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
 
@@ -95,11 +94,11 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
 }
 
-abstract class PtwBundle extends XSBundle with HasPtwConst
+abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
 abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
-class PteBundle extends PtwBundle{
+class PteBundle(implicit p: Parameters) extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
@@ -130,15 +129,15 @@ class PteBundle extends PtwBundle{
   }
 
   def getPerm() = {
-    val p = Wire(new PtePermBundle)
-    p.d := perm.d
-    p.a := perm.a
-    p.g := perm.g
-    p.u := perm.u
-    p.x := perm.x
-    p.w := perm.w
-    p.r := perm.r
-    p
+    val pm = Wire(new PtePermBundle)
+    pm.d := perm.d
+    pm.a := perm.a
+    pm.g := perm.g
+    pm.u := perm.u
+    pm.x := perm.x
+    pm.w := perm.w
+    pm.r := perm.r
+    pm
   }
 
   override def toPrintable: Printable = {
@@ -146,7 +145,7 @@ class PteBundle extends PtwBundle{
   }
 }
 
-class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false) extends PtwBundle {
+class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
@@ -186,7 +185,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   }
 }
 
-class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends PtwBundle {
+class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
 
   val tag  = UInt(tagLen.W)
@@ -233,7 +232,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
   }
 }
 
-class PtwReq extends PtwBundle {
+class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
   override def toPrintable: Printable = {
@@ -241,7 +240,7 @@ class PtwReq extends PtwBundle {
   }
 }
 
-class PtwResp extends PtwBundle {
+class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
 
@@ -250,7 +249,7 @@ class PtwResp extends PtwBundle {
   }
 }
 
-class PtwIO extends PtwBundle {
+class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
@@ -293,13 +292,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
-  val difftestIO = IO(new Bundle() {
-    val ptwResp = Output(Bool())
-    val ptwAddr = Output(UInt(64.W))
-    val ptwData = Output(Vec(4, UInt(64.W)))
-  })
-
-  difftestIO <> DontCare
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
   arb.io.in <> VecInit(io.tlb.map(_.req))
@@ -808,7 +800,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
 }
 
-class PTWRepeater extends XSModule with HasXSParameter with HasPtwConst {
+class PTWRepeater(implicit p: Parameters) extends XSModule with HasXSParameter with HasPtwConst {
   val io = IO(new Bundle {
     val tlb = Flipped(new TlbPtwIO)
     val ptw = new TlbPtwIO
