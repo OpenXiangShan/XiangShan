@@ -60,7 +60,6 @@ class GlobalHistory extends XSBundle {
   // override def toString(): String = "histPtr=%d, sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d".format(histPtr, sawNTBr, takenOnBr, saveHalfRVI)
 }
 
-
 class IFUIO extends XSBundle
 {
   // to ibuffer
@@ -132,25 +131,28 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if2_valid = RegInit(init = false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready && bpu.io.in_ready)
   val if1_fire = if1_valid &&  if2_allReady
-
-  val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
+  
+  val if1_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
-  val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
-
+  
+  val npcGen = new PriorityMuxGenerator[UInt]
+  npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
+  val nghGen = new PriorityMuxGenerator[GlobalHistory]
+  nghGen.register(true.B, RegNext(if1_gh), Some("stallGh"))
+  
   //********************** IF2 ****************************//
   val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
   val if2_fire = if2_allValid && if3_ready
-  val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
+  val if2_pc = RegEnable(next = if1_npc, init = resetVector.U(VAddrBits.W), enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
-  val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
+  val if2_gh = RegEnable(if1_gh, enable=if1_fire)
+
   if2_ready := if3_ready && icache.io.tlb.resp.valid || !if2_valid
   when (if1_fire)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
 
-  val npcGen = new PriorityMuxGenerator[UInt]
-  npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
   val if2_bp = bpu.io.out(0)
 
   // if taken, bp_redirect should be true
@@ -159,6 +161,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   npcGen.register(if2_valid, Mux(if2_bp.taken, if2_bp.target, if2_snpc), Some("if2_target"))
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
+  nghGen.register(if2_valid, if2_predicted_gh, Some("if2_predicted_gh"))
 
   //********************** IF3 ****************************//
   // if3 should wait for instructions resp to arrive
@@ -168,7 +171,7 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_snpc = RegEnable(if2_snpc, if2_fire)
-  val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
+  val if3_gh = RegEnable(if2_gh, enable=if2_fire)
   if3_ready := if4_ready && icache.io.resp.valid || !if3_valid
   when (if3_flush) {
     if3_valid := false.B
@@ -180,19 +183,19 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
   val if3_bp = bpu.io.out(1)
   if3_predicted_gh := if3_gh.update(if3_bp.hasNotTakenBrs, if3_bp.takenOnBr)
-
-
+  
+  
   val prevHalfInstrReq = WireInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
   // only valid when if4_fire
   val hasPrevHalfInstrReq = prevHalfInstrReq.valid && HasCExtension.B
-
+  
   val if3_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
-
+  
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
-
+  
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid && HasCExtension.B
-
+  
   // the previous half of RVI instruction waits until it meets its last half
   val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_valid
   // set to invalid once consumed or redirect from backend
@@ -210,49 +213,62 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   }
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
-
-  class IF3_PC_COMP extends XSModule {
+  
+  class IF3_COMP[T <: Data](gen: T) extends XSModule {
     val io = IO(new Bundle {
-      val if2_pc = Input(UInt(VAddrBits.W))
-      val pc     = Input(UInt(VAddrBits.W))
+      val if2_src = Input(chiselTypeOf(gen))
+      val src_to_comp = Input(chiselTypeOf(gen))
       val if2_valid = Input(Bool())
       val res = Output(Bool())
     })
-    io.res := !io.if2_valid || io.if2_valid && io.if2_pc =/= io.pc
+    io.res := !io.if2_valid || io.if2_valid && io.if2_src.asUInt =/= io.src_to_comp.asUInt
   }
-  def if3_nextValidPCNotEquals(pc: UInt) = {
-    val comp = Module(new IF3_PC_COMP)
-    comp.io.if2_pc := if2_pc
-    comp.io.pc     := pc
+  def if3_nextValidSrcNotEquals[T <: Data](if2_src: T)(src: T) = {
+    val comp = Module(new IF3_COMP(if2_src))
+    comp.io.if2_src := if2_src
+    comp.io.src_to_comp := src
     comp.io.if2_valid := if2_valid
     comp.io.res
   }
+  val if3_nextValidPCNotEquals = if3_nextValidSrcNotEquals(if2_pc)(_)
+  val if3_nextValidGHNotEquals = if3_nextValidSrcNotEquals(if2_gh)(_)
+  
+  val if3_predTarget = Mux(if3_bp.taken, if3_bp.target, if3_snpc)
 
-  val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
-  val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
-  val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(if3_snpc)
-  // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
-  // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
+  val if3_prevHalfNotMetRedirect     = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
+  val if3_predTakenRedirect          = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
+  val if3_predNotTakenRedirect       = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(if3_snpc)
+  val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_nextValidGHNotEquals(if3_predicted_gh) && enableGhistRepair.B
+  
+  XSPerfAccumulate("if3_prevHalfNotMetRedirect", if3_prevHalfNotMetRedirect)
+  XSPerfAccumulate("if3_predTakenRedirect", if3_predTakenRedirect)
+  XSPerfAccumulate("if3_predNotTakenRedirect", if3_predNotTakenRedirect)
+  XSPerfAccumulate("if3_ghInfoNotIdenticalRedirect", if3_ghInfoNotIdenticalRedirect)
+  XSPerfAccumulate("if3_ghInfoNotIdenticalRedirect_independently", if3_ghInfoNotIdenticalRedirect && !if3_predTakenRedirect && !if3_predNotTakenRedirect)
+
 
   if3_redirect := if3_valid && (
-                    // prevHalf does not match if3_pc and the next fetch packet is not snpc
-                    if3_prevHalfNotMetRedirect && HasCExtension.B ||
-                    // pred taken and next fetch packet is not the predicted target
-                    if3_predTakenRedirect ||
-                    // pred not taken and next fetch packet is not snpc
-                    if3_predNotTakenRedirect
-                    // GHInfo from last pred does not corresponds with this packet
-                    // if3_ghInfoNotIdenticalRedirect
-                  )
+    // prevHalf does not match if3_pc and the next fetch packet is not snpc
+    if3_prevHalfNotMetRedirect && HasCExtension.B ||
+    // pred taken and next fetch packet is not the predicted target
+    if3_predTakenRedirect ||
+    // pred not taken and next fetch packet is not snpc
+    if3_predNotTakenRedirect ||
+    // GHInfo from last pred does not corresponds with this packet
+    if3_ghInfoNotIdenticalRedirect
+    )
+    
+    val if3_target = WireInit(if3_snpc)
 
-  val if3_target = WireInit(if3_snpc)
-
-  if3_target := Mux1H(Seq((if3_prevHalfNotMetRedirect -> if3_prevHalfInstr.bits.npc),
-                          (if3_predTakenRedirect      -> if3_bp.target),
-                          (if3_predNotTakenRedirect   -> if3_snpc)))
-
-  npcGen.register(if3_redirect, if3_target, Some("if3_target"))
-
+    if3_target := ParallelPriorityMux(Seq(
+      (if3_prevHalfNotMetRedirect, if3_prevHalfInstr.bits.npc),
+      (if3_bp.taken  && (if3_nextValidPCNotEquals(if3_bp.target) || if3_ghInfoNotIdenticalRedirect), if3_bp.target),
+      (!if3_bp.taken && (if3_nextValidPCNotEquals(if3_snpc) || if3_ghInfoNotIdenticalRedirect), if3_snpc)))
+    
+    npcGen.register(if3_redirect, if3_target, Some("if3_target"))
+    // gh should correspond to redirect target
+    nghGen.register(if3_redirect, if3_predicted_gh, Some("if3_predicted_gh"))
+    
 
   //********************** IF4 ****************************//
   val ftqEnqBuf_ready = Wire(Bool())
@@ -267,9 +283,9 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   val if4_snpc = RegEnable(if3_snpc, if3_fire)
   // This is the real mask given from icache
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
+  val if4_gh = RegEnable(if3_gh, if3_fire)
 
 
-  val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq && ftqEnqBuf_ready || !if4_valid) && GTimer() > 500.U
   when (if4_flush) {
@@ -338,33 +354,40 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   prevHalfInstrReq.bits.instr := if4_pd.instrs(PredictWidth-1)(15, 0)
   prevHalfInstrReq.bits.ipf := if4_ipf
 
-  class IF4_PC_COMP extends XSModule {
+  class IF4_COMP[T <: Data](gen: T) extends XSModule {
     val io = IO(new Bundle {
-      val if2_pc = Input(UInt(VAddrBits.W))
-      val if3_pc = Input(UInt(VAddrBits.W))
-      val pc     = Input(UInt(VAddrBits.W))
+      val if2_src = Input(chiselTypeOf(gen))
+      val if3_src = Input(chiselTypeOf(gen))
+      val src_to_comp = Input(chiselTypeOf(gen))
       val if2_valid = Input(Bool())
       val if3_valid = Input(Bool())
       val res = Output(Bool())
     })
-    io.res := io.if3_valid  && io.if3_pc =/= io.pc ||
-              !io.if3_valid && (io.if2_valid && io.if2_pc =/= io.pc) ||
+    io.res := io.if3_valid  && io.if3_src.asUInt =/= io.src_to_comp.asUInt ||
+              !io.if3_valid && (io.if2_valid && io.if2_src.asUInt =/= io.src_to_comp.asUInt) ||
               !io.if3_valid && !io.if2_valid
   }
-  def if4_nextValidPCNotEquals(pc: UInt) = {
-    val comp = Module(new IF4_PC_COMP)
-    comp.io.if2_pc := if2_pc
-    comp.io.if3_pc := if3_pc
-    comp.io.pc     := pc
+  def if4_nextValidSrcNotEquals[T <: Data](if2_src: T, if3_src: T)(src: T) = {
+    val comp = Module(new IF4_COMP(if2_src))
+    comp.io.if2_src := if2_src
+    comp.io.if3_src := if3_src
+    comp.io.src_to_comp := src
     comp.io.if2_valid := if2_valid
     comp.io.if3_valid := if3_valid
     comp.io.res
   }
+  val if4_nextValidPCNotEquals = if4_nextValidSrcNotEquals(if2_pc, if3_pc)(_)
+  val if4_nextValidGHNotEquals = if4_nextValidSrcNotEquals(if2_gh, if3_gh)(_)
 
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
   val if4_predTakenRedirect = if4_bp.taken && if4_nextValidPCNotEquals(if4_bp.target)
   val if4_predNotTakenRedirect = !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
-  // val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
+  val if4_ghInfoNotIdenticalRedirect = if4_nextValidGHNotEquals(if4_predicted_gh) && enableGhistRepair.B
+
+  XSPerfAccumulate("if4_predTakenRedirect", if4_predTakenRedirect)
+  XSPerfAccumulate("if4_predNotTakenRedirect", if4_predNotTakenRedirect)
+  XSPerfAccumulate("if4_ghInfoNotIdenticalRedirect", if4_ghInfoNotIdenticalRedirect)
+  XSPerfAccumulate("if4_ghInfoNotIdenticalRedirect_independently", if4_ghInfoNotIdenticalRedirect && !if4_predTakenRedirect && !if4_predNotTakenRedirect)
 
   if4_redirect := if4_valid && (
                     // when if4 has a lastHalfRVI, but the next fetch packet is not snpc
@@ -372,9 +395,9 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
                     // when if4 preds taken, but the pc of next fetch packet is not the target
                     if4_predTakenRedirect ||
                     // when if4 preds not taken, but the pc of next fetch packet is not snpc
-                    if4_predNotTakenRedirect
+                    if4_predNotTakenRedirect ||
                     // GHInfo from last pred does not corresponds with this packet
-                    // if4_ghInfoNotIdenticalRedirect
+                    if4_ghInfoNotIdenticalRedirect
                   )
 
   val if4_target = WireInit(if4_snpc)
@@ -382,14 +405,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
 
   npcGen.register(if4_redirect, if4_target, Some("if4_target"))
+  nghGen.register(if4_redirect, if4_predicted_gh, Some("if4_predicted_gh"))
 
-  when (if4_fire) {
-    final_gh := if4_predicted_gh
-  }
-  if4_gh := final_gh
-  if3_gh := Mux(if4_valid, if4_predicted_gh, if4_gh)
-  if2_gh := Mux(if3_valid && !if3_flush, if3_predicted_gh, if3_gh)
-  if1_gh := Mux(if2_valid && !if2_flush, if2_predicted_gh, if2_gh)
 
   // ***************** Ftq enq buffer ********************
   val toFtqBuf = Wire(new FtqEntry)
@@ -409,12 +426,11 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
   io.toFtq.bits  := ftqEnqBuf
 
   toFtqBuf := DontCare
-  toFtqBuf.ftqPC    := if4_pc
+  toFtqBuf.ftqPC := if4_pc
   toFtqBuf.lastPacketPC.valid := if4_pendingPrevHalfInstr
   toFtqBuf.lastPacketPC.bits  := if4_prevHalfInstr.bits.pc
 
-  toFtqBuf.hist     := final_gh
-  toFtqBuf.predHist := if4_predHist.asTypeOf(new GlobalHistory)
+  toFtqBuf.hist     := if4_gh
   toFtqBuf.rasSp    := bpu.io.brInfo.rasSp
   toFtqBuf.rasTop   := bpu.io.brInfo.rasTop
   toFtqBuf.specCnt  := bpu.io.brInfo.specCnt
@@ -449,23 +465,18 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
 
 
   val r = io.redirect
-  val cfiUpdate = io.redirect.bits.cfiUpdate
-  when (r.valid) {
-    val isMisPred = r.bits.level === 0.U
-    val b = cfiUpdate
-    val oldGh = b.hist
-    val sawNTBr = b.sawNotTakenBranch
-    val isBr = b.pd.isBr
-    val taken = Mux(isMisPred, b.taken, b.predTaken)
-    val updatedGh = oldGh.update(sawNTBr, isBr && taken)
-    final_gh := updatedGh
-    if1_gh := updatedGh
-  }
+  val u = io.redirect.bits.cfiUpdate
+  val isMisPred = r.bits.level === 0.U
+  val redirect_taken = Mux(isMisPred, u.taken, u.predTaken)
+  val redirect_gh = u.hist.update(u.sawNotTakenBranch, u.pd.isBr && redirect_taken)
 
-  npcGen.register(io.redirect.valid, io.redirect.bits.cfiUpdate.target, Some("backend_redirect"))
+  npcGen.register(r.valid, r.bits.cfiUpdate.target, Some("backend_redirect"))
+  nghGen.register(r.valid, redirect_gh, Some("redirect_gh"))
   npcGen.register(RegNext(reset.asBool) && !reset.asBool, resetVector.U(VAddrBits.W), Some("reset_vector"))
+  nghGen.register(RegNext(reset.asBool) && !reset.asBool, 0.U.asTypeOf(new GlobalHistory), Some("reset_gh"))
 
   if1_npc := npcGen()
+  if1_gh := nghGen()
 
 
   icache.io.req.valid := if1_fire
@@ -629,8 +640,8 @@ class IFU extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with 
     val b = ftqEnqBuf
     XSDebug("[FtqEnqBuf] v=%d r=%d pc=%x cfiIndex(%d)=%d cfiIsCall=%d cfiIsRet=%d cfiIsJalr=%d cfiIsRVC=%d\n",
       ftqEnqBuf_valid, ftqEnqBuf_ready, b.ftqPC, b.cfiIndex.valid, b.cfiIndex.bits, b.cfiIsCall, b.cfiIsRet, b.cfiIsJalr, b.cfiIsRVC)
-    XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x predHist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
-      b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.predHist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
+    XSDebug("[FtqEnqBuf] valids=%b br_mask=%b rvc_mask=%b hist=%x rasSp=%d rasTopAddr=%x rasTopCtr=%d\n",
+      b.valids.asUInt, b.br_mask.asUInt, b.rvc_mask.asUInt, b.hist.asUInt, b.rasSp, b.rasTop.retAddr, b.rasTop.ctr)
     XSDebug("[ToFTQ] v=%d r=%d leftOne=%d ptr=%d\n", io.toFtq.valid, io.toFtq.ready, io.ftqLeftOne, io.ftqEnqPtr.value)
   }
 

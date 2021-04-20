@@ -632,7 +632,7 @@ class BPU extends BaseBPU {
       val isBr = buinfo.br_mask(i)
       val pc = packetAligned(buinfo.ftqPC) + (i * instBytes).U - Mux((i==0).B && buinfo.hasLastPrev, 2.U, 0.U)
       val tage_cycle = buinfo.metas(i).debug_tage_cycle
-      XSDebug(buValid && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${buinfo.mispred(i)}) cycle($tage_cycle) hist(${Hexadecimal(buinfo.predHist.asUInt)})\n")
+      XSDebug(buValid && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${buinfo.mispred(i)}) cycle($tage_cycle) hist(${Hexadecimal(buinfo.hist.asUInt)})\n")
     }
   }
 

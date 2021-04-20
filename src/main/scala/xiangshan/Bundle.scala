@@ -160,7 +160,6 @@ class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
-  val predHist = new GlobalHistory
   val specCnt = Vec(PredictWidth, UInt(10.W))
   // need pipeline update
   val sawNotTakenBranch = Bool()
@@ -191,7 +190,6 @@ class FtqEntry extends XSBundle {
   val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
   // prediction metas
   val hist = new GlobalHistory
-  val predHist = new GlobalHistory
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry()
   val specCnt = Vec(PredictWidth, UInt(10.W))

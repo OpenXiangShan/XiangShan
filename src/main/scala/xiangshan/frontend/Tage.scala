@@ -383,7 +383,7 @@ class Tage extends BaseTage {
     VecInit(u.valids zip u.br_mask map {
       case (v, b) => v && b && io.update.valid
     })
-  val updateHist = u.predHist.asUInt
+  val updateHist = u.hist.asUInt
 
   val updateMetas = VecInit(u.metas.map(_.tageMeta))
   val updateMisPred = u.mispred

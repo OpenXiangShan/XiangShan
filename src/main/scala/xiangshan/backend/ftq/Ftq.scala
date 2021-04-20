@@ -70,7 +70,6 @@ class Ftq_4R_SRAMEntry extends XSBundle {
 class Ftq_2R_SRAMEntry extends XSBundle {
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
-  val predHist = new GlobalHistory
   val specCnt = Vec(PredictWidth, UInt(10.W))
 }
 
@@ -138,7 +137,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   ftq_2r_sram.io.waddr := tailPtr.value
   ftq_2r_sram.io.wdata.rasSp := io.enq.bits.rasSp
   ftq_2r_sram.io.wdata.rasEntry := io.enq.bits.rasTop
-  ftq_2r_sram.io.wdata.predHist := io.enq.bits.predHist
   ftq_2r_sram.io.wdata.specCnt := io.enq.bits.specCnt
   val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
   pred_target_sram.io.wen := real_fire
@@ -240,7 +238,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // from 2r sram
   commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
   commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
-  commitEntry.predHist := RegNext(ftq_2r_sram.io.rdata(0).predHist)
   commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
   // from 1r sram
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
@@ -278,7 +275,6 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.cfiRead.entry := DontCare
   io.cfiRead.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
   io.cfiRead.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
-  io.cfiRead.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
   io.cfiRead.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){

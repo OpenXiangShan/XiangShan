@@ -166,7 +166,6 @@ class RedirectGenerator extends XSModule with HasCircularQueuePtrHelper with Wai
   stage3CfiUpdate.pd := s2_pd
   stage3CfiUpdate.rasSp := s2_ftqRead.rasSp
   stage3CfiUpdate.rasEntry := s2_ftqRead.rasTop
-  stage3CfiUpdate.predHist := s2_ftqRead.predHist
   stage3CfiUpdate.specCnt := s2_ftqRead.specCnt
   stage3CfiUpdate.hist := s2_hist
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
