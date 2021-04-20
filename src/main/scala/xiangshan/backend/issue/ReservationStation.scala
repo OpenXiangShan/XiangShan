@@ -93,11 +93,11 @@ class ReservationStation
   feedback: Boolean,
 ) extends XSModule {
   val iqIdxWidth = log2Up(iqSize)
-  val nonBlocked = fixedDelay >= 0
+  val nonBlocked = if (exuCfg == Exu.mulDivExeUnitCfg) false else fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   val fastPortsCnt = fastPortsCfg.size
   val slowPortsCnt = slowPortsCfg.size
-  require(nonBlocked==fastWakeup)
+  // require(nonBlocked==fastWakeup)
 
   val io = IO(new Bundle {
     val numExist = Output(UInt(iqIdxWidth.W))
@@ -211,11 +211,11 @@ class ReservationStationSelect
   feedback: Boolean,
 ) extends XSModule with HasCircularQueuePtrHelper{
   val iqIdxWidth = log2Up(iqSize)
-  val nonBlocked = fixedDelay >= 0
+  val nonBlocked = if (exuCfg == Exu.mulDivExeUnitCfg) false else fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   val fastPortsCnt = fastPortsCfg.size
   val slowPortsCnt = slowPortsCfg.size
-  require(nonBlocked==fastWakeup)
+  // require(nonBlocked==fastWakeup)
   val replayDelay = VecInit(Seq(1, 1, 1, 5).map(_.U(5.W)))
 
   val io = IO(new Bundle {
@@ -448,11 +448,11 @@ class ReservationStationCtrl
   feedback: Boolean,
 ) extends XSModule with HasCircularQueuePtrHelper {
   val iqIdxWidth = log2Up(iqSize)
-  val nonBlocked = fixedDelay >= 0
+  val nonBlocked = if (exuCfg == Exu.mulDivExeUnitCfg) false else fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   val fastPortsCnt = fastPortsCfg.size
   val slowPortsCnt = slowPortsCfg.size
-  require(nonBlocked==fastWakeup)
+  // require(nonBlocked==fastWakeup)
 
   val io = IO(new XSBundle {
 
@@ -753,11 +753,11 @@ class ReservationStationData
   feedback: Boolean,
 ) extends XSModule {
   val iqIdxWidth = log2Up(iqSize)
-  val nonBlocked = fixedDelay >= 0
+  val nonBlocked = if (exuCfg == Exu.mulDivExeUnitCfg) false else fixedDelay >= 0
   val srcNum = if (exuCfg == Exu.jumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   val fastPortsCnt = fastPortsCfg.size
   val slowPortsCnt = slowPortsCfg.size
-  require(nonBlocked==fastWakeup)
+  // require(nonBlocked==fastWakeup)
 
   val io = IO(new XSBundle {
     val srcRegValue = Vec(srcNum, Input(UInt(srcLen.W)))
