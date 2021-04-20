@@ -224,7 +224,7 @@ object FunctionUnit extends HasXSParameter {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(3)
+    CertainLatency(2)
   )
 
   val fmacCfg = FuConfig(
