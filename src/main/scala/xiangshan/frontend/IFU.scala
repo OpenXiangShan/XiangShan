@@ -453,7 +453,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
     val sawNTBr = b.sawNotTakenBranch
     val isBr = b.pd.isBr
     val taken = Mux(isMisPred, b.taken, b.predTaken)
-    val updatedGh = oldGh.update(sawNTBr, isBr && taken)
+    val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
     final_gh := updatedGh
     if1_gh := updatedGh
   }
