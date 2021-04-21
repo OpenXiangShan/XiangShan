@@ -94,7 +94,7 @@ class FloatBlock
 
   // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val readPortIndex = Seq(0, 1, 2, 3, 2, 3)
-  val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
+  val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
@@ -150,8 +150,8 @@ class FloatBlock
     rs
   })
 
-  for(rs <- reservedStations){
-    val inBlockUops = reservedStations.filter(x =>
+  for(rs <- reservationStations){
+    val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeFpRf
     ).map(x => {
       val raw = WireInit(x.io.fastUopOut)
@@ -227,4 +227,8 @@ class FloatBlock
     difftest.io.coreid := 0.U
     difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
   }
+
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  XSPerfAccumulate("fp_rs_deq_count", rsDeqCount)
+  XSPerfHistogram("fp_rs_deq_count", rsDeqCount, true.B, 0, 6, 1)
 }

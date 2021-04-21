@@ -14,6 +14,7 @@ import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
+import utils._
 
 class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
@@ -382,5 +383,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
-}
 
+  val ldDeqCount = PopCount(reservationStations.take(2).map(_.io.deq.valid))
+  val stDeqCount = PopCount(reservationStations.drop(2).map(_.io.deq.valid))
+  val rsDeqCount = ldDeqCount + stDeqCount
+  XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
+  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("store_rs_deq_count", stDeqCount)
+  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+}
