@@ -119,7 +119,7 @@ class ReservationStation
     val flush = Input(Bool())
 
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
-    val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
+    val rsIdx = if (feedback) Output(UInt(log2Up(iqSize).W)) else null
     val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
@@ -223,10 +223,10 @@ class ReservationStationSelect
     val numExist = Output(UInt(iqIdxWidth.W))
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
 
-    val redirectVec = Input(Vec(IssQueSize, Bool()))
-    val readyVec = Input(Vec(IssQueSize, Bool()))
-    val validVec = Output(Vec(IssQueSize, Bool()))
-    val indexVec = Output(Vec(IssQueSize, UInt(iqIdxWidth.W)))
+    val redirectVec = Input(Vec(iqSize, Bool()))
+    val readyVec = Input(Vec(iqSize, Bool()))
+    val validVec = Output(Vec(iqSize, Bool()))
+    val indexVec = Output(Vec(iqSize, UInt(iqIdxWidth.W)))
 
     // val enq = Flipped(DecoupledIO(UInt(iqIdxWidth.W)))
     val enq = new Bundle {
@@ -465,10 +465,10 @@ class ReservationStationCtrl
     val sel = Flipped(ValidIO(UInt(iqIdxWidth.W)))
     val out = ValidIO(new MicroOp)
 
-    val redirectVec = Output(Vec(IssQueSize, Bool()))
-    val readyVec = Output(Vec(IssQueSize, Bool()))
-    val validVec = Input(Vec(IssQueSize, Bool()))
-    val indexVec = Input(Vec(IssQueSize, UInt(iqIdxWidth.W)))
+    val redirectVec = Output(Vec(iqSize, Bool()))
+    val readyVec = Output(Vec(iqSize, Bool()))
+    val validVec = Input(Vec(iqSize, Bool()))
+    val indexVec = Input(Vec(iqSize, UInt(iqIdxWidth.W)))
 
     val fastUopOut = ValidIO(new MicroOp)
     val fastUopsIn = Flipped(Vec(fastPortsCnt, ValidIO(new MicroOp)))
@@ -587,7 +587,7 @@ class ReservationStationCtrl
     }
   }
 
-  val roqIdx = Reg(Vec(IssQueSize, new RoqPtr))
+  val roqIdx = Reg(Vec(iqSize, new RoqPtr))
   when (enqEn) {
     roqIdx(enqPtr) := enqUop.roqIdx
   }
