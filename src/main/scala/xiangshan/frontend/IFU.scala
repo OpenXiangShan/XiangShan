@@ -464,7 +464,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
   val u = io.redirect.bits.cfiUpdate
   val isMisPred = r.bits.level === 0.U
   val redirect_taken = Mux(isMisPred, u.taken, u.predTaken)
-  val redirect_gh = u.hist.update(u.sawNotTakenBranch, u.pd.isBr && redirect_taken)
+  val redirect_gh = u.hist.update(u.sawNotTakenBranch || u.pd.isBr, u.pd.isBr && redirect_taken)
 
   npcGen.register(r.valid, r.bits.cfiUpdate.target, Some("backend_redirect"))
   nghGen.register(r.valid, redirect_gh, Some("redirect_gh"))
