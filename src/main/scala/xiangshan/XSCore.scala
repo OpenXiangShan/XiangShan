@@ -68,6 +68,7 @@ case class XSCoreParameters
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
+  MemIssQueSize: Int = 32,
   NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
@@ -163,6 +164,7 @@ trait HasXSParameter {
   val BrqSize = coreParams.BrqSize
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
+  val MemIssQueSize = coreParams.MemIssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = coreParams.NRPhyRegs
