@@ -3,10 +3,11 @@ package xiangshan.backend.ftq
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, XSError}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
+import scala.tools.nsc.doc.model.Val
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
@@ -182,25 +183,87 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   tailPtr := tailPtr + real_fire
 
   // exu write back, update some info
-  for ((wb, i) <- io.exuWriteback.zipWithIndex) {
+
+  // when redirect cfi offset < current offset, update all cfi info
+  val cfiWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
+  // when redirect cfi offset == current offset (and only), update cfi valid bit
+  val cfiValidWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
+
+  val cfiIndexValidWb_vec = Wire(Vec(FtqSize, Bool()))
+  val cfiIndexBitsWb_vec = Wire(Vec(FtqSize, UInt(log2Up(PredictWidth).W)))
+  val cfiInfoWb_vec = Wire(Vec(FtqSize, Vec(4, Bool())))
+
+  val nWbPorts = io.exuWriteback.size
+  def extractWbInfo(wb: Valid[ExuOutput]) = {
     val wbIdx = wb.bits.redirect.ftqIdx.value
     val offset = wb.bits.redirect.ftqOffset
     val cfiUpdate = wb.bits.redirect.cfiUpdate
-    when(wb.valid && wb.bits.redirectValid) {
-      mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
-      when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
-        cfiIndex_vec(wbIdx).valid := true.B
-        cfiIndex_vec(wbIdx).bits := offset
-        cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
-        cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
-        cfiIsJalr(wbIdx) := wb.bits.uop.cf.pd.isJalr
-        cfiIsRVC(wbIdx) := wb.bits.uop.cf.pd.isRVC
-      }
-      when (offset === cfiIndex_vec(wbIdx).bits) {
-        cfiIndex_vec(wbIdx).valid := cfiUpdate.taken
-      }
+    (wbIdx, offset, cfiUpdate)
+  }
+  def extractWbCfiInfo(wb: Valid[ExuOutput]) = {
+    val isCall = wb.bits.uop.cf.pd.isCall
+    val isRet = wb.bits.uop.cf.pd.isRet
+    val isJalr= wb.bits.uop.cf.pd.isJalr
+    val isRVC = wb.bits.uop.cf.pd.isRVC
+    VecInit(isCall, isRet, isJalr, isRVC)
+  }
+
+  def getFtqOffset(wb: Valid[ExuOutput]): UInt = extractWbInfo(wb)._2
+  def getFtqOffset(n: Int): UInt = extractWbInfo(io.exuWriteback(n))._2
+  // FtqSize * onehot
+  val wbPortSel_vec = Wire(Vec(FtqSize, Vec(nWbPorts, Bool())))
+  // in order to handle situation in which multiple cfi taken writebacks target the same ftqEntry
+  for (i <- 0 until FtqSize) {
+    val needToUpdateThisEntry =
+      VecInit(for (wb <- io.exuWriteback) yield {
+        val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+        wb.valid && wb.bits.redirectValid && cfiUpdate.taken && wbIdx === i.U && offset < cfiIndex_vec(wbIdx).bits
+      })
+    val updateCfiValidMask = 
+      VecInit(for (wb <- io.exuWriteback) yield {
+        val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+        wb.valid && wb.bits.redirectValid && wbIdx === i.U && offset === cfiIndex_vec(wbIdx).bits
+      })
+      
+    cfiWbEn_vec(i) := needToUpdateThisEntry.asUInt().orR()
+    cfiValidWbEn_vec(i) := updateCfiValidMask.asUInt().orR()
+
+    for (n <- 0 until nWbPorts) {
+      val hasFormerWriteBack = (
+        for (another <- 0 until nWbPorts if another != n) yield {
+          needToUpdateThisEntry(another) && getFtqOffset(another) < getFtqOffset(n)
+        }
+      ).reduce(_||_)
+      wbPortSel_vec(i)(n) := needToUpdateThisEntry(n) && !hasFormerWriteBack || !needToUpdateThisEntry.asUInt().orR() && updateCfiValidMask(n)
+    }
+
+    XSError(PopCount(wbPortSel_vec(i)) > 1.U, p"multiple wb ports are selected to update cfiIndex_vec($i)\n")
+
+    cfiIndexValidWb_vec(i) := cfiWbEn_vec(i) || cfiValidWbEn_vec(i) && extractWbInfo(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))._3.taken
+    cfiIndexBitsWb_vec(i) := getFtqOffset(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))
+    cfiInfoWb_vec(i) := extractWbCfiInfo(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))
+  }
+
+  for (i <- 0 until FtqSize) {
+    when (cfiWbEn_vec(i) || cfiValidWbEn_vec(i)) {
+      cfiIndex_vec(i).valid := cfiIndexValidWb_vec(i)
+    }
+    when (cfiWbEn_vec(i)) {
+      cfiIndex_vec(i).bits := cfiIndexBitsWb_vec(i)
+      cfiIsCall(i) := cfiInfoWb_vec(i)(0)
+      cfiIsRet(i) := cfiInfoWb_vec(i)(1)
+      cfiIsJalr(i) := cfiInfoWb_vec(i)(2)
+      cfiIsRVC(i) := cfiInfoWb_vec(i)(3)
     }
   }
+
+  for (wb <- io.exuWriteback) {
+    val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+    when(wb.valid && wb.bits.redirectValid) {
+      mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
+    }
+  }
+
 
   // fix mispredict entry
   val lastIsMispredict = RegNext(
