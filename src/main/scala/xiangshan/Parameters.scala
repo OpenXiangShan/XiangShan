@@ -115,7 +115,7 @@ case object DebugOptionsKey extends Field[DebugOptions]
 case class DebugOptions
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false,
+  EnableDebug: Boolean = true,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false
 )
