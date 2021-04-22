@@ -3,7 +3,7 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
@@ -275,4 +275,7 @@ class IntegerBlock
     difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
   }
 
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  XSPerfAccumulate("int_rs_deq_count", rsDeqCount)
+  XSPerfHistogram("int_rs_deq_count", rsDeqCount, true.B, 0, 7, 1)
 }
