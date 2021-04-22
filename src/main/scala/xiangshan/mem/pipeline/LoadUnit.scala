@@ -309,7 +309,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
   // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
-  io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid
+  io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid && !load_s1.io.dcacheKill
   io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
@@ -326,7 +326,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.lsq.loadIn.bits := load_s2.io.out.bits
 
   // write to rob and writeback bus
-  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss
+  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss && !load_s2.io.out.bits.mmio
 
   // Int load, if hit, will be writebacked at s2
   val hitLoadOut = Wire(Valid(new ExuOutput))
