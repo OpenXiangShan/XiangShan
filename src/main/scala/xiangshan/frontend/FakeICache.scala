@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import device.RAMHelper
@@ -12,17 +13,17 @@ trait HasICacheConst { this: XSModule =>
   def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
 }
 
-class FakeIcacheReq extends XSBundle {
+class FakeIcacheReq(implicit p: Parameters) extends XSBundle {
   val addr = UInt(VAddrBits.W)
 }
 
-class FakeIcacheResp extends XSBundle {
+class FakeIcacheResp(implicit p: Parameters) extends XSBundle {
   val data = UInt(64.W)
   val finish = Bool()
 
 }
 
-class FakeCache extends XSModule with HasICacheConst {
+class FakeCache(implicit p: Parameters) extends XSModule with HasICacheConst {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new FakeIcacheReq))
     val out = DecoupledIO(new FakeIcacheResp)

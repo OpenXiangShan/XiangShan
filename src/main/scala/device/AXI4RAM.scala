@@ -3,11 +3,14 @@ package device
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
+import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4EdgeParameters, AXI4MasterNode}
+import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp, RegionType}
+import top.HaveAXI4MemPort
 import xiangshan.HasXSParameter
-import utils.{MaskExpand}
+import utils.MaskExpand
 
-class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
+class RAMHelper(memByte: BigInt) extends BlackBox {
+  val DataBits = 64
   val io = IO(new Bundle {
     val clk   = Input(Clock())
     val en    = Input(Bool())
@@ -27,11 +30,10 @@ class AXI4RAM
   useBlackBox: Boolean = false,
   executable: Boolean = true,
   beatBytes: Int = 8,
-  burstLen: Int = 16
+  burstLen: Int = 16,
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable, beatBytes, burstLen)
-{
-
+{ 
   override lazy val module = new AXI4SlaveModuleImp(this){
 
     val split = beatBytes / 8
@@ -75,4 +77,28 @@ class AXI4RAM
     }
     in.r.bits.data := rdata
   }
+}
+
+class AXI4RAMWrapper
+(snode: AXI4SlaveNode, memByte: Long, useBlackBox: Boolean = false)
+(implicit p: Parameters)
+  extends LazyModule {
+
+  val mnode = AXI4MasterNode(List(snode.in.head._2.master))
+ 
+  val portParam = snode.portParams.head
+  val slaveParam = portParam.slaves.head
+  val burstLen = portParam.maxTransfer / portParam.beatBytes
+  val ram = LazyModule(new AXI4RAM(
+    slaveParam.address, memByte, useBlackBox,
+    slaveParam.executable, portParam.beatBytes, burstLen
+  ))
+  ram.node := mnode
+  
+  val io_axi4 = InModuleBody{ mnode.makeIOs() }
+  def connectToSoC(soc: HaveAXI4MemPort) = {
+    io_axi4 <> soc.memory
+  }
+
+  lazy val module = new LazyModuleImp(this){}
 }

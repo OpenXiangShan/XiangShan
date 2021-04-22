@@ -1,22 +1,22 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.ExcitingUtils._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
+import xiangshan.backend.roq.{RoqEnqIO, RoqPtr}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
-class PreDispatchInfo extends XSBundle {
+class PreDispatchInfo(implicit p: Parameters) extends XSBundle {
   val lsqNeedAlloc = Vec(RenameWidth, UInt(2.W))
 }
 
 // read rob and enqueue
-class Dispatch1 extends XSModule with HasExceptionNO {
+class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))

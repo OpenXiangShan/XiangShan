@@ -1,5 +1,6 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
@@ -72,20 +73,20 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
 }
 
-abstract class DCacheModule extends L1CacheModule
+abstract class DCacheModule(implicit p: Parameters) extends L1CacheModule
   with HasDCacheParameters
 
-abstract class DCacheBundle extends L1CacheBundle
+abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
   with HasDCacheParameters
 
 // basic building blocks for L1 DCache
-class L1Metadata extends DCacheBundle {
+class L1Metadata(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
 }
 
 object L1Metadata {
-  def apply(tag: Bits, coh: ClientMetadata) = {
+  def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
     val meta = Wire(new L1Metadata)
     meta.tag := tag
     meta.coh := coh
@@ -93,17 +94,17 @@ object L1Metadata {
   }
 }
 
-class L1MetaReadReq extends DCacheBundle {
+class L1MetaReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
   val way_en = UInt(nWays.W)
   val tag = UInt(tagBits.W)
 }
 
-class L1MetaWriteReq extends L1MetaReadReq {
+class L1MetaWriteReq(implicit p: Parameters) extends L1MetaReadReq {
   val data = new L1Metadata
 }
 
-class L1DataReadReq extends DCacheBundle {
+class L1DataReadReq(implicit p: Parameters) extends DCacheBundle {
   // you can choose which bank to read to save power
   val rmask = Bits(blockRows.W)
   val way_en = Bits(nWays.W)
@@ -111,17 +112,17 @@ class L1DataReadReq extends DCacheBundle {
 }
 
 // Now, we can write a cache-block in a single cycle
-class L1DataWriteReq extends L1DataReadReq {
+class L1DataWriteReq(implicit p: Parameters) extends L1DataReadReq {
   val wmask = Bits(blockRows.W)
   val data = Vec(blockRows, Bits(rowBits.W))
 }
 
-class ReplacementAccessBundle extends DCacheBundle {
+class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
   val set = UInt(log2Up(nSets).W)
   val way = UInt(log2Up(nWays).W)
 }
 
-abstract class AbstractDataArray extends DCacheModule {
+abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
@@ -178,7 +179,7 @@ abstract class AbstractDataArray extends DCacheModule {
   }
 }
 
-class DuplicatedDataArray extends AbstractDataArray {
+class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
   val singlePort = true
   val readHighPriority = false
 
@@ -327,7 +328,7 @@ class DuplicatedDataArray extends AbstractDataArray {
   }
 }
 
-class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
+class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends DCacheModule {
   val rstVal = onReset()
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
@@ -403,7 +404,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   }
 }
 
-class DuplicatedMetaArray extends DCacheModule {
+class DuplicatedMetaArray(implicit p: Parameters) extends DCacheModule {
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
 
   val metaBits = onReset.getWidth

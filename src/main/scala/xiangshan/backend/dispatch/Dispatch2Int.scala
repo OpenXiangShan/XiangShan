@@ -1,14 +1,13 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.exu.Exu._
-import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.BusyTableReadIO
 
-class Dispatch2Int extends XSModule {
+class Dispatch2Int(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
     val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))

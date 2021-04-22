@@ -11,6 +11,9 @@ void ram_finish();
 void* get_ram_start();
 long get_ram_size();
 
+void* get_img_start();
+long get_img_size();
+
 #ifdef WITH_DRAMSIM3
 #include "axi4.h"
 

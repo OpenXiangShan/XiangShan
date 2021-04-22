@@ -1,11 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 
-class MainPipeReq extends DCacheBundle
+class MainPipeReq(implicit p: Parameters) extends DCacheBundle
 {
   // for request that comes from MissQueue
   // does this req come from MissQueue
@@ -45,7 +46,7 @@ class MainPipeReq extends DCacheBundle
   }
 }
 
-class MainPipeResp extends DCacheBundle
+class MainPipeResp(implicit p: Parameters) extends DCacheBundle
 {
   val id     = UInt(reqIdWidth.W)
   // AMO resp data
@@ -58,7 +59,7 @@ class MainPipeResp extends DCacheBundle
   }
 }
 
-class MainPipe extends DCacheModule {
+class MainPipe(implicit p: Parameters) extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
   def encMetaBits = cacheParams.tagCode.width(metaBits)
 

@@ -1,5 +1,6 @@
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -13,7 +14,7 @@ trait WaitTableParameters {
 }
 
 // 21264-like wait table
-class WaitTable extends XSModule with WaitTableParameters {
+class WaitTable(implicit p: Parameters) extends XSModule with WaitTableParameters {
   val io = IO(new Bundle {
     val raddr = Vec(DecodeWidth, Input(UInt(WaitTableAddrWidth.W))) // decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(Bool())) // loadWaitBit

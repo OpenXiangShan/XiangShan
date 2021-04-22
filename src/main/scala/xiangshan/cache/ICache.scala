@@ -6,8 +6,8 @@ import device._
 import xiangshan._
 import xiangshan.frontend._
 import utils._
-import chisel3.ExcitingUtils._
 import bus.tilelink.TLParameters
+import chipsalliance.rocketchip.config.Parameters
 import system.L1CacheErrorInfo
 
 
@@ -74,25 +74,25 @@ trait HasFrontEndExceptionNo {
   def pageFault   = 1
 }
 
-abstract class ICacheBundle extends XSBundle
+abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
   with HasICacheParameters
 
-abstract class ICacheModule extends XSModule
+abstract class ICacheModule(implicit p: Parameters) extends XSModule
   with HasICacheParameters
   with HasFrontEndExceptionNo
   with HasIFUConst
 
-abstract class ICacheArray extends XSModule
+abstract class ICacheArray(implicit p: Parameters) extends XSModule
   with HasICacheParameters
 
 
-class ICacheReq extends ICacheBundle
+class ICacheReq(implicit p: Parameters) extends ICacheBundle
 {
   val addr = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
 }
 
-class ICacheResp extends ICacheBundle
+class ICacheResp(implicit p: Parameters) extends ICacheBundle
 {
   val pc = UInt(VAddrBits.W)
   val data = UInt((FetchWidth * 32).W)
@@ -103,7 +103,7 @@ class ICacheResp extends ICacheBundle
 }
 
 
-class ICacheIO extends ICacheBundle
+class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
@@ -124,14 +124,14 @@ class ICacheIO extends ICacheBundle
   val error = new L1CacheErrorInfo
 }
 
-class ICacheMetaReadBundle extends ICacheBundle
+class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val tags = Vec(nWays,UInt(tagBits.W))
   val errors = Vec(nWays,Bool())
 
 }
 
-class ICacheMetaWriteBundle extends ICacheBundle
+class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx = UInt(idxBits.W)
   val phyTag = UInt(tagBits.W)
@@ -145,7 +145,7 @@ class ICacheMetaWriteBundle extends ICacheBundle
 
 }
 
-class ICacheDataWriteBundle extends ICacheBundle
+class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx = UInt(idxBits.W)
   val data = UInt(blockBits.W)
@@ -159,14 +159,14 @@ class ICacheDataWriteBundle extends ICacheBundle
 
 }
 
-class ICacheDataReadBundle extends ICacheBundle
+class ICacheDataReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas = Vec(nWays,Vec(blockRows,UInt(rowBits.W)))
   val errors = Vec(nWays,Bool())
 
 }
 
-class ICacheMetaArray extends ICacheArray
+class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
 {
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
@@ -207,7 +207,7 @@ class ICacheMetaArray extends ICacheArray
 
 }
 
-class ICacheDataArray extends ICacheArray
+class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 {
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheDataWriteBundle))
@@ -294,7 +294,7 @@ class ICacheDataArray extends ICacheArray
   io.write.ready := DontCare
 }
 
-class ICacheErrorAbiter extends ICacheModule
+class ICacheErrorAbiter(implicit p: Parameters) extends ICacheModule
 {
   val io = IO(new Bundle{
     val meta_ways_error = Flipped(Valid(Vec(nWays,Bool())))
@@ -319,7 +319,7 @@ class ICacheErrorAbiter extends ICacheModule
  * The hardware implementation of ICache
  * ------------------------------------------------------------
  */
-class ICache extends ICacheModule
+class ICache(implicit p: Parameters) extends ICacheModule
 {
   val io = IO(new ICacheIO)
 

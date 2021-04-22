@@ -1,11 +1,11 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
 import utils.XSDebug
 
-class AtomicsReplayEntry extends DCacheModule
+class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val lsu  = Flipped(new DCacheWordIO)

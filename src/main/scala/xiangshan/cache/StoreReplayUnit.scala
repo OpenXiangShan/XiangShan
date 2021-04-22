@@ -1,12 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import utils.{XSDebug, XSPerfAccumulate, XSPerfHistogram, TransactionLatencyCounter}
+import utils.{TransactionLatencyCounter, XSDebug, XSPerfAccumulate, XSPerfHistogram}
 import bus.tilelink._
 
-class StoreReplayEntry extends DCacheModule
+class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val id = Input(UInt())
@@ -131,7 +131,7 @@ class StoreReplayEntry extends DCacheModule
 }
 
 
-class StoreReplayQueue extends DCacheModule
+class StoreReplayQueue(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val lsu       = Flipped(new DCacheLineIO)

@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
-import xiangshan.cache.{DCache, HasDCacheParameters, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import chipsalliance.rocketchip.config.Parameters
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 
 object MemMap {
   def apply (base: String, top: String, width: String, description: String, mode: String): ((String, String), Map[String, String]) = {
@@ -169,7 +170,7 @@ object AddressSpace {
   }
 }
 
-class PMAChecker extends XSModule with HasDCacheParameters
+class PMAChecker(implicit p: Parameters) extends XSModule with HasDCacheParameters
 {
   val io = IO(new Bundle() {
     val paddr = Input(UInt(VAddrBits.W))

@@ -25,7 +25,7 @@ import cache.TLCTest._
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Seq}
 
-class L1DTestTopIO extends Bundle {
+class L1DTestTopIO(implicit p: Parameters) extends Bundle {
   val slaveIO = new TLCTestSlaveMMIO()
   val dcacheIO = new DCacheToLsuIO
 }
@@ -55,7 +55,6 @@ class L1DTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 }
 
 class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with TLCOp with RandomSampleUtil {
-  top.Parameters.set(top.Parameters.debugParameters)
 
   it should "run" in {
     implicit val p = Parameters((site, up, here) => {

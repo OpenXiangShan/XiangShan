@@ -1,11 +1,11 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import chisel3.ExcitingUtils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.{RenameBypassInfo, BusyTableReadIO}
 import xiangshan.mem.LsqEnqIO
@@ -20,7 +20,7 @@ case class DispatchParameters
   LsDqDeqWidth: Int
 )
 
-class Dispatch extends XSModule {
+class Dispatch(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
