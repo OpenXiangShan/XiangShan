@@ -327,7 +327,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   io.lsq.loadIn.bits := load_s2.io.out.bits
 
   // write to rob and writeback bus
-  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss
+  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss && !load_s2.io.out.bits.mmio
 
   // Int load, if hit, will be writebacked at s2
   val hitLoadOut = Wire(Valid(new ExuOutput))
