@@ -17,8 +17,8 @@ VEXTRA_FLAGS += --trace
 endif
 
 # Verilator multi-thread support
-EMU_THREADS  ?= 1
-ifneq ($(EMU_THREADS),1)
+EMU_THREADS  ?= 0
+ifneq ($(EMU_THREADS),0)
 VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi all
 endif
 
