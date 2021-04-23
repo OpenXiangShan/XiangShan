@@ -24,6 +24,7 @@ static inline void print_help(const char *file) {
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
   printf("      --no-snapshot          disable saving snapshots\n");
   printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("      --diff=PATH            set the path of REF for differential testing\n");
   printf("  -h, --help                 print program help info\n");
   printf("\n");
 }
@@ -31,10 +32,12 @@ static inline void print_help(const char *file) {
 inline EmuArgs parse_args(int argc, const char *argv[]) {
   EmuArgs args;
   int long_index = 0;
+  extern const char *difftest_ref_so;
   const struct option long_options[] = {
     { "load-snapshot",  1, NULL,  0  },
     { "dump-wave",      0, NULL,  0  },
     { "no-snapshot",    0, NULL,  0  },
+    { "diff",           1, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
@@ -56,6 +59,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 0: args.snapshot_path = optarg; continue;
           case 1: args.enable_waveform = true; continue;
           case 2: args.enable_snapshot = false; continue;
+          case 3: difftest_ref_so = optarg; continue;
         }
         // fall through
       default:
