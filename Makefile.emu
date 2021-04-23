@@ -88,7 +88,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
 	@echo "\n[g++] Compiling C++ files..." >> $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 ifeq ($(REMOTE),localhost)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(TIME_CMD) $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK)) 2> $(BUILD_DIR)/g++.log
+	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(TIME_CMD) $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK)) 2> $(BUILD_DIR)/g++.err.log | tee $(BUILD_DIR)/g++.out.log | grep '^g++' | awk '{print "Compiling/Generating", $$NF}'
 else
 	@echo "try to get emu.lock ..."
 	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
