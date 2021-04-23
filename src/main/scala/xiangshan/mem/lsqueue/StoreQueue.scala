@@ -263,25 +263,30 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // all addrvalid terms need to be checked
     val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && allocated(i))))
     val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => datavalid(i))))
-    val needForward1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask) & addrValidVec.asUInt
-    val needForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W)) & addrValidVec.asUInt
+    val allValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i) && allocated(i))))
+    val canForward1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask) & allValidVec.asUInt
+    val canForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W)) & allValidVec.asUInt
+    val needForward = Mux(differentFlag, ~deqMask | forwardMask, deqMask ^ forwardMask)
 
-    XSDebug(p"$i f1 ${Binary(needForward1)} f2 ${Binary(needForward2)} " +
+    XSDebug(p"$i f1 ${Binary(canForward1)} f2 ${Binary(canForward2)} " +
       p"sqIdx ${io.forward(i).sqIdx} pa ${Hexadecimal(io.forward(i).paddr)}\n"
     )
 
-    // do real fwd query
-    dataModule.io.needForward(i)(0) := needForward1 & paddrModule.io.forwardMmask(i).asUInt
-    dataModule.io.needForward(i)(1) := needForward2 & paddrModule.io.forwardMmask(i).asUInt
+    // do real fwd query (cam lookup in load_s1)
+    dataModule.io.needForward(i)(0) := canForward1 & paddrModule.io.forwardMmask(i).asUInt
+    dataModule.io.needForward(i)(1) := canForward2 & paddrModule.io.forwardMmask(i).asUInt
 
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
 
-    // Forward result will be generated 1 cycle later
+    // Forward result will be generated 1 cycle later (load_s2)
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
     // If addr match, data not ready, mark it as dataInvalid
-    io.forward(i).dataInvalid := RegNext((addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt).orR)
+    // load_s1: generate dataInvalid in load_s1 to set fastUop to 
+    io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt & needForward).orR 
+    // load_s2
+    io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
   }
 
   /**

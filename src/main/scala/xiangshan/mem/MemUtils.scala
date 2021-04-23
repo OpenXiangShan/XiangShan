@@ -89,7 +89,9 @@ class PipeLoadForwardQueryIO extends XSBundle {
   // sqIdxMask is calcuated in earlier stage for better timing
   val sqIdxMask = Output(UInt(StoreQueueSize.W))
 
-  val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
+  // dataInvalid: addr match, but data is not valid for now
+  val dataInvalidFast = Input(Bool()) // resp to load_s1
+  val dataInvalid = Input(Bool()) // resp to load_s2
   // If dataInvalid, load inst should sleep for a while
   // Feedback type should be RSFeedbackType.dataInvalid
 }
