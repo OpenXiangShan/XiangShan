@@ -73,10 +73,10 @@ EMU := $(BUILD_DIR)/emu
 
 $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	@mkdir -p $(@D)
-	date -R
-	verilator --cc --exe $(VERILATOR_FLAGS) \
+	@echo "\n[verilator] Generating C++ files..." >> $(TIMELOG)
+	@date -R | tee -a $(TIMELOG)
+	$(TIME_CMD) verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
-	date -R
 
 LOCK = /var/emu/emu.lock
 LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
@@ -85,18 +85,18 @@ $(LOCK_BIN): ./scripts/utils/lock-emu.c
 	gcc $^ -o $@
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
-	date -R
+	@echo "\n[g++] Compiling C++ files..." >> $(TIMELOG)
+	@date -R | tee -a $(TIMELOG)
 ifeq ($(REMOTE),localhost)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
+	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(TIME_CMD) $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK)) 2> $(BUILD_DIR)/g++.log
 else
 	@echo "try to get emu.lock ..."
 	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
 	@echo "get lock"
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	$(TIME_CMD) ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
 	@echo "release lock ..."
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
-	date -R
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
