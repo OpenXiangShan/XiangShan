@@ -1,7 +1,7 @@
 #include <csignal>
 #include "common.h"
 
-int assert_count = -1;
+int assert_count = 0;
 static pthread_mutex_t assert_mutex;
 int signal_num = 0;
 
