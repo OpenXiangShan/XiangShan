@@ -137,7 +137,7 @@ public:
     retire_group_cnt_queue[retire_group_pointer] = count;
     retire_group_pointer = (retire_group_pointer + 1) % DEBUG_GROUP_TRACE_SIZE;
   };
-  void record_inst(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint8_t data) {
+  void record_inst(uint64_t pc, uint32_t inst, uint8_t en, uint8_t dest, uint64_t data) {
     retire_inst_pc_queue   [retire_inst_pointer] = pc;
     retire_inst_inst_queue [retire_inst_pointer] = inst;
     retire_inst_wen_queue  [retire_inst_pointer] = en;
