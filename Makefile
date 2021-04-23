@@ -146,8 +146,6 @@ release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
 clean:
-	git submodule foreach git clean -fdx
-	git clean -fd
 	rm -rf ./build
 
 init:
