@@ -226,8 +226,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       dataModule.io.data.wdata(i) := genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
       dataModule.io.data.wen(i) := true.B
 
-      mmio(stWbIndex) := io.storeIn(i).bits.mmio
-
       XSInfo("store data write to sq idx %d pc 0x%x data %x -> %x\n",
         io.storeDataIn(i).bits.uop.sqIdx.value,
         io.storeDataIn(i).bits.uop.cf.pc,
@@ -235,10 +233,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
         dataModule.io.data.wdata(i)
       )
     }
-    // vaddrModule write is delayed, as vaddrModule will not be read right after write
-    vaddrModule.io.waddr(i) := RegNext(stWbIndex)
-    vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
-    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
   }
 
   /**
