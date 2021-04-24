@@ -8,6 +8,11 @@ EMU_LDFLAGS  += -lpthread -lSDL2 -ldl -lz
 
 EMU_VFILES    = $(SIM_VSRC)
 
+CCACHE := $(if $(shell which ccache),ccache,)
+ifneq ($(CCACHE),)
+export OBJCACHE = ccache
+endif
+
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
 # Verilator trace support
