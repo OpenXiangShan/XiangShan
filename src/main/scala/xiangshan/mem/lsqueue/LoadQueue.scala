@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.HasFPUParameters
@@ -7,17 +8,20 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.ftq.FtqPtr
 
 
-class LqPtr extends CircularQueuePtr[LqPtr](LqPtr.LoadQueueSize) { }
+class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
+  p => p(XSCoreParamsKey).LoadQueueSize
+){
+  override def cloneType = (new LqPtr).asInstanceOf[this.type]
+}
 
-object LqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): LqPtr = {
+object LqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LqPtr = {
     val ptr = Wire(new LqPtr)
     ptr.flag := f
     ptr.value := v
@@ -48,7 +52,7 @@ trait HasLoadHelper { this: XSModule =>
   }
 }
 
-class LqEnqIO extends XSBundle {
+class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
@@ -57,7 +61,7 @@ class LqEnqIO extends XSBundle {
 }
 
 // Load Queue
-class LoadQueue extends XSModule
+class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper

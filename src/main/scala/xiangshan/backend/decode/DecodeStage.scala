@@ -1,11 +1,12 @@
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-class DecodeStage extends XSModule {
+class DecodeStage(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))

@@ -1,5 +1,6 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,9 +9,9 @@ import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
+import difftest._
 
-
-class FpBlockToCtrlIO extends XSBundle {
+class FpBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
 }
@@ -21,7 +22,7 @@ class FloatBlock
   memSlowWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig],
-) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
+)(implicit p: Parameters) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
@@ -93,7 +94,7 @@ class FloatBlock
 
   // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val readPortIndex = Seq(0, 1, 2, 3, 2, 3)
-  val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
+  val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
@@ -149,8 +150,8 @@ class FloatBlock
     rs
   })
 
-  for(rs <- reservedStations){
-    val inBlockUops = reservedStations.filter(x =>
+  for(rs <- reservationStations){
+    val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeFpRf
     ).map(x => {
       val raw = WireInit(x.io.fastUopOut)
@@ -215,5 +216,19 @@ class FloatBlock
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
+  fpRf.io.debug_rports := DontCare
 
+  if (!env.FPGAPlatform) {
+    for ((rport, rat) <- fpRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
+      rport.addr := rat
+    }
+    val difftest = Module(new DifftestArchFpRegState)
+    difftest.io.clock  := clock
+    difftest.io.coreid := 0.U
+    difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
+  }
+
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  XSPerfAccumulate("fp_rs_deq_count", rsDeqCount)
+  XSPerfHistogram("fp_rs_deq_count", rsDeqCount, true.B, 0, 6, 1)
 }

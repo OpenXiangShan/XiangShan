@@ -1,12 +1,13 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.roq.RoqPtr
 
-class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
+class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     // output: dispatch queue can accept new requests
     val canAccept = Output(Bool())
@@ -18,13 +19,13 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   val flush = Input(Bool())
+  val dqFull = Output(Bool())
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
-  val dqFull = Output(Bool())
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule with HasCircularQueuePtrHelper {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
 
   val s_invalid :: s_valid:: Nil = Enum(2)

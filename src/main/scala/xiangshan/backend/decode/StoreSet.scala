@@ -1,5 +1,6 @@
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -11,14 +12,14 @@ import xiangshan.backend.roq.RoqPtr
 // See "Memory Dependence Prediction using Store Sets" for details
 
 // Store Set Identifier Table Entry
-class SSITEntry extends XSBundle {
+class SSITEntry(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
   val isload = Bool()
   val ssid = UInt(SSIDWidth.W) // store set identifier
 }
 
 // Store Set Identifier Table
-class SSIT extends XSModule {
+class SSIT(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(new SSITEntry))
@@ -130,26 +131,26 @@ class SSIT extends XSModule {
 
 
 // Last Fetched Store Table Entry
-class LFSTEntry extends XSBundle  {
+class LFSTEntry(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
   val sqIdx = new SqPtr
   val roqIdx = new RoqPtr
 }
 
-class DispatchToLFST extends XSBundle  {
+class DispatchToLFST(implicit p: Parameters) extends XSBundle  {
   val sqIdx = new SqPtr
   val roqIdx = new RoqPtr
   val ssid = UInt(SSIDWidth.W)
 }
 
-class LookupLFST extends XSBundle  {
+class LookupLFST(implicit p: Parameters) extends XSBundle  {
   val raddr = Vec(DecodeWidth, Input(UInt(SSIDWidth.W))) // use ssid to llokup LFST
   val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
   val rdata = Vec(DecodeWidth, Output(Bool()))
 }
 
 // Last Fetched Store Table
-class LFST extends XSModule  {
+class LFST(implicit p: Parameters) extends XSModule  {
   val io = IO(new Bundle {
     val lookup = new LookupLFST
     // val update = Input(new MemPredUpdateReq) // RegNext should be added outside

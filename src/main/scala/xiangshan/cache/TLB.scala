@@ -1,12 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import chisel3.ExcitingUtils._
 
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
@@ -51,10 +51,10 @@ trait HasTlbConst extends HasXSParameter {
   }
 }
 
-abstract class TlbBundle extends XSBundle with HasTlbConst
-abstract class TlbModule extends XSModule with HasTlbConst
+abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
+abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
-class PtePermBundle extends TlbBundle {
+class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val d = Bool()
   val a = Bool()
   val g = Bool()
@@ -69,7 +69,7 @@ class PtePermBundle extends TlbBundle {
   }
 }
 
-class TlbPermBundle extends TlbBundle {
+class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   // pagetable perm (software defined)
   val d = Bool()
@@ -92,7 +92,7 @@ class TlbPermBundle extends TlbBundle {
   }
 }
 
-class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
+class comBundle(implicit p: Parameters) extends TlbBundle with HasCircularQueuePtrHelper{
   val roqIdx = new RoqPtr
   val valid = Bool()
   val bits = new PtwReq
@@ -108,7 +108,7 @@ object Compare {
 
 // multi-read && single-write
 // input is data, output is hot-code(not one-hot)
-class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) extends TlbModule {
+class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
   val io = IO(new Bundle {
     val r = new Bundle {
       val req = Input(Vec(readWidth, gen))
@@ -135,7 +135,7 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) exten
   }
 }
 
-class TlbSPMeta extends TlbBundle {
+class TlbSPMeta(implicit p: Parameters) extends TlbBundle {
   val tag = UInt(vpnLen.W) // tag is vpn
   val level = UInt(1.W) // 1 for 2MB, 0 for 1GB
 
@@ -155,7 +155,7 @@ class TlbSPMeta extends TlbBundle {
 
 }
 
-class TlbData(superpage: Boolean = false) extends TlbBundle {
+class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBundle {
   val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
   val ppn = UInt(ppnLen.W)
   val perm = new TlbPermBundle
@@ -220,7 +220,7 @@ object TlbCmd {
   def isAtom(a: UInt) = a(2)
 }
 
-class TlbReq extends TlbBundle {
+class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
   val roqIdx = new RoqPtr
@@ -234,7 +234,7 @@ class TlbReq extends TlbBundle {
   }
 }
 
-class TlbResp extends TlbBundle {
+class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = UInt(PAddrBits.W)
   val miss = Bool()
   val mmio = Bool()
@@ -257,17 +257,17 @@ class TlbResp extends TlbBundle {
   }
 }
 
-class TlbRequestIO() extends TlbBundle {
+class TlbRequestIO()(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class BlockTlbRequestIO() extends TlbBundle {
+class BlockTlbRequestIO()(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class TlbPtwIO extends TlbBundle {
+class TlbPtwIO(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new PtwReq)
   val resp = Flipped(DecoupledIO(new PtwResp))
 
@@ -276,7 +276,7 @@ class TlbPtwIO extends TlbBundle {
   }
 }
 
-class TlbIO(Width: Int) extends TlbBundle {
+class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO
   val sfence = Input(new SfenceBundle)
@@ -286,7 +286,7 @@ class TlbIO(Width: Int) extends TlbBundle {
 }
 
 
-class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
+class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
   val req    = io.requestor.map(_.req)
@@ -601,7 +601,7 @@ object TLB {
     width: Int,
     isDtlb: Boolean,
     shouldBlock: Boolean
-  ) = {
+  )(implicit p: Parameters) = {
     require(in.length == width)
 
     val tlb = Module(new TLB(width, isDtlb))

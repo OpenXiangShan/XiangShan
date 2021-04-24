@@ -1,11 +1,11 @@
 package xiangshan.cache.prefetch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
 import utils._
-import chisel3.ExcitingUtils._
 
 case class L1plusPrefetcherParameters(
   enable: Boolean,
@@ -16,7 +16,7 @@ case class L1plusPrefetcherParameters(
 }
 
 // prefetch ICache lines in L1plusCache using StreamPrefetch
-class L1plusPrefetcher extends PrefetchModule {
+class L1plusPrefetcher(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new IcacheMissReq))
     // prefetch
@@ -43,9 +43,14 @@ class L1plusPrefetcher extends PrefetchModule {
     source.ready := !valid || sink.fire()
   }
 
+  val streamParams = l1plusPrefetcherParameters.streamParams
+  val q = p.alterPartial({
+    case StreamParamsKey => streamParams
+    case BOPParamsKey => null
+  })
+
   if (l1plusPrefetcherParameters.enable && l1plusPrefetcherParameters._type == "stream") {
-    val streamParams = l1plusPrefetcherParameters.streamParams
-    val pft = Module(new StreamPrefetch(streamParams))
+    val pft = Module(new StreamPrefetch()(q))
     pft.io.train.valid := io.in.fire() && io.enable
     pft.io.train.bits.addr := io.in.bits.addr
     pft.io.train.bits.write := false.B

@@ -1,10 +1,10 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import chisel3.experimental.chiselName
 
 trait LTBParams extends HasXSParameter with HasBPUParameter {
@@ -17,13 +17,13 @@ trait LTBParams extends HasXSParameter with HasBPUParameter {
   val cntBits = 10
 }
 
-abstract class LTBBundle extends XSBundle with LTBParams
-abstract class LTBModule extends XSModule with LTBParams { val debug = true }
+abstract class LTBBundle(implicit p: Parameters) extends XSBundle with LTBParams
+abstract class LTBModule(implicit p: Parameters) extends XSModule with LTBParams { val debug = true }
 
 // class LoopMeta extends LTBBundle {
 // }
 
-class LoopEntry extends LTBBundle {
+class LoopEntry(implicit p: Parameters) extends LTBBundle {
   val tag = UInt(tagLen.W)
   // how many times has the same loop trip count been seen in a row?
   val conf = UInt(3.W)
@@ -41,26 +41,26 @@ class LoopEntry extends LTBBundle {
   def isUnconf = conf === 0.U
 }
 
-class LTBColumnReq extends LTBBundle {
+class LTBColumnReq(implicit p: Parameters) extends LTBBundle {
   val pc = UInt(VAddrBits.W) // only for debug!!!
   val idx = UInt(idxLen.W)
   val tag = UInt(tagLen.W)
 }
 
-class LTBColumnResp extends LTBBundle {
+class LTBColumnResp(implicit p: Parameters) extends LTBBundle {
   // exit the loop
   val exit = Bool()
   val specCnt = UInt(cntBits.W)
 }
 
-class LTBColumnUpdate extends LTBBundle {
+class LTBColumnUpdate(implicit p: Parameters) extends LTBBundle {
   // val misPred = Bool()
   val pc = UInt(VAddrBits.W)
   // val specCnt = UInt(cntBits.W)
   // val taken = Bool()
 }
 
-class LTBColumnRedirect extends LTBBundle {
+class LTBColumnRedirect(implicit p: Parameters) extends LTBBundle {
   val mispred = Bool()
   val pc = UInt(VAddrBits.W)
   val specCnt = UInt(cntBits.W)
@@ -69,7 +69,7 @@ class LTBColumnRedirect extends LTBBundle {
 }
 
 @chiselName
-class LTBColumn extends LTBModule {
+class LTBColumn(implicit p: Parameters) extends LTBModule {
   val io = IO(new Bundle() {
     // if3 send req
     val req = Input(new LTBColumnReq)
@@ -314,7 +314,7 @@ class LTBColumn extends LTBModule {
 }
 
 @chiselName
-class LoopPredictor extends BasePredictor with LTBParams {
+class LoopPredictor(implicit p: Parameters) extends BasePredictor with LTBParams {
   class LoopResp extends Resp {
     val exit = Vec(PredictWidth, Bool())
   }

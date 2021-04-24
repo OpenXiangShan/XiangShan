@@ -5,11 +5,10 @@
 
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
-
+import freechips.rocketchip.util.{UIntIsOneOf, uintToBitPat}
 import xiangshan._
 import utils._
 import xiangshan.backend._
@@ -391,7 +390,7 @@ object ImmUnion {
 /**
  * IO bundle for the Decode unit
  */
-class DecodeUnitIO extends XSBundle {
+class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
   val deq = new Bundle { val cf_ctrl = Output(new CfCtrl) }
 }
@@ -399,7 +398,7 @@ class DecodeUnitIO extends XSBundle {
 /**
  * Decode unit that takes in a single CtrlFlow and generates a CfCtrl.
  */
-class DecodeUnit extends XSModule with DecodeUnitConstants {
+class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitIO)
 
   val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded

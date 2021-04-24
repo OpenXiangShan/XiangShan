@@ -9,20 +9,20 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientN
 import xiangshan._
 import xiangshan.frontend._
 
-class InsUncacheReq extends ICacheBundle
+class InsUncacheReq(implicit p: Parameters) extends ICacheBundle
 {
     val addr = UInt(PAddrBits.W)
     val id = UInt(3.W)
 }
 
-class InsUncacheResp extends ICacheBundle
+class InsUncacheResp(implicit p: Parameters) extends ICacheBundle
 {
   val data = UInt((mmioBeats * mmioBusWidth).W)
   val id   = UInt(3.W)
 }
 
 // One miss entry deals with one mmio request
-class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters with HasIFUConst
+class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule with HasICacheParameters with HasIFUConst
 {
   val io = IO(new Bundle {
     val id = Input(UInt(log2Up(cacheParams.nMMIOs).W))
@@ -122,7 +122,7 @@ class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters 
   }
 }
 
-class icacheUncacheIO extends DCacheBundle {
+class icacheUncacheIO(implicit p: Parameters) extends DCacheBundle {
     val req = Flipped(DecoupledIO(new InsUncacheReq ))
     val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())

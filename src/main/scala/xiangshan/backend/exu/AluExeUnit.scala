@@ -1,13 +1,14 @@
   
 package xiangshan.backend.exu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
-import xiangshan.backend.exu.Exu.aluExeUnitCfg
+import xiangshan._
 import xiangshan.backend.fu.Alu
 
-class AluExeUnit extends Exu(aluExeUnitCfg)
+class AluExeUnit(implicit p: Parameters) extends Exu(AluExeUnitCfg)
 {
   val alu = supportedFunctionUnits.collectFirst{
     case a: Alu => a

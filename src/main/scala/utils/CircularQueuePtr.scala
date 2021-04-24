@@ -1,11 +1,14 @@
 package utils
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 
 class CircularQueuePtr[T <: CircularQueuePtr[T]](val entries: Int) extends Bundle {
-  val PTR_WIDTH = log2Up(entries)
 
+  def this(f: Parameters => Int)(implicit p: Parameters) = this(f(p))
+
+  val PTR_WIDTH = log2Up(entries)
   val flag = Bool()
   val value = UInt(PTR_WIDTH.W)
 

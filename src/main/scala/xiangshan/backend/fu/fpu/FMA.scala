@@ -1,12 +1,13 @@
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util.RegEnable
 import freechips.rocketchip.tile.FType
 import hardfloat.{MulAddRecFN_pipeline_stage1, MulAddRecFN_pipeline_stage2, MulAddRecFN_pipeline_stage3, MulAddRecFN_pipeline_stage4, RoundAnyRawFNToRecFN}
-import xiangshan.backend.fu.FunctionUnit
+import xiangshan._
 
-class FMADataModule(latency: Int) extends FPUDataModule {
+class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 
   val regEnables = IO(Input(Vec(latency, Bool())))
   val typeTagOut = IO(Input(UInt(2.W)))
@@ -83,8 +84,8 @@ class FMADataModule(latency: Int) extends FPUDataModule {
   )
 }
 
-class FMA extends FPUPipelineModule {
-  override def latency: Int = FunctionUnit.fmacCfg.latency.latencyVal.get
+class FMA(implicit p: Parameters) extends FPUPipelineModule {
+  override def latency: Int = fmacCfg.latency.latencyVal.get
 
   override val dataModule = Module(new FMADataModule(latency))
   connectDataModule

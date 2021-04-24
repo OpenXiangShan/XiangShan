@@ -72,31 +72,32 @@ object PLICConsts
   require(hartBase >= enableBase(maxHarts))
 }
 
-class PlicIO extends Bundle with xiangshan.HasXSParameter {
-  val intrVec = Input(UInt(NrPlicIntr.W))
-  val meip = Output(Vec(top.Parameters.get.socParameters.NumCores, Bool()))
+class PlicIO(val numCores: Int, val numExtIntrs: Int) extends Bundle{
+  val intrVec = Input(UInt(numExtIntrs.W))
+  val meip = Output(Vec(numCores, Bool()))
 }
 
 class AXI4Plic
 (
   address: Seq[AddressSet],
+  numCores: Int,
+  numExtIntrs: Int,
   sim: Boolean = false
 )(implicit p: Parameters)
-  extends AXI4SlaveModule(address, executable = false, _extra = new PlicIO) with xiangshan.HasXSParameter
+  extends AXI4SlaveModule(address, executable = false, _extra = new PlicIO(numCores, numExtIntrs))
 {
   override lazy val module = new AXI4SlaveModuleImp[PlicIO](this) {
-    val NumCores = top.Parameters.get.socParameters.NumCores
-    require(NrPlicIntr <= PLICConsts.maxDevices)
-    require(NumCores <= PLICConsts.maxHarts)
+    require(numCores <= PLICConsts.maxDevices)
+    require(numExtIntrs <= PLICConsts.maxHarts)
     val addressSpaceSize = 0x4000000
     val addressBits = log2Up(addressSpaceSize)
 
     def getOffset(addr: UInt) = addr(addressBits - 1, 0)
 
-    val priority = List.fill(NrPlicIntr)(Reg(UInt(32.W)))
+    val priority = List.fill(numExtIntrs)(Reg(UInt(32.W)))
     val priorityMap = priority.zipWithIndex.map { case (r, intr) => RegMap((intr + 1) * 4, r) }.toMap
 
-    val nrIntrWord = (NrPlicIntr + 31) / 32 // roundup
+    val nrIntrWord = (numExtIntrs + 31) / 32 // roundup
     // pending bits are updated in the unit of bit by PLIC,
     // so define it as vectors of bits, instead of UInt(32.W)
     val pending = List.fill(nrIntrWord)(RegInit(0.U.asTypeOf(Vec(32, Bool()))))
@@ -104,24 +105,24 @@ class AXI4Plic
       RegMap(0x1000 + intrWord * 4, Cat(r.reverse), RegMap.Unwritable)
     }.toMap
 
-    val enable = List.fill(NumCores)(List.fill(nrIntrWord)(RegInit(0.U(32.W))))
+    val enable = List.fill(numCores)(List.fill(nrIntrWord)(RegInit(0.U(32.W))))
     val enableMap = enable.zipWithIndex.map { case (l, hart) =>
       l.zipWithIndex.map { case (r, intrWord) => RegMap(0x2000 + hart * 0x80 + intrWord * 4, r) }
     }.reduce(_ ++ _).toMap
 
-    val threshold = List.fill(NumCores)(Reg(UInt(32.W)))
+    val threshold = List.fill(numCores)(Reg(UInt(32.W)))
     val thresholdMap = threshold.zipWithIndex.map {
       case (r, hart) => RegMap(0x200000 + hart * 0x1000, r)
     }.toMap
 
-    val inHandle = RegInit(0.U.asTypeOf(Vec(NrPlicIntr + 1, Bool())))
+    val inHandle = RegInit(0.U.asTypeOf(Vec(numExtIntrs + 1, Bool())))
 
     def completionFn(wdata: UInt) = {
       inHandle(wdata(31, 0)) := false.B
       0.U
     }
 
-    val claimCompletion = List.fill(NumCores)(Reg(UInt(32.W)))
+    val claimCompletion = List.fill(numCores)(Reg(UInt(32.W)))
     val claimCompletionMap = claimCompletion.zipWithIndex.map {
       case (r, hart) => {
         val addr = 0x200004 + hart * 0x1000
@@ -132,7 +133,7 @@ class AXI4Plic
       }
     }.toMap
 
-    val intrVecReg = Wire(UInt(NrPlicIntr.W))
+    val intrVecReg = Wire(UInt(numExtIntrs.W))
     intrVecReg := RegNext(RegNext(RegNext(io.extra.get.intrVec)))
     intrVecReg.asBools.zipWithIndex.map { case (intr, i) => {
       val id = i + 1

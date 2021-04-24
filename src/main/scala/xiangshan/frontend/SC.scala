@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -16,16 +17,16 @@ trait HasSCParameter extends HasTageParameter {
   val SCTableInfo = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {case ((n, cb), h) => (n, cb, h)}
 }
 
-class SCReq extends TageReq
+class SCReq(implicit p: Parameters) extends TageReq
 
-abstract class SCBundle extends TageBundle with HasSCParameter {}
-abstract class SCModule extends TageModule with HasSCParameter {}
+abstract class SCBundle(implicit p: Parameters) extends TageBundle with HasSCParameter {}
+abstract class SCModule(implicit p: Parameters) extends TageModule with HasSCParameter {}
 
-class SCResp(val ctrBits: Int = 6) extends SCBundle {
+class SCResp(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val ctr = Vec(2, SInt(ctrBits.W))
 }
 
-class SCUpdate(val ctrBits: Int = 6) extends SCBundle {
+class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val mask = Vec(TageBanks, Bool())
@@ -34,14 +35,14 @@ class SCUpdate(val ctrBits: Int = 6) extends SCBundle {
   val takens = Vec(TageBanks, Bool())
 }
 
-class SCTableIO(val ctrBits: Int = 6) extends SCBundle {
+class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val req = Input(Valid(new SCReq))
   val resp = Output(Vec(TageBanks, new SCResp(ctrBits)))
   val update = Input(new SCUpdate(ctrBits))
 }
 
 @chiselName
-class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
+class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
 
@@ -157,7 +158,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)
 
 }
 
-class SCThreshold(val ctrBits: Int = 6) extends SCBundle {
+class SCThreshold(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val ctr = UInt(ctrBits.W)
   def satPos(ctr: UInt = this.ctr) = ctr === ((1.U << ctrBits) - 1.U)
   def satNeg(ctr: UInt = this.ctr) = ctr === 0.U
@@ -180,7 +181,7 @@ class SCThreshold(val ctrBits: Int = 6) extends SCBundle {
 }
 
 object SCThreshold {
-  def apply(bits: Int) = {
+  def apply(bits: Int)(implicit p: Parameters) = {
     val t = Wire(new SCThreshold(ctrBits=bits))
     t.ctr := t.neutralVal
     t.thres := t.initVal

@@ -7,7 +7,6 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.L1CacheErrorInfo
 import xiangshan._
-import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import xiangshan.backend.exu._
 import xiangshan.cache._
@@ -15,19 +14,20 @@ import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
+import utils._
 
-class LsBlockToCtrlIO extends XSBundle {
+class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
 }
 
-class IntBlockToMemBlockIO extends XSBundle {
+class IntBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readIntRf = Vec(NRMemReadPorts, new RfReadPort(XLEN))
 }
 
-class FpBlockToMemBlockIO extends XSBundle {
+class FpBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort(XLEN + 1))
 }
 
@@ -90,29 +90,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
   })
-  val difftestIO = IO(new Bundle() {
-    val fromSbuffer = new Bundle() {
-      val sbufferResp = Output(Bool())
-      val sbufferAddr = Output(UInt(64.W))
-      val sbufferData = Output(Vec(64, UInt(8.W)))
-      val sbufferMask = Output(UInt(64.W))
-    }
-    val fromSQ = new Bundle() {
-      val storeCommit = Output(UInt(2.W))
-      val storeAddr   = Output(Vec(2, UInt(64.W)))
-      val storeData   = Output(Vec(2, UInt(64.W)))
-      val storeMask   = Output(Vec(2, UInt(8.W)))
-    }
-    val fromAtomic = new Bundle() {
-      val atomicResp = Output(Bool())
-      val atomicAddr = Output(UInt(64.W))
-      val atomicData = Output(UInt(64.W))
-      val atomicMask = Output(UInt(8.W))
-      val atomicFuop = Output(UInt(8.W))
-      val atomicOut  = Output(UInt(64.W))
-    }
-  })
-  difftestIO <> DontCare
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -154,17 +131,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
       .map(a => (a._1, a._2.bits.data)) ++
-      (if (cfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
+      (if (cfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
 
     val fastPortsCnt = fastDatas.length
 
     val slowPorts = (
-      (loadExuConfigs.zip(if(cfg == Exu.stExeUnitCfg) wakeUpFp else exeWbReqs)) ++
+      (loadExuConfigs.zip(if(cfg == StExeUnitCfg) wakeUpFp else exeWbReqs)) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map{
-          case (Exu.jumpExeUnitCfg, _) if cfg == Exu.stExeUnitCfg =>
-            (Exu.jumpExeUnitCfg, io.intWakeUpFp.head)
+          case (JumpExeUnitCfg, _) if cfg == StExeUnitCfg =>
+            (JumpExeUnitCfg, io.intWakeUpFp.head)
           case (config, value) => (config, value)
         }
     ).map(a => (a._1, decoupledIOToValidIO(a._2)))
@@ -211,7 +188,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
       .map(_._2) ++
-      (if (rs.exuCfg == Exu.ldExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
+      (if (rs.exuCfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
@@ -240,11 +217,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> RegNext(io.sfence)
   dtlb.io.csr    <> RegNext(io.tlbCsr)
-  if (!env.FPGAPlatform) {
-    difftestIO.fromSbuffer <> sbuffer.difftestIO
-    difftestIO.fromSQ <> lsq.difftestIO.fromSQ
-    difftestIO.fromAtomic <> atomicsUnit.difftestIO
-  }
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -419,5 +391,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
-}
 
+  val ldDeqCount = PopCount(reservationStations.take(2).map(_.io.deq.valid))
+  val stDeqCount = PopCount(reservationStations.drop(2).map(_.io.deq.valid))
+  val rsDeqCount = ldDeqCount + stDeqCount
+  XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
+  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("store_rs_deq_count", stDeqCount)
+  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+}
