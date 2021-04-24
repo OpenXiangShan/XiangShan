@@ -69,6 +69,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 
+sim-verilog: $(SIM_TOP_V)
+
 SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
 SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
 
@@ -160,5 +162,5 @@ bump:
 bsp:
 	mill -i mill.contrib.BSP/install
 
-.PHONY: verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
