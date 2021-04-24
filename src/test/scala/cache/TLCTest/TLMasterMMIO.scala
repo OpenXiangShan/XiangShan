@@ -5,15 +5,14 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
-import xiangshan.HasXSLog
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 
-class TLCFakeBundle extends DCacheBundle
+class TLCFakeBundle(implicit p: Parameters) extends DCacheBundle
 {
   val sourceBits = 5 //maybe parameterized later
 }
 
-class TLCFakeABundle extends TLCFakeBundle
+class TLCFakeABundle(implicit p: Parameters) extends TLCFakeBundle
 {
   val opcode = UInt(3.W)
   val param = UInt(3.W)
@@ -23,7 +22,7 @@ class TLCFakeABundle extends TLCFakeBundle
   val mask = UInt((l1BusDataWidth/8).W)
   val data = UInt(l1BusDataWidth.W)
 }
-class TLCFakeCBundle extends TLCFakeBundle
+class TLCFakeCBundle(implicit p: Parameters) extends TLCFakeBundle
 {
   val opcode = UInt(3.W)
   val param = UInt(3.W)
@@ -32,11 +31,11 @@ class TLCFakeCBundle extends TLCFakeBundle
   val address = UInt(64.W)
   val data = UInt(l1BusDataWidth.W)
 }
-class TLCFakeEBundle extends TLCFakeBundle
+class TLCFakeEBundle(implicit p: Parameters) extends TLCFakeBundle
 {
   val sink = UInt(8.W) //maybe enough
 }
-class TLCFakeBBundle extends TLCFakeBundle
+class TLCFakeBBundle(implicit p: Parameters) extends TLCFakeBundle
 {
   val opcode = UInt(3.W)
   val param = UInt(3.W)
@@ -46,7 +45,7 @@ class TLCFakeBBundle extends TLCFakeBundle
   val mask = UInt((l1BusDataWidth/8).W)
   val data = UInt(l1BusDataWidth.W)
 }
-class TLCFakeDBundle extends TLCFakeBundle
+class TLCFakeDBundle(implicit p: Parameters) extends TLCFakeBundle
 {
   val opcode = UInt(3.W)
   val param = UInt(3.W)
@@ -57,7 +56,7 @@ class TLCFakeDBundle extends TLCFakeBundle
   val data = UInt(l1BusDataWidth.W)
 }
 
-class TLCTestMasterMMIO extends DCacheBundle
+class TLCTestMasterMMIO(implicit p: Parameters) extends DCacheBundle
 {
   val AChannel = Flipped(DecoupledIO(new TLCFakeABundle()))
   val CChannel = Flipped(DecoupledIO(new TLCFakeCBundle()))
@@ -82,7 +81,7 @@ class TLCMasterMMIO()(implicit p: Parameters) extends LazyModule
   val node = TLClientNode(Seq(clientParameters))
 
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val (bus,edge) = node.out.head
 

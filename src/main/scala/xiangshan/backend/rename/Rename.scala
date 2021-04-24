@@ -1,5 +1,6 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -7,7 +8,7 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
 
-class RenameBypassInfo extends XSBundle {
+class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
@@ -16,7 +17,7 @@ class RenameBypassInfo extends XSBundle {
   val move_eliminated_src2 = Vec(RenameWidth-1, Bool())
 }
 
-class Rename extends XSModule with HasCircularQueuePtrHelper {
+class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -28,6 +29,8 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -51,6 +54,8 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   val intRat = Module(new RenameTable(float = false)).io
   val fpRat = Module(new RenameTable(float = true)).io
   val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
+  intRat.debug_rdata <> io.debug_int_rat
+  fpRat.debug_rdata <> io.debug_fp_rat
 
   allPhyResource.map{ case (rat, freelist, _) =>
     rat.redirect := io.redirect.valid
@@ -272,5 +277,6 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+
 
 }

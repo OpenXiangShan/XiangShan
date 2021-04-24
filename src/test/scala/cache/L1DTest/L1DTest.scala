@@ -14,7 +14,7 @@ import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{EnviromentParameters, HasXSLog}
+import xiangshan.EnviromentParameters
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheToLsuIO, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -25,7 +25,7 @@ import cache.TLCTest._
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Seq}
 
-class L1DTestTopIO extends Bundle {
+class L1DTestTopIO(implicit p: Parameters) extends Bundle {
   val slaveIO = new TLCTestSlaveMMIO()
   val dcacheIO = new DCacheToLsuIO
 }
@@ -38,7 +38,7 @@ class L1DTestTop()(implicit p: Parameters) extends LazyModule {
   val c_buffer = TLBuffer(a = BufferParams.none, b = BufferParams.none, c = BufferParams.pipe, d = BufferParams.none, e = BufferParams.none)
   slave.node := dcache_outer.node := c_buffer := dcache.clientNode
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
     val io = IO(new L1DTestTopIO())
     dcache.module.io.lsu <> io.dcacheIO
     slave.module.io <> io.slaveIO
@@ -55,7 +55,6 @@ class L1DTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 }
 
 class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with TLCOp with RandomSampleUtil {
-  top.Parameters.set(top.Parameters.debugParameters)
 
   it should "run" in {
     implicit val p = Parameters((site, up, here) => {

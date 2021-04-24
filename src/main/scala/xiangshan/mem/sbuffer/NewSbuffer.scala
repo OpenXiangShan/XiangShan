@@ -1,10 +1,12 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.cache._
+import difftest._
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
@@ -36,16 +38,16 @@ trait HasSbufferConst extends HasXSParameter {
   val WordOffsetWidth: Int = PAddrBits - WordsWidth
 }
 
-class SbufferBundle extends XSBundle with HasSbufferConst
+class SbufferBundle(implicit p: Parameters) extends XSBundle with HasSbufferConst
 
-class DataWriteReq extends SbufferBundle {
+class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   val idx = UInt(SbufferIndexWidth.W)
   val mask = UInt((DataBits/8).W)
   val data = UInt(DataBits.W)
   val wordOffset = UInt(WordOffsetWidth.W)
 }
 
-class SbufferData extends XSModule with HasSbufferConst {
+class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle(){
     val writeReq = Vec(StorePipelineWidth, Flipped(ValidIO(new DataWriteReq)))
     val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
@@ -68,7 +70,7 @@ class SbufferData extends XSModule with HasSbufferConst {
   io.dataOut := data
 }
 
-class NewSbuffer extends XSModule with HasSbufferConst {
+class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
@@ -77,13 +79,6 @@ class NewSbuffer extends XSModule with HasSbufferConst {
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
-  val difftestIO = IO(new Bundle() {
-    val sbufferResp = Output(Bool())
-    val sbufferAddr = Output(UInt(64.W))
-    val sbufferData = Output(Vec(64, UInt(8.W)))
-    val sbufferMask = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
@@ -359,13 +354,16 @@ class NewSbuffer extends XSModule with HasSbufferConst {
   }
 
   if (!env.FPGAPlatform) {
-    difftestIO.sbufferResp := WireInit(io.dcache.resp.fire())
-    difftestIO.sbufferAddr := WireInit(getAddr(tag(respId)))
-    difftestIO.sbufferData := WireInit(data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
-    difftestIO.sbufferMask := WireInit(mask(respId).asUInt)
+    val difftest = Module(new DifftestSbufferEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.sbufferResp := io.dcache.resp.fire()
+    difftest.io.sbufferAddr := getAddr(tag(respId))
+    difftest.io.sbufferData := data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+    difftest.io.sbufferMask := mask(respId).asUInt
   }
 
-  for(i <- 0 until StoreBufferSize){
+  for (i <- 0 until StoreBufferSize) {
     when(validMask(i) && !timeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U
     }

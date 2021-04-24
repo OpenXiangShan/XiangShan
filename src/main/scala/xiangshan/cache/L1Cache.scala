@@ -2,6 +2,7 @@
 
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.{HasXSParameter, XSBundle, XSModule}
@@ -75,8 +76,8 @@ trait HasL1CacheParameters extends HasXSParameter
   def full_divide(a: Int, b: Int) = a >= b && isPow2(a / b)
 }
 
-abstract class L1CacheModule extends XSModule
+abstract class L1CacheModule(implicit p: Parameters) extends XSModule
   with HasL1CacheParameters
 
-abstract class L1CacheBundle extends XSBundle
+abstract class L1CacheBundle(implicit p: Parameters) extends XSBundle
   with HasL1CacheParameters

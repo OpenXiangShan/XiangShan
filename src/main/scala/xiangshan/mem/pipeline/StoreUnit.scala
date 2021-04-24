@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -9,7 +10,7 @@ import xiangshan.cache._
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class StoreUnit_S0 extends XSModule {
+class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
@@ -61,7 +62,7 @@ class StoreUnit_S0 extends XSModule {
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class StoreUnit_S1 extends XSModule {
+class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -107,7 +108,7 @@ class StoreUnit_S1 extends XSModule {
   io.out.bits := io.lsq.bits
 }
 
-class StoreUnit_S2 extends XSModule {
+class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -119,7 +120,7 @@ class StoreUnit_S2 extends XSModule {
 
 }
 
-class StoreUnit_S3 extends XSModule {
+class StoreUnit_S3(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val stout = DecoupledIO(new ExuOutput) // writeback store
@@ -139,7 +140,7 @@ class StoreUnit_S3 extends XSModule {
 
 }
 
-class StoreUnit extends XSModule {
+class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))

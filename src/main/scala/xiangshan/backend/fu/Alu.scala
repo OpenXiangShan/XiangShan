@@ -1,12 +1,12 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{LookupTree, ParallelMux, SignExt, ZeroExt}
 import xiangshan._
-import xiangshan.backend.ALUOpType
 
-class AddModule extends XSModule {
+class AddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src1, src2 = Input(UInt(XLEN.W))
     val out = Output(UInt((XLEN+1).W))
@@ -14,7 +14,7 @@ class AddModule extends XSModule {
   io.out := io.src1 +& io.src2
 }
 
-class SubModule extends XSModule {
+class SubModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src1, src2 = Input(UInt(XLEN.W))
     val out = Output(UInt((XLEN+1).W))
@@ -22,7 +22,7 @@ class SubModule extends XSModule {
   io.out := (io.src1 +& (~io.src2).asUInt()) + 1.U
 }
 
-class LeftShiftModule extends XSModule {
+class LeftShiftModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
     val sllSrc = Input(UInt(XLEN.W))
@@ -31,7 +31,7 @@ class LeftShiftModule extends XSModule {
   io.sll := (io.sllSrc << io.shamt)(XLEN - 1, 0)
 }
 
-class RightShiftModule extends XSModule {
+class RightShiftModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
     val srlSrc, sraSrc = Input(UInt(XLEN.W))
@@ -43,7 +43,7 @@ class RightShiftModule extends XSModule {
   io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt() >> io.shamt).asUInt()
 }
 
-class MiscResultSelect extends XSModule {
+class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
     val sll, slt, sltu, xor, srl, or, and, sra = Input(UInt(XLEN.W))
@@ -62,7 +62,7 @@ class MiscResultSelect extends XSModule {
   ).map(x => (x._1 === io.func(3, 0), x._2)))
 }
 
-class AluResSel extends XSModule {
+class AluResSel(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
     val isSub = Input(Bool())
@@ -78,7 +78,7 @@ class AluResSel extends XSModule {
   io.aluRes := Cat(h32, res(31, 0))
 }
 
-class AluDataModule extends XSModule {
+class AluDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src1, src2 = Input(UInt(XLEN.W))
     val func = Input(FuOpType())
@@ -150,7 +150,7 @@ class AluDataModule extends XSModule {
   io.mispredict := (io.pred_taken ^ taken) && io.isBranch
 }
 
-class Alu extends FunctionUnit with HasRedirectOut {
+class Alu(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
 
   val (src1, src2, func, pc, uop) = (
     io.in.bits.src(0),

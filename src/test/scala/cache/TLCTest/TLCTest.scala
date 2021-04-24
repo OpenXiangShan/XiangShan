@@ -15,7 +15,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, XSDebug}
-import xiangshan.HasXSLog
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
@@ -37,7 +36,7 @@ case class TLCCacheTestParams
 
 case object TLCCacheTestKey extends Field[TLCCacheTestParams]
 
-class TLCCacheTestTopIO extends Bundle {
+class TLCCacheTestTopIO(implicit p: Parameters) extends Bundle {
   val mastersIO = Vec(2, new TLCTestMasterMMIO())
   val ulIO = new TLULMMIO()
   val slaveIO = new TLCTestSlaveMMIO()
@@ -86,7 +85,7 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
   val slave = LazyModule(new TLCSlaveMMIO())
   slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(new TLCCacheTestTopIO)
 
@@ -133,8 +132,6 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
   val slave_safe = 0
   val slave_granting = 1
   val slave_probing = 2
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   it should "run" in {
 

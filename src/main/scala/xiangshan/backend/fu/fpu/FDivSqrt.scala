@@ -1,11 +1,12 @@
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
-import hardfloat.{DivSqrtRecFNToRaw_small, RoundAnyRawFNToRecFN}
+import hardfloat.{DivSqrtRecFNToRaw_small, DivSqrtRecFNToRaw_srt4, RoundAnyRawFNToRecFN}
 
-class FDivSqrtDataModule extends FPUDataModule {
+class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_valid, out_ready = IO(Input(Bool()))
   val in_ready, out_valid = IO(Output(Bool()))
   val kill_w = IO(Input(Bool()))
@@ -13,12 +14,11 @@ class FDivSqrtDataModule extends FPUDataModule {
 
   val in_fire = in_valid && in_ready
   val out_fire = out_valid && out_ready
-  val killReg = RegInit(false.B)
 
   val s_idle :: s_div :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val divSqrt = Module(new DivSqrtRecFNToRaw_small(FType.D.exp, FType.D.sig, 0))
+  val divSqrt = Module(new DivSqrtRecFNToRaw_srt4(FType.D.exp, FType.D.sig))
   val divSqrtRawValid = divSqrt.io.rawOutValid_sqrt || divSqrt.io.rawOutValid_div
 
   val fpCtrl = io.in.fpCtrl
@@ -32,27 +32,23 @@ class FDivSqrtDataModule extends FPUDataModule {
     }
     is(s_div){
       when(divSqrtRawValid){
-        when(kill_r || killReg){
-          state := s_idle
-          killReg := false.B
-        }.otherwise({
-          state := s_finish
-        })
-      }.elsewhen(kill_r){
-        killReg := true.B
+        state := s_finish
       }
     }
     is(s_finish){
-      when(out_fire || kill_r){
+      when(out_fire){
         state := s_idle
       }
     }
   }
+  when(kill_r){ state := s_idle }
 
   val src1 = unbox(io.in.src(0), tag, None)
   val src2 = unbox(io.in.src(1), tag, None)
   divSqrt.io.inValid := in_fire && !kill_w
   divSqrt.io.sqrtOp := fpCtrl.sqrt
+  divSqrt.io.kill := kill_r
+  divSqrt.io.sigBits := Mux(tag === S, FType.S.sig.U, FType.D.sig.U)
   divSqrt.io.a := src1
   divSqrt.io.b := src2
   divSqrt.io.roundingMode := rm
@@ -75,17 +71,18 @@ class FDivSqrtDataModule extends FPUDataModule {
   val data = Mux(single, round32.io.out, round64.io.out)
   val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
 
+  assert(!(state === s_idle && !divSqrt.io.inReady))
   in_ready := state===s_idle
-  out_valid := state===s_finish && !killReg
+  out_valid := state===s_finish
   io.out.data := RegNext(data, divSqrtRawValid)
   fflags := RegNext(flags, divSqrtRawValid)
 }
 
 
-class FDivSqrt extends FPUSubModule {
+class FDivSqrt(implicit p: Parameters) extends FPUSubModule {
 
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  val kill_r = uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_r = !io.in.ready && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
 
   override val dataModule = Module(new FDivSqrtDataModule)
   connectDataModule

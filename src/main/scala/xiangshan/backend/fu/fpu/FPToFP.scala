@@ -3,12 +3,13 @@
 
 package xiangshan.backend.fu.fpu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import hardfloat.CompareRecFN
-import xiangshan.backend.fu.FunctionUnit
+import xiangshan._
 
-class FPToFPDataModule(latency: Int) extends FPUDataModule {
+class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 
   val regEnables = IO(Input(Vec(latency, Bool())))
 
@@ -83,9 +84,9 @@ class FPToFPDataModule(latency: Int) extends FPUDataModule {
   fflags := RegEnable(mux.exc, regEnables(1))
 }
 
-class FPToFP extends FPUPipelineModule{
+class FPToFP(implicit p: Parameters) extends FPUPipelineModule {
 
-  override def latency: Int = FunctionUnit.f2iCfg.latency.latencyVal.get
+  override def latency: Int = f2iCfg.latency.latencyVal.get
 
   override val dataModule = Module(new FPToFPDataModule(latency))
   connectDataModule

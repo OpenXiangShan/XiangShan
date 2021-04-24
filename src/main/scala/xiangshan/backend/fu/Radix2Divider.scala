@@ -1,16 +1,17 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-abstract class AbstractDivider(len: Int) extends FunctionUnit(len){
+abstract class AbstractDivider(len: Int)(implicit p: Parameters) extends FunctionUnit(len){
   val ctrl = IO(Input(new MulDivCtrl))
   val sign = ctrl.sign
 }
 
-class Radix2Divider(len: Int) extends AbstractDivider(len) {
+class Radix2Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
 
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign

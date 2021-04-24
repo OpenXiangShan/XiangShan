@@ -1,5 +1,6 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -12,13 +13,13 @@ class MulDivCtrl extends Bundle{
   val isHi = Bool() // return hi bits of result ?
 }
 
-class AbstractMultiplier(len: Int) extends FunctionUnit(
+class AbstractMultiplier(len: Int)(implicit p: Parameters) extends FunctionUnit(
   len
 ){
   val ctrl = IO(Input(new MulDivCtrl))
 }
 
-class NaiveMultiplier(len: Int, val latency: Int)
+class NaiveMultiplier(len: Int, val latency: Int)(implicit p: Parameters)
   extends AbstractMultiplier(len)
   with HasPipelineReg
 {
@@ -42,7 +43,7 @@ class NaiveMultiplier(len: Int, val latency: Int)
   XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")
 }
 
-class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends XSModule {
+class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends Module {
   val io = IO(new Bundle() {
     val a, b = Input(UInt(len.W))
     val regEnables = Input(Vec(doReg.size, Bool()))
@@ -162,7 +163,8 @@ class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends XSModule {
   io.result := sum + carry
 }
 
-class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len) with HasPipelineReg {
+class ArrayMultiplier(len: Int, doReg: Seq[Int])(implicit p: Parameters)
+  extends AbstractMultiplier(len) with HasPipelineReg {
 
   override def latency = doReg.size
 

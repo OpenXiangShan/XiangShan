@@ -6,7 +6,6 @@ import utils._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
-import xiangshan.HasXSLog
 
 abstract class AXI4SlaveModule[T <: Data]
 (
@@ -34,7 +33,7 @@ abstract class AXI4SlaveModule[T <: Data]
 }
 
 class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
-  extends LazyModuleImp(outer) with HasXSLog
+  extends LazyModuleImp(outer)
 {
   val io = IO(new Bundle {
     val extra = if(outer._extra == null) None else Some(outer._extra.cloneType)

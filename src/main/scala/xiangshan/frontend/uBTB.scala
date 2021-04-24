@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -15,7 +16,7 @@ trait MicroBTBPatameter{
 }
 
 @chiselName
-class MicroBTB extends BasePredictor
+class MicroBTB(implicit p: Parameters) extends BasePredictor
     with MicroBTBPatameter
 {
     // val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1

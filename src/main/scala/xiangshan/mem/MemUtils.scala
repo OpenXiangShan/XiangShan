@@ -1,5 +1,7 @@
 package xiangshan.mem
 
+
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -30,7 +32,7 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle extends XSBundle {
+class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val func = UInt(6.W) //fixme???
@@ -48,12 +50,12 @@ class LsPipelineBundle extends XSBundle {
   val forwardData = Vec(8, UInt(8.W))
 }
 
-class StoreDataBundle extends XSBundle {
+class StoreDataBundle(implicit p: Parameters) extends XSBundle {
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
 }
 
-class LoadForwardQueryIO extends XSBundle {
+class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val uop = Output(new MicroOp) // for replay
@@ -75,7 +77,7 @@ class LoadForwardQueryIO extends XSBundle {
 //
 // Difference between PipeLoadForwardQueryIO and LoadForwardQueryIO:
 // PipeIO use predecoded sqIdxMask for better forward timing
-class PipeLoadForwardQueryIO extends XSBundle {
+class PipeLoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val uop = Output(new MicroOp) // for replay

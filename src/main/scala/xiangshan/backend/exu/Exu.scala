@@ -1,10 +1,10 @@
 package xiangshan.backend.exu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.fu.FunctionUnit._
-import xiangshan.backend.fu.{FuConfig, FuOutput, FunctionUnit, HasFuLatency, UncertainLatency}
+import xiangshan.backend.fu._
 
 case class ExuParameters
 (
@@ -27,10 +27,6 @@ case class ExuParameters
   def LsExuCnt = LduCnt + StuCnt
 
   def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
-
-  def NRFuType = 9
-
-  def FuOpWidth = 6
 }
 
 case class ExuConfig
@@ -70,9 +66,9 @@ case class ExuConfig
   }
 }
 
-abstract class Exu(val config: ExuConfig) extends XSModule {
+abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModule {
 
-  val supportedFunctionUnits = config.fuConfigs.map(_.fuGen).map(gen => Module(gen()))
+  val supportedFunctionUnits = config.fuConfigs.map(_.fuGen).map(gen => Module(gen(p)))
 
   val fuSel = supportedFunctionUnits.zip(config.fuConfigs.map(_.fuSel)).map {
     case (fu, sel) => sel(fu)
@@ -189,33 +185,4 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   assignDontCares(io.out.bits)
-}
-
-object Exu {
-
-  val aluExeUnitCfg = ExuConfig("AluExeUnit", Seq(aluCfg), 0, Int.MaxValue)
-  val jumpExeUnitCfg = ExuConfig("JmpExeUnit", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val mulDivExeUnitCfg = ExuConfig("MulDivExeUnit", Seq(mulCfg, divCfg), 1, Int.MaxValue)
-  val fmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
-  val fmiscExeUnitCfg = ExuConfig(
-    "FmiscExeUnit",
-    Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
-    Int.MaxValue, 1
-  )
-  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
-
-  val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(ldExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(stExeUnitCfg)
-
-  val intExuConfigs = jumpExeUnitCfg +: (
-    Seq.fill(exuParameters.MduCnt)(mulDivExeUnitCfg) ++
-      Seq.fill(exuParameters.AluCnt)(aluExeUnitCfg)
-  )
-
-  val fpExuConfigs =
-    Seq.fill(exuParameters.FmacCnt)(fmacExeUnitCfg) ++
-      Seq.fill(exuParameters.FmiscCnt)(fmiscExeUnitCfg)
-
-  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
 }

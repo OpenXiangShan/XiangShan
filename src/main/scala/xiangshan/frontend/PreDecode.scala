@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -34,7 +35,7 @@ object ExcType {  //TODO:add exctype
   def apply() = UInt(3.W)
 }
 
-class PreDecodeInfo extends XSBundle {  // 8 bit
+class PreDecodeInfo extends Bundle {  // 8 bit
   val isRVC   = Bool()
   val brType  = UInt(2.W)
   val isCall  = Bool()
@@ -46,7 +47,7 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   def notCFI = brType === BrType.notBr
 }
 
-class PreDecodeInfoForDebug(val usePerf: Boolean = true) extends XSBundle {
+class PreDecodeInfoForDebug(val usePerf: Boolean = true) extends Bundle {
   val isRVC   = if (usePerf) Bool() else UInt(0.W)
   val brType  = if (usePerf) UInt(2.W) else UInt(0.W)
   val isCall  = if (usePerf) Bool() else UInt(0.W)
@@ -58,7 +59,7 @@ class PreDecodeInfoForDebug(val usePerf: Boolean = true) extends XSBundle {
   def notCFI = brType === BrType.notBr
 }
 
-class PreDecodeResp extends XSBundle with HasIFUConst {
+class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasIFUConst {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val mask = UInt(PredictWidth.W)
@@ -67,7 +68,7 @@ class PreDecodeResp extends XSBundle with HasIFUConst {
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
-class PreDecode extends XSModule with HasPdconst with HasIFUConst {
+class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
   val io = IO(new Bundle() {
     val in = Input(new ICacheResp)
     val prev = Flipped(ValidIO(UInt(16.W)))
@@ -148,7 +149,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
   }
 }
 
-class RVCExpander extends XSModule {
+class RVCExpander(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val in = Input(UInt(32.W))
     val out = Output(new ExpandedInstruction)

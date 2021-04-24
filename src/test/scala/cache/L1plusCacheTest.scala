@@ -18,7 +18,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{HasXSLog, MicroOp}
+import xiangshan.MicroOp
 import xiangshan.cache.{DCache, DCacheLineIO, L1plusCache, L1plusCacheIO, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -27,7 +27,7 @@ import scala.util.Random
 
 case object L1plusCacheTestKey extends Field[Long]
 
-class L1plusTestTopIO extends Bundle {
+class L1plusTestTopIO(implicit p: Parameters) extends Bundle {
   val l1plus = new L1plusCacheIO()
   val dcacheStore = new DCacheLineIO()
 }
@@ -70,7 +70,7 @@ class L1plusTestTop()(implicit p: Parameters) extends LazyModule{
     TLCacheCork() :=
     l2.node
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(Flipped(new L1plusTestTopIO))
 
@@ -103,8 +103,6 @@ class L1plusCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matche
   // useful request parameter values
   val CMD_READ = MemoryOpConstants.M_XRD
   val r = scala.util.Random
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,
