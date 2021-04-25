@@ -198,64 +198,63 @@ void Difftest::do_instr_commit(int i) {
   // ds.mtval = dut.csr.mtval;
   // ds.stval = dut.csr.stval;
   // proxy->disambiguate_exec(&ds);
-  // } else {
-
-    // // Load instruction
-    // if (dut.load[i].fuType == 0xC || dut.load[i].fuType == 0xF) {
-    //   proxy->get_regs(ref_regs_ptr);
-    //   if (dut.commit[i].wen && ref_regs_ptr[dut.commit[i].wdest] != dut.commit[i].wdata) {
-    //     // printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
-    //     // printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
-    //     uint64_t golden;
-    //     int len = 0;
-    //     if (dut.load[i].fuType == 0xC) {
-    //       switch (dut.load[i].opType) {
-    //         case 0: len = 1; break;
-    //         case 1: len = 2; break;
-    //         case 2: len = 4; break;
-    //         case 3: len = 8; break;
-    //         case 4: len = 1; break;
-    //         case 5: len = 2; break;
-    //         case 6: len = 4; break;
-    //         default:
-    //           printf("Unknown fuOpType: 0x%x\n", dut.load[i].opType);
-    //       }
-    //     } else if (dut.load[i].fuType == 0xF) {
-    //       if (dut.load[i].opType % 2 == 0) {
-    //         len = 4;
-    //       } else if (dut.load[i].opType % 2 == 1) {
-    //         len = 8;
-    //       }
-    //     }
-    //     read_goldenmem(dut.load[i].paddr, &golden, len);
-    //     if (dut.load[i].fuType == 0xC) {
-    //       switch (dut.load[i].opType) {
-    //         case 0: golden = (int64_t)(int8_t)golden; break;
-    //         case 1: golden = (int64_t)(int16_t)golden; break;
-    //         case 2: golden = (int64_t)(int32_t)golden; break;
-    //       }
-    //     }
-    //     // printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[dut.commit[i].wdest]);
-    //     if (golden == dut.commit[i].wdata) {
-    //       // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
-    //       proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
-    //       if (dut.commit[i].wdest != 0) {
-    //         ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
-    //         proxy->set_regs(ref_regs_ptr);
-    //       }
-    //     } else if (dut.load[i].fuType == 0xF) {
-    //       proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
-    //       if (dut.commit[i].wdest != 0) {
-    //         ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
-    //         proxy->set_regs(ref_regs_ptr);
-    //       }
-    //       // printf("---    atomic instr carefully handled\n");
-    //     } else {
-    //       // printf("---    goldenmem check failed as well\n");
-    //     }
-      // }
-    // }
   // }
+
+  // Handle load instruction carefully for SMP
+  if (dut.load[i].fuType == 0xC || dut.load[i].fuType == 0xF) {
+    proxy->get_regs(ref_regs_ptr);
+    if (dut.commit[i].wen && ref_regs_ptr[dut.commit[i].wdest] != dut.commit[i].wdata) {
+      // printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
+      // printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
+      uint64_t golden;
+      int len = 0;
+      if (dut.load[i].fuType == 0xC) {
+        switch (dut.load[i].opType) {
+          case 0: len = 1; break;
+          case 1: len = 2; break;
+          case 2: len = 4; break;
+          case 3: len = 8; break;
+          case 4: len = 1; break;
+          case 5: len = 2; break;
+          case 6: len = 4; break;
+          default:
+            printf("Unknown fuOpType: 0x%x\n", dut.load[i].opType);
+        }
+      } else {  // dut.load[i].fuType == 0xF
+        if (dut.load[i].opType % 2 == 0) {
+          len = 4;
+        } else {  // dut.load[i].opType % 2 == 1
+          len = 8;
+        }
+      }
+      read_goldenmem(dut.load[i].paddr, &golden, len);
+      if (dut.load[i].fuType == 0xC) {
+        switch (dut.load[i].opType) {
+          case 0: golden = (int64_t)(int8_t)golden; break;
+          case 1: golden = (int64_t)(int16_t)golden; break;
+          case 2: golden = (int64_t)(int32_t)golden; break;
+        }
+      }
+      // printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[dut.commit[i].wdest]);
+      if (golden == dut.commit[i].wdata) {
+        // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
+        proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
+        if (dut.commit[i].wdest != 0) {
+          ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
+          proxy->set_regs(ref_regs_ptr);
+        }
+      } else if (dut.load[i].fuType == 0xF) {
+        proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
+        if (dut.commit[i].wdest != 0) {
+          ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
+          proxy->set_regs(ref_regs_ptr);
+        }
+        // printf("---    atomic instr carefully handled\n");
+      } else {
+        // printf("---    goldenmem check failed as well\n");
+      }
+    }
+  }
 }
 
 void Difftest::do_first_instr_commit() {
