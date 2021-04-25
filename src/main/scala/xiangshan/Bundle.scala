@@ -303,13 +303,13 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
-  def needRfRPort(index: Int, rfType: Int) : Bool = {
+  def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = false) : Bool = {
     (index, rfType) match {
-      case (0, 0) => ctrl.src1Type === SrcType.reg && ctrl.lsrc1 =/= 0.U && src1State === SrcState.rdy
-      case (1, 0) => ctrl.src2Type === SrcType.reg && ctrl.lsrc2 =/= 0.U && src1State === SrcState.rdy
-      case (0, 1) => ctrl.src1Type === SrcType.fp && src1State === SrcState.rdy
-      case (1, 1) => ctrl.src2Type === SrcType.fp && src1State === SrcState.rdy
-      case (2, 1) => ctrl.src3Type === SrcType.fp && src1State === SrcState.rdy
+      case (0, 0) => ctrl.src1Type === SrcType.reg && ctrl.lsrc1 =/= 0.U && (src1State === SrcState.rdy || ignoreState.B)
+      case (1, 0) => ctrl.src2Type === SrcType.reg && ctrl.lsrc2 =/= 0.U && (src2State === SrcState.rdy || ignoreState.B)
+      case (0, 1) => ctrl.src1Type === SrcType.fp && (src1State === SrcState.rdy || ignoreState.B)
+      case (1, 1) => ctrl.src2Type === SrcType.fp && (src2State === SrcState.rdy || ignoreState.B)
+      case (2, 1) => ctrl.src3Type === SrcType.fp && (src3State === SrcState.rdy || ignoreState.B)
       case _ => false.B
     }
   }
