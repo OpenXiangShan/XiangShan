@@ -17,7 +17,7 @@ import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
-  val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
+  val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(MemIssQueSize).W)))
   val replay = ValidIO(new Redirect)
 }
 

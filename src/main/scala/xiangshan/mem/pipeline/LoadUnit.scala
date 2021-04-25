@@ -24,7 +24,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIssQueSize).W))
     val isFirstIssue = Input(Bool())
   })
 
@@ -262,7 +262,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIssQueSize).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()

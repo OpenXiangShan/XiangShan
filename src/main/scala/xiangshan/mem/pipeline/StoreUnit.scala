@@ -13,7 +13,7 @@ import xiangshan.cache._
 class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIssQueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
@@ -144,7 +144,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val flush = Input(Bool())
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx = Input(UInt(log2Up(MemIssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
     val stout = DecoupledIO(new ExuOutput) // writeback store

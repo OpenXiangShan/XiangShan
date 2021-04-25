@@ -14,7 +14,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
-    val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
+    val rsIdx         = Input(UInt(log2Up(MemIssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))

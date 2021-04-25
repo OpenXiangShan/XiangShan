@@ -42,7 +42,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     val readIntState= Vec(NRIntReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(NRFpReadPorts, Flipped(new BusyTableReadIO))
     // to reservation stations
-    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
+    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(MaxIssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
     // send reg file read port index to reservation stations
     val readPortIndex = new Bundle {

@@ -15,7 +15,7 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
     val readFpRf = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val readIntState = Vec(NRMemReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(exuParameters.StuCnt, Flipped(new BusyTableReadIO))
-    val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(IssQueSize).W)))
+    val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(MemIssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   })
 
