@@ -86,7 +86,7 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 
 LOCK = /var/emu/emu.lock
 LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
-EMU_COMPILE_FILTER = 2> $(BUILD_DIR)/g++.err.log | tee $(BUILD_DIR)/g++.out.log | grep '^g++' | awk '{print "Compiling/Generating", $$NF}'
+EMU_COMPILE_FILTER = 2> $(BUILD_DIR)/g++.err.log | tee $(BUILD_DIR)/g++.out.log | grep 'g++' | awk '{print "Compiling/Generating", $$NF}'
 
 build_emu_local: $(EMU_MK)
 	@echo "\n[g++] Compiling C++ files..." >> $(TIMELOG)
