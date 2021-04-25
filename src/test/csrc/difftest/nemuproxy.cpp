@@ -66,18 +66,18 @@ NemuProxy::NemuProxy(int coreid) {
   assert(isa_reg_display);
 
   auto nemu_difftest_set_mhartid = (void (*)(int))dlsym(handle, "difftest_set_mhartid");
-  // assert(nemu_difftest_set_mhartid);
   auto nemu_misc_put_gmaddr = (void (*)(void*))dlsym(handle, "misc_put_gmaddr");
-  // assert(nemu_misc_put_gmaddr);
+
+  if (EMU_CORES > 1) {  // SMP Difftest
+    assert(nemu_difftest_set_mhartid);
+    assert(nemu_misc_put_gmaddr);
+    nemu_difftest_set_mhartid(coreid);
+    nemu_misc_put_gmaddr(goldenMem);
+  }
+
   auto nemu_init = (void (*)(void))dlsym(handle, "difftest_init");
   assert(nemu_init);
 
-  if (nemu_difftest_set_mhartid) {
-    nemu_difftest_set_mhartid(coreid);
-  }
-  if (nemu_misc_put_gmaddr) {
-    nemu_misc_put_gmaddr(goldenMem);
-  }
   nemu_init();
 }
 
