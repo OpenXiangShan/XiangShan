@@ -65,6 +65,7 @@ VERILATOR_FLAGS =                   \
   +define+RANDOMIZE_MEM_INIT        \
   +define+RANDOMIZE_GARBAGE_ASSIGN  \
   +define+RANDOMIZE_DELAY=0         \
+  -Wno-STMTDLY -Wno-WIDTH           \
   $(VEXTRA_FLAGS)                   \
   --assert                          \
   --stats-vars                      \
@@ -102,7 +103,7 @@ else
 	@echo "try to get emu.lock ..."
 	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
 	@echo "get lock"
-	ssh -tt $(REMOTE) '$(MAKE) -j230 build_emu_local'
+	ssh -tt $(REMOTE) 'export NOOP_HOME=$(NOOP_HOME); export NEMU_HOME=$(NEMU_HOME); $(MAKE) -C $(NOOP_HOME) -j230 build_emu_local'
 	@echo "release lock ..."
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
