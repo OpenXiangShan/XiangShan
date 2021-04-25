@@ -83,7 +83,7 @@ int Difftest::step() {
   if (do_store_check()) {
     return 1;
   }
-  if (do_golden_memory_check()) {
+  if (do_golden_memory_update()) {
     return 1;
   }
 
@@ -367,17 +367,16 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
 
 }
 
-int Difftest::do_golden_memory_check() {
+int Difftest::do_golden_memory_update() {
   // Update Golden Memory info
-  // if (dut.sbuffer.resp) {
-  //   update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
-  // }
+  if (dut.sbuffer.resp) {
+    update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
+  }
 
-  // if (dut.atomic.resp) {
-  //   handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
-  // }
+  if (dut.atomic.resp) {
+    handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
+  }
 
-  // TODO
   return 0;
 }
 

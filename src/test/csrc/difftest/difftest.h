@@ -248,7 +248,7 @@ private:
   void do_exception();
   void do_instr_commit(int index);
   int do_store_check();
-  int do_golden_memory_check();
+  int do_golden_memory_update();
   // inline uint64_t *ref_regs_ptr() { return (uint64_t*)&ref.regs; }
   // inline uint64_t *dut_regs_ptr() { return (uint64_t*)&dut.regs; }
 

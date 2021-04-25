@@ -271,7 +271,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     dut_ptr->io_perfInfo_clean = 0;
     dut_ptr->io_perfInfo_dump = 0;
 
-    // Naive instr cnt, dual core is not supported
+    // Naive instr cnt per core
     for (int i = 0; i < EMU_CORES; i++) {
       // update instr_cnt
       uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
