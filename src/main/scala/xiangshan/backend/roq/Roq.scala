@@ -874,7 +874,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
-      difftest.io.coreid   := 0.U
+      difftest.io.coreid   := hardId.U
       difftest.io.index    := i.U
 
       val ptr = deqPtrVec(i).value
@@ -899,7 +899,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestLoadEvent)
       difftest.io.clock  := clock
-      difftest.io.coreid := 0.U
+      difftest.io.coreid := hardId.U
       difftest.io.index  := i.U
 
       val ptr = deqPtrVec(i).value
@@ -915,7 +915,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestTrapEvent)
     difftest.io.clock    := clock
-    difftest.io.coreid   := 0.U
+    difftest.io.coreid   := hardId.U
     difftest.io.valid    := hitTrap
     difftest.io.code     := trapCode
     difftest.io.pc       := trapPC

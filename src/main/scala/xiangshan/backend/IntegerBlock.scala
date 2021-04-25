@@ -271,7 +271,7 @@ class IntegerBlock
     }
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock  := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
   }
 

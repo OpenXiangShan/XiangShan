@@ -870,7 +870,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.intrNO := RegNext(difftestIntrNO)
     difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
@@ -879,7 +879,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.priviledgeMode := priviledgeMode
     difftest.io.mstatus := mstatus
     difftest.io.sstatus := mstatus & sstatusRmask

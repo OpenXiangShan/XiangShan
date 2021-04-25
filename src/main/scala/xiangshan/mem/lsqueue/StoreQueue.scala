@@ -384,7 +384,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       val difftest = Module(new DifftestStoreEvent)
       difftest.io.clock       := clock
-      difftest.io.coreid      := 0.U
+      difftest.io.coreid      := hardId.U
       difftest.io.index       := i.U
       difftest.io.valid       := storeCommit
       difftest.io.storeAddr   := waddr
