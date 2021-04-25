@@ -327,6 +327,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType)
   val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType)
 
+  val st0_data_atomics = reservationStations(atomic_rs0).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.stData.bits.uop.ctrl.fuType)
+  val st1_data_atomics = reservationStations(atomic_rs1).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.stData.bits.uop.ctrl.fuType)
+
   when (st0_atomics) {
     reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready
     storeUnits(0).io.stin.valid := false.B
@@ -348,6 +351,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
+  atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
+  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, reservationStations(atomic_rs0).io.stData.bits, reservationStations(atomic_rs1).io.stData.bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
   atomicsUnit.io.flush <> io.fromCtrlBlock.flush

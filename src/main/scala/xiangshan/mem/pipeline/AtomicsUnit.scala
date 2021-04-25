@@ -11,6 +11,7 @@ import difftest._
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
+    val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
@@ -27,6 +28,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
+  val addr_valid = RegInit(false.B)
+  val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
@@ -68,9 +71,20 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.in.ready := true.B
     when (io.in.fire()) {
       in := io.in.bits
+      in.src2 := in.src2 // leave src2 unchanged
+      addr_valid := true.B
+    }
+    when (io.storeDataIn.fire()) {
+      in.src2 := io.storeDataIn.bits.data
+      data_valid := true.B
+    }
+    when(data_valid && addr_valid) {
       state := s_tlb
+      addr_valid := false.B
+      data_valid := false.B
     }
   }
+
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
