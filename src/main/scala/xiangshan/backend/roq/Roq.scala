@@ -867,10 +867,6 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
   if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
-  }
-
-  if (!env.FPGAPlatform) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
