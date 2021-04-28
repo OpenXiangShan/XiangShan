@@ -41,7 +41,7 @@ extern "C" int v_difftest_step();
 #define INTERFACE_ARCH_EVENT             \
   DIFFTEST_DPIC_FUNC_DECL(ArchEvent) (   \
     DPIC_ARG_BYTE coreid,                \
-    DPIC_ARG_INT  intrNo,                \
+    DPIC_ARG_LONG intrNo,                \
     DPIC_ARG_INT  cause,                 \
     DPIC_ARG_LONG exceptionPC            \
   )

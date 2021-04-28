@@ -28,7 +28,7 @@ typedef struct {
 // architectural events: interrupts and exceptions
 // whose priority should be higher than normal commits
 typedef struct {
-  uint32_t interrupt = 0;
+  uint64_t interrupt = 0;
   uint32_t exception = 0;
   uint64_t exceptionPC = 0;
 } arch_event_t;
