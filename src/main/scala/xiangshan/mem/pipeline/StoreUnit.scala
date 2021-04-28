@@ -56,6 +56,10 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   ))
   io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
 
+  XSPerfAccumulate("addr_spec_success", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_failed", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
 }
 
 // Load Pipeline Stage 1
