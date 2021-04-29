@@ -7,7 +7,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.roq.RoqLsqIO
+import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import difftest._
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
@@ -215,6 +215,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // Write data to sq
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.data.wen(i) := false.B
+    io.roq.storeDataRoqWb(i).valid := false.B
+    io.roq.storeDataRoqWb(i).bits := DontCare
     val stWbIndex = io.storeDataIn(i).bits.uop.sqIdx.value
     when (io.storeDataIn(i).fire()) {
       datavalid(stWbIndex) := true.B
@@ -222,6 +224,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       dataModule.io.data.waddr(i) := stWbIndex
       dataModule.io.data.wdata(i) := genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
       dataModule.io.data.wen(i) := true.B
+
+      io.roq.storeDataRoqWb(i).valid := true.B
+      io.roq.storeDataRoqWb(i).bits := io.storeDataIn(i).bits.uop.roqIdx
 
       XSInfo("store data write to sq idx %d pc 0x%x data %x -> %x\n",
         io.storeDataIn(i).bits.uop.sqIdx.value,

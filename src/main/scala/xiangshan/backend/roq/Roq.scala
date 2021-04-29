@@ -56,6 +56,7 @@ class RoqLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())
+  val storeDataRoqWb = Input(Vec(StorePipelineWidth, Valid(new RoqPtr)))
 }
 
 class RoqEnqIO(implicit p: Parameters) extends XSBundle {
@@ -274,6 +275,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // writeback status
   // val writebacked = Reg(Vec(RoqSize, Bool()))
   val writebacked = Mem(RoqSize, Bool())
+  val store_data_writebacked = Mem(RoqSize, Bool())
   // data for redirect, exception, etc.
   // val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val flagBkup = Mem(RoqSize, Bool())
@@ -468,7 +470,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
-  val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
+  // store will be commited iff both sta & std have been writebacked  
+  val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value) && store_data_writebacked(ptr.value)))
   val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.roqIdx, deqPtrVec.last)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
   val allowOnlyOneCommit = commit_exception || intrBitSetReg
@@ -663,11 +666,14 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
       writebacked(enqPtrVec(i).value) := false.B
+      val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
+      store_data_writebacked(enqPtrVec(i).value) := !isStu
     }
   }
   when (exceptionGen.io.out.valid) {
     val wbIdx = exceptionGen.io.out.bits.roqIdx.value
     writebacked(wbIdx) := true.B
+    store_data_writebacked(wbIdx) := true.B
   }
   // writeback logic set numWbPorts writebacked to true
   for (i <- 0 until numWbPorts) {
@@ -675,6 +681,12 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       val wbIdx = io.exeWbResults(i).bits.uop.roqIdx.value
       val block_wb = selectAll(io.exeWbResults(i).bits.uop.cf.exceptionVec, false, true).asUInt.orR || io.exeWbResults(i).bits.uop.ctrl.flushPipe
       writebacked(wbIdx) := !block_wb
+    }
+  }
+  // store data writeback logic mark store as data_writebacked
+  for (i <- 0 until StorePipelineWidth) {
+    when(io.lsq.storeDataRoqWb(i).valid) {
+      store_data_writebacked(io.lsq.storeDataRoqWb(i).bits.value) := true.B
     }
   }
 

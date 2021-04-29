@@ -644,6 +644,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
+  /**
+    * misc
+    */
+  io.roq.storeDataRoqWb := DontCare // will be overwriten by store queue's result
+
   // perf counter
   QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
   io.lqFull := !allowEnqueue
