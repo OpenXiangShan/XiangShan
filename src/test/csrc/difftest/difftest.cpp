@@ -293,7 +293,8 @@ int Difftest::do_store_check() {
   return 0;
 }
 
-inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
+inline int handle_atomic(int coreid, uint64_t atomicAddr, uint64_t atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
+  // We need to do atmoic operations here so as to update goldenMem
   if (!(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff)) {
     printf("Mask f**ked: %lx\n", atomicMask);
   }
@@ -305,9 +306,9 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
     uint64_t ret;
     uint64_t mem;
     read_goldenmem(atomicAddr, &mem, 8);
-    if (mem != t && atomicFuop != 007 && atomicFuop != 003) {
-      printf("Atomic instr f**ked up, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", mem, t, atomicFuop, atomicAddr);
-      // assert(0);
+    if (mem != t && atomicFuop != 007 && atomicFuop != 003) {  // ignore sc_d & lr_d
+      printf("Core %d atomic instr mismatch goldenMem, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", coreid, mem, t, atomicFuop, atomicAddr);
+      return 1;
     }
     switch (atomicFuop) {
       case 002: case 003: ret = t; break;
@@ -340,9 +341,9 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
     else
       mem = (uint32_t)(mem_temp >> 32);
 
-    if (mem != t && atomicFuop != 006 && atomicFuop != 002) {
-      printf("Atomic instr f**ked up, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", mem_temp, mem, t, atomicFuop, atomicAddr);
-      // assert(0);
+    if (mem != t && atomicFuop != 006 && atomicFuop != 002) {  // ignore sc_w & lr_w
+      printf("Core %d atomic instr mismatch goldenMem, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", coreid, mem_raw, mem, t, atomicFuop, atomicAddr);
+      return 1;
     }
     switch (atomicFuop) {
       case 002: case 003: ret = t; break;
@@ -363,19 +364,20 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
       ret_temp = (ret_temp << 32);
     update_goldenmem(atomicAddr, &ret_temp, atomicMask, 8);
   }
-
+  return 0;
 }
 
 int Difftest::do_golden_memory_update() {
   // Update Golden Memory info
   if (dut.sbuffer.resp) {
+    dut.sbuffer.resp = 0;
     update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
   }
-
   if (dut.atomic.resp) {
-    handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
+    dut.atomic.resp = 0;
+    int ret = handle_atomic(id, dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
+    if (ret) return ret;
   }
-
   return 0;
 }
 
