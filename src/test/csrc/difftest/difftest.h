@@ -21,8 +21,8 @@ typedef struct {
   uint8_t  valid = 0;
   uint8_t  code;
   uint64_t pc;
-  uint64_t cycleCnt;
-  uint64_t instrCnt;
+  uint64_t cycleCnt = 0;
+  uint64_t instrCnt = 0;
 } trap_event_t;
 
 // architectural events: interrupts and exceptions
