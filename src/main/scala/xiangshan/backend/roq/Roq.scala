@@ -9,14 +9,6 @@ import utils._
 import xiangshan.backend.ftq.FtqPtr
 import difftest._
 
-object roqDebugId extends Function0[Integer] {
-  var x = 0
-  def apply(): Integer = {
-    x = x + 1
-    return x
-  }
-}
-
 class RoqPtr(implicit p: Parameters) extends CircularQueuePtr[RoqPtr](
   p => p(XSCoreParamsKey).RoqSize
 ) with HasCircularQueuePtrHelper {
