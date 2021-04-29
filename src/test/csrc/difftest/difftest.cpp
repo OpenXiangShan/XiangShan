@@ -94,6 +94,7 @@ int Difftest::step() {
   num_commit = 0; // reset num_commit this cycle to 0
   // interrupt has the highest priority
   if (dut.event.interrupt) {
+    dut.csr.this_pc = dut.event.exceptionPC;
     do_interrupt();
   } else if(dut.event.exception) { 
     // We ignored instrAddrMisaligned exception (0) for better debug interface
@@ -141,7 +142,7 @@ int Difftest::step() {
 
 void Difftest::do_interrupt() {
   state->record_abnormal_inst(dut.commit[0].pc, dut.commit[0].inst, RET_INT, dut.event.interrupt);
-  proxy->raise_intr(dut.event.interrupt);
+  proxy->raise_intr(dut.event.interrupt | (1ULL << 63));
   progress = true;
 }
 
