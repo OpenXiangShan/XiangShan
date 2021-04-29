@@ -82,6 +82,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("in", io.in.valid)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
   XSPerfAccumulate("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
+  XSPerfAccumulate("addr_spec_success", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_failed", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
 }
 
 
