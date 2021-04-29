@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater, PTWFilter}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -105,7 +105,7 @@ case class XSCoreParameters
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
-  PtwMSHRSize: Int = 4,
+  PtwMissQueueSize: Int = 4,
   NumPerfCounters: Int = 16,
   NrExtIntr: Int = 150
 )
@@ -189,7 +189,7 @@ trait HasXSParameter {
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
-  val PtwMSHRSize = coreParams.PtwMSHRSize
+  val PtwMissQueueSize = coreParams.PtwMissQueueSize
   val NumPerfCounters = coreParams.NumPerfCounters
   val NrExtIntr = coreParams.NrExtIntr
 
@@ -462,7 +462,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater())
-  val dtlbRepeater = Module(new PTWRepeater())
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence

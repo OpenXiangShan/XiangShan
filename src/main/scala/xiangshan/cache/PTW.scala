@@ -9,9 +9,16 @@ import chisel3.ExcitingUtils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
 
+/* PTW Graph
+ * not yet
+ */
+
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
+  val SramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
+
+  val bPtwWidth = log2Up(PtwWidth)
 
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
@@ -49,7 +56,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
   val spReplacer = Some("plru")
 
-  val MSHRSize = PtwMSHRSize
+  val MSHRSize = PtwMissQueueSize
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
@@ -303,17 +310,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   /* Ptw processes multiple requests
    * Divide Ptw procedure into two stages: cache access ; mem access if cache miss
-   *                     itlb       dtlb
-   *                       |         |
-   *                       --arbiter--
-   *                            |
-   *                     // [][][][][][][] several mshr storing reqs to filter dup
+   *           miss queue itlb       dtlb
+   *               |       |         |
+   *               ------arbiter------
    *                            |
    *                    l1 - l2 - l3 - sp
    *                            |
    *          -------------------------------------------
-   *    miss  |                                         | hit
-   *    [][][][][][] several mshr storing cache result  |
+   *    miss  |  queue                                  | hit
+   *    [][][][][][]                                    |
    *          |                                         |
    *    state machine accessing mem                     |
    *          |                                         |
@@ -324,32 +329,335 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   difftestIO <> DontCare
 
-  val missQueue = Module(new PtwMissQueue)
-  val arb = Module(new Arbiter(new PtwReq, 1 + PtwWidth))
-  val cache = Module(new PtwCache)
-  val fsm = Moudle(new PtwFsm)
-  arb.io.in(0) <> missQueue.io.out
-  arb.io.in.drop(1) <>  io.tlb.map(_.req)
-
-  arb.io.out <> cache.io.in
-  cache.io.mqout <> missQueue.io.in
-  cache.io.fsmout <> fsm.io.in
-
-  val isFirstSource = RegEnable((arb.io.chosen === 0.U && missQueue.io.outIsInstr || 
-    arb.io.chosen === 1.U), arb.io.out.fire())
-  val fromMissQueue = RegEnable(arb.io.chosen === 0.U, arb.io.out.fire())
-  
-  val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
-  val resp  = VecInit(io.tlb.map(_.resp))
-  val vpn = req.vpn
-  val sfence = io.sfence
+  val sfence = RegNext(io.sfence)
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
 
-  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire(), sfence.valid)
-  val validOneCycle = OneCycleValid(arb.io.out.fire(), sfence.valid)
-  arb.io.out.ready := !valid// || resp(arbChosen).fire()
+  val missQueue = Module(new PtwMissQueue)
+  val cache = Module(new PtwCache)
+  val fsm = Module(new PtwFsm)
+  val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
+  val arb2 = Module(new Arbiter(new Bundle {
+    val vpn = UInt(vpnLen.W)
+    val source = UInt(bPtwWidth.W)
+  }, 2))
+  val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 2)).io)
+
+  // NOTE: when cache out but miss and fsm doesnt accept,
+  val blockNewReq = !missQueue.io.in.ready && cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay
+  arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
+  arb1.io.out.ready := arb2.io.in(1).ready && !blockNewReq
+
+  val blockMissQueue = !fsm.io.req.ready || BoolStopWatch(missQueue.io.out.fire(), fsm.io.resp.fire() || sfence.valid)
+  block_decoupled(missQueue.io.out, arb2.io.in(0), blockMissQueue)
+  arb2.io.in(1).valid := arb1.io.out.valid && !blockNewReq
+  arb2.io.in(1).bits.vpn := arb1.io.out.bits.vpn
+  arb2.io.in(1).bits.source := arb1.io.chosen
+  arb2.io.out.ready := cache.io.req.ready
+
+  cache.io.req.valid := arb2.io.out.valid
+  cache.io.req.bits.vpn := arb2.io.out.bits.vpn
+  cache.io.req.bits.source := arb2.io.out.bits.source
+  cache.io.req.bits.isReplay := arb2.io.chosen === 0.U
+  cache.io.refill.valid := mem.d.valid
+  cache.io.refill.bits.ptes := mem.d.bits.data
+  cache.io.refill.bits.vpn  := fsm.io.refill.vpn
+  cache.io.refill.bits.level := fsm.io.refill.level
+  cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
+  cache.io.sfence := sfence
+  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B,
+                         Mux(cache.io.resp.bits.isReplay, missQueue.io.in.ready, fsm.io.req.ready))
+
+  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !fsm.io.req.fire()
+  missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
+  missQueue.io.in.bits.source := cache.io.resp.bits.source
+  missQueue.io.sfence  := sfence
+  assert(!(cache.io.resp.valid && !cache.io.resp.bits.isReplay) || missQueue.io.in.ready, "cache should not blocked")
+
+  // NOTE: missQueue req has higher priority
+  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.isReplay || missQueue.io.empty)
+  fsm.io.req.bits.source := cache.io.resp.bits.source
+  fsm.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
+  fsm.io.req.bits.l2Hit := cache.io.resp.bits.toFsm.l2Hit
+  fsm.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
+  fsm.io.req.bits.vpn := cache.io.resp.bits.vpn
+  fsm.io.mem.req.ready := mem.a.ready
+  fsm.io.mem.resp.valid := mem.d.valid
+  fsm.io.mem.resp.bits.data := mem.d.bits.data
+  fsm.io.csr := csr
+  fsm.io.sfence := sfence
+  fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, false.B,
+    (0 until PtwWidth).map(i => i.U -> outArb(i).in(1).ready))
+
+  val memRead =  edge.Get(
+    fromSource = 0.U/*id*/,
+    // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
+    toAddress  = Cat(fsm.io.mem.req.bits.addr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
+    lgSize     = log2Up(l1BusDataWidth/8).U
+  )._2
+  mem.a.bits := memRead
+  mem.a.valid := fsm.io.mem.req.valid
+  mem.d.ready := true.B
+
+  for (i <- 0 until PtwWidth) {
+    outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
+    outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
+    outArb(i).in(0).bits.pf := false.B
+    outArb(i).in(1).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
+    outArb(i).in(1).bits := fsm.io.resp.bits.resp
+  }
+
+  // io.tlb.map(_.resp) <> outArb.map(_.out)
+  io.tlb.map(_.resp).zip(outArb.map(_.out)).map{
+    case (resp, out) => resp <> out
+  }
+  def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
+    sink.valid   := source.valid && !block_signal
+    source.ready := sink.ready   && !block_signal
+    sink.bits    := source.bits
+  }
+  // debug info
+  for (i <- 0 until PtwWidth) {
+    XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
+  }
+  XSDebug(p"[io.sfence] ${io.sfence}\n")
+  XSDebug(p"[io.csr] ${io.csr}\n")
+}
+
+/* Miss Queue dont care about duplicate req, which is done by PtwFilter
+ * PtwMissQueue is just a Queue inside Chisel with flush
+ */
+class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Bundle {
+      val vpn = UInt(vpnLen.W)
+      val source = UInt(bPtwWidth.W)
+    }))
+    val sfence = Input(new SfenceBundle)
+    val out = Decoupled(new Bundle {
+      val vpn = UInt(vpnLen.W)
+      val source = UInt(bPtwWidth.W)
+    })
+    val empty = Output(Bool())
+  })
+
+  val vpn = Reg(Vec(MSHRSize, UInt(vpnLen.W))) // request vpn
+  val source = Reg(Vec(MSHRSize, UInt(bPtwWidth.W))) // is itlb
+  val enqPtr = RegInit(0.U(log2Up(MSHRSize).W))
+  val deqPtr = RegInit(0.U(log2Up(MSHRSize).W))
+
+  val mayFull = RegInit(false.B)
+  val full = mayFull && enqPtr === deqPtr
+  val empty = !mayFull && enqPtr === deqPtr
+
+  when (io.in.fire()) {
+    enqPtr := enqPtr + 1.U
+    vpn(enqPtr) := io.in.bits.vpn
+    source(enqPtr) := io.in.bits.source
+  }
+
+  when (io.out.fire()) {
+    deqPtr := deqPtr + 1.U
+  }
+
+  when (io.in.fire() =/= io.out.fire()) {
+    mayFull := io.in.fire()
+  }
+
+  when (io.sfence.valid) {
+    enqPtr := 0.U
+    deqPtr := 0.U
+    mayFull := false.B
+  }
+
+  io.in.ready := !full
+  io.out.valid := !empty
+  io.out.bits.vpn := vpn(deqPtr)
+  io.out.bits.source := source(deqPtr)
+  io.empty := empty
+}
+
+class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+  val io = IO(new Bundle {
+    val tlb = Flipped(new TlbPtwIO)
+    val ptw = new TlbPtwIO
+    val sfence = Input(new SfenceBundle)
+  })
+
+  val (tlb, ptw, sfence) = (io.tlb, io.ptw, RegNext(io.sfence.valid))
+  val req = RegEnable(tlb.req(0).bits, tlb.req(0).fire())
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
+  val haveOne = BoolStopWatch(tlb.req(0).fire(), tlb.resp.fire() || sfence)
+  val sent = BoolStopWatch(ptw.req(0).fire(), tlb.req(0).fire() || sfence)
+  val recv = BoolStopWatch(ptw.resp.fire(), tlb.req(0).fire() || sfence)
+
+  tlb.req(0).ready := !haveOne
+  ptw.req(0).valid := haveOne && !sent
+  ptw.req(0).bits := req
+
+  tlb.resp.bits := resp
+  tlb.resp.valid := haveOne && recv
+  ptw.resp.ready := !recv
+
+  XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
+  XSDebug(io.tlb.req(0).valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
+  assert(!RegNext(recv && io.ptw.resp.valid), "re-receive ptw.resp")
+}
+
+/* dtlb
+ *
+ */
+class PTWFilter(Width: Int, Size: Int) extends XSModule with HasXSLog with HasPtwConst {
+  val io = IO(new Bundle {
+    val tlb = Flipped(new TlbPtwIO(Width))
+    val ptw = new TlbPtwIO
+    val sfence = Input(new SfenceBundle)
+  })
+
+  val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
+  val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val enqPtr = RegInit(0.U(log2Up(Size).U)) // Enq
+  val issPtr = RegInit(0.U(log2Up(Size).U)) // Iss to Ptw
+  val deqPtr = RegInit(0.U(log2Up(Size).U)) // Deq
+  val mayFullDeq = RegInit(false.B)
+  val mayFullIss = RegInit(false.B)
+
+  val sfence = RegNext(io.sfence)
+  val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
+  val ptwResp_valid = RegNext(io.ptw.resp.valid, init = false.B)
+  val reqs = filter(io.tlb.req)
+
+  var enqPtr_next = WireInit(deqPtr)
+  val isFull = enqPtr === deqPtr && mayFullDeq
+  val isEmptyDeq = enqPtr === deqPtr && !mayFullDeq
+  val isEmptyIss = enqPtr === issPtr && !mayFullIss
+  val accumEnqNum = (0 until Width).map(i => PopCount(reqs.take(i).map(_.valid)))
+  val enqPtrVec = VecInit((0 until Width).map(i => enqPtr + accumEnqNum(i)))
+  val enqPtrFullVec = enqPtrVec.map(_ === deqPtr && mayFullDeq)
+  val canEnqueue = !Cat(enqPtrFullVec).orR
+
+  io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
+  io.tlb.resp.valid := ptwResp_valid
+  io.tlb.resp.bits := ptwResp
+  io.ptw.req(0).valid := v(issPtr) && !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn))
+  io.ptw.req(0).bits.vpn := vpn(issPtr)
+  io.ptw.resp.ready := true.B
+
+  reqs.zipWithIndex.map{
+    case (req, i) =>
+      when (req.valid && canEnqueue) {
+        v(enqPtrVec(i)) := true.B
+        vpn(enqPtrVec(i)) := req.bits.vpn
+      }
+  }
+
+  val do_enq = canEnqueue && Cat(reqs.map(_.valid)).orR
+  val do_deq = (!v(deqPtr) && !isEmptyDeq)
+  val do_iss = io.ptw.req(0).fire() || (!v(issPtr) && !isEmptyIss)
+  when (do_enq) {
+    enqPtr := enqPtr + enqPtrVec(Width - 1)
+  }
+  when (do_deq) {
+    deqPtr := deqPtr + 1.U
+  }
+  when (do_iss) {
+    issPtr := issPtr + 1.U
+  }
+  when (do_enq =/= do_deq) {
+    mayFullDeq := do_enq
+  }
+  when (do_enq =/= do_iss) {
+    mayFullIss := do_enq
+  }
+
+  when (ptwResp_valid) {
+    vpn.zip(v).map{case (pi, vi) =>
+      when (vi && ptwResp.entry.hit(pi)) { vi := false.B }
+    }
+  }
+
+  when (sfence.valid) {
+    v.map(_ := false.B)
+    deqPtr := 0.U
+    enqPtr := 0.U
+    issPtr := 0.U
+    ptwResp_valid := false.B
+    mayFullDeq := false.B
+    mayFullIss := false.B
+  }
+
+  def canMerge(vpnReq: UInt, reqs: Seq[DecoupledIO[PtwReq]], index: Int) : Bool = {
+    Cat((vpn ++ reqs.take(index).map(_.bits.vpn))
+      .zip(v ++ reqs.take(index).map(_.valid))
+      .map{case (pi, vi) => vi && pi === vpnReq}
+    ).orR || (ptwResp_valid && ptwResp.entry.hit(vpnReq))
+  }
+
+  def filter(tlbReq: Vec[DecoupledIO[PtwReq]]) = {
+    val reqs =  tlbReq.indices.map{ i =>
+      val req = Wire(ValidIO(new PtwReq()))
+      req.bits := tlbReq(i).bits
+      req.valid := !canMerge(tlbReq(i).bits.vpn, tlbReq, i) && tlbReq(i).valid
+      req
+    }
+    reqs
+  }
+}
+
+/* ptw cache caches the page table of all the three layers
+ * ptw cache resp at next cycle
+ * the cache should not be blocked
+ * when miss queue if full, just block req outside
+ */
+class PtwCacheIO extends PtwBundle {
+  val req = Flipped(DecoupledIO(new Bundle {
+    val vpn = UInt(vpnLen.W)
+    val source = UInt(bPtwWidth.W)
+    val isReplay = Bool()
+  }))
+  val resp = DecoupledIO(new Bundle {
+    val source = UInt(bPtwWidth.W)
+    val vpn = UInt(vpnLen.W)
+    val isReplay = Bool()
+    val hit = Bool()
+    val toFsm = new Bundle {
+      val l1Hit = Bool()
+      val l2Hit = Bool()
+      val ppn = UInt(ppnLen.W)
+    }
+    val toTlb = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
+  })
+  val refill = Flipped(ValidIO(new Bundle {
+    val ptes = UInt(MemBandWidth.W)
+    val vpn = UInt(vpnLen.W)
+    val level = UInt(log2Up(Level).W)
+    val memAddr = Input(UInt(PAddrBits.W))
+  }))
+  val sfence = Input(new SfenceBundle)
+}
+
+class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst {
+  val io = IO(new PtwCacheIO)
+
+  // TODO: four caches make the codes dirty, think about how to deal with it
+
+  val sfence = io.sfence
+  val refill = io.refill.bits
+
+  val first_valid = io.req.valid
+  val first_fire = first_valid && io.req.ready
+  val first_req = io.req.bits
+  val second_ready = Wire(Bool())
+  val second_valid = BoolStopWatch(first_fire, io.resp.fire(), true)
+  val second_req = RegEnable(first_req, first_fire)
+  // NOTE: if ptw cache resp may be blocked, hard to handle refill
+  // when miss queue is full, please to block itlb and dtlb input
+
+  // when refill, refuce to accept new req
+  val rwHarzad = if (SramSinglePort) io.refill.valid else false.B
+  io.req.ready := !rwHarzad && second_ready// NOTE: when write, don't ready
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -361,7 +669,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false),
     set = PtwL2LineNum,
     way = PtwL2WayNum,
-    singlePort = true
+    singlePort = SramSinglePort
   ))
   val l2v = RegInit(0.U((PtwL2LineNum * PtwL2WayNum).W))
   val l2g = Reg(UInt((PtwL2LineNum * PtwL2WayNum).W))
@@ -378,7 +686,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true),
     set = PtwL3LineNum,
     way = PtwL3WayNum,
-    singlePort = true
+    singlePort = SramSinglePort
   ))
   val l3v = RegInit(0.U((PtwL3LineNum * PtwL3WayNum).W))
   val l3g = Reg(UInt((PtwL3LineNum * PtwL3WayNum).W))
@@ -395,25 +703,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val spv = RegInit(0.U(PtwSPEntrySize.W))
   val spg = Reg(UInt(PtwSPEntrySize.W))
 
-  // mem alias
-  val memRespFire = mem.d.fire()
-  val memRdata = mem.d.bits.data
-  val memSelData = Wire(UInt(XLEN.W))
-  val memPte   = memSelData.asTypeOf(new PteBundle)
-  val memPteReg = RegEnable(memPte, memRespFire)
-  val memPtes  =(0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
-  val memValid = mem.d.valid
-  val memRespReady = mem.d.ready
-  val memReqReady = mem.a.ready
-  val memReqFire = mem.a.fire()
-
-  // fsm
-  val s_idle :: s_read_ptw :: s_req :: s_resp :: Nil = Enum(4)
-  val state = RegInit(s_idle)
-  val level = RegInit(0.U(log2Up(Level).W))
-  val levelNext = level + 1.U
-  val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
-
   // Access Perf
   val l1AccessPerf = Wire(Vec(PtwL1EntrySize, Bool()))
   val l2AccessPerf = Wire(Vec(PtwL2WayNum, Bool()))
@@ -426,22 +715,20 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
-  val l1HitReg = Reg(Bool())
-  val l1HitPPNReg = Reg(UInt(ppnLen.W))
   val (l1Hit, l1HitPPN) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(vpn) && l1v(i) }
-    val hitVec = hitVecT.map(RegEnable(_, validOneCycle))
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && l1v(i) }
+    val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
-    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+    val hit = ParallelOR(hitVec) && second_valid
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
 
-    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
+    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(first_fire)}
     for (i <- 0 until PtwL1EntrySize) {
-      XSDebug(validOneCycle, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn)}\n")
+      XSDebug(first_fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(first_req.vpn)}\n")
     }
-    XSDebug(validOneCycle, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
-    XSDebug(valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} l1HitReg:${l1HitReg} l1HitPPNReg:${Hexadecimal(l1HitPPNReg)} hitVec:${VecInit(hitVec).asUInt}\n")
+    XSDebug(first_fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
+    XSDebug(second_valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
 
     VecInit(hitVecT).suggestName(s"l1_hitVecT")
     VecInit(hitVec).suggestName(s"l1_hitVec")
@@ -451,18 +738,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
   // l2
   val ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
-  val l2HitReg = Reg(Bool())
-  val l2HitPPNReg = Reg(UInt(ppnLen.W))
   val (l2Hit, l2HitPPN) = {
-    val ridx = genPtwL2SetIdx(vpn)
-    val vidx = RegEnable(VecInit(getl2vSet(vpn).asBools), validOneCycle)
-    l2.io.r.req.valid := validOneCycle
+    val ridx = genPtwL2SetIdx(first_req.vpn)
+    val vidx = RegEnable(VecInit(getl2vSet(first_req.vpn).asBools), first_fire)
+    l2.io.r.req.valid := first_fire
     l2.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l2.io.r.resp.data
-    // val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(vpn) })
-    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.hit(vpn) && v })
+    // val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(first_req.vpn) })
+    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.hit(second_req.vpn) && v })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
-    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+    val hit = ParallelOR(hitVec) && second_valid
     val hitWay = ParallelPriorityMux(hitVec zip (0 until PtwL2WayNum).map(_.U))
 
     ridx.suggestName(s"l2_ridx")
@@ -472,40 +757,39 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     hitWayData.suggestName(s"l2_hitWayData")
     hitWay.suggestName(s"l2_hitWay")
 
-    when (hit) { ptwl2replace.access(genPtwL2SetIdx(vpn), hitWay) }
+    when (hit) { ptwl2replace.access(genPtwL2SetIdx(second_req.vpn), hitWay) }
 
-    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
-    XSDebug(validOneCycle, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
+    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(first_fire) }
+    XSDebug(first_fire, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL2WayNum) {
-      XSDebug(RegNext(validOneCycle), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
+      XSDebug(RegNext(first_fire), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).hit(second_req.vpn)}\n")
     }
-    XSDebug(valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(vpn)))} l2HitReg:${l2HitReg} l2HitPPNReg:0x${Hexadecimal(l2HitPPNReg)} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
+    XSDebug(second_valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(second_req.vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
 
-    (hit, hitWayData.ppns(genPtwL2SectorIdx(vpn)))
+    (hit, hitWayData.ppns(genPtwL2SectorIdx(second_req.vpn)))
   }
 
   // l3
   val ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
-  val l3HitReg = Reg(Bool())
   val (l3Hit, l3HitData) = {
-    val ridx = genPtwL3SetIdx(vpn)
-    val vidx = RegEnable(VecInit(getl3vSet(vpn).asBools), validOneCycle)
-    l3.io.r.req.valid := validOneCycle
+    val ridx = genPtwL3SetIdx(first_req.vpn)
+    val vidx = RegEnable(VecInit(getl3vSet(first_req.vpn).asBools), first_fire)
+    l3.io.r.req.valid := first_fire
     l3.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l3.io.r.resp.data
-    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.hit(vpn) && v })
+    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.hit(second_req.vpn) && v })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
-    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+    val hit = ParallelOR(hitVec) && second_valid
     val hitWay = ParallelPriorityMux(hitVec zip (0 until PtwL3WayNum).map(_.U))
 
-    when (hit) { ptwl3replace.access(genPtwL3SetIdx(vpn), hitWay) }
+    when (hit) { ptwl3replace.access(genPtwL3SetIdx(second_req.vpn), hitWay) }
 
-    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
-    XSDebug(validOneCycle, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
+    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(first_fire) }
+    XSDebug(first_fire, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL3WayNum) {
-      XSDebug(RegNext(validOneCycle), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
+      XSDebug(RegNext(first_fire), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).hit(second_req.vpn)}\n")
     }
-    XSDebug(valid, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} l3HitReg:${l3HitReg} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
+    XSDebug(second_valid, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
 
     ridx.suggestName(s"l3_ridx")
     vidx.suggestName(s"l3_vidx")
@@ -515,25 +799,24 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     (hit, hitWayData)
   }
-  val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(vpn))
-  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(vpn))
+  val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(second_req.vpn))
+  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(second_req.vpn))
 
   // super page
   val spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
-  val spHitReg = Reg(Bool())
   val (spHit, spHitData) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn) && spv(i) }
-    val hitVec = hitVecT.map(RegEnable(_, validOneCycle))
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && spv(i) }
+    val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
-    val hit = ParallelOR(hitVec) && RegNext(validOneCycle)
+    val hit = ParallelOR(hitVec) && second_valid
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
 
-    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(validOneCycle) }
+    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(first_fire) }
     for (i <- 0 until PtwSPEntrySize) {
-      XSDebug(validOneCycle, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn)} spv:${spv(i)}\n")
+      XSDebug(first_fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(first_req.vpn)} spv:${spv(i)}\n")
     }
-    XSDebug(valid, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
+    XSDebug(second_valid, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
 
     VecInit(hitVecT).suggestName(s"sp_hitVecT")
     VecInit(hitVec).suggestName(s"sp_hitVec")
@@ -543,93 +826,26 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
 
-  // default values
-  // resp.map(_.valid := false.B)
-  // resp.map(_.bits := DontCare)
-  l2.io.w.req <> DontCare
-  l3.io.w.req <> DontCare
-  l2.io.w.req.valid := false.B
-  l3.io.w.req.valid := false.B
+  val resp = Wire(io.resp.bits.cloneType)
+  val resp_latch = RegEnable(resp, io.resp.valid && !io.resp.ready)
+  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.ready, sfence.valid)
+  second_ready := !(second_valid || resp_latch_valid) || io.resp.fire()
+  resp.source   := second_req.source
+  resp.vpn      := second_req.vpn
+  resp.isReplay := second_req.isReplay
+  resp.hit      := l3Hit || spHit
+  resp.toFsm.l1Hit := l1Hit
+  resp.toFsm.l2Hit := l2Hit
+  resp.toFsm.ppn   := Mux(l1Hit, l1HitPPN, l2HitPPN)
+  resp.toTlb.tag   := second_req.vpn
+  resp.toTlb.ppn   := Mux(l3Hit, l3HitPPN, spHitData.ppn)
+  resp.toTlb.perm.map(_ := Mux(l3Hit, l3HitPerm, spHitPerm))
+  resp.toTlb.level.map(_ := Mux(l3Hit, 2.U, spHitLevel))
 
-  // fsm
-  val pteHit = l3Hit || spHit
-  val notFound = WireInit(false.B)
-  notFound.suggestName("PtwNotFound")
-  switch (state) {
-    is (s_idle) {
-      when (valid) {
-        state := s_read_ptw
-        level := 0.U
-      }
-    }
-
-    is (s_read_ptw) {
-      when (pteHit) {
-        state := s_idle
-      }.otherwise {
-        state := s_req
-        level := Mux(l2Hit, 2.U, Mux(l1Hit, 1.U, 0.U))
-      }
-      l1HitReg := l1Hit
-      l2HitReg := l2Hit
-      l1HitPPNReg := l1HitPPN
-      l2HitPPNReg := l2HitPPN
-      l3HitReg := l3Hit
-      spHitReg := spHit
-    }
-
-    is (s_req) {
-      when (memReqFire && !sfenceLatch) {
-        state := s_resp
-      }
-    }
-
-    is (s_resp) {
-      when (memRespFire) {
-        when (memPte.isLeaf() || memPte.isPf(level)) {
-          state := s_idle
-          notFound := memPte.isPf(level)
-        }.otherwise {
-          when (level =/= 2.U) {
-            level := levelNext
-            state := s_req
-          }.otherwise {
-            state := s_idle
-            notFound := true.B
-          }
-        }
-      }
-    }
-  }
-
-  // mem
-  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1HitReg, l1HitPPNReg, memPteReg.ppn), getVpnn(vpn, 1))
-  val l3addr = MakeAddr(Mux(l2HitReg, l2HitPPNReg, memPteReg.ppn), getVpnn(vpn, 0))
-  val memAddr = Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
-  val memAddrReg = RegEnable(memAddr, mem.a.fire())
-  val pteRead =  edge.Get(
-    fromSource = 0.U/*id*/,
-    // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
-    lgSize     = log2Up(l1BusDataWidth/8).U
-  )._2
-  mem.a.bits := pteRead
-  mem.a.valid := state === s_req && !sfenceLatch && !sfence.valid
-  mem.d.ready := state === s_resp || sfenceLatch
-  memSelData := memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrReg(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
-
-  // resp
-  val ptwFinish = state === s_read_ptw && pteHit ||
-                  memRespFire && !sfenceLatch && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
-  for (i <- 0 until PtwWidth) {
-    resp(i).valid := valid && ptwFinish && arbChosen === i.U
-    resp(i).bits.entry.tag := vpn
-    resp(i).bits.entry.ppn := Mux(memRespFire, memPte.ppn, Mux(l3Hit, l3HitPPN, spHitData.ppn))
-    resp(i).bits.entry.perm.map(_ := Mux(memRespFire, memPte.getPerm(), Mux(l3Hit, l3HitPerm, spHitPerm)))
-    resp(i).bits.entry.level.map(_ := Mux(memRespFire, level, Mux(l3Hit, 2.U, spHitLevel)))
-    resp(i).bits.pf := level === 3.U || notFound
-  }
+  io.resp.valid := second_valid
+  io.resp.bits := Mux(resp_latch_valid, resp_latch, resp)
+  assert(!(l3Hit && spHit), "normal page and super page both hit")
+  assert(!(second_valid && resp_latch_valid), "resp and resp_latch valid at the same time")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(PtwL1EntrySize, Bool()))
@@ -642,38 +858,49 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   spRefillPerf.map(_ := false.B)
 
   // refill
-  when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
-    when (level === 0.U && !memPte.isLeaf()) {
+  l2.io.w.req <> DontCare
+  l3.io.w.req <> DontCare
+  l2.io.w.req.valid := false.B
+  l3.io.w.req.valid := false.B
+
+  val memRdata = refill.ptes
+  val memSelData = memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(refill.memAddr(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
+  val memPtes = (0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
+  val memPte = memSelData.asTypeOf(new PteBundle)
+
+  // TODO: handle sfenceLatch outsize
+  when (io.refill.valid && !memPte.isPf(refill.level) && sfence.valid) {
+    when (refill.level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
-      l1(refillIdx).refill(vpn, memSelData)
+      l1(refillIdx).refill(refill.vpn, memSelData)
       ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
 
       for (i <- 0 until PtwL1EntrySize) {
-          l1RefillPerf(i) := i.U === refillIdx
+        l1RefillPerf(i) := i.U === refillIdx
       }
 
-      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(vpn, memSelData)}\n")
+      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.vpn, memSelData)}\n")
       XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
       refillIdx.suggestName(s"l1_refillIdx")
       rfOH.suggestName(s"l1_rfOH")
     }
 
-    when (level === 1.U && !memPte.isLeaf()) {
-      val refillIdx = genPtwL2SetIdx(vpn)
-      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(vpn).asBools).asUInt, validOneCycle), ptwl2replace.way(refillIdx))
+    when (refill.level === 1.U && !memPte.isLeaf()) {
+      val refillIdx = genPtwL2SetIdx(refill.vpn)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(refill.vpn).asBools).asUInt, first_fire), ptwl2replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
         data = (new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)).genEntries(
-          vpn = vpn, data = memRdata, levelUInt = 1.U
+          vpn = refill.vpn, data = memRdata, levelUInt = 1.U
         ),
         waymask = victimWayOH
       )
@@ -688,7 +915,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l2 refill] refilldata:0x${
         (new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)).genEntries(
-          vpn = vpn, data = memRdata, levelUInt = 1.U)
+          vpn = refill.vpn, data = memRdata, levelUInt = 1.U)
       }\n")
       XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
       XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
@@ -699,16 +926,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       rfvOH.suggestName(s"l2_rfvOH")
     }
 
-    when (level === 2.U && memPte.isLeaf()) {
-      val refillIdx = genPtwL3SetIdx(vpn)
-      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(vpn).asBools).asUInt, validOneCycle), ptwl3replace.way(refillIdx))
+    when (refill.level === 2.U && memPte.isLeaf()) {
+      val refillIdx = genPtwL3SetIdx(refill.vpn)
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(refill.vpn).asBools).asUInt, first_fire), ptwl3replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       l3.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
         data = (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
-          vpn = vpn, data = memRdata, levelUInt = 2.U
+          vpn = refill.vpn, data = memRdata, levelUInt = 2.U
         ),
         waymask = victimWayOH
       )
@@ -723,7 +950,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l3 refill] refilldata:0x${
         (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
-          vpn = vpn, data = memRdata, levelUInt = 2.U)
+          vpn = refill.vpn, data = memRdata, levelUInt = 2.U)
       }\n")
       XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
       XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
@@ -734,10 +961,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       rfvOH.suggestName(s"l3_rfvOH")
     }
 
-    when ((level === 0.U || level === 1.U) && memPte.isLeaf()) {
+    when ((refill.level === 0.U || refill.level === 1.U) && memPte.isLeaf()) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
-      sp(refillIdx).refill(vpn, memSelData, level)
+      sp(refillIdx).refill(refill.vpn, memSelData, refill.level)
       spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
@@ -746,21 +973,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         spRefillPerf(i) := i.U === refillIdx
       }
 
-      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(vpn, memSelData, level)}\n")
+      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.vpn, memSelData, refill.level)}\n")
       XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
       refillIdx.suggestName(s"sp_refillIdx")
       rfOH.suggestName(s"sp_rfOH")
     }
   }
-  
+
   // sfence
   when (sfence.valid) {
-    state := s_idle
-    when (state === s_resp && !memRespFire) {
-      sfenceLatch := true.B
-    }
-
     when (sfence.bits.rs1/*va*/) {
       when (sfence.bits.rs2) {
         // all va && all asid
@@ -795,15 +1017,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // Perf Count
-  XSPerfAccumulate("access", validOneCycle)
+  XSPerfAccumulate("access", second_valid)
   XSPerfAccumulate("l1_hit", l1Hit)
   XSPerfAccumulate("l2_hit", l2Hit)
   XSPerfAccumulate("l3_hit", l3Hit)
   XSPerfAccumulate("sp_hit", spHit)
-  XSPerfAccumulate("pte_hit", pteHit)
-  XSPerfAccumulate("mem_count", memReqFire)
-  XSPerfAccumulate("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
-  XSPerfAccumulate("mem_blocked_cycle", mem.a.valid && !memReqReady)
+  XSPerfAccumulate("pte_hit", l3Hit || spHit)
   l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1AccessIndex${i}", l) }
   l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2AccessIndex${i}", l) }
   l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3AccessIndex${i}", l) }
@@ -813,22 +1032,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3RefillIndex${i}", l) }
   spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPRefillIndex${i}", l) }
 
-
-  // debug info
-  for (i <- 0 until PtwWidth) {
-    XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
-  }
-  XSDebug(p"[io.sfence] ${io.sfence}\n")
-  XSDebug(p"[io.csr] ${io.csr}\n")
-
-  XSDebug(p"req:${req} arb.io.out:(${arb.io.out.valid},${arb.io.out.ready}) arbChosen:${arbChosen} ptwFinish:${ptwFinish}\n")
-
-  XSDebug(p"[mem][A] (${mem.a.valid},${mem.a.ready})\n")
-  XSDebug("[mem][A] memAddr:0x${Hexadecimal(memAddr)} l1addr:0x${Hexadecimal(l1addr)} l2addr:0x${Hexadecimal(l2addr)} l3addr:0x${Hexadecimal(l3addr)} memAddrReg:0x${Hexadecimal(memAddrReg)} memPteReg.ppn:0x${Hexadecimal(memPteReg.ppn)}")
-  XSDebug(p"[mem][D] (${mem.d.valid},${mem.d.ready}) memSelData:0x${Hexadecimal(memSelData)} memPte:${memPte} memPte.isLeaf:${memPte.isLeaf()} memPte.isPf(${level}):${memPte.isPf(level)}\n")
-  XSDebug(memRespFire, p"[mem][D] memPtes:${printVec(memPtes)}\n")
-
-  XSDebug(p"[fsm] state:${state} level:${level} pteHit:${pteHit} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
+  // debug
   XSDebug(sfence.valid, p"[sfence] original v and g vector:\n")
   XSDebug(sfence.valid, p"[sfence] l1v:${Binary(l1v)}\n")
   XSDebug(sfence.valid, p"[sfence] l2v:${Binary(l2v)}\n")
@@ -843,86 +1047,143 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
 }
 
-class PTWMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
-  val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new Bundle {
-      val vpn = UInt(vpnLen.W)
-      val instr = Bool()
-    }))
-    val sfence = Input(new SfenceBundle)
-    val out = Decoupled(new PtwReq)
-    val outIsInstr = Outptu(new Bool)
+/* ptw finite state machine, the actual page table walker
+ */
+class PtwFsmIO extends PtwBundle {
+  val req = Flipped(DecoupledIO(new Bundle {
+    val source = UInt(bPtwWidth.W)
+    val l1Hit = Bool()
+    val l2Hit = Bool()
+    val vpn = UInt(vpnLen.W)
+    val ppn = UInt(ppnLen.W)
+  }))
+  val resp = DecoupledIO(new Bundle {
+    val source = UInt(bPtwWidth.W)
+    val resp = new PtwResp
   })
 
-  val s_idle :: s_valid :: Nil = Enum(2)
-
-  val state = RegInit(VecInit(Seq.fill(MSHRSize)(s_idle))) // entry state
-  val enqIdx = RegInit(0.U(log2Up(MSHRSize).W))
-  val deqIdx = RegInit(0.U(log2Up(MSHRSize).W))
-
-  val ptrMatch = enqIdx === deqIdx
-  val mayFull = RegInit(false.B)
-  val full = mayFull && enqIdx === deqIdx
-  val empty = !mayFull && enqIdx === deqIdx
-
-  val vpn = Reg(Vec(MSHRSize, UInt(vpnLen.W))) // request vpn
-  val instr = Reg(Vec(MSHRSize, Bool())) // is itlb
-
-  val addrDup = (0 until MSHRSize).map(i => state(i) =/= s_idle && vpn(i) === io.in.bits.vpn ) // addr match
-  val instrDup = (0 until MSHRSize).map(i => instr(i) === io.in.bits.instr) // same source
-  val dropIt = Cat(addrDup.zip(instrDup).map(_.1 && _.2)).orR // NOTE: let it in, but drop it
-
-  when (io.in.fire() && !dropIt) {
-    enqIdx := enqIdx + 1.U
-    state(enqIdx) := s_valid
-    vpn(enqIdx) := io.in.bits.vpn
-    instr(enqIdx) := io.in.bits.instr
+  val mem = new Bundle {
+    val req = DecoupledIO(new Bundle {
+      val addr = UInt(PAddrBits.W)
+    })
+    val resp = Flipped(ValidIO(new Bundle {
+      val data = UInt(MemBandWidth.W)
+    }))
   }
 
-  when (io.out.fire()) {
-    deqIdx := deqIdx + 1.U
-    state(deqIdx) := s_idle
-  }
-
-  when (io.sfence.valid) {
-    enqIdx := 0.U
-    deqIdx := 0.U
-    mayFull := false.B
-    state.map(_ := s_idle)
-  }  
-
-  io.in.ready := !full
-  io.out.valid := !empty
-  assert(empty || !(state(deqIdx) === s_idle), "state must be valid when between enqIdx and deqIdx")
-
-  io.out.bits.vpn := vpn(deqIdx)
-  io.out.bits.instr := instr(deqIdx)
+  val csr = Input(new TlbCsrBundle)
+  val sfence = Input(new SfenceBundle)
+  val refill = Output(new Bundle {
+    val vpn = UInt(vpnLen.W)
+    val level = UInt(log2Up(Level).W)
+    val memAddr = UInt(PAddrBits.W)
+  })
 }
 
-class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
-  val io = IO(new Bundle {
-    val tlb = Flipped(new TlbPtwIO)
-    val ptw = new TlbPtwIO
-    val sfence = Input(new SfenceBundle)
-  })
+class PtwFsm extends XSModule with HasPtwConst {
+  val io = IO(new PtwFsmIO)
 
-  val (tlb, ptw, sfence) = (io.tlb, io.ptw, io.sfence.valid)
-  val req = RegEnable(tlb.req.bits, tlb.req.fire())
-  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
-  val haveOne = BoolStopWatch(tlb.req.fire(), tlb.resp.fire() || sfence)
-  val sent = BoolStopWatch(ptw.req.fire(), tlb.req.fire() || sfence)
-  val recv = BoolStopWatch(ptw.resp.fire(), tlb.req.fire() || sfence)
+  val sfence = io.sfence
+  val mem = io.mem
+  val satp = io.csr.satp
 
-  tlb.req.ready := !haveOne
-  ptw.req.valid := haveOne && !sent
-  ptw.req.bits := req
+  val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: Nil = Enum(4)
+  val state = RegInit(s_idle)
+  val level = Reg(UInt(log2Up(Level).W))
+  val ppn = Reg(UInt(ppnLen.W))
+  val vpn = Reg(UInt(vpnLen.W))
+  val levelNext = level + 1.U
 
-  tlb.resp.bits := resp
-  tlb.resp.valid := haveOne && recv
-  ptw.resp.ready := !recv
+  val sfenceLatch = RegEnable(false.B, init = false.B, mem.resp.valid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
+  val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
+  val l1Hit = Reg(Bool())
+  val l2Hit = Reg(Bool())
 
-  XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
-  XSDebug(io.tlb.req.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
-  XSDebug(io.ptw.req.valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
-  assert(!RegNext(recv && io.ptw.resp.valid), "re-receive ptw.resp")
+  val memRdata = mem.resp.bits.data
+  val memSelData = memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrReg(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
+  val memPtes = (0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
+  val memPte = memSelData.asTypeOf(new PteBundle)
+  val memPteReg = RegEnable(memPte, mem.resp.fire())
+
+  val notFound = WireInit(false.B)
+  switch (state) {
+    is (s_idle) {
+      when (io.req.fire()) {
+        val req = io.req.bits
+        state := s_mem_req
+        level := Mux(req.l2Hit, 2.U, Mux(req.l1Hit, 1.U, 0.U))
+        ppn := Mux(req.l2Hit || req.l1Hit, io.req.bits.ppn, satp.ppn)
+        vpn := io.req.bits.vpn
+        l1Hit := req.l1Hit
+        l2Hit := req.l2Hit
+      }
+    }
+
+    is (s_mem_req) {
+      when (mem.req.fire() && !sfenceLatch) {
+        state := s_mem_resp
+      }
+    }
+
+    is (s_mem_resp) {
+      when (mem.resp.fire()) {
+        when (memPte.isLeaf() || memPte.isPf(level)) {
+          state := s_resp
+          notFound := memPte.isPf(level)
+        }.otherwise {
+          when (level =/= 2.U) {
+            level := levelNext
+            state := s_mem_req
+          }.otherwise {
+            state := s_resp
+            notFound := true.B
+          }
+        }
+      }
+    }
+
+    is (s_resp) {
+      when (io.resp.fire()) {
+        state := s_idle
+      }
+    }
+  }
+
+  when (sfence.valid) {
+    state := s_idle
+    when (state === s_mem_resp && !mem.resp.fire()) {
+      sfenceLatch := true.B
+    }
+  }
+
+  val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
+  val resp = Reg(io.resp.bits.cloneType)
+  when (finish && !sfenceLatch) {
+    resp.source := RegEnable(io.req.bits.source, io.req.fire())
+    resp.resp.pf := level === 2.U || notFound
+    resp.resp.entry.tag := vpn
+    resp.resp.entry.ppn := memPte.ppn
+    resp.resp.entry.perm.map(_ := memPte.getPerm())
+    resp.resp.entry.level.map(_ := level)
+  }
+  io.resp.valid := state === s_resp
+  io.resp.bits := resp
+  io.req.ready := state === s_idle
+
+  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
+  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
+  val l3addr = MakeAddr(Mux(l2Hit, ppn, memPteReg.ppn), getVpnn(vpn, 0))
+  mem.req.valid := state === s_mem_req
+  mem.req.bits.addr := Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
+
+  io.refill.vpn := vpn
+  io.refill.level := level
+  io.refill.memAddr := memAddrReg
+
+  XSDebug(p"[fsm] state:${state} level:${level} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
+
+  // perf
+  XSPerfAccumulate("mem_count", mem.req.fire())
+  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
+  XSPerfAccumulate("mem_blocked_cycle", mem.req.valid && !mem.req.ready)
 }

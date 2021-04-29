@@ -267,18 +267,20 @@ class BlockTlbRequestIO() extends TlbBundle {
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class TlbPtwIO extends TlbBundle {
-  val req = DecoupledIO(new PtwReq)
+class TlbPtwIO(Width: Int = 1) extends TlbBundle {
+  val req = Vec(Width, DecoupledIO(new PtwReq))
   val resp = Flipped(DecoupledIO(new PtwResp))
 
+  override def cloneType: this.type = (new TlbPtwIO(Width)).asInstanceOf[this.type]
+
   override def toPrintable: Printable = {
-    p"req:${req.valid} ${req.ready} ${req.bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
+    p"req(0):${req(0).valid} ${req(0).ready} ${req(0).bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
   }
 }
 
 class TlbIO(Width: Int) extends TlbBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
-  val ptw = new TlbPtwIO
+  val ptw = new TlbPtwIO(Width)
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
 
@@ -358,19 +360,25 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       val refillIdx = sRefillIdx
       refillIdx.suggestName(s"SuperRefillIdx")
 
-      sv(refillIdx) := true.B
-      sMeta(refillIdx).apply(
-        vpn = resp.entry.tag,
-        level = resp.entry.level.getOrElse(0.U)
-      )
-      sData(refillIdx).apply(
-        ppn   = resp.entry.ppn,
-        level = resp.entry.level.getOrElse(0.U),
-        perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
-        pf    = resp.pf
-      )
-      sReplace.access(sRefillIdx)
-      XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
+      val dup = Cat(sv.zip(sMeta).map{ case (v, m) =>
+        v && m.hit(resp.entry.tag)
+      }).orR // NOTE: may have long latency, RegNext it
+
+      when (!dup) {
+        sv(refillIdx) := true.B
+        sMeta(refillIdx).apply(
+          vpn = resp.entry.tag,
+          level = resp.entry.level.getOrElse(0.U)
+        )
+        sData(refillIdx).apply(
+          ppn   = resp.entry.ppn,
+          level = resp.entry.level.getOrElse(0.U),
+          perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
+          pf    = resp.pf
+        )
+        sReplace.access(sRefillIdx)
+        XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
+      }
     }
   }
 
@@ -476,30 +484,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val missVec = readResult.map(res => res._2)
   val hitVecVec = readResult.map(res => res._3)
   val validRegVec = readResult.map(res => res._4)
-  val hasMissReq = Cat(missVec).orR
 
-  // ptw
-  val waiting = RegInit(false.B)
-  when (ptw.req.fire()) {
-    waiting := true.B
-  }
-  when (sfence.valid || ptw.resp.valid) {
-    waiting := false.B
-  }
-  assert(!ptw.resp.valid || waiting)
-
-  // ptw <> DontCare // TODO: need check it
-  ptw.req.valid := hasMissReq && !waiting && !RegNext(refill)
-  ptw.resp.ready := waiting
-
-  // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
-  val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
   for (i <- 0 until Width) {
-    ptwReqSeq(i).valid := ((if (isDtlb) RegNext(valid(i)) else valid(i)) && missVec(i))
-    ptwReqSeq(i).roqIdx := (if (isDtlb) RegNext(req(i).bits.roqIdx) else req(i).bits.roqIdx)
-    ptwReqSeq(i).bits.vpn := (if (isDtlb) RegNext(reqAddr(i).vpn) else reqAddr(i).vpn)
+    io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
+    io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
   }
-  ptw.req.bits := Compare(ptwReqSeq).bits
+  io.ptw.resp.ready := true.B
 
   // val tooManyPf = PopCount(pf) > 5.U
   // when (tooManyPf) { // when too much pf, just clear
@@ -540,18 +530,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     // NOTE: ITLB is blocked, so every resp will be valid only when hit
     // every req will be ready only when hit
     XSPerfAccumulate("access", io.requestor(0).req.fire() && vmEnable)
-    XSPerfAccumulate("miss", ptw.req.fire())
+    XSPerfAccumulate("miss", ptw.req(0).fire())
   }
-  val reqCycleCnt = Reg(UInt(16.W))
-  when (ptw.req.fire()) {
-    reqCycleCnt := 1.U
-  }
-  when (waiting) {
-    reqCycleCnt := reqCycleCnt + 1.U
-  }
-  XSPerfAccumulate("ptw_req_count", ptw.req.fire())
-  XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
-  XSPerfAccumulate("wait_blocked_count", waiting && hasMissReq)
+  //val reqCycleCnt = Reg(UInt(16.W))
+  //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire || sfence.valid)
+  //XSPerfAccumulate("ptw_req_count", ptw.req.fire())
+  //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
+  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
   for (i <- 0 until TlbEntrySize) {
     val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
@@ -577,19 +562,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
   XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
-  XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
+  for (i <- ptw.req.indices) {
+    XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
+  }
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
-//   for (i <- 0 until Width) {
-//     if(isDtlb) {
-//       XSDebug(!(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR), p"Dtlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
-//       assert(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR)
-//     } else {
-//       XSDebug(!(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR), p"Itlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
-//       assert(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR)
-//     }
-//   }
+  // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
 }
 
 object TLB {
