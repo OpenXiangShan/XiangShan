@@ -178,6 +178,7 @@ public:
   // Its backend should be cross-platform (NEMU, Spike, ...)
   // Initialize difftest environments
   Difftest(int coreid);
+  DIFF_PROXY *proxy;
   uint32_t num_commit = 0; // # of commits if made progress
   // Trigger a difftest checking procdure
   int step();
@@ -229,7 +230,6 @@ private:
   int id;
   difftest_core_state_t dut;
   difftest_core_state_t ref;
-  DIFF_PROXY *proxy;
   uint64_t *ref_regs_ptr = (uint64_t*)&ref.regs;
   uint64_t *dut_regs_ptr = (uint64_t*)&dut.regs;
 

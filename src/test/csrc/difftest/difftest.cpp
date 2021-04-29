@@ -251,7 +251,12 @@ void Difftest::do_instr_commit(int i) {
         }
         // printf("---    atomic instr carefully handled\n");
       } else {
-        // printf("---    goldenmem check failed as well\n");
+        // goldenmem check failed as well, raise error
+        printf("---  SMP difftest mismatch!\n");
+        printf("---  Trying to probe local data of another core\n");
+        uint64_t buf;
+        difftest[(EMU_CORES-1) - this->id]->proxy->memcpy_from_ref(&buf, dut.load[i].paddr, len);
+        printf("---    content: %lx\n", buf);
       }
     }
   }
