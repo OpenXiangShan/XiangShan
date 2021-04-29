@@ -381,6 +381,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     // if !sbuffer.fire(), read the same ptr
     // if sbuffer.fire(), read next
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
+    // Note that store data/addr should both be valid after store's commit
+    assert(!io.sbuffer(i).valid || allvalid(ptr))
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := paddrModule.io.rdata(i)
     io.sbuffer(i).bits.data := dataModule.io.rdata(i).data
