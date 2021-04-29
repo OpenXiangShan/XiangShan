@@ -428,7 +428,7 @@ void Difftest::clear_step() {
 }
 
 void Difftest::display() {
-  state->display();
+  state->display(this->id);
 
   printf("\n==============  REF Regs  ==============\n");
   fflush(stdout);
@@ -436,8 +436,8 @@ void Difftest::display() {
   printf("priviledgeMode: %lu\n", dut.csr.priviledgeMode);
 }
 
-void DiffState::display() {
-  printf("\n============== Commit Group Trace ==============\n");
+void DiffState::display(int coreid) {
+  printf("\n============== Commit Group Trace (Core %d) ==============\n", coreid);
   for (int j = 0; j < DEBUG_GROUP_TRACE_SIZE; j++) {
     printf("commit group [%x]: pc %010lx cmtcnt %d %s\n",
         j, retire_group_pc_queue[j], retire_group_cnt_queue[j],

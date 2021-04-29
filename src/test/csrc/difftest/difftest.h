@@ -153,7 +153,7 @@ public:
     retire_inst_type_queue[retire_inst_pointer] = abnormal_type;
     retire_inst_pointer = (retire_inst_pointer + 1) % DEBUG_INST_TRACE_SIZE;
   };
-  void display();
+  void display(int coreid);
 
 private:
   const static size_t DEBUG_GROUP_TRACE_SIZE = 16;
