@@ -25,9 +25,9 @@ int main(int argc, const char** argv) {
   }
 
   auto emu = new Emulator(argc, argv);
+  init_goldenmem();
   difftest_init();
 
-  init_goldenmem();
   // init device
   init_device();
 

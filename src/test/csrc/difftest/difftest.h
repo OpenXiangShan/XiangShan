@@ -153,7 +153,7 @@ public:
     retire_inst_type_queue[retire_inst_pointer] = abnormal_type;
     retire_inst_pointer = (retire_inst_pointer + 1) % DEBUG_INST_TRACE_SIZE;
   };
-  void display();
+  void display(int coreid);
 
 private:
   const static size_t DEBUG_GROUP_TRACE_SIZE = 16;
@@ -178,6 +178,7 @@ public:
   // Its backend should be cross-platform (NEMU, Spike, ...)
   // Initialize difftest environments
   Difftest(int coreid);
+  DIFF_PROXY *proxy;
   uint32_t num_commit = 0; // # of commits if made progress
   // Trigger a difftest checking procdure
   int step();
@@ -229,7 +230,6 @@ private:
   int id;
   difftest_core_state_t dut;
   difftest_core_state_t ref;
-  DIFF_PROXY *proxy;
   uint64_t *ref_regs_ptr = (uint64_t*)&ref.regs;
   uint64_t *dut_regs_ptr = (uint64_t*)&dut.regs;
 
@@ -248,7 +248,7 @@ private:
   void do_exception();
   void do_instr_commit(int index);
   int do_store_check();
-  int do_golden_memory_check();
+  int do_golden_memory_update();
   // inline uint64_t *ref_regs_ptr() { return (uint64_t*)&ref.regs; }
   // inline uint64_t *dut_regs_ptr() { return (uint64_t*)&dut.regs; }
 
