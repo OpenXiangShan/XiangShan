@@ -124,7 +124,6 @@ class PteBundle extends PtwBundle{
   }
 
   def unaligned(level: UInt) = {
-    assert(level=/=3.U)
     isLeaf() && !(level === 2.U ||
                   level === 1.U && ppn(vpnnLen-1,   0) === 0.U ||
                   level === 0.U && ppn(vpnnLen*2-1, 0) === 0.U)
@@ -373,7 +372,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
   missQueue.io.in.bits.source := cache.io.resp.bits.source
   missQueue.io.sfence  := sfence
-  assert(!(cache.io.resp.valid && !cache.io.resp.bits.isReplay) || missQueue.io.in.ready, "cache should not blocked")
 
   // NOTE: missQueue req has higher priority
   fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.isReplay || missQueue.io.empty)
@@ -503,7 +501,7 @@ class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtw
   XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
   XSDebug(io.tlb.req(0).valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
-  assert(!RegNext(recv && io.ptw.resp.valid), "re-receive ptw.resp")
+  assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
 }
 
 /* dtlb
@@ -845,7 +843,6 @@ class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst
   io.resp.valid := second_valid
   io.resp.bits := Mux(resp_latch_valid, resp_latch, resp)
   assert(!(l3Hit && spHit), "normal page and super page both hit")
-  assert(!(second_valid && resp_latch_valid), "resp and resp_latch valid at the same time")
 
   // refill Perf
   val l1RefillPerf = Wire(Vec(PtwL1EntrySize, Bool()))
@@ -1089,7 +1086,7 @@ class PtwFsm extends XSModule with HasPtwConst {
 
   val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  val level = Reg(UInt(log2Up(Level).W))
+  val level = RegInit(0.U(log2Up(Level).W))
   val ppn = Reg(UInt(ppnLen.W))
   val vpn = Reg(UInt(vpnLen.W))
   val levelNext = level + 1.U
