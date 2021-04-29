@@ -39,7 +39,9 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
 
-  io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  // Now data use its own io
+  // io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.data := io.in.bits.src2 // FIXME: remove data from pipeline
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx
@@ -66,7 +68,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
-    val tlbFeedback = ValidIO(new TlbFeedback)
+    val rsFeedback = ValidIO(new RSFeedback)
   })
 
   val s1_paddr = io.dtlbResp.bits.paddr
@@ -79,14 +81,15 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
 
   // Send TLB feedback to store issue queue
-  io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s1_tlb_miss
-  io.tlbFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
-  io.tlbFeedback.bits.rsIdx := io.in.bits.rsIdx
-  XSDebug(io.tlbFeedback.valid,
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !s1_tlb_miss
+  io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
+  XSDebug(io.rsFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
-    io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.rsIdx
+    io.rsFeedback.bits.hit,
+    io.rsFeedback.bits.rsIdx
   )
 
 
@@ -142,7 +145,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val tlbFeedback = ValidIO(new TlbFeedback)
+    val rsFeedback = ValidIO(new RSFeedback)
     val dtlb = new TlbRequestIO()
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
@@ -164,7 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.dtlb.resp
-  store_s1.io.tlbFeedback <> io.tlbFeedback
+  store_s1.io.rsFeedback <> io.rsFeedback
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
