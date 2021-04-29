@@ -610,13 +610,13 @@ class ReservationStationCtrl
   }
 
   // load wait store
-  if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) {
+  if (exuCfg == StExeUnitCfg) {
     io.readyVec := srcQueueWire.map(a => a(0))
     io.dataReadyVec := srcQueueWire.map(a => a(1))
   } else {
     io.readyVec := srcQueueWire.map(Cat(_).andR)
   }
-  if (exuCfg == LdExeUnitCfg) {
+  if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
     ldWait.zip(sqIdx).map{ case (lw, sq) =>
