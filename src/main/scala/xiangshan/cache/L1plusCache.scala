@@ -2,17 +2,13 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, ReplacementPolicy, HasTLDump, XSDebug, SRAMTemplate, XSPerfAccumulate}
+import xiangshan._
+import utils._
 import system.L1CacheErrorInfo
-
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters,
-  TLMasterParameters, TLMasterPortParameters, TLArbiter,
-  TLEdgeOut, TLBundleA, TLBundleD,
-  ClientStates, ClientMetadata
-}
-
+import freechips.rocketchip.tilelink._
+import device.RAMHelper
 import scala.math.max
 
 
@@ -923,5 +919,56 @@ class L1plusCacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends L1pl
   when (io.mem_grant.fire()) {
     XSDebug("mem_grant ")
     io.mem_grant.bits.dump
+  }
+}
+
+
+class FakeL1plusCache()(implicit p: Parameters) extends XSModule with HasL1plusCacheParameters {
+  val io = IO(Flipped(new L1plusCacheIO))
+
+  val fakeRAM = Seq.fill(8)(Module(new RAMHelper(64L * 1024 * 1024 * 1024)))
+  val req_valid = RegNext(io.req.valid)
+  val req_addr = RegNext((io.req.bits.addr - "h80000000".U) >> 3)
+  assert(!req_valid || req_addr(2, 0) === 0.U)
+  for ((ram, i) <- fakeRAM.zipWithIndex) {
+    ram.io.clk   := clock
+    ram.io.en    := req_valid
+    ram.io.rIdx  := req_addr + i.U
+    ram.io.wIdx  := 0.U
+    ram.io.wdata := 0.U
+    ram.io.wmask := 0.U
+    ram.io.wen   := false.B
+  }
+
+  io.req.ready := true.B
+
+  io.resp.valid := req_valid
+  assert(!io.resp.valid || io.resp.ready)
+  io.resp.bits.data := Cat(fakeRAM.map(_.io.rdata).reverse)
+  io.resp.bits.id := RegNext(io.req.bits.id)
+
+  io.empty := true.B
+  io.error := DontCare
+  io.error.ecc_error.valid := false.B
+  io.error.paddr.valid := false.B
+}
+
+class L1plusCacheWrapper()(implicit p: Parameters) extends LazyModule with HasL1plusCacheParameters {
+
+  val clientNode = if (!useFakeL1plusCache) TLIdentityNode() else null
+  val l1plusCache = if (!useFakeL1plusCache) LazyModule(new L1plusCache()) else null
+  if (!useFakeL1plusCache) {
+    clientNode := l1plusCache.clientNode
+  }
+
+  lazy val module = new LazyModuleImp(this) with HasL1plusCacheParameters {
+    val io = IO(Flipped(new L1plusCacheIO))
+    if (useFakeL1plusCache) {
+      val fake_l1plus_cache = Module(new FakeL1plusCache())
+      io <> fake_l1plus_cache.io
+    }
+    else {
+      io <> l1plusCache.module.io
+    }
   }
 }
