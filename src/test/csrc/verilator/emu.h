@@ -5,8 +5,13 @@
 #include "snapshot.h"
 #include "VSimTop.h"
 #include <verilated_vcd_c.h>	// Trace file format header
+#include <sys/wait.h>
+#include <sys/types.h>
 
 #define SNAPSHOT_INTERVAL 60 // unit: second
+
+#define SLOT_SIZE 3
+
 
 struct EmuArgs {
   uint32_t seed;
