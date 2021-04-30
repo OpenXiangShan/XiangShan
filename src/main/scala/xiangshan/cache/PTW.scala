@@ -365,8 +365,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   cache.io.refill.bits.level := fsm.io.refill.level
   cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
   cache.io.sfence := sfence
-  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B,
-                         Mux(cache.io.resp.bits.isReplay, fsm.io.req.ready, missQueue.io.in.ready))
+  cache.io.resp.ready := Mux(cache.io.resp.bits.hit || cache.io.resp.bits.isReplay, true.B, missQueue.io.in.ready)
+
+  when (cache.io.resp.valid && cache.io.resp.bits.isReplay) {
+    assert(fsm.io.req.ready, "when replay, fsm should be empty")
+  }
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay//!fsm.io.req.fire()
   missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
@@ -469,7 +472,7 @@ class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPt
     mayFull := false.B
   }
 
-  io.in.ready := !full
+  io.in.ready := !full || io.out.fire()
   io.out.valid := !empty
   io.out.bits.vpn := vpn(deqPtr)
   io.out.bits.source := source(deqPtr)
@@ -655,7 +658,12 @@ class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst
 
   // when refill, refuce to accept new req
   val rwHarzad = if (SramSinglePort) io.refill.valid else false.B
-  io.req.ready := !rwHarzad && second_ready// NOTE: when write, don't ready
+  io.req.ready := !rwHarzad && (second_ready || io.req.bits.isReplay)
+  // NOTE: when write, don't ready, whe
+  //       when replay, just come in, out make sure resp.fire()
+  when (io.req.fire() && io.req.bits.isReplay) {
+    assert(io.resp.fire() || !io.resp.valid, "should not block replay")
+  }
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
