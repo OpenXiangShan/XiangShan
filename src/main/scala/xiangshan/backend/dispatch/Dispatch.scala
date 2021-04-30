@@ -133,6 +133,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   io.ctrlInfo.fpdqFull := fpDq.io.dqFull
   io.ctrlInfo.lsdqFull := lsDq.io.dqFull
 
+  val enableDetailedRegfilePortsPerf = true
   val intPortsNeeded = intDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 2).map(i => enq.bits.needRfRPort(i, 0))))
   val fpPortsNeeded = fpDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 3).map(i => enq.bits.needRfRPort(i, 1))))
   val lsPortsNeededInt = lsDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 2).map(i => enq.bits.needRfRPort(i, 0))))
@@ -152,6 +153,12 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("fp_rf_active_ports_fp", fpActivePorts)
   XSPerfAccumulate("fp_rf_active_ports_ls", lsActivePortsFp)
   XSPerfAccumulate("fp_rf_active_ports_all", activePortsFpAll)
-  XSPerfHistogram("int_rf_active_ports_all", activePortsIntAll, true.B, 0, 14, 1)
-  XSPerfHistogram("fp_rf_active_ports_all", activePortsFpAll, true.B, 0, 14, 1)
+  if (enableDetailedRegfilePortsPerf) {
+    XSPerfHistogram("int_rf_active_ports_all", activePortsIntAll, true.B, 0, 14+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_all", activePortsFpAll, true.B, 0, 14+1, 1)
+    XSPerfHistogram("int_rf_active_ports_int", intActivePorts, true.B, 0, 8+1, 1)
+    XSPerfHistogram("int_rf_active_ports_ls", lsActivePortsInt, true.B, 0, 6+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_fp", fpActivePorts, true.B, 0, 12+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_ls", lsActivePortsFp, true.B, 0, 2+1, 1)
+  }
 }
