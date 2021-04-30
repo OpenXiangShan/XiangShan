@@ -366,15 +366,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
   cache.io.sfence := sfence
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B,
-                         Mux(cache.io.resp.bits.isReplay, missQueue.io.in.ready, fsm.io.req.ready))
+                         Mux(cache.io.resp.bits.isReplay, fsm.io.req.ready, missQueue.io.in.ready))
 
-  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !fsm.io.req.fire()
+  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay//!fsm.io.req.fire()
   missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
   missQueue.io.in.bits.source := cache.io.resp.bits.source
   missQueue.io.sfence  := sfence
 
   // NOTE: missQueue req has higher priority
-  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.isReplay || missQueue.io.empty)
+  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isReplay// (cache.io.resp.bits.isReplay || missQueue.io.empty)
   fsm.io.req.bits.source := cache.io.resp.bits.source
   fsm.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   fsm.io.req.bits.l2Hit := cache.io.resp.bits.toFsm.l2Hit
