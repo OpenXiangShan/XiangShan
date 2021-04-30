@@ -12,7 +12,7 @@ class PrintModuleName extends Transform with DependencyAPIMigration {
   // avoid print's check
   override def prerequisites = firrtl.stage.Forms.Checks
   override def invalidates(a: Transform) = false
-  override def optionalPrerequisites = Seq(Dependency[WiringTransform])
+  override def optionalPrerequisiteOf: Seq[TransformDependency] = firrtl.stage.Forms.HighEmitters
 
   override protected def execute(state: CircuitState): CircuitState = {
 

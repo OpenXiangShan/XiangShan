@@ -32,6 +32,7 @@ case class ExuParameters
 case class ExuConfig
 (
   name: String,
+  blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
   wbFpPriority: Int

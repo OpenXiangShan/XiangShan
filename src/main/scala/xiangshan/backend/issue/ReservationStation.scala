@@ -137,7 +137,7 @@ class ReservationStation
   io.numExist := select.io.numExist
   select.io.redirectVec := ctrl.io.redirectVec
   select.io.readyVec := ctrl.io.readyVec
-  select.io.enq.valid := io.fromDispatch.valid && !(io.redirect.valid || io.flush) 
+  select.io.enq.valid := io.fromDispatch.valid && !(io.redirect.valid || io.flush)
   io.fromDispatch.ready := select.io.enq.ready
   select.io.deq.ready := io.deq.ready
   if (feedback) {
@@ -465,7 +465,7 @@ class ReservationStationSelect
   XSPerfAccumulate("exuBlockDeq", issueValid && !io.deq.ready)
   XSPerfAccumulate("bubbleBlockEnq", haveBubble && !io.enq.ready)
   XSPerfAccumulate("validButNotSel", PopCount(selectMask) - haveReady)
-  
+
   QueuePerf(iqSize, io.numExist, !io.enq.ready)
   XSPerfAccumulate("validUtil", PopCount(validQueue))
   XSPerfAccumulate("emptyUtil", io.numExist - PopCount(validQueue) - PopCount(stateQueue.map(_ === s_replay)) - PopCount(stateQueue.map(_ === s_wait))) // NOTE: hard to count, use utilization - nonEmpty
@@ -474,7 +474,7 @@ class ReservationStationSelect
   XSPerfAccumulate("waitUtil", PopCount(stateQueue.map(_ === s_wait)))
   XSPerfAccumulate("replayUtil", PopCount(stateQueue.map(_ === s_replay)))
 
-  
+
   if (!feedback && nonBlocked) {
     XSPerfAccumulate("issueValidButBubbleDeq", selectReg && bubbleReg && (deqPtr === bubblePtr))
     XSPerfAccumulate("bubbleShouldNotHaveDeq", selectReg && bubbleReg && (deqPtr === bubblePtr) && io.deq.ready)
@@ -487,7 +487,7 @@ class ReservationStationSelect
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
       XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
     }
-    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
+    io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U)
   }
   for(i <- 0 until iqSize) {
     if (i == 0) XSPerfAccumulate("empty", io.numExist === 0.U)
@@ -776,6 +776,22 @@ class ReservationStationCtrl
       }
     }
   }
+
+  def updateFilterByBlock(blockName: String) = {
+    srcUpdateListen.map(a => a.map(b =>
+      b.zip(fastPortsCfg ++ slowPortsCfg)
+      .filter(
+        _._2.blockName == blockName
+      ).map(_._1)
+    )).flatten.flatten
+  }
+
+  val intSrcUpdate = updateFilterByBlock("Int")
+  val memSrcUpdate = updateFilterByBlock("Mem")
+  val fpSrcUpdate  = updateFilterByBlock("Fp")
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Int", PopCount(Cat(intSrcUpdate)))
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Mem", PopCount(Cat(memSrcUpdate)))
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Fp", PopCount(Cat(fpSrcUpdate)))
 }
 
 class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int, writePort: Int = 1) extends Module {

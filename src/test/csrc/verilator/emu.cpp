@@ -24,6 +24,7 @@ static inline void print_help(const char *file) {
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
   printf("      --no-snapshot          disable saving snapshots\n");
   printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("      --diff=PATH            set the path of REF for differential testing\n");
   printf("  -h, --help                 print program help info\n");
   printf("\n");
 }
@@ -31,10 +32,12 @@ static inline void print_help(const char *file) {
 inline EmuArgs parse_args(int argc, const char *argv[]) {
   EmuArgs args;
   int long_index = 0;
+  extern const char *difftest_ref_so;
   const struct option long_options[] = {
     { "load-snapshot",  1, NULL,  0  },
     { "dump-wave",      0, NULL,  0  },
     { "no-snapshot",    0, NULL,  0  },
+    { "diff",           1, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
@@ -56,6 +59,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 0: args.snapshot_path = optarg; continue;
           case 1: args.enable_waveform = true; continue;
           case 2: args.enable_snapshot = false; continue;
+          case 3: difftest_ref_so = optarg; continue;
         }
         // fall through
       default:
@@ -237,6 +241,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       // difftest[0]->display();
       eprintf("The simulation stopped. There might be some assertion failed.\n");
       trapCode = STATE_ABORT;
+      break;
     }
     // signals
     if (signal_num != 0) {
@@ -266,7 +271,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     dut_ptr->io_perfInfo_clean = 0;
     dut_ptr->io_perfInfo_dump = 0;
 
-    // Naive instr cnt, dual core is not supported
+    // Naive instr cnt per core
     for (int i = 0; i < EMU_CORES; i++) {
       // update instr_cnt
       uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];

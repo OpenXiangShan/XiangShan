@@ -487,15 +487,16 @@ package object xiangshan {
     UncertainLatency()
   )
 
-  val AluExeUnitCfg = ExuConfig("AluExeUnit", Seq(aluCfg), 0, Int.MaxValue)
-  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", Seq(mulCfg, divCfg), 1, Int.MaxValue)
-  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
+  val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
+  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
+  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg), 1, Int.MaxValue)
+  val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
+    "Fp",
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
-  val LdExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
+  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }

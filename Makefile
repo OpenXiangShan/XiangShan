@@ -58,7 +58,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -68,6 +68,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+
+sim-verilog: $(SIM_TOP_V)
 
 SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
 SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
@@ -160,5 +162,5 @@ bump:
 bsp:
 	mill -i mill.contrib.BSP/install
 
-.PHONY: verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
