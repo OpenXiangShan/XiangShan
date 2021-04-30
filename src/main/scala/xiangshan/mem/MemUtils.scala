@@ -50,6 +50,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val forwardData = Vec(8, UInt(8.W))
 }
 
+class StoreDataBundle(implicit p: Parameters) extends XSBundle {
+  val data = UInt((XLEN+1).W)
+  val uop = new MicroOp
+}
+
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
@@ -62,9 +67,17 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
 
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
+
+  val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
+  // If dataInvalid, load inst should sleep for a while
+  // Feedback type should be RSFeedbackType.dataInvalid
 }
 
-class MaskedLoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
+// LoadForwardQueryIO used in load pipeline
+//
+// Difference between PipeLoadForwardQueryIO and LoadForwardQueryIO:
+// PipeIO use predecoded sqIdxMask for better forward timing
+class PipeLoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val uop = Output(new MicroOp) // for replay
@@ -74,7 +87,13 @@ class MaskedLoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
 
-  val sqIdx = Output(new SqPtr) // for debug
+  val sqIdx = Output(new SqPtr) // for debug, should not be used in pipeline for timing reasons
   // sqIdxMask is calcuated in earlier stage for better timing
   val sqIdxMask = Output(UInt(StoreQueueSize.W))
+
+  // dataInvalid: addr match, but data is not valid for now
+  val dataInvalidFast = Input(Bool()) // resp to load_s1
+  val dataInvalid = Input(Bool()) // resp to load_s2
+  // If dataInvalid, load inst should sleep for a while
+  // Feedback type should be RSFeedbackType.dataInvalid
 }
