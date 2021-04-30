@@ -516,9 +516,9 @@ class PTWFilter(Width: Int, Size: Int) extends XSModule with HasXSLog with HasPt
 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
-  val enqPtr = RegInit(0.U(log2Up(Size).U)) // Enq
-  val issPtr = RegInit(0.U(log2Up(Size).U)) // Iss to Ptw
-  val deqPtr = RegInit(0.U(log2Up(Size).U)) // Deq
+  val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
+  val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
+  val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
 
