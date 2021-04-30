@@ -120,11 +120,7 @@ object TransactionLatencyCounter
 }
 
 object XSPerfPrint {
-  def apply(fmt: String, data: Bits*): Any =
-    apply(Printable.pack(fmt, data:_*))
-
-  def apply(pable: Printable): Any = {
-    val commonInfo = p"[PERF ][time=${GTimer()}] 9527: "
-    printf(commonInfo + pable)
+  def apply(pable: Printable)(implicit p: Parameters): Any = {
+    XSLog(XSLogLevel.PERF)(true, true.B, pable)
   }
 }
