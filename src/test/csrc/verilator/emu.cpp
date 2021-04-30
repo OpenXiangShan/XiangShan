@@ -21,6 +21,7 @@ static inline void print_help(const char *file) {
   printf("  -i, --image=FILE           run with this image file\n");
   printf("  -b, --log-begin=NUM        display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM          stop display log at NUM th cycle\n");
+  printf("      --force-dump-result    force dump performance counter result in the end\n");
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
   printf("      --no-snapshot          disable saving snapshots\n");
   printf("      --dump-wave            dump waveform when log is enabled\n");
@@ -34,20 +35,21 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
   int long_index = 0;
   extern const char *difftest_ref_so;
   const struct option long_options[] = {
-    { "load-snapshot",  1, NULL,  0  },
-    { "dump-wave",      0, NULL,  0  },
-    { "no-snapshot",    0, NULL,  0  },
-    { "diff",           1, NULL,  0  },
-    { "seed",           1, NULL, 's' },
-    { "max-cycles",     1, NULL, 'C' },
-    { "max-instr",      1, NULL, 'I' },
-    { "warmup-instr",   1, NULL, 'W' },
-    { "stat-cycles",    1, NULL, 'D' },
-    { "image",          1, NULL, 'i' },
-    { "log-begin",      1, NULL, 'b' },
-    { "log-end",        1, NULL, 'e' },
-    { "help",           0, NULL, 'h' },
-    { 0,                0, NULL,  0  }
+    { "load-snapshot",     1, NULL,  0  },
+    { "dump-wave",         0, NULL,  0  },
+    { "no-snapshot",       0, NULL,  0  },
+    { "force-dump-result", 0, NULL,  0  },
+    { "diff",              1, NULL,  0  },
+    { "seed",              1, NULL, 's' },
+    { "max-cycles",        1, NULL, 'C' },
+    { "max-instr",         1, NULL, 'I' },
+    { "warmup-instr",      1, NULL, 'W' },
+    { "stat-cycles",       1, NULL, 'D' },
+    { "image",             1, NULL, 'i' },
+    { "log-begin",         1, NULL, 'b' },
+    { "log-end",           1, NULL, 'e' },
+    { "help",              0, NULL, 'h' },
+    { 0,                   0, NULL,  0  }
   };
 
   int o;
@@ -59,7 +61,8 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 0: args.snapshot_path = optarg; continue;
           case 1: args.enable_waveform = true; continue;
           case 2: args.enable_snapshot = false; continue;
-          case 3: difftest_ref_so = optarg; continue;
+          case 3: args.force_dump_result = true; continue;
+          case 4: difftest_ref_so = optarg; continue;
         }
         // fall through
       default:
@@ -359,6 +362,9 @@ inline void Emulator::save_coverage(time_t t) {
 
 void Emulator::trigger_stat_dump() {
   dut_ptr->io_perfInfo_dump = 1;
+  if(get_args().force_dump_result) {
+    dut_ptr->io_logCtrl_log_end = -1;
+  }
   single_cycle();
 }
 
