@@ -9,6 +9,7 @@
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
+#include <list>
 
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
@@ -104,19 +105,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   // init ram
   init_ram(args.image);
 
-// #if VM_TRACE == 1
-//   enable_waveform = args.enable_waveform;
-//   if (enable_waveform) {
-//     Verilated::traceEverOn(true);	// Verilator must compute traced signals
-//     tfp = new VerilatedVcdC;
-//     dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
-//     time_t now = time(NULL);
-//     tfp->open(waveform_filename(now));	// Open the dump file
-//   }
-// #else
-//   enable_waveform = false;
-// #endif
-
   // set log time range and log level
   dut_ptr->io_logCtrl_log_begin = args.log_begin;
   dut_ptr->io_logCtrl_log_end = args.log_end;
@@ -163,7 +151,7 @@ inline void Emulator::single_cycle() {
 
 #if VM_TRACE == 1
   if (enable_waveform) {
-    if(cycles % 200 == 0) printf("[%d] dump wave! cycles:%d\n", getpid(),cycles);
+    //if(cycles % 200 == 0) printf("[%d] dump wave! cycles:%d\n", getpid(),cycles);
     auto trap = difftest[0]->get_trap_event();
     uint64_t cycle = trap->cycleCnt;
     uint64_t begin = dut_ptr->io_logCtrl_log_begin;
@@ -203,9 +191,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   int status = -1;
   int slotCnt = 1;
   int waitProcess = 0;
-  int haskill = 0;
-  pid_t pidSlot[SLOT_SIZE] = {-1 , -1, -1}; 
-  pidSlot[0] = getpid();
+  //pid_t pidSlot[SLOT_SIZE] = {-1 , -1, -1}; 
+  std::list<pid_t> pidSlot = {getpid()};
   enable_waveform = false;
 
 
@@ -216,53 +203,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   time_t coverage_start_time = time(NULL);
 #endif
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
-    if(cycles % 500 == 0 && !waitProcess){   //time out need to fork
-        if(slotCnt == SLOT_SIZE) {     //kill first wait process
-            printf("[%d] 2:%d 1:%d 0:%d\n",getpid(),pidSlot[2],pidSlot[1],pidSlot[0]);
-            pid_t temp = pidSlot[2];
-            pidSlot[2] = pidSlot[1];
-            pidSlot[1] = pidSlot[0];
-            printf("kill slot 0 :pid %d\n",temp);
-            kill(temp, SIGKILL); 
-            slotCnt--;
-            haskill =1;
-        }
-        //fork-wait
-        if((pid = fork())<0){
-            printf("[%d]Error: could not fork process!\n",getpid());
-            return -1;
-        } else if(pid != 0) {       //father fork and wait.
-            printf("[%d]Creating a child process: %d\n", getpid(),pid);  
-            waitProcess = 1;
-            wait(&status);
-            enable_waveform = args.enable_waveform;
-            if (enable_waveform) {
-              Verilated::traceEverOn(true);	// Verilator must compute traced signals
-              tfp = new VerilatedVcdC;
-              dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
-              time_t now = time(NULL);
-              tfp->open(waveform_filename(now));	// Open the dump file
-              printf("[%d] cycles:%ld\n",getpid(),cycles);
-            }
-
-        } else {        //child insert its pid
-            slotCnt++;
-            if(!haskill){
-                pidSlot[2] = pidSlot[1];
-                pidSlot[1] = pidSlot[0];    
-            }
-            pidSlot[0] = getpid();
-            haskill=0;
-            printf("[Child] I was born slotcnt:%d\n",slotCnt);
-        }
-    } 
-
-    if(cycles == 5000 ){
-        printf("[%d] Error occurs! exit process..., \n",getpid());
-        //exit(0);
-        trapCode = STATE_BADTRAP;
-    }
-
     // cycle limitation
     if (!max_cycle) {
       trapCode = STATE_LIMIT_EXCEEDED;
@@ -305,7 +245,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 
-    if(cycles % 200 == 0) printf("[%d] start doing single_cycle() and enable_waveform:%d cycles:%ld\n",getpid(), enable_waveform,cycles);
+    //if(cycles % 200 == 0) printf("[%d] start doing single_cycle() and enable_waveform:%d cycles:%ld\n",getpid(), enable_waveform,cycles);
     single_cycle();
 
     max_cycle --;
@@ -322,12 +262,45 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
 
+    if(cycles == 5000 ){
+        trapCode = STATE_BADTRAP;
+    }
+
     if (difftest_step()) {
       trapCode = STATE_ABORT;
       break;
     }
     if (trapCode != STATE_RUNNING) break;
 
+    if(cycles % 500 == 0 && !waitProcess ){   //time out need to fork
+      if(slotCnt == SLOT_SIZE) {     //kill first wait process
+          pid_t temp = pidSlot.back();
+          pidSlot.pop_back();
+          kill(temp, SIGKILL); 
+          slotCnt--;
+      }
+      //fork-wait
+      if((pid = fork())<0){
+          eprintf("[%d]Error: could not fork process!\n",getpid());
+          return -1;
+      } else if(pid != 0) {       //father fork and wait.
+          waitProcess = 1;
+          wait(&status);
+#if VM_TRACE == 1
+          enable_waveform = args.enable_waveform;
+          if (enable_waveform) {
+            Verilated::traceEverOn(true);	// Verilator must compute traced signals
+            tfp = new VerilatedVcdC;
+            dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+            time_t now = time(NULL);
+            tfp->open(waveform_filename(now));	// Open the dump file
+          }
+#endif
+      } else {        //child insert its pid
+          slotCnt++;
+          pidSlot.insert(pidSlot.begin(),  getpid());
+      }
+    } 
 }
 
 #if VM_TRACE == 1
