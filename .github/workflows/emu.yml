@@ -38,6 +38,7 @@ jobs:
           echo "RVTEST_HOME=/home/ci-runner/xsenv/riscv-tests" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/bigdata/xs-perf/$GITHUB_SHA-$(date +%s)" >> $GITHUB_ENV
+          mkdir $PERF_HOME || true
       - name: Build EMU
         run:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220 EMU_THREADS=8
@@ -98,6 +99,7 @@ jobs:
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "DRAMSIM3_HOME=/home/ci-runner/xsenv/DRAMsim3" >> $GITHUB_ENV
           echo "PERF_HOME=/bigdata/xs-perf/$GITHUB_SHA-$(date +%s)" >> $GITHUB_ENV
+          mkdir $PERF_HOME || true
       - name: Build EMU
         run:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME DRAMSIM3_HOME=$DRAMSIM3_HOME -j220 EMU_THREADS=16 WITH_DRAMSIM3=1
