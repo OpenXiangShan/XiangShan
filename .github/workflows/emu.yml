@@ -37,7 +37,7 @@ jobs:
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "RVTEST_HOME=/home/ci-runner/xsenv/riscv-tests" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf" >> $GITHUB_ENV
+          echo "PERF_HOME=/bigdata/xs-perf/$GITHUB_SHA-$(date +%s)" >> $GITHUB_ENV
       - name: Build EMU
         run:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220 EMU_THREADS=8
@@ -65,19 +65,19 @@ jobs:
         run: |
           numactl -m 1 -C 64-75 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-microbench.log
+          cat perf.log | sort | tee $PERF_HOME/microbench.log
           exit $ret
       - name: Simple Test - CoreMark
         run: |
           numactl -m 1 -C 64-75 make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-coremark.log
+          cat perf.log | sort | tee $PERF_HOME/coremark.log
           exit $ret
       - name: System Test - Linux
         run: |
           numactl -m 1 -C 64-75 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-linux.log
+          cat perf.log | sort | tee $PERF_HOME/linux.log
           exit $ret
       - name: Floating-point Test - povray
         run: |
@@ -97,7 +97,7 @@ jobs:
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "DRAMSIM3_HOME=/home/ci-runner/xsenv/DRAMsim3" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf" >> $GITHUB_ENV
+          echo "PERF_HOME=/bigdata/xs-perf/$GITHUB_SHA-$(date +%s)" >> $GITHUB_ENV
       - name: Build EMU
         run:
           make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME DRAMSIM3_HOME=$DRAMSIM3_HOME -j220 EMU_THREADS=16 WITH_DRAMSIM3=1
@@ -105,42 +105,42 @@ jobs:
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-mcf.log
+          cat perf.log | sort | tee $PERF_HOME/mcf.log
           exit $ret
       - name: SPEC06 Test - xalancbmk
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-xalancbmk.log
+          cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
           exit $ret
       - name: SPEC06 Test - gcc
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-gcc.log
+          cat perf.log | sort | tee $PERF_HOME/gcc.log
           exit $ret
       - name: SPEC06 Test - namd
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/namd/_4850001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-namd.log
+          cat perf.log | sort | tee $PERF_HOME/namd.log
           exit $ret
       - name: SPEC06 Test - milc
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/milc/_4150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-milc.log
+          cat perf.log | sort | tee $PERF_HOME/milc.log
           exit $ret
       - name: SPEC06 Test - lbm
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/lbm/_7550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-lbm.log
+          cat perf.log | sort | tee $PERF_HOME/lbm.log
           exit $ret
       - name: SPEC06 Test - gromacs
         run: |
           numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gromacs/_3150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
           ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-gromacs.log
+          cat perf.log | sort | tee $PERF_HOME/gromacs.log
           exit $ret
 
