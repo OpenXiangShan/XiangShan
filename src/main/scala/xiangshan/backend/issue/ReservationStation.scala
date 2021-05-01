@@ -563,9 +563,9 @@ class ReservationStationCtrl
     (srcType =/= SrcType.reg && srcType =/= SrcType.fp) ||
     (srcType === SrcType.reg && src === 0.U)
   }
-  val enqSrcSeq      = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
-  val enqSrcTypeSeq  = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
-  val enqSrcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
+  val enqSrcSeq      = Seq(enqUop.psrc(0), enqUop.psrc(1), enqUop.psrc(2))
+  val enqSrcTypeSeq  = Seq(enqUop.ctrl.srcType(0), enqUop.ctrl.srcType(1), enqUop.ctrl.srcType(2))
+  val enqSrcStateSeq = Seq(enqUop.srcState(0), enqUop.srcState(1), enqUop.srcState(2))
   val enqSrcReady = (0 until srcNum).map(i =>
     stateCheck(enqSrcSeq(i), enqSrcTypeSeq(i)) || (enqSrcStateSeq(i) === SrcState.rdy)
   )
@@ -591,11 +591,11 @@ class ReservationStationCtrl
   }
   // NOTE: delay one cycle for fp src will come one cycle later than usual
   if (exuCfg == StExeUnitCfg) {
-    when (enqEnReg && RegNext(enqUop.ctrl.src2Type === SrcType.fp && enqSrcReady(1))) {
+    when (enqEnReg && RegNext(enqUop.ctrl.srcType(1) === SrcType.fp && enqSrcReady(1))) {
       srcQueue(enqPtrReg)(1) := true.B
     }
     when (enqEn) {
-      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
+      when (enqUop.ctrl.srcType(1) === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
     }
   }
   val srcQueueWire = VecInit((0 until srcQueue.size).map(i => {
@@ -919,7 +919,7 @@ class ReservationStationData
 
   exuCfg match {
     case JumpExeUnitCfg =>
-      val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+      val src1Mux = Mux(enqUopReg.ctrl.srcType(0) === SrcType.pc,
                         SignExt(io.jumpPc, XLEN),
                         io.srcRegValue(0)
                     )
@@ -935,7 +935,7 @@ class ReservationStationData
                     ImmUnion.I.toImm32(enqUopReg.ctrl.imm)
                   )
       val imm64 = SignExt(imm32, XLEN)
-      val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
+      val src2Mux = Mux(enqUopReg.ctrl.srcType(1) === SrcType.imm,
                       imm64, io.srcRegValue(1)
                     )
       data(1).w(0).wdata := src2Mux
@@ -944,8 +944,8 @@ class ReservationStationData
       (0 until srcNum).foreach(i => data(i).w(0).wdata := io.srcRegValue(i) )
       data(1).w(1).wdata := io.fpRegValue
       data(1).w(1).addr := RegNext(addrReg)
-      data(1).w(1).wen   := RegNext(enqSrcReadyReg(1) && enqUopReg.ctrl.src2Type === SrcType.fp)
-      data(1).w(0).wen   := enqSrcReadyReg(1) && enqUopReg.ctrl.src2Type =/= SrcType.fp
+      data(1).w(1).wen   := RegNext(enqSrcReadyReg(1) && enqUopReg.ctrl.srcType(1) === SrcType.fp)
+      data(1).w(0).wen   := enqSrcReadyReg(1) && enqUopReg.ctrl.srcType(1) =/= SrcType.fp
 
     case _ =>
       (0 until srcNum).foreach(i => data(i).w(0).wdata := io.srcRegValue(i) )

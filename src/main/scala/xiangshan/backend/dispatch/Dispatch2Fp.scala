@@ -51,31 +51,31 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
   // val fpDynamicMapped = fpDynamicIndex.map(i => indexVec(i))
   // for (i <- fpStaticIndex.indices) {
   //   val index = WireInit(VecInit(fpStaticMapped(i) +: fpDynamicMapped))
-  //   io.readRf(3*i  ) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc1
-  //   io.readRf(3*i+1) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc2
-  //   io.readRf(3*i+2) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc3
+  //   io.readRf(3*i  ) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc(0)
+  //   io.readRf(3*i+1) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc(1)
+  //   io.readRf(3*i+2) := io.fromDq(index(fpReadPortSrc(i))).bits.psrc(2)
   // }
   // val readPortIndex = Wire(Vec(exuParameters.FpExuCnt, UInt(2.W)))
   // fpStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
   // fpDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := fpDynamicExuSrc(i)})
 
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    io.readState(3*i  ).req := io.fromDq(i).bits.psrc1
-    io.readState(3*i+1).req := io.fromDq(i).bits.psrc2
-    io.readState(3*i+2).req := io.fromDq(i).bits.psrc3
+    io.readState(3*i  ).req := io.fromDq(i).bits.psrc(0)
+    io.readState(3*i+1).req := io.fromDq(i).bits.psrc(1)
+    io.readState(3*i+2).req := io.fromDq(i).bits.psrc(2)
   }
-  io.readRf(0)  := io.enqIQCtrl(0).bits.psrc1
-  io.readRf(1)  := io.enqIQCtrl(0).bits.psrc2
-  io.readRf(2)  := io.enqIQCtrl(0).bits.psrc3
-  io.readRf(3)  := io.enqIQCtrl(1).bits.psrc1
-  io.readRf(4)  := io.enqIQCtrl(1).bits.psrc2
-  io.readRf(5)  := io.enqIQCtrl(1).bits.psrc3
-  io.readRf(6)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc1, io.enqIQCtrl(4).bits.psrc1)
-  io.readRf(7)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc2, io.enqIQCtrl(4).bits.psrc2)
-  io.readRf(8)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc3, io.enqIQCtrl(4).bits.psrc3)
-  io.readRf(9)  := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc1, io.enqIQCtrl(5).bits.psrc1)
-  io.readRf(10) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc2, io.enqIQCtrl(5).bits.psrc2)
-  io.readRf(11) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc3, io.enqIQCtrl(5).bits.psrc3)
+  io.readRf(0)  := io.enqIQCtrl(0).bits.psrc(0)
+  io.readRf(1)  := io.enqIQCtrl(0).bits.psrc(1)
+  io.readRf(2)  := io.enqIQCtrl(0).bits.psrc(2)
+  io.readRf(3)  := io.enqIQCtrl(1).bits.psrc(0)
+  io.readRf(4)  := io.enqIQCtrl(1).bits.psrc(1)
+  io.readRf(5)  := io.enqIQCtrl(1).bits.psrc(2)
+  io.readRf(6)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc(0), io.enqIQCtrl(4).bits.psrc(0))
+  io.readRf(7)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc(1), io.enqIQCtrl(4).bits.psrc(1))
+  io.readRf(8)  := Mux(io.enqIQCtrl(2).valid, io.enqIQCtrl(2).bits.psrc(2), io.enqIQCtrl(4).bits.psrc(2))
+  io.readRf(9)  := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc(0), io.enqIQCtrl(5).bits.psrc(0))
+  io.readRf(10) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc(1), io.enqIQCtrl(5).bits.psrc(1))
+  io.readRf(11) := Mux(io.enqIQCtrl(3).valid, io.enqIQCtrl(3).bits.psrc(2), io.enqIQCtrl(5).bits.psrc(2))
 
   /**
     * Part 3: dispatch to reservation stations
@@ -96,12 +96,12 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
     val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 3).resp))
     val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 3 + 1).resp))
     val src3Ready = VecInit((0 until 4).map(i => io.readState(i * 3 + 2).resp))
-    enq.bits.src1State := src1Ready(deqIndex)
-    enq.bits.src2State := src2Ready(deqIndex)
-    enq.bits.src3State := src3Ready(deqIndex)
+    enq.bits.srcState(0) := src1Ready(deqIndex)
+    enq.bits.srcState(1) := src2Ready(deqIndex)
+    enq.bits.srcState(2) := src3Ready(deqIndex)
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
-      p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State}) " +
+      p"srcState(${enq.bits.srcState(0)} ${enq.bits.srcState(1)} ${enq.bits.srcState(2)}) " +
       p"enters reservation station $i from ${deqIndex}\n")
   }
 
@@ -142,9 +142,9 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
 //
 //    XSDebug(dataValidRegDebug(i),
 //      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)}), " +
-//        p"(${readPortIndexReg(i)+2.U}, ${uopReg(i).psrc3}, ${Hexadecimal(io.enqIQData(i).src3)})\n")
+//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src2)}), " +
+//        p"(${readPortIndexReg(i)+2.U}, ${uopReg(i).psrc(2)}, ${Hexadecimal(io.enqIQData(i).src3)})\n")
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))

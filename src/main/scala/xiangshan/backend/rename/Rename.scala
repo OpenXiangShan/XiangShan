@@ -37,9 +37,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     XSInfo(
       in.valid && in.ready,
       p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
-        p"lsrc1:${in.bits.ctrl.lsrc1} -> psrc1:${out.bits.psrc1} " +
-        p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
-        p"lsrc3:${in.bits.ctrl.lsrc3} -> psrc3:${out.bits.psrc3} " +
+        p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
+        p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
+        p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
         p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
         p"old_pdest:${out.bits.old_pdest} " +
         p"out v:${out.valid} r:${out.ready}\n"
@@ -102,9 +102,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   uops.foreach( uop => {
 //    uop.brMask := DontCare
 //    uop.brTag := DontCare
-    uop.src1State := DontCare
-    uop.src2State := DontCare
-    uop.src3State := DontCare
+    uop.srcState(0) := DontCare
+    uop.srcState(1) := DontCare
+    uop.srcState(2) := DontCare
     uop.roqIdx := DontCare
     uop.diffTestDebugLrScValid := DontCare
     uop.debugInfo := DontCare
@@ -177,13 +177,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
       (psrcVec, old_pdest)
     }
-    val lsrcList = List(uops(i).ctrl.lsrc1, uops(i).ctrl.lsrc2, uops(i).ctrl.lsrc3)
+    val lsrcList = List(uops(i).ctrl.lsrc(0), uops(i).ctrl.lsrc(1), uops(i).ctrl.lsrc(2))
     val ldest = uops(i).ctrl.ldest
     val (intPhySrcVec, intOldPdest) = readRat(lsrcList.take(2), ldest, fp = false)
     val (fpPhySrcVec, fpOldPdest) = readRat(lsrcList, ldest, fp = true)
-    uops(i).psrc1 := Mux(uops(i).ctrl.src1Type === SrcType.reg, intPhySrcVec(0), fpPhySrcVec(0))
-    uops(i).psrc2 := Mux(uops(i).ctrl.src2Type === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
-    uops(i).psrc3 := fpPhySrcVec(2)
+    uops(i).psrc(0) := Mux(uops(i).ctrl.srcType(0) === SrcType.reg, intPhySrcVec(0), fpPhySrcVec(0))
+    uops(i).psrc(1) := Mux(uops(i).ctrl.srcType(1) === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
+    uops(i).psrc(2) := fpPhySrcVec(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
   }
 
@@ -191,19 +191,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // Instead, we determine whether there're some dependences between the valid instructions.
   for (i <- 1 until RenameWidth) {
     io.renameBypass.lsrc1_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc1
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(0) === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(0) === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
     }).reverse)
     io.renameBypass.lsrc2_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc2
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(1) === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(1) === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(1)
     }).reverse)
     io.renameBypass.lsrc3_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc3
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(2) === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(2) === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(2)
     }).reverse)
     io.renameBypass.ldest_bypass(i-1) := Cat((0 until i).map(j => {
       val fpMatch  = needFpDest(j) && needFpDest(i)
@@ -214,14 +214,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // the producer move instruction writes to non-zero register
       io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
       // the consumer instruction uses the move's destination register
-      io.in(i).bits.ctrl.src1Type === SrcType.reg && io.in(i).bits.ctrl.lsrc1 === io.in(i-1).bits.ctrl.ldest &&
+      io.in(i).bits.ctrl.srcType(0) === SrcType.reg && io.in(i).bits.ctrl.lsrc(0) === io.in(i-1).bits.ctrl.ldest &&
       // CSR control (by srnctl)
       io.csrCtrl.move_elim_enable
     io.renameBypass.move_eliminated_src2(i-1) :=
       // the producer move instruction writes to non-zero register
       io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
       // the consumer instruction uses the move's destination register
-      io.in(i).bits.ctrl.src2Type === SrcType.reg && io.in(i).bits.ctrl.lsrc2 === io.in(i-1).bits.ctrl.ldest &&
+      io.in(i).bits.ctrl.srcType(1) === SrcType.reg && io.in(i).bits.ctrl.lsrc(1) === io.in(i-1).bits.ctrl.ldest &&
       // CSR control (by srnctl)
       io.csrCtrl.move_elim_enable
   }
