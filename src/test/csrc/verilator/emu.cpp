@@ -191,8 +191,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   int status = -1;
   int slotCnt = 1;
   int waitProcess = 0;
+  pid_t originPID = getpid();
+  uint32_t timer = 0;
   //pid_t pidSlot[SLOT_SIZE] = {-1 , -1, -1}; 
-  std::list<pid_t> pidSlot = {getpid()};
+  std::list<pid_t> pidSlot = {originPID};
   enable_waveform = false;
 
 
@@ -262,7 +264,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
 
-    if(cycles == 5000 ){
+    //fake error point
+    if(cycles == 25535 ){
         trapCode = STATE_BADTRAP;
     }
 
@@ -272,12 +275,15 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
     if (trapCode != STATE_RUNNING) break;
 
-    if(cycles % 500 == 0 && !waitProcess ){   //time out need to fork
+    timer = uptime();
+    if(timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess ){   //time out need to fork
+      lasttime_snapshot = timer;
       if(slotCnt == SLOT_SIZE) {     //kill first wait process
           pid_t temp = pidSlot.back();
           pidSlot.pop_back();
           kill(temp, SIGKILL); 
           slotCnt--;
+          if(temp == originPID) printf("[%d] running process: Still running, please wait..\n",getpid());
       }
       //fork-wait
       if((pid = fork())<0){
@@ -312,6 +318,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
   if(!waitProcess) display_trapinfo();
+  else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
   return cycles;
 }
 

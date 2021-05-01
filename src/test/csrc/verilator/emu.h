@@ -8,9 +8,8 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 
-#define SNAPSHOT_INTERVAL 60 // unit: second
-
-#define SLOT_SIZE 3
+#define FORK_INTERVAL 5 // unit: second
+#define SLOT_SIZE 4
 
 
 struct EmuArgs {
