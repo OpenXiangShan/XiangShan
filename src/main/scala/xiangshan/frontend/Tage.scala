@@ -16,18 +16,32 @@ import scala.util.matching.Regex
 
 trait HasTageParameter extends HasXSParameter with HasBPUParameter with HasIFUConst {
   //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 128,    2,    7),
-                      ( 128,    4,    7),
-                      ( 256,    8,    8),
-                      ( 256,   16,    8),
-                      ( 128,   32,    9),
-                      ( 128,   64,    9))
+  // val TableInfo = Seq(( 128,    2,    7),
+  //                     ( 128,    4,    7),
+  //                     ( 256,    8,    8),
+  //                     ( 256,   16,    8),
+  //                     ( 128,   32,    9),
+  //                     ( 128,   64,    9))
                       // (  64,   64,   11),
                       // (  64,  101,   12),
                       // (  64,  160,   12),
                       // (  64,  254,   13),
                       // (  32,  403,   14),
                       // (  32,  640,   15))
+  //     Sets  Hist   Tag
+  val TableInfo = 
+    Seq((  64,    4,    7),
+        (  64,    6,    7),
+        ( 128,   10,    8),
+        ( 128,   16,    8),
+        ( 128,   25,    9),
+        ( 128,   40,   10),
+        (  64,   64,   11),
+        (  64,  101,   12),
+        (  64,  160,   12),
+        (  64,  254,   13),
+        (  32,  403,   14),
+        (  32,  640,   15))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
