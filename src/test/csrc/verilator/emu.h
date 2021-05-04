@@ -7,9 +7,35 @@
 #include <verilated_vcd_c.h>	// Trace file format header
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/prctl.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #define FORK_INTERVAL 5 // unit: second
-#define SLOT_SIZE 4
+#define SLOT_SIZE 3
+#define FAIT_EXIT    exit(EXIT_FAILURE);
+#define WAIT_INTERVAL 1
+
+typedef struct shinfo{
+  int exitNum;
+  bool flag;
+} shinfo;
+
+class ForkShareMemory{
+    //private
+    key_t  key_n ;
+    int shm_id;
+
+public:
+    shinfo *info;    
+
+    ForkShareMemory();
+    ~ForkShareMemory();
+
+    void shwait();
+};
 
 
 struct EmuArgs {
@@ -48,6 +74,7 @@ private:
   VerilatedSaveMem snapshot_slot[2];
 #endif
   EmuArgs args;
+  ForkShareMemory forkshm;
 
   enum {
     STATE_GOODTRAP = 0,

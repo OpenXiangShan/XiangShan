@@ -188,15 +188,31 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     lasttime_poll = t;
   }
   pid_t pid =-1;
+  pid_t originPID = getpid();
   int status = -1;
   int slotCnt = 1;
   int waitProcess = 0;
-  pid_t originPID = getpid();
   uint32_t timer = 0;
   //pid_t pidSlot[SLOT_SIZE] = {-1 , -1, -1}; 
-  std::list<pid_t> pidSlot = {originPID};
+  std::list<pid_t> pidSlot = {};
   enable_waveform = false;
 
+  //first process as a control process
+  if((pid = fork()) < 0 ){
+    perror("First fork failed..\n");
+    FAIT_EXIT;
+  } else if(pid > 0) {  //parent process
+    printf("[%d] Control process first fork...child: %d\n ",getpid(),pid);
+    prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    forkshm.shwait();
+    printf("[%d] Emulationg finished, Control process exit..",getpid());
+    return cycles;
+  } else {
+    forkshm.info->exitNum++;
+    forkshm.info->flag = true;
+    pidSlot.insert(pidSlot.begin(),  getpid());
+    printf("[%d] First running process created\n ",getpid());
+  }
 
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
@@ -283,7 +299,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           pidSlot.pop_back();
           kill(temp, SIGKILL); 
           slotCnt--;
-          if(temp == originPID) printf("[%d] running process: Still running, please wait..\n",getpid());
+          forkshm.info->exitNum--;
+          printf("[%d]kill %d\n",getpid(),temp);
       }
       //fork-wait
       if((pid = fork())<0){
@@ -291,7 +308,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           return -1;
       } else if(pid != 0) {       //father fork and wait.
           waitProcess = 1;
+          printf("[%d]fork a child process %d and wait\n",getpid(),pid);
           wait(&status);
+          printf("[%d]child process exit, start dump wave\n",getpid());
 #if VM_TRACE == 1
           enable_waveform = args.enable_waveform;
           if (enable_waveform) {
@@ -304,6 +323,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
       } else {        //child insert its pid
           slotCnt++;
+          printf("[%d]child process created..\n",getpid());
+          forkshm.info->exitNum++;
           pidSlot.insert(pidSlot.begin(),  getpid());
       }
     } 
@@ -319,6 +340,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
   if(!waitProcess) display_trapinfo();
   else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
+
+  forkshm.info->exitNum--;
   return cycles;
 }
 
@@ -336,7 +359,7 @@ inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
   strcpy(p, ".vcd");
-  printf("dump wave to %s...\n", buf);
+  printf("[%d]dump wave to %s...\n", getpid(), buf);
   return buf;
 }
 
@@ -397,5 +420,45 @@ void Emulator::display_trapinfo() {
   if (trapCode != STATE_ABORT) {
     trigger_stat_dump();
   }
+}
+
+ForkShareMemory::ForkShareMemory() {
+  if((key_n = ftok(".",'s')<0)) {
+      perror("Fail to ftok\n");
+      FAIT_EXIT
+  }
+  printf("key num:%d\n",key_n);
+
+  if((shm_id = shmget(key_n,1024,0666|IPC_CREAT))==-1) {
+      perror("shmget failed...\n");
+      FAIT_EXIT
+  }
+  printf("share memory id:%d\n",shm_id);
+
+  if((info = (shinfo*)(shmat(shm_id, NULL, 0))) == NULL ) {
+      perror("shmat failed...\n");
+      FAIT_EXIT
+  }
+
+  info->exitNum = 0;
+  info->flag = false;
+}
+
+ForkShareMemory::~ForkShareMemory() {
+  if(shmdt(info) == -1 ){
+    perror("detach error\n");
+  }
+  shmctl(shm_id, IPC_RMID, NULL) ;
+}
+
+void ForkShareMemory::shwait(){
+    while(true){
+        if(info->exitNum == 0 && info->flag){ break;  } 
+        else {  
+            //printf("exitNum:%d  flag:%d\n",info->exitNum,info->flag);
+            sleep(WAIT_INTERVAL);  
+        }
+    }
+    printf("exit count finished\n");
 }
 
