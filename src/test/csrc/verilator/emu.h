@@ -13,10 +13,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define FORK_INTERVAL 5 // unit: second
+#define FORK_INTERVAL 10 // unit: second
 #define SLOT_SIZE 3
 #define FAIT_EXIT    exit(EXIT_FAILURE);
 #define WAIT_INTERVAL 1
+#define EN_FORKWAIT
 
 typedef struct shinfo{
   int exitNum;
@@ -71,11 +72,10 @@ private:
   VSimTop *dut_ptr;
   VerilatedVcdC* tfp;
   bool enable_waveform;
-#ifdef VM_SAVABLE
-  VerilatedSaveMem snapshot_slot[2];
-#endif
   EmuArgs args;
+#ifdef EN_FORKWAIT
   ForkShareMemory forkshm;
+#endif
 
   enum {
     STATE_GOODTRAP = 0,

@@ -105,6 +105,25 @@ Emulator::Emulator(int argc, const char *argv[]):
   // init ram
   init_ram(args.image);
 
+#if (VM_TRACE == 1)
+#ifndef EN_FORKWAIT
+  enable_waveform = args.enable_waveform;
+  if (enable_waveform) {
+    Verilated::traceEverOn(true);	// Verilator must compute traced signals
+    tfp = new VerilatedVcdC;
+    dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+    time_t now = time(NULL);
+    tfp->open(waveform_filename(now));	// Open the dump file
+  }
+#else
+  // VM_TRACE =1 && EN_FORKWAIT
+  enable_waveform = false;
+#endif
+#else
+  // VM_TRACE =0
+  enable_waveform = false;
+#endif
+
   // set log time range and log level
   dut_ptr->io_logCtrl_log_begin = args.log_begin;
   dut_ptr->io_logCtrl_log_end = args.log_end;
@@ -151,7 +170,6 @@ inline void Emulator::single_cycle() {
 
 #if VM_TRACE == 1
   if (enable_waveform) {
-    //if(cycles % 200 == 0) printf("[%d] dump wave! cycles:%d\n", getpid(),cycles);
     auto trap = difftest[0]->get_trap_event();
     uint64_t cycle = trap->cycleCnt;
     uint64_t begin = dut_ptr->io_logCtrl_log_begin;
@@ -187,13 +205,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     poll_event();
     lasttime_poll = t;
   }
+
+#ifdef EN_FORKWAIT
   pid_t pid =-1;
   pid_t originPID = getpid();
   int status = -1;
   int slotCnt = 1;
   int waitProcess = 0;
   uint32_t timer = 0;
-  //pid_t pidSlot[SLOT_SIZE] = {-1 , -1, -1}; 
   std::list<pid_t> pidSlot = {};
   enable_waveform = false;
 
@@ -212,6 +231,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     forkshm.info->flag = true;
     pidSlot.insert(pidSlot.begin(),  getpid());
   }
+#endif
 
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
@@ -232,6 +252,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         break;
       }
     }
+
     // assertions
     if (assert_count > 0) {
       // for (int i = 0;  )
@@ -278,17 +299,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
 
-    //fake error point
-    // if(cycles == 25535 ){
-    //     trapCode = STATE_BADTRAP;
-    // }
-
     if (difftest_step()) {
       trapCode = STATE_ABORT;
       break;
     }
     if (trapCode != STATE_RUNNING) break;
 
+#ifdef EN_FORKWAIT  
     timer = uptime();
     if(timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess ){   //time out need to fork
       lasttime_snapshot = timer;
@@ -306,8 +323,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       } else if(pid != 0) {       //father fork and wait.
           waitProcess = 1;
           wait(&status);
-#if VM_TRACE == 1
-          //enable_waveform = args.enable_waveform;
           enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
           if (enable_waveform) {
             Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -316,13 +331,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
             time_t now = time(NULL);
             tfp->open(waveform_filename(now));	// Open the dump file
           }
-#endif
       } else {        //child insert its pid
           slotCnt++;
           forkshm.info->exitNum++;
           pidSlot.insert(pidSlot.begin(),  getpid());
       }
     } 
+#endif
 }
 
 #if VM_TRACE == 1
@@ -333,11 +348,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   save_coverage(coverage_start_time);
 #endif
 
+#ifdef EN_FORKWAIT
   if(!waitProcess) display_trapinfo();
   else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
-
   forkshm.info->exitNum--;
   forkshm.info->resInfo = trapCode;
+#endif
+
   return cycles;
 }
 
@@ -418,6 +435,7 @@ void Emulator::display_trapinfo() {
   }
 }
 
+#ifdef EN_FORKWAIT
 ForkShareMemory::ForkShareMemory() {
   if((key_n = ftok(".",'s')<0)) {
       perror("Fail to ftok\n");
@@ -456,4 +474,4 @@ void ForkShareMemory::shwait(){
         }
     }
 }
-
+#endif
