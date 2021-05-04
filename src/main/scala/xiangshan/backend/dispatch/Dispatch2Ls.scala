@@ -49,21 +49,21 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
   assert(exuParameters.LduCnt == 2)
   assert(exuParameters.StuCnt == 2)
   val readPort = Seq(0, 1, 2, 4)
-  val firstStorePsrc2 = PriorityMux(storeCanAccept, io.fromDq.map(_.bits.psrc2))
-  val secondStorePsrc2 = PriorityMux((1 until 4).map(i => Cat(storeCanAccept.take(i)).orR && storeCanAccept(i)), io.fromDq.drop(1).map(_.bits.psrc2))
+  val firstStorePsrc2 = PriorityMux(storeCanAccept, io.fromDq.map(_.bits.psrc(1)))
+  val secondStorePsrc2 = PriorityMux((1 until 4).map(i => Cat(storeCanAccept.take(i)).orR && storeCanAccept(i)), io.fromDq.drop(1).map(_.bits.psrc(1)))
   for (i <- 0 until exuParameters.LsExuCnt) {
     if (i < exuParameters.LduCnt) {
-      io.readIntRf(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
+      io.readIntRf(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc(0)
     }
     else {
-      io.readFpRf(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc2
-      io.readIntRf(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc1
-      io.readIntRf(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc2
+      io.readFpRf(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc(1)
+      io.readIntRf(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc(0)
+      io.readIntRf(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc(1)
     }
   }
   // src1 always needs srcState but only store's src2 needs srcState
   for (i <- 0 until 4) {
-    io.readIntState(i).req := io.fromDq(i).bits.psrc1
+    io.readIntState(i).req := io.fromDq(i).bits.psrc(0)
   }
   io.readIntState(4).req := firstStorePsrc2
   io.readIntState(5).req := secondStorePsrc2
@@ -84,20 +84,20 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
       enq.valid := storeIndexGen.io.mapping(i - exuParameters.LduCnt).valid && storeReady
     }
     enq.bits := io.fromDq(indexVec(i)).bits
-    enq.bits.src1State := io.readIntState(indexVec(i)).resp
+    enq.bits.srcState(0) := io.readIntState(indexVec(i)).resp
     if (i < exuParameters.LduCnt) {
-      enq.bits.src2State := DontCare
+      enq.bits.srcState(1) := DontCare
     }
     else {
-      enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
+      enq.bits.srcState(1) := Mux(io.fromDq(indexVec(i)).bits.ctrl.srcType(1) === SrcType.fp,
         Mux(storePriority(i-2) === 0.U, io.readFpState(0).resp, io.readFpState(1).resp),
         Mux(storePriority(i-2) === 0.U, io.readIntState(4).resp, io.readIntState(5).resp)
       )
     }
-    enq.bits.src3State := DontCare
+    enq.bits.srcState(2) := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
-      p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
+      p"srcState(${enq.bits.srcState(0)} ${enq.bits.srcState(1)}) " +
       p"enters issue queue $i from ${indexVec(i)}\n")
   }
 
@@ -129,21 +129,21 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
 //    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 //
 //    io.enqIQData(i) := DontCare
-//    // assert(uopReg(i).ctrl.src1Type =/= SrcType.pc)
+//    // assert(uopReg(i).ctrl.srcType(0) =/= SrcType.pc)
 //    io.enqIQData(i).src1 := io.readIntRf(readPort(i)).data
 //    if (i >= exuParameters.LduCnt) {
 //      io.enqIQData(i).src2 := Mux(
-//        uopReg(i).ctrl.src2Type === SrcType.imm,
+//        uopReg(i).ctrl.srcType(1) === SrcType.imm,
 //        uopReg(i).ctrl.imm,
-//        Mux(uopReg(i).ctrl.src2Type === SrcType.fp,
+//        Mux(uopReg(i).ctrl.srcType(1) === SrcType.fp,
 //          io.readFpRf(i - exuParameters.LduCnt).data,
 //          io.readIntRf(readPort(i) + 1).data))
 //    }
 //
 //    XSDebug(dataValidRegDebug(i),
 //      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPort(i)  }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-//        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//        p"(${readPort(i)  }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+//        p"(${readPort(i)+1}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))

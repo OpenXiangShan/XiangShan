@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
+import freechips.rocketchip.tilelink._
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
@@ -826,4 +826,60 @@ class PTWRepeater(implicit p: Parameters) extends XSModule with HasXSParameter w
   XSDebug(io.tlb.req.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req.valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid), "re-receive ptw.resp")
+}
+
+class PTEHelper() extends BlackBox {
+  val io = IO(new Bundle {
+    val clock  = Input(Clock())
+    val enable = Input(Bool())
+    val satp   = Input(UInt(64.W))
+    val vpn    = Input(UInt(64.W))
+    val pte    = Output(UInt(64.W))
+    val level  = Output(UInt(8.W))
+    val pf     = Output(UInt(8.W))
+  })
+}
+
+class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new PtwIO)
+
+  for (i <- 0 until PtwWidth) {
+    io.tlb(i).req.ready := true.B
+
+    val helper = Module(new PTEHelper())
+    helper.io.clock := clock
+    helper.io.enable := io.tlb(i).req.valid
+    helper.io.satp := io.csr.satp.ppn
+    helper.io.vpn := io.tlb(i).req.bits.vpn
+    val pte = helper.io.pte.asTypeOf(new PteBundle)
+    val level = helper.io.level
+    val pf = helper.io.pf
+
+    io.tlb(i).resp.valid := RegNext(io.tlb(i).req.valid)
+    assert(!io.tlb(i).resp.valid || io.tlb(i).resp.ready)
+    io.tlb(i).resp.bits.entry.tag := RegNext(io.tlb(i).req.bits.vpn)
+    io.tlb(i).resp.bits.entry.ppn := pte.ppn
+    io.tlb(i).resp.bits.entry.perm.map(_ := pte.getPerm())
+    io.tlb(i).resp.bits.entry.level.map(_ := level)
+    io.tlb(i).resp.bits.pf := pf
+  }
+}
+
+class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+  val node = if (!useFakePTW) TLIdentityNode() else null
+  val ptw = if (!useFakePTW) LazyModule(new PTW()) else null
+  if (!useFakePTW) {
+    node := ptw.node
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new PtwIO)
+    if (useFakePTW) {
+      val fake_ptw = Module(new FakePTW())
+      io <> fake_ptw.io
+    }
+    else {
+      io <> ptw.module.io
+    }
+  }
 }

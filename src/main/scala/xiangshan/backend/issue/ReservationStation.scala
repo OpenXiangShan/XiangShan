@@ -8,7 +8,7 @@ import utils._
 import xiangshan.backend.decode.{ImmUnion, Imm_U}
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.mem.SqPtr
+import xiangshan.mem.{SqPtr, StoreDataBundle}
 
 import scala.math.max
 
@@ -102,6 +102,7 @@ class ReservationStation
     val numExist = Output(UInt(iqIdxWidth.W))
     val fromDispatch = Flipped(DecoupledIO(new MicroOp))
     val deq = DecoupledIO(new ExuInput)
+    val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
     val stIssuePtr = if (exuCfg == LdExeUnitCfg) Input(new SqPtr()) else null
@@ -119,7 +120,7 @@ class ReservationStation
     val flush = Input(Bool())
 
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
-    val rsIdx = if (feedback) Output(UInt(log2Up(IssQueSize).W)) else null
+    val rsIdx = if (feedback) Output(UInt(log2Up(iqSize).W)) else null
     val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
@@ -143,6 +144,11 @@ class ReservationStation
     select.io.memfeedback := io.memfeedback
     select.io.flushState := io.memfeedback.bits.flushState
   }
+  if (exuCfg == StExeUnitCfg) {
+    select.io.dataReadyVec := ctrl.io.dataReadyVec
+  } else {
+    select.io.dataReadyVec := DontCare
+  }
 
   ctrl.io.in.valid := select.io.enq.ready && io.fromDispatch.valid // NOTE: ctrl doesnt care redirect for timing optimization
   ctrl.io.flush := io.flush
@@ -162,6 +168,10 @@ class ReservationStation
   if (exuCfg == LdExeUnitCfg) {
     ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
+  if (exuCfg == StExeUnitCfg) {
+    ctrl.io.selData.valid := select.io.deqData.valid
+    ctrl.io.selData.bits  := select.io.deqData.bits
+  }
 
   data.io.in.valid := select.io.enq.fire()
   data.io.in.addr := select.io.enq.bits
@@ -174,6 +184,7 @@ class ReservationStation
   }
   if (exuCfg == StExeUnitCfg) {
     data.io.fpRegValue := io.fpRegValue
+    data.io.selData := select.io.deqData.bits
   }
   data.io.sel := select.io.deq.bits
   data.io.listen.wen := ctrl.io.listen
@@ -196,6 +207,12 @@ class ReservationStation
   if (srcNum > 1) { io.deq.bits.src2 := data.io.out(1) }
   if (srcNum > 2) { io.deq.bits.src3 := data.io.out(2) }
   if (exuCfg == JumpExeUnitCfg) { io.deq.bits.uop.cf.pc := data.io.pc }
+
+  if (exuCfg == StExeUnitCfg) {
+    io.stData.bits.uop :=  ctrl.io.stData.bits
+    io.stData.bits.data := data.io.stData
+    io.stData.valid := ctrl.io.stData.valid
+  }
 }
 
 class ReservationStationSelect
@@ -223,10 +240,11 @@ class ReservationStationSelect
     val numExist = Output(UInt(iqIdxWidth.W))
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
 
-    val redirectVec = Input(Vec(IssQueSize, Bool()))
-    val readyVec = Input(Vec(IssQueSize, Bool()))
-    val validVec = Output(Vec(IssQueSize, Bool()))
-    val indexVec = Output(Vec(IssQueSize, UInt(iqIdxWidth.W)))
+    val redirectVec = Input(Vec(iqSize, Bool()))
+    val readyVec = Input(Vec(iqSize, Bool()))
+    val dataReadyVec = Input(Vec(iqSize, Bool())) // NOTE: wanna dead code elimination eliminates the codes
+    val validVec = Output(Vec(iqSize, Bool()))
+    val indexVec = Output(Vec(iqSize, UInt(iqIdxWidth.W)))
 
     // val enq = Flipped(DecoupledIO(UInt(iqIdxWidth.W)))
     val enq = new Bundle {
@@ -236,6 +254,7 @@ class ReservationStationSelect
       def fire() = valid && ready
     }
     val deq = DecoupledIO(UInt(iqIdxWidth.W))
+    val deqData = if (exuCfg == StExeUnitCfg) ValidIO(UInt(iqIdxWidth.W)) else null
 
     val flushState = if (feedback) Input(Bool()) else null
     val isFirstIssue = if (feedback) Output(Bool()) else null
@@ -251,7 +270,8 @@ class ReservationStationSelect
    * count   queue : record replay cycle
    */
 
-  val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
+  val s_idle :: s_valid :: s_wait :: s_replay :: s_sent :: Nil = Enum(5)
+  val d_idle :: d_sent :: Nil = Enum(2)
   /* state machine
    * s_idle     : empty slot, init state, set when deq
    * s_valid    : ready to be secleted
@@ -269,6 +289,11 @@ class ReservationStationSelect
   val readyIdxQueue = widthMap(i => validQueue(indexQueue(i)) && io.readyVec(indexQueue(i)))
   val emptyIdxQueue = widthMap(i => emptyQueue(indexQueue(i)))
   val countIdxQueue = widthMap(i => countQueue(indexQueue(i)))
+
+  // NOTE: wanna dead code elimination eliminates the below codes
+  val dataStateQueue = RegInit(VecInit(Seq.fill(iqSize)(d_idle)))
+  val dataValidQueue = VecInit(dataStateQueue.zip(stateQueue).map(a => a._1 === d_idle && a._2 =/= s_idle))
+  val dataReadyIdxQueue = widthMap(i => dataValidQueue(indexQueue(i)) && io.dataReadyVec(indexQueue(i)))
 
   // select ready
   // for no replay, select just equal to deq (attached)
@@ -305,6 +330,19 @@ class ReservationStationSelect
                     (if(feedback) ~(0.U(iqSize.W)) else
                     Mux(RegNext(selectValid && (io.redirect.valid || io.flush)), 0.U, ~(0.U(iqSize.W))))
 
+  // store deq data, receiver(the sq) must be ready
+  // NOTE: wanna dead code elimination eliminates the below codes
+  val lastDataMask = Wire(UInt(iqSize.W))
+  val dataMask = WireInit(VecInit((0 until iqSize).map(i => dataReadyIdxQueue(i)))).asUInt & lastDataMask
+  val dataIdx = ParallelPriorityMux(dataMask.asBools zip indexQueue)
+  val dataPtr = ParallelPriorityMux(dataMask.asBools.zipWithIndex.map{ case (a,i) => (a, i.U)}) // NOTE: the idx of indexQueue
+  val haveData = Cat(dataMask).orR
+  val dataIdxReg = RegNext(dataIdx, init = 0.U)
+  val dataValid = haveData
+  val dataReg = RegNext(dataValid, init = false.B)
+  val dataPtrReg = RegNext(Mux(moveMask(dataPtr), dataPtr-1.U, dataPtr), init = 0.U)
+  lastDataMask := ~Mux(dataReg, UIntToOH(dataPtrReg), 0.U)
+
   // deq
   val dequeue = Mux(RegNext(io.flush), false.B,
                     if (feedback) bubbleReg else bubbleReg || issueFire)
@@ -327,11 +365,28 @@ class ReservationStationSelect
   if (feedback) {
     when (io.memfeedback.valid) {
       when (stateQueue(io.memfeedback.bits.rsIdx) === s_wait) {
-        stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_idle, s_replay)
+        val s_finish_state = if (exuCfg == StExeUnitCfg) {
+          Mux(dataStateQueue(io.memfeedback.bits.rsIdx) === d_sent || (dataReg && dataIdxReg === io.memfeedback.bits.rsIdx),
+            s_idle, s_sent)
+        } else { s_idle }
+        stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_finish_state, s_replay)
       }
       when (!io.memfeedback.bits.hit) {
         countQueue(io.memfeedback.bits.rsIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.rsIdx))
       }
+      assert(stateQueue(io.memfeedback.bits.rsIdx) === s_wait, "mem feedback but rs dont wait for it")
+    }
+  }
+
+  if (exuCfg == StExeUnitCfg) {
+    when (dataReg) {
+      dataStateQueue(dataIdxReg) := d_sent
+    }
+    when (dataReg && stateQueue(dataIdxReg) === s_sent) {
+      stateQueue(dataIdxReg) := s_idle
+    }
+    for (i <- 0 until iqSize) {
+      assert(stateQueue(i) =/= s_sent || dataStateQueue(i) =/= d_sent, "dont want the state that addr and data both sent, but still not idle")
     }
   }
 
@@ -383,6 +438,7 @@ class ReservationStationSelect
   val enqIdx = indexQueue(enqPtr)
   when (enqueue) {
     stateQueue(enqIdx) := s_valid
+    dataStateQueue(enqIdx) := d_idle
     cntCountQueue(enqIdx) := 0.U
   }
 
@@ -393,6 +449,11 @@ class ReservationStationSelect
   io.enq.bits  := enqIdx
   io.deq.valid := selectValid
   io.deq.bits  := selectIndex
+
+  if (exuCfg == StExeUnitCfg) {
+    io.deqData.valid := dataValid
+    io.deqData.bits := dataIdx
+  }
 
   io.numExist := RegNext(Mux(nextTailPtr.flag, if(isPow2(iqSize)) (iqSize-1).U else iqSize.U, nextTailPtr.value), init = (iqSize - 1).U)
 
@@ -463,12 +524,15 @@ class ReservationStationCtrl
       val uop  = new MicroOp
     }))
     val sel = Flipped(ValidIO(UInt(iqIdxWidth.W)))
+    val selData = if (exuCfg == StExeUnitCfg) Flipped(ValidIO(UInt(iqIdxWidth.W))) else null
     val out = ValidIO(new MicroOp)
+    val stData = if (exuCfg == StExeUnitCfg) ValidIO(new MicroOp) else null
 
-    val redirectVec = Output(Vec(IssQueSize, Bool()))
-    val readyVec = Output(Vec(IssQueSize, Bool()))
-    val validVec = Input(Vec(IssQueSize, Bool()))
-    val indexVec = Input(Vec(IssQueSize, UInt(iqIdxWidth.W)))
+    val redirectVec = Output(Vec(iqSize, Bool()))
+    val readyVec = Output(Vec(iqSize, Bool()))
+    val dataReadyVec = if (exuCfg == StExeUnitCfg) Output(Vec(IssQueSize, Bool())) else null
+    val validVec = Input(Vec(iqSize, Bool()))
+    val indexVec = Input(Vec(iqSize, UInt(iqIdxWidth.W)))
 
     val fastUopOut = ValidIO(new MicroOp)
     val fastUopsIn = Flipped(Vec(fastPortsCnt, ValidIO(new MicroOp)))
@@ -486,7 +550,6 @@ class ReservationStationCtrl
   val enqEn  = io.in.valid
   val enqEnReg = RegNext(enqEn && !(io.redirect.valid || io.flush), init = false.B)
   val enqUop = io.in.bits.uop
-  val enqUopReg = RegEnable(enqUop, selValid)
   val selPtr = io.sel.bits
   val selPtrReg = RegEnable(selPtr, selValid)
   val data = io.listen
@@ -500,9 +563,9 @@ class ReservationStationCtrl
     (srcType =/= SrcType.reg && srcType =/= SrcType.fp) ||
     (srcType === SrcType.reg && src === 0.U)
   }
-  val enqSrcSeq      = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
-  val enqSrcTypeSeq  = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
-  val enqSrcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
+  val enqSrcSeq      = Seq(enqUop.psrc(0), enqUop.psrc(1), enqUop.psrc(2))
+  val enqSrcTypeSeq  = Seq(enqUop.ctrl.srcType(0), enqUop.ctrl.srcType(1), enqUop.ctrl.srcType(2))
+  val enqSrcStateSeq = Seq(enqUop.srcState(0), enqUop.srcState(1), enqUop.srcState(2))
   val enqSrcReady = (0 until srcNum).map(i =>
     stateCheck(enqSrcSeq(i), enqSrcTypeSeq(i)) || (enqSrcStateSeq(i) === SrcState.rdy)
   )
@@ -528,11 +591,11 @@ class ReservationStationCtrl
   }
   // NOTE: delay one cycle for fp src will come one cycle later than usual
   if (exuCfg == StExeUnitCfg) {
-    when (enqEnReg && RegNext(enqUop.ctrl.src2Type === SrcType.fp && enqSrcReady(1))) {
+    when (enqEnReg && RegNext(enqUop.ctrl.srcType(1) === SrcType.fp && enqSrcReady(1))) {
       srcQueue(enqPtrReg)(1) := true.B
     }
     when (enqEn) {
-      when (enqUop.ctrl.src2Type === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
+      when (enqUop.ctrl.srcType(1) === SrcType.fp) { srcQueue(enqPtr)(1) := false.B }
     }
   }
   val srcQueueWire = VecInit((0 until srcQueue.size).map(i => {
@@ -547,7 +610,12 @@ class ReservationStationCtrl
   }
 
   // load wait store
-  io.readyVec := srcQueueWire.map(Cat(_).andR)
+  if (exuCfg == StExeUnitCfg) {
+    io.readyVec := srcQueueWire.map(a => a(0))
+    io.dataReadyVec := srcQueueWire.map(a => a(1))
+  } else {
+    io.readyVec := srcQueueWire.map(Cat(_).andR)
+  }
   if (exuCfg == LdExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
@@ -566,7 +634,7 @@ class ReservationStationCtrl
   }
 
   val redirectHit = io.redirectVec(selPtr)
-  val uop = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, 1))
+  val uop = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, if (exuCfg == StExeUnitCfg) 2 else 1, 1))
 
   uop.io.raddr(0) := selPtr
   io.out.valid    := RegNext(selValid && ~redirectHit)
@@ -575,7 +643,14 @@ class ReservationStationCtrl
   uop.io.waddr(0) := enqPtr
   uop.io.wdata(0) := enqUop
 
-  class fastSendUop extends Bundle {
+  if (exuCfg == StExeUnitCfg) { // NOTE: send data part of st
+    uop.io.raddr(1) := io.selData.bits
+    io.stData.bits     := uop.io.rdata(1)
+    io.stData.valid := RegNext(io.selData.valid && ~io.redirectVec(io.selData.bits))
+  }
+  // NOTE: st dont fast wake others, dont care override
+
+  class fastSendUop extends XSBundle {
     val pdest = UInt(PhyRegIdxWidth.W)
     val rfWen = Bool()
     val fpWen = Bool()
@@ -589,7 +664,7 @@ class ReservationStationCtrl
     }
   }
 
-  val roqIdx = Reg(Vec(IssQueSize, new RoqPtr))
+  val roqIdx = Reg(Vec(iqSize, new RoqPtr))
   when (enqEn) {
     roqIdx(enqPtr) := enqUop.roqIdx
   }
@@ -597,6 +672,9 @@ class ReservationStationCtrl
     red := roq.needFlush(io.redirect, io.flush)
   }
   io.out.bits.roqIdx := roqIdx(selPtrReg)
+  if (exuCfg == StExeUnitCfg) {
+    io.stData.bits.roqIdx := roqIdx(RegEnable(io.selData.bits, io.selData.valid))
+  }
 
   io.fastUopOut := DontCare
   if (fastWakeup) {
@@ -700,6 +778,22 @@ class ReservationStationCtrl
       }
     }
   }
+
+  def updateFilterByBlock(blockName: String) = {
+    srcUpdateListen.map(a => a.map(b =>
+      b.zip(fastPortsCfg ++ slowPortsCfg)
+      .filter(
+        _._2.blockName == blockName
+      ).map(_._1)
+    )).flatten.flatten
+  }
+
+  val intSrcUpdate = updateFilterByBlock("Int")
+  val memSrcUpdate = updateFilterByBlock("Mem")
+  val fpSrcUpdate  = updateFilterByBlock("Fp")
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Int", PopCount(Cat(intSrcUpdate)))
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Mem", PopCount(Cat(memSrcUpdate)))
+  XSPerfAccumulate(s"${exuCfg.blockName}_wakeup_by_Fp", PopCount(Cat(fpSrcUpdate)))
 }
 
 class RSDataSingleSrc(srcLen: Int, numEntries: Int, numListen: Int, writePort: Int = 1) extends Module {
@@ -776,7 +870,10 @@ class ReservationStationData
     }
 
     val sel = Input(UInt(iqIdxWidth.W))
+    val selData = if(exuCfg == StExeUnitCfg) Input(UInt(iqIdxWidth.W)) else null
     val out = Output(Vec(srcNum, UInt(srcLen.W)))
+    val stData = if(exuCfg == StExeUnitCfg) Output(UInt(srcLen.W)) else null
+
     val pc = if(exuCfg == JumpExeUnitCfg) Output(UInt(VAddrBits.W)) else null
   })
 
@@ -824,7 +921,7 @@ class ReservationStationData
 
   exuCfg match {
     case JumpExeUnitCfg =>
-      val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+      val src1Mux = Mux(enqUopReg.ctrl.srcType(0) === SrcType.pc,
                         SignExt(io.jumpPc, XLEN),
                         io.srcRegValue(0)
                     )
@@ -840,7 +937,7 @@ class ReservationStationData
                     ImmUnion.I.toImm32(enqUopReg.ctrl.imm)
                   )
       val imm64 = SignExt(imm32, XLEN)
-      val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
+      val src2Mux = Mux(enqUopReg.ctrl.srcType(1) === SrcType.imm,
                       imm64, io.srcRegValue(1)
                     )
       data(1).w(0).wdata := src2Mux
@@ -849,15 +946,25 @@ class ReservationStationData
       (0 until srcNum).foreach(i => data(i).w(0).wdata := io.srcRegValue(i) )
       data(1).w(1).wdata := io.fpRegValue
       data(1).w(1).addr := RegNext(addrReg)
-      data(1).w(1).wen   := RegNext(enqSrcReadyReg(1) && enqUopReg.ctrl.src2Type === SrcType.fp)
-      data(1).w(0).wen   := enqSrcReadyReg(1) && enqUopReg.ctrl.src2Type =/= SrcType.fp
+      data(1).w(1).wen   := RegNext(enqSrcReadyReg(1) && enqUopReg.ctrl.srcType(1) === SrcType.fp)
+      data(1).w(0).wen   := enqSrcReadyReg(1) && enqUopReg.ctrl.srcType(1) =/= SrcType.fp
 
     case _ =>
       (0 until srcNum).foreach(i => data(i).w(0).wdata := io.srcRegValue(i) )
   }
   // deq
-  data.map(_.r.addr := io.sel)
+  if (exuCfg == StExeUnitCfg) {
+    data(0).r.addr := io.sel
+    data(1).r.addr := io.selData
+    io.stData := data(1).r.rdata
+  } else {
+    data.map(_.r.addr := io.sel)
+  }
+
   io.out := data.map(_.r.rdata)
+  if (exuCfg == StExeUnitCfg) {
+    io.out(1) := DontCare
+  }
   if(pcMem.nonEmpty){
     pcMem.get.io.raddr(0) := io.sel
     io.pc := pcMem.get.io.rdata(0)

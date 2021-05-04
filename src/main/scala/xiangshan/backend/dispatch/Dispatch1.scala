@@ -66,7 +66,7 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
   /**
     * Part 2:
-    *   Update commitType, psrc1, psrc2, psrc3, old_pdest, roqIdx, lqIdx, sqIdx for the uops
+    *   Update commitType, psrc(0), psrc(1), psrc(2), old_pdest, roqIdx, lqIdx, sqIdx for the uops
     */
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
@@ -79,17 +79,17 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
     val pdestBypassedPsrc1 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc1) {
+      .foldLeft(io.fromRename(i).bits.psrc(0)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedPsrc2 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc2_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc2) {
+      .foldLeft(io.fromRename(i).bits.psrc(1)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedPsrc3 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc3_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc3) {
+      .foldLeft(io.fromRename(i).bits.psrc(2)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedOldPdest = io.fromRename.take(i).map(_.bits.pdest)
@@ -102,7 +102,7 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       updatedPsrc2(i) := pdestBypassedPsrc2
     }
     else {
-      // for move elimination, the psrc1/psrc2 of consumer instruction always come from psrc1 of move
+      // for move elimination, the psrc(0)/psrc(1) of consumer instruction always come from psrc(0) of move
       updatedPsrc1(i) := Mux(io.renameBypass.move_eliminated_src1(i-1), updatedPsrc1(i-1), pdestBypassedPsrc1)
       updatedPsrc2(i) := Mux(io.renameBypass.move_eliminated_src2(i-1), updatedPsrc1(i-1), pdestBypassedPsrc2)
     }
@@ -110,10 +110,10 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedOldPdest(i) := pdestBypassedOldPdest
 
     updatedUop(i) := io.fromRename(i).bits
-    // update bypass psrc1/psrc2/psrc3/old_pdest
-    updatedUop(i).psrc1 := updatedPsrc1(i)
-    updatedUop(i).psrc2 := updatedPsrc2(i)
-    updatedUop(i).psrc3 := updatedPsrc3(i)
+    // update bypass psrc(0)/psrc(1)/psrc(2)/old_pdest
+    updatedUop(i).psrc(0) := updatedPsrc1(i)
+    updatedUop(i).psrc(1) := updatedPsrc2(i)
+    updatedUop(i).psrc(2) := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
     updatedUop(i).debugInfo.src1MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src1(i-1))
     updatedUop(i).debugInfo.src2MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src2(i-1))

@@ -17,6 +17,9 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+TIMELOG = $(BUILD_DIR)/time.log
+TIME_CMD = time -a -o $(TIMELOG)
+
 # remote machine with more cores to speedup c++ build
 REMOTE ?= localhost
 
@@ -53,8 +56,9 @@ SIM_TOP   = SimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	date -R
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@date -R | tee -a $(TIMELOG)
+	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -64,7 +68,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
-	date -R
+
+sim-verilog: $(SIM_TOP_V)
 
 SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
 SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
@@ -146,8 +151,6 @@ release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
 clean:
-	git submodule foreach git clean -fdx
-	git clean -fd
 	rm -rf ./build
 
 init:
@@ -159,5 +162,5 @@ bump:
 bsp:
 	mill -i mill.contrib.BSP/install
 
-.PHONY: verilog emu clean help init bump bsp $(REF_SO)
+.PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 

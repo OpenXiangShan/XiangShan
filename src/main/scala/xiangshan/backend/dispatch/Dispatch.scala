@@ -125,4 +125,33 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   io.ctrlInfo.intdqFull := intDq.io.dqFull
   io.ctrlInfo.fpdqFull := fpDq.io.dqFull
   io.ctrlInfo.lsdqFull := lsDq.io.dqFull
+
+  val enableDetailedRegfilePortsPerf = true
+  val intPortsNeeded = intDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 2).map(i => enq.bits.needRfRPort(i, 0))))
+  val fpPortsNeeded = fpDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 3).map(i => enq.bits.needRfRPort(i, 1))))
+  val lsPortsNeededInt = lsDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 2).map(i => enq.bits.needRfRPort(i, 0))))
+  val lsPortsNeededFp = lsDispatch.io.enqIQCtrl.map(enq => PopCount((0 until 2).map(i => enq.bits.needRfRPort(i, 1))))
+  def get_active_ports(enq: Seq[Bool], ports: Seq[UInt]) = {
+    enq.zip(ports).map{ case (e, p) => Mux(e, p, 0.U)}.reduce(_ +& _)
+  }
+  val intActivePorts = get_active_ports(intDispatch.io.enqIQCtrl.map(_.valid), intPortsNeeded)
+  val fpActivePorts = get_active_ports(fpDispatch.io.enqIQCtrl.map(_.valid), fpPortsNeeded)
+  val lsActivePortsInt = get_active_ports(lsDispatch.io.enqIQCtrl.map(_.valid), lsPortsNeededInt)
+  val lsActivePortsFp = get_active_ports(lsDispatch.io.enqIQCtrl.map(_.valid), lsPortsNeededFp)
+  val activePortsIntAll = intActivePorts + lsActivePortsInt
+  val activePortsFpAll = fpActivePorts + lsActivePortsFp
+  XSPerfAccumulate("int_rf_active_ports_int", intActivePorts)
+  XSPerfAccumulate("int_rf_active_ports_ls", lsActivePortsInt)
+  XSPerfAccumulate("int_rf_active_ports_all", activePortsIntAll)
+  XSPerfAccumulate("fp_rf_active_ports_fp", fpActivePorts)
+  XSPerfAccumulate("fp_rf_active_ports_ls", lsActivePortsFp)
+  XSPerfAccumulate("fp_rf_active_ports_all", activePortsFpAll)
+  if (enableDetailedRegfilePortsPerf) {
+    XSPerfHistogram("int_rf_active_ports_all", activePortsIntAll, true.B, 0, 14+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_all", activePortsFpAll, true.B, 0, 14+1, 1)
+    XSPerfHistogram("int_rf_active_ports_int", intActivePorts, true.B, 0, 8+1, 1)
+    XSPerfHistogram("int_rf_active_ports_ls", lsActivePortsInt, true.B, 0, 6+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_fp", fpActivePorts, true.B, 0, 12+1, 1)
+    XSPerfHistogram("fp_rf_active_ports_ls", lsActivePortsFp, true.B, 0, 2+1, 1)
+  }
 }
