@@ -211,7 +211,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     forkshm.info->exitNum++;
     forkshm.info->flag = true;
     pidSlot.insert(pidSlot.begin(),  getpid());
-    printf("[%d] First running process created\n ",getpid());
   }
 
 #if VM_COVERAGE == 1
@@ -263,7 +262,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 
-    //if(cycles % 200 == 0) printf("[%d] start doing single_cycle() and enable_waveform:%d cycles:%ld\n",getpid(), enable_waveform,cycles);
     single_cycle();
 
     max_cycle --;
@@ -281,9 +279,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     if (trapCode != STATE_RUNNING) break;
 
     //fake error point
-    if(cycles == 25535 ){
-        trapCode = STATE_BADTRAP;
-    }
+    // if(cycles == 25535 ){
+    //     trapCode = STATE_BADTRAP;
+    // }
 
     if (difftest_step()) {
       trapCode = STATE_ABORT;
@@ -300,7 +298,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           kill(temp, SIGKILL); 
           slotCnt--;
           forkshm.info->exitNum--;
-          printf("[%d]kill %d\n",getpid(),temp);
       }
       //fork-wait
       if((pid = fork())<0){
@@ -308,11 +305,10 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           return -1;
       } else if(pid != 0) {       //father fork and wait.
           waitProcess = 1;
-          printf("[%d]fork a child process %d and wait\n",getpid(),pid);
           wait(&status);
-          printf("[%d]child process exit, start dump wave\n",getpid());
 #if VM_TRACE == 1
-          enable_waveform = args.enable_waveform;
+          //enable_waveform = args.enable_waveform;
+          enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
           if (enable_waveform) {
             Verilated::traceEverOn(true);	// Verilator must compute traced signals
             tfp = new VerilatedVcdC;
@@ -323,7 +319,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
       } else {        //child insert its pid
           slotCnt++;
-          printf("[%d]child process created..\n",getpid());
           forkshm.info->exitNum++;
           pidSlot.insert(pidSlot.begin(),  getpid());
       }
@@ -342,6 +337,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
 
   forkshm.info->exitNum--;
+  forkshm.info->resInfo = trapCode;
   return cycles;
 }
 
@@ -440,8 +436,9 @@ ForkShareMemory::ForkShareMemory() {
       FAIT_EXIT
   }
 
-  info->exitNum = 0;
-  info->flag = false;
+  info->exitNum   = 0;
+  info->flag      = false;
+  info->resInfo   = -1;           //STATE_RUNNING
 }
 
 ForkShareMemory::~ForkShareMemory() {
@@ -455,10 +452,8 @@ void ForkShareMemory::shwait(){
     while(true){
         if(info->exitNum == 0 && info->flag){ break;  } 
         else {  
-            //printf("exitNum:%d  flag:%d\n",info->exitNum,info->flag);
             sleep(WAIT_INTERVAL);  
         }
     }
-    printf("exit count finished\n");
 }
 

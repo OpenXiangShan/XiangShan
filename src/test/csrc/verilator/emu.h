@@ -20,6 +20,7 @@
 
 typedef struct shinfo{
   int exitNum;
+  int resInfo;
   bool flag;
 } shinfo;
 
