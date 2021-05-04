@@ -365,19 +365,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   cache.io.refill.bits.level := fsm.io.refill.level
   cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
   cache.io.sfence := sfence
-  cache.io.resp.ready := Mux(cache.io.resp.bits.hit || cache.io.resp.bits.isReplay, true.B, missQueue.io.in.ready)
+  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
-  when (cache.io.resp.valid && cache.io.resp.bits.isReplay) {
-    assert(fsm.io.req.ready, "when replay, fsm should be empty")
-  }
-
-  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay//!fsm.io.req.fire()
+  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !fsm.io.req.ready
   missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
   missQueue.io.in.bits.source := cache.io.resp.bits.source
   missQueue.io.sfence  := sfence
 
   // NOTE: missQueue req has higher priority
-  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isReplay// (cache.io.resp.bits.isReplay || missQueue.io.empty)
+  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit
   fsm.io.req.bits.source := cache.io.resp.bits.source
   fsm.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   fsm.io.req.bits.l2Hit := cache.io.resp.bits.toFsm.l2Hit
@@ -452,18 +448,21 @@ class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPt
   val full = mayFull && enqPtr === deqPtr
   val empty = !mayFull && enqPtr === deqPtr
 
-  when (io.in.fire()) {
+  val do_enq = io.in.fire()
+  val do_deq = io.out.fire()
+
+  when (do_enq) {
     enqPtr := enqPtr + 1.U
     vpn(enqPtr) := io.in.bits.vpn
     source(enqPtr) := io.in.bits.source
   }
 
-  when (io.out.fire()) {
+  when (do_deq) {
     deqPtr := deqPtr + 1.U
   }
 
-  when (io.in.fire() =/= io.out.fire()) {
-    mayFull := io.in.fire()
+  when (do_enq =/= do_deq) {
+    mayFull := do_enq
   }
 
   when (io.sfence.valid) {
@@ -472,7 +471,7 @@ class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPt
     mayFull := false.B
   }
 
-  io.in.ready := !full || io.out.fire()
+  io.in.ready := !full
   io.out.valid := !empty
   io.out.bits.vpn := vpn(deqPtr)
   io.out.bits.source := source(deqPtr)
@@ -661,9 +660,6 @@ class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst
   io.req.ready := !rwHarzad && (second_ready || io.req.bits.isReplay)
   // NOTE: when write, don't ready, whe
   //       when replay, just come in, out make sure resp.fire()
-  when (io.req.fire() && io.req.bits.isReplay) {
-    assert(io.resp.fire() || !io.resp.valid, "should not block replay")
-  }
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
