@@ -1120,7 +1120,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
 
     is (s_mem_req) {
-      when (mem.req.fire() && !sfenceLatch) {
+      when (mem.req.fire()) {
         state := s_mem_resp
       }
     }
@@ -1173,7 +1173,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
   val l3addr = MakeAddr(Mux(l2Hit, ppn, memPteReg.ppn), getVpnn(vpn, 0))
-  mem.req.valid := state === s_mem_req
+  mem.req.valid := state === s_mem_req && !sfenceLatch
   mem.req.bits.addr := Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
 
   io.refill.vpn := vpn
