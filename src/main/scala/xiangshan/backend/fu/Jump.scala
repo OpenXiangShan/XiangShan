@@ -1,20 +1,20 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.decode.ImmUnion
-import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.decode.isa._
 
-trait HasRedirectOut { this: RawModule =>
+trait HasRedirectOut { this: XSModule =>
   val redirectOutValid = IO(Output(Bool()))
   val redirectOut = IO(Output(new Redirect))
 }
 
-class JumpDataModule extends XSModule {
+class JumpDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src1 = Input(UInt(XLEN.W))
     val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
@@ -42,7 +42,7 @@ class JumpDataModule extends XSModule {
   io.isAuipc := isAuipc
 }
 
-class Jump extends FunctionUnit with HasRedirectOut {
+class Jump(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
 
   val (src1, jalr_target, pc, immMin, func, uop) = (
     io.in.bits.src(0),

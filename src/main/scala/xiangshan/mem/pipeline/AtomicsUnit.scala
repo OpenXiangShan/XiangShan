@@ -1,41 +1,35 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
+import difftest._
 
-class AtomicsUnit extends XSModule with MemoryOpConstants{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
+    val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
-    val tlbFeedback   = ValidIO(new TlbFeedback)
+    val rsFeedback   = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
-
-  val difftestIO = IO(new Bundle() {
-    val atomicResp = Output(Bool())
-    val atomicAddr = Output(UInt(64.W))
-    val atomicData = Output(UInt(64.W))
-    val atomicMask = Output(UInt(8.W))
-    val atomicFuop = Output(UInt(8.W))
-    val atomicOut  = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
+  val addr_valid = RegInit(false.B)
+  val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
@@ -77,18 +71,30 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.in.ready := true.B
     when (io.in.fire()) {
       in := io.in.bits
+      in.src2 := in.src2 // leave src2 unchanged
+      addr_valid := true.B
+    }
+    when (io.storeDataIn.fire()) {
+      in.src2 := io.storeDataIn.bits.data
+      data_valid := true.B
+    }
+    when(data_valid && addr_valid) {
       state := s_tlb
+      addr_valid := false.B
+      data_valid := false.B
     }
   }
+
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
-  io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
-  io.tlbFeedback.bits.flushState := DontCare
+  io.rsFeedback.valid       := RegNext(RegNext(io.in.valid))
+  io.rsFeedback.bits.hit    := true.B
+  io.rsFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.rsFeedback.bits.flushState := DontCare
+  io.rsFeedback.bits.sourceType := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -257,11 +263,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   }
 
   if (!env.FPGAPlatform) {
-    difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
-    difftestIO.atomicAddr := WireInit(paddr_reg)
-    difftestIO.atomicData := WireInit(data_reg)
-    difftestIO.atomicMask := WireInit(mask_reg)
-    difftestIO.atomicFuop := WireInit(fuop_reg)
-    difftestIO.atomicOut  := resp_data_wire
+    val difftest = Module(new DifftestAtomicEvent)
+    difftest.io.clock      := clock
+    difftest.io.coreid     := hardId.U
+    difftest.io.atomicResp := io.dcache.resp.fire()
+    difftest.io.atomicAddr := paddr_reg
+    difftest.io.atomicData := data_reg
+    difftest.io.atomicMask := mask_reg
+    difftest.io.atomicFuop := fuop_reg
+    difftest.io.atomicOut  := resp_data_wire
   }
 }

@@ -5,9 +5,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
+import freechips.rocketchip.tilelink._
 
 /* PTW Graph
  * not yet
@@ -104,11 +103,11 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
 }
 
-abstract class PtwBundle extends XSBundle with HasPtwConst
+abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
 abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
-  with HasXSParameter with HasXSLog with HasPtwConst
+  with HasXSParameter with HasPtwConst
 
-class PteBundle extends PtwBundle{
+class PteBundle(implicit p: Parameters) extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
@@ -138,15 +137,15 @@ class PteBundle extends PtwBundle{
   }
 
   def getPerm() = {
-    val p = Wire(new PtePermBundle)
-    p.d := perm.d
-    p.a := perm.a
-    p.g := perm.g
-    p.u := perm.u
-    p.x := perm.x
-    p.w := perm.w
-    p.r := perm.r
-    p
+    val pm = Wire(new PtePermBundle)
+    pm.d := perm.d
+    pm.a := perm.a
+    pm.g := perm.g
+    pm.u := perm.u
+    pm.x := perm.x
+    pm.w := perm.w
+    pm.r := perm.r
+    pm
   }
 
   override def toPrintable: Printable = {
@@ -154,7 +153,7 @@ class PteBundle extends PtwBundle{
   }
 }
 
-class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false) extends PtwBundle {
+class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
@@ -194,7 +193,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   }
 }
 
-class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends PtwBundle {
+class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
 
   val tag  = UInt(tagLen.W)
@@ -241,7 +240,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
   }
 }
 
-class PtwReq extends PtwBundle {
+class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
   override def toPrintable: Printable = {
@@ -249,7 +248,7 @@ class PtwReq extends PtwBundle {
   }
 }
 
-class PtwResp extends PtwBundle {
+class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
 
@@ -258,7 +257,7 @@ class PtwResp extends PtwBundle {
   }
 }
 
-class PtwIO extends PtwBundle {
+class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
@@ -295,7 +294,7 @@ class PTW()(implicit p: Parameters) extends LazyModule {
   lazy val module = new PTWImp(this)
 }
 
-class PTWImp(outer: PTW) extends PtwModule(outer) {
+class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val (mem, edge) = outer.node.out.head
   require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
@@ -425,7 +424,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 /* Miss Queue dont care about duplicate req, which is done by PtwFilter
  * PtwMissQueue is just a Queue inside Chisel with flush
  */
-class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Bundle {
       val vpn = UInt(vpnLen.W)
@@ -478,7 +477,7 @@ class PtwMissQueue extends XSModule with HasXSParameter with HasXSLog with HasPt
   io.empty := empty
 }
 
-class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+class PTWRepeater(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new Bundle {
     val tlb = Flipped(new TlbPtwIO)
     val ptw = new TlbPtwIO
@@ -509,7 +508,7 @@ class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtw
 /* dtlb
  *
  */
-class PTWFilter(Width: Int, Size: Int) extends XSModule with HasXSLog with HasPtwConst {
+class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new Bundle {
     val tlb = Flipped(new TlbPtwIO(Width))
     val ptw = new TlbPtwIO
@@ -611,7 +610,7 @@ class PTWFilter(Width: Int, Size: Int) extends XSModule with HasXSLog with HasPt
  * the cache should not be blocked
  * when miss queue if full, just block req outside
  */
-class PtwCacheIO extends PtwBundle {
+class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val vpn = UInt(vpnLen.W)
     val source = UInt(bPtwWidth.W)
@@ -638,7 +637,7 @@ class PtwCacheIO extends PtwBundle {
   val sfence = Input(new SfenceBundle)
 }
 
-class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst {
+class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PtwCacheIO)
 
   // TODO: four caches make the codes dirty, think about how to deal with it
@@ -1050,7 +1049,7 @@ class PtwCache extends Module with HasXSParameter with HasXSLog with HasPtwConst
 
 /* ptw finite state machine, the actual page table walker
  */
-class PtwFsmIO extends PtwBundle {
+class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val source = UInt(bPtwWidth.W)
     val l1Hit = Bool()
@@ -1081,7 +1080,7 @@ class PtwFsmIO extends PtwBundle {
   })
 }
 
-class PtwFsm extends XSModule with HasPtwConst {
+class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PtwFsmIO)
 
   val sfence = io.sfence
@@ -1187,4 +1186,60 @@ class PtwFsm extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked_cycle", mem.req.valid && !mem.req.ready)
+}
+
+class PTEHelper() extends BlackBox {
+  val io = IO(new Bundle {
+    val clock  = Input(Clock())
+    val enable = Input(Bool())
+    val satp   = Input(UInt(64.W))
+    val vpn    = Input(UInt(64.W))
+    val pte    = Output(UInt(64.W))
+    val level  = Output(UInt(8.W))
+    val pf     = Output(UInt(8.W))
+  })
+}
+
+class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new PtwIO)
+
+  for (i <- 0 until PtwWidth) {
+    io.tlb(i).req(0).ready := true.B
+
+    val helper = Module(new PTEHelper())
+    helper.io.clock := clock
+    helper.io.enable := io.tlb(i).req(0).valid
+    helper.io.satp := io.csr.satp.ppn
+    helper.io.vpn := io.tlb(i).req(0).bits.vpn
+    val pte = helper.io.pte.asTypeOf(new PteBundle)
+    val level = helper.io.level
+    val pf = helper.io.pf
+
+    io.tlb(i).resp.valid := RegNext(io.tlb(i).req(0).valid)
+    assert(!io.tlb(i).resp.valid || io.tlb(i).resp.ready)
+    io.tlb(i).resp.bits.entry.tag := RegNext(io.tlb(i).req(0).bits.vpn)
+    io.tlb(i).resp.bits.entry.ppn := pte.ppn
+    io.tlb(i).resp.bits.entry.perm.map(_ := pte.getPerm())
+    io.tlb(i).resp.bits.entry.level.map(_ := level)
+    io.tlb(i).resp.bits.pf := pf
+  }
+}
+
+class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+  val node = if (!useFakePTW) TLIdentityNode() else null
+  val ptw = if (!useFakePTW) LazyModule(new PTW()) else null
+  if (!useFakePTW) {
+    node := ptw.node
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new PtwIO)
+    if (useFakePTW) {
+      val fake_ptw = Module(new FakePTW())
+      io <> fake_ptw.io
+    }
+    else {
+      io <> ptw.module.io
+    }
+  }
 }

@@ -1,19 +1,19 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
 
 // Data module define
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
-class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters {
+class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
@@ -53,19 +53,26 @@ class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   }
 }
 
-class SQData8Entry extends XSBundle {
+class SQData8Entry(implicit p: Parameters) extends XSBundle {
   // val paddr = UInt(PAddrBits.W)
   val valid = Bool()
   val data = UInt((XLEN/8).W)
 }
 
-class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQData8Entry))
-    val wen   = Vec(numWrite, Input(Bool()))
-    val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
-    val wdata = Vec(numWrite, Input(new SQData8Entry))
+    val data = new Bundle() {
+      val wen   = Vec(numWrite, Input(Bool()))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
+      val wdata = Vec(numWrite, Input(UInt((XLEN/8).W)))
+    }
+    val mask = new Bundle() {
+      val wen   = Vec(numWrite, Input(Bool()))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
+      val wdata = Vec(numWrite, Input(Bool()))
+    }
 
     val needForward = Input(Vec(numForward, Vec(2, UInt(size.W))))
     val forwardValid = Vec(numForward, Output(Bool()))
@@ -76,10 +83,15 @@ class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) ext
 
   val data = Reg(Vec(size, new SQData8Entry))
 
-  // writeback to lq/sq
+  // writeback to sq
   (0 until numWrite).map(i => {
-    when(io.wen(i)){
-      data(io.waddr(i)) := io.wdata(i)
+    when(io.data.wen(i)){
+      data(io.data.waddr(i)).data := io.data.wdata(i)
+    }
+  })
+  (0 until numWrite).map(i => {
+    when(io.mask.wen(i)){
+      data(io.mask.waddr(i)).valid := io.mask.wdata(i)
     }
   })
 
@@ -91,7 +103,12 @@ class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) ext
   // DataModuleTemplate should not be used when there're any write conflicts
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
+    }
+  }
+  for (i <- 0 until numWrite) {
+    for (j <- i+1 until numWrite) {
+      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
     }
   }
 
@@ -144,19 +161,26 @@ class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) ext
   })
 }
 
-class SQDataEntry extends XSBundle {
+class SQDataEntry(implicit p: Parameters) extends XSBundle {
   // val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
 }
 
-class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQDataModule(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQDataEntry))
-    val wen   = Vec(numWrite, Input(Bool()))
-    val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
-    val wdata = Vec(numWrite, Input(new SQDataEntry))
+    val data = new Bundle() {
+      val wen   = Vec(numWrite, Input(Bool()))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
+      val wdata = Vec(numWrite, Input(UInt(XLEN.W)))
+    }
+    val mask = new Bundle() {
+      val wen   = Vec(numWrite, Input(Bool()))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
+      val wdata = Vec(numWrite, Input(UInt(8.W)))
+    }
 
     val needForward = Input(Vec(numForward, Vec(2, UInt(size.W))))
     val forwardMask = Vec(numForward, Output(Vec(8, Bool())))
@@ -169,10 +193,12 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
   for (i <- 0 until numWrite) {
     // write to data8
     for (j <- 0 until 8) {
-      data8(j).io.waddr(i) := io.waddr(i)
-      data8(j).io.wdata(i).valid := io.wdata(i).mask(j)
-      data8(j).io.wdata(i).data := io.wdata(i).data(8*(j+1)-1, 8*j)
-      data8(j).io.wen(i) := io.wen(i)
+      data8(j).io.mask.waddr(i) := io.mask.waddr(i)
+      data8(j).io.mask.wdata(i) := io.mask.wdata(i)(j)
+      data8(j).io.mask.wen(i)   := io.mask.wen(i)
+      data8(j).io.data.waddr(i) := io.data.waddr(i)
+      data8(j).io.data.wdata(i) := io.data.wdata(i)(8*(j+1)-1, 8*j)
+      data8(j).io.data.wen(i)   := io.data.wen(i)
     }
   }
 
@@ -188,7 +214,12 @@ class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) ex
   // DataModuleTemplate should not be used when there're any write conflicts
   for (i <- 0 until numWrite) {
     for (j <- i+1 until numWrite) {
-      assert(!(io.wen(i) && io.wen(j) && io.waddr(i) === io.waddr(j)))
+      assert(!(io.data.wen(i) && io.data.wen(j) && io.data.waddr(i) === io.data.waddr(j)))
+    }
+  }
+  for (i <- 0 until numWrite) {
+    for (j <- i+1 until numWrite) {
+      assert(!(io.mask.wen(i) && io.mask.wen(j) && io.mask.waddr(i) === io.mask.waddr(j)))
     }
   }
 

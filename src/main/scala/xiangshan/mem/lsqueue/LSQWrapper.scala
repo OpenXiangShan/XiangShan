@@ -1,33 +1,33 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 
-class ExceptionAddrIO extends XSBundle {
+class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val lsIdx = Input(new LSIdx)
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
 }
 
-class FwdEntry extends XSBundle {
+class FwdEntry extends Bundle {
   val valid = Bool()
   val data = UInt(8.W)
 }
 
 // inflight miss block reqs
-class InflightBlockInfo extends XSBundle {
+class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
   val block_addr = UInt(PAddrBits.W)
   val valid = Bool()
 }
 
-class LsqEnqIO extends XSBundle {
+class LsqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val needAlloc = Vec(RenameWidth, Input(UInt(2.W)))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
@@ -35,19 +35,20 @@ class LsqEnqIO extends XSBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrappper extends XSModule with HasDCacheParameters {
+class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
-    val forward = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
+    val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect))
     val dcache = Flipped(ValidIO(new Refill))
@@ -56,16 +57,9 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr)
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
+    val sqFull = Output(Bool())
+    val lqFull = Output(Bool())
   })
-  val difftestIO = IO(new Bundle() {
-    val fromSQ = new Bundle() {
-      val storeCommit = Output(UInt(2.W))
-      val storeAddr   = Output(Vec(2, UInt(64.W)))
-      val storeData   = Output(Vec(2, UInt(64.W)))
-      val storeMask   = Output(Vec(2, UInt(8.W)))
-    }
-  })
-  difftestIO <> DontCare
 
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
@@ -108,6 +102,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.flush <> io.flush
   storeQueue.io.storeIn <> io.storeIn
+  storeQueue.io.storeDataIn <> io.storeDataIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.roq <> io.roq
@@ -120,10 +115,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
 
   storeQueue.io.sqempty <> io.sqempty
-
-  if (!env.FPGAPlatform) {
-    difftestIO.fromSQ <> storeQueue.difftestIO
-  }
 
   io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 
@@ -168,4 +159,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && pendingstate === s_idle))
 
+  io.lqFull := loadQueue.io.lqFull
+  io.sqFull := storeQueue.io.sqFull
 }

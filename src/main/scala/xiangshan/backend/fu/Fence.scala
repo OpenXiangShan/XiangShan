@@ -1,12 +1,12 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.FenceOpType
 
-class FenceToSbuffer extends XSBundle {
+class FenceToSbuffer extends Bundle {
   val flushSb = Output(Bool())
   val sbIsEmpty = Input(Bool())
 }
@@ -14,7 +14,7 @@ class FenceToSbuffer extends XSBundle {
 // class Fence extends FunctionUnit(FuConfig(
   // /*FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,*/ latency = UncertainLatency()
 // )){
-class Fence extends FunctionUnit{ // TODO: check it
+class Fence(implicit p: Parameters) extends FunctionUnit{ // TODO: check it
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
@@ -39,15 +39,13 @@ class Fence extends FunctionUnit{ // TODO: check it
   val sbEmpty = toSbuffer.sbIsEmpty
   val uop = RegEnable(io.in.bits.uop, io.in.fire())
   val func = uop.ctrl.fuOpType
-  val lsrc1 = uop.ctrl.lsrc1
-  val lsrc2 = uop.ctrl.lsrc2
 
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := state === s_wait
   fencei       := state === s_icache
   sfence.valid := state === s_tlb
-  sfence.bits.rs1  := lsrc1 === 0.U
-  sfence.bits.rs2  := lsrc2 === 0.U
+  sfence.bits.rs1  := uop.ctrl.lsrc(0) === 0.U
+  sfence.bits.rs2  := uop.ctrl.lsrc(1) === 0.U
   sfence.bits.addr := RegEnable(src1, io.in.fire())
 
   when (state === s_idle && valid) { state := s_wait }

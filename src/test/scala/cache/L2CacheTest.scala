@@ -18,7 +18,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.HasXSLog
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -123,7 +122,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
     TLCacheCork() :=
     l3.node
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(new L2TestTopIO)
 
@@ -254,8 +253,6 @@ class L2TestTopWrapper()(implicit p: Parameters) extends LazyModule {
 }
 
 class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,

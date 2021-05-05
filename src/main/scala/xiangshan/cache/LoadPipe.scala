@@ -1,12 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-
 import utils.{XSDebug, XSPerfAccumulate}
 
-class LoadPipe extends DCacheModule {
+class LoadPipe(implicit p: Parameters) extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
   def encMetaBits = cacheParams.tagCode.width(metaBits)
   def getMeta(encMeta: UInt): UInt = {

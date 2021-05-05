@@ -5,10 +5,9 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLManagerNode, TLSlaveParameters, TLSlavePortParameters}
-import xiangshan.HasXSLog
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
  
-class TLCTestSlaveMMIO extends DCacheBundle
+class TLCTestSlaveMMIO(implicit p: Parameters) extends DCacheBundle
 {
   val AChannel = DecoupledIO(new TLCFakeABundle())
   val CChannel = DecoupledIO(new TLCFakeCBundle())
@@ -43,7 +42,7 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
   )))
 
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val (bus,edge) = node.in.head
 

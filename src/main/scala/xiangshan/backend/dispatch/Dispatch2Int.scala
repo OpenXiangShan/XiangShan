@@ -1,14 +1,13 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.exu.Exu._
-import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.BusyTableReadIO
 
-class Dispatch2Int extends XSModule {
+class Dispatch2Int(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
     val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
@@ -59,24 +58,24 @@ class Dispatch2Int extends XSModule {
   // val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
   // for (i <- intStaticIndex.indices) {
   //   val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-  //   io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-  //   io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+  //   io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc(0)
+  //   io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc(1)
   // }
   // val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
   // intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
   // intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
-  io.readRf(0) := io.enqIQCtrl(3).bits.psrc1
-  io.readRf(1) := io.enqIQCtrl(3).bits.psrc2
-  io.readRf(2) := Mux(io.enqIQCtrl(4).valid, io.enqIQCtrl(4).bits.psrc1, io.enqIQCtrl(0).bits.psrc1)
-  io.readRf(3) := io.enqIQCtrl(4).bits.psrc2
-  io.readRf(4) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc1, io.enqIQCtrl(1).bits.psrc1)
-  io.readRf(5) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc2, io.enqIQCtrl(1).bits.psrc2)
-  io.readRf(6) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc1, io.enqIQCtrl(2).bits.psrc1)
-  io.readRf(7) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc2, io.enqIQCtrl(2).bits.psrc2)
+  io.readRf(0) := io.enqIQCtrl(3).bits.psrc(0)
+  io.readRf(1) := io.enqIQCtrl(3).bits.psrc(1)
+  io.readRf(2) := Mux(io.enqIQCtrl(4).valid, io.enqIQCtrl(4).bits.psrc(0), io.enqIQCtrl(0).bits.psrc(0))
+  io.readRf(3) := io.enqIQCtrl(4).bits.psrc(1)
+  io.readRf(4) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc(0), io.enqIQCtrl(1).bits.psrc(0))
+  io.readRf(5) := Mux(io.enqIQCtrl(5).valid, io.enqIQCtrl(5).bits.psrc(1), io.enqIQCtrl(1).bits.psrc(1))
+  io.readRf(6) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc(0), io.enqIQCtrl(2).bits.psrc(0))
+  io.readRf(7) := Mux(io.enqIQCtrl(6).valid, io.enqIQCtrl(6).bits.psrc(1), io.enqIQCtrl(2).bits.psrc(1))
 
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    io.readState(2*i  ).req := io.fromDq(i).bits.psrc1
-    io.readState(2*i+1).req := io.fromDq(i).bits.psrc2
+    io.readState(2*i  ).req := io.fromDq(i).bits.psrc(0)
+    io.readState(2*i+1).req := io.fromDq(i).bits.psrc(1)
   }
   val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
   val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
@@ -101,12 +100,12 @@ class Dispatch2Int extends XSModule {
     }
     enq.bits := io.fromDq(deqIndex).bits
 
-    enq.bits.src1State := src1Ready(deqIndex)
-    enq.bits.src2State := src2Ready(deqIndex)
-    enq.bits.src3State := DontCare
+    enq.bits.srcState(0) := src1Ready(deqIndex)
+    enq.bits.srcState(1) := src2Ready(deqIndex)
+    enq.bits.srcState(2) := DontCare
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
-      p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
+      p"srcState(${enq.bits.srcState(0)} ${enq.bits.srcState(1)}) " +
       p"enters reservation station $i from ${deqIndex}\n")
   }
 
@@ -142,15 +141,15 @@ class Dispatch2Int extends XSModule {
 //    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 //
 //    io.enqIQData(i) := DontCare
-//    io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.src1Type === SrcType.pc,
+//    io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.srcType(0) === SrcType.pc,
 //      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
-//    io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.src2Type === SrcType.imm,
+//    io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.srcType(1) === SrcType.imm,
 //      uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
 //
 //    XSDebug(dataValidRegDebug(i),
 //      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))

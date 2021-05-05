@@ -6,11 +6,12 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLArbiter, TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLMessages}
+import freechips.rocketchip.tilelink._
 import system.L1CacheErrorInfo
+import device.RAMHelper
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
-class DCacheWordReq  extends DCacheBundle
+class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -24,7 +25,7 @@ class DCacheWordReq  extends DCacheBundle
 }
 
 // memory request in word granularity(store)
-class DCacheLineReq  extends DCacheBundle
+class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -37,7 +38,7 @@ class DCacheLineReq  extends DCacheBundle
   }
 }
 
-class DCacheWordResp extends DCacheBundle
+class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
   // cache req missed, send it to miss queue
@@ -51,7 +52,7 @@ class DCacheWordResp extends DCacheBundle
   }
 }
 
-class DCacheLineResp extends DCacheBundle
+class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
 {
   val data   = UInt((cfg.blockBytes * 8).W)
   // cache req missed, send it to miss queue
@@ -65,7 +66,7 @@ class DCacheLineResp extends DCacheBundle
   }
 }
 
-class Refill extends DCacheBundle
+class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
   val data   = UInt((cfg.blockBytes * 8).W)
@@ -74,14 +75,14 @@ class Refill extends DCacheBundle
   }
 }
 
-class DCacheWordIO extends DCacheBundle
+class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
 // used by load unit
-class DCacheLoadIO extends DCacheWordIO
+class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
@@ -92,22 +93,23 @@ class DCacheLoadIO extends DCacheWordIO
   val s1_disable_fast_wakeup = Input(Bool())
 }
 
-class DCacheLineIO extends DCacheBundle
+class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheLineReq )
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
-class DCacheToLsuIO extends DCacheBundle {
+class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = Flipped(new DCacheLineIO) // for sbuffer
   val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
 }
 
-class DCacheIO extends DCacheBundle {
+class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = new L1CacheErrorInfo
+  val mshrFull = Output(Bool())
 }
 
 
@@ -127,7 +129,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasXSLog {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
 
   val io = IO(new DCacheIO)
 
@@ -347,4 +349,86 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // performance counters
   val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
   XSPerfAccumulate("num_loads", num_loads)
+
+  io.mshrFull := missQueue.io.full
+}
+
+class AMOHelper() extends BlackBox {
+  val io = IO(new Bundle {
+    val clock  = Input(Clock())
+    val enable = Input(Bool())
+    val cmd    = Input(UInt(5.W))
+    val addr   = Input(UInt(64.W))
+    val wdata  = Input(UInt(64.W))
+    val mask   = Input(UInt(8.W))
+    val rdata  = Output(UInt(64.W))
+  })
+}
+
+class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+  val io = IO(new DCacheIO)
+
+  io := DontCare
+  // to LoadUnit
+  for (i <- 0 until LoadPipelineWidth) {
+    val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
+    fakeRAM.io.clk   := clock
+    fakeRAM.io.en    := io.lsu.load(i).resp.valid && !reset.asBool
+    fakeRAM.io.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
+    fakeRAM.io.wIdx  := 0.U
+    fakeRAM.io.wdata := 0.U
+    fakeRAM.io.wmask := 0.U
+    fakeRAM.io.wen   := false.B
+
+    io.lsu.load(i).req.ready := true.B
+    io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
+    io.lsu.load(i).resp.bits.data := fakeRAM.io.rdata
+    io.lsu.load(i).resp.bits.miss := false.B
+    io.lsu.load(i).resp.bits.replay := false.B
+    io.lsu.load(i).resp.bits.id := DontCare
+    io.lsu.load(i).s1_hit_way := 1.U
+    io.lsu.load(i).s1_disable_fast_wakeup := false.B
+  }
+  // to LSQ
+  io.lsu.lsq.valid := false.B
+  io.lsu.lsq.bits := DontCare
+  // to Store Buffer
+  io.lsu.store.req.ready := true.B
+  io.lsu.store.resp := DontCare
+  io.lsu.store.resp.valid := RegNext(io.lsu.store.req.valid)
+  io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
+  // to atomics
+  val amoHelper = Module(new AMOHelper)
+  amoHelper.io.clock := clock
+  amoHelper.io.enable := io.lsu.atomics.req.valid && !reset.asBool
+  amoHelper.io.cmd := io.lsu.atomics.req.bits.cmd
+  amoHelper.io.addr := io.lsu.atomics.req.bits.addr
+  amoHelper.io.wdata := io.lsu.atomics.req.bits.data
+  amoHelper.io.mask := io.lsu.atomics.req.bits.mask
+  io.lsu.atomics.req.ready := true.B
+  io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
+  assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
+  io.lsu.atomics.resp.bits.data := amoHelper.io.rdata
+  io.lsu.atomics.resp.bits.replay := false.B
+  io.lsu.atomics.resp.bits.id := 1.U
+}
+
+class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientNode = if (!useFakeDCache) TLIdentityNode() else null
+  val dcache = if (!useFakeDCache) LazyModule(new DCache()) else null
+  if (!useFakeDCache) {
+    clientNode := dcache.clientNode
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new DCacheIO)
+    if (useFakeDCache) {
+      val fake_dcache = Module(new FakeDCache())
+      io <> fake_dcache.io
+    }
+    else {
+      io <> dcache.module.io
+    }
+  }
 }

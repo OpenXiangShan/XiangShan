@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.HasFPUParameters
@@ -7,16 +8,19 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
-class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
+class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
+  p => p(XSCoreParamsKey).LoadQueueSize
+){
+  override def cloneType = (new LqPtr).asInstanceOf[this.type]
+}
 
-object LqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): LqPtr = {
+object LqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LqPtr = {
     val ptr = Wire(new LqPtr)
     ptr.flag := f
     ptr.value := v
@@ -47,7 +51,7 @@ trait HasLoadHelper { this: XSModule =>
   }
 }
 
-class LqEnqIO extends XSBundle {
+class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
@@ -56,7 +60,7 @@ class LqEnqIO extends XSBundle {
 }
 
 // Load Queue
-class LoadQueue extends XSModule
+class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
@@ -71,12 +75,13 @@ class LoadQueue extends XSModule
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
-    val load_s1 = Vec(LoadPipelineWidth, Flipped(new MaskedLoadForwardQueryIO))
+    val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
+    val lqFull = Output(Bool())
   })
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
@@ -639,8 +644,14 @@ class LoadQueue extends XSModule
 
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
+  /**
+    * misc
+    */
+  io.roq.storeDataRoqWb := DontCare // will be overwriten by store queue's result
+
   // perf counter
   QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
+  io.lqFull := !allowEnqueue
   XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire())

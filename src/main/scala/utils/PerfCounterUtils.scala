@@ -1,12 +1,12 @@
 package utils
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import top.Parameters
-import xiangshan.HasXSParameter
+import xiangshan.DebugOptionsKey
 
-object XSPerfAccumulate extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt)(implicit name: String) = {
-    val env = Parameters.get.envParameters
+object XSPerfAccumulate {
+  def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -20,17 +20,19 @@ object XSPerfAccumulate extends HasXSParameter {
       counter := Mux(perfClean, 0.U, next_counter)
 
       when (perfDump) {
-        XSLog(XSLogLevel.PERF)(true, true.B, p"$perfName, $next_counter\n")
+        XSPerfPrint(p"$perfName, $next_counter\n")
       }
     }
   }
 }
 
-object XSPerfHistogram extends HasXSParameter {
+object XSPerfHistogram {
   // instead of simply accumulating counters
   // this function draws a histogram
-  def apply(perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)(implicit name: String) = {
-    val env = Parameters.get.envParameters
+  def apply
+  (perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)
+  (implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -64,15 +66,15 @@ object XSPerfHistogram extends HasXSParameter {
         }
 
         when (perfDump) {
-          XSLog(XSLogLevel.PERF)(true, true.B, p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
+          XSPerfPrint(p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
         }
       }
     }
   }
 }
-object XSPerfMax extends HasXSParameter {
-  def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit name: String) = {
-    val env = Parameters.get.envParameters
+object XSPerfMax {
+  def apply(perfName: String, perfCnt: UInt, enable: Bool)(implicit p: Parameters) = {
+    val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
       val logTimestamp = WireInit(0.U(64.W))
       val perfClean = WireInit(false.B)
@@ -86,15 +88,16 @@ object XSPerfMax extends HasXSParameter {
       max := Mux(perfClean, 0.U, next_max)
 
       when (perfDump) {
-        XSLog(XSLogLevel.PERF)(true, true.B, p"${perfName}_max, $next_max\n")
+        XSPerfPrint(p"${perfName}_max, $next_max\n")
       }
     }
   }
 }
 
-object QueuePerf extends HasXSParameter {
-  def apply(size: Int, utilization: UInt, full: UInt)(implicit name: String) = {
+object QueuePerf {
+  def apply(size: Int, utilization: UInt, full: UInt)(implicit p: Parameters) = {
     XSPerfAccumulate("utilization", utilization)
+    XSPerfHistogram("util", utilization, true.B, 0, size, 1)
     XSPerfAccumulate("full", full)
     val exHalf = utilization > (size/2).U
     val empty = utilization === 0.U
@@ -113,5 +116,11 @@ object TransactionLatencyCounter
     val next_counter = counter + 1.U
     counter := Mux(start || stop, 0.U, next_counter)
     (stop, next_counter)
+  }
+}
+
+object XSPerfPrint {
+  def apply(pable: Printable)(implicit p: Parameters): Any = {
+    XSLog(XSLogLevel.PERF)(true, true.B, pable)
   }
 }

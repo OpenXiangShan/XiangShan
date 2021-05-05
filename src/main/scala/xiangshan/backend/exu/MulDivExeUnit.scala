@@ -1,14 +1,13 @@
 package xiangshan.backend.exu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.MDUOpType
-import xiangshan.backend.exu.Exu.mulDivExeUnitCfg
-import xiangshan.backend.fu.{AbstractDivider, ArrayMultiplier, FunctionUnit, Radix2Divider}
+import xiangshan.backend.fu._
 
-class MulDivExeUnit extends Exu(mulDivExeUnitCfg) {
+class MulDivExeUnit(implicit p: Parameters) extends Exu(MulDivExeUnitCfg) {
 
   val func = io.fromInt.bits.uop.ctrl.fuOpType
   val (src1, src2) = (
