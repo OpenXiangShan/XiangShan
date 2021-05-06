@@ -23,7 +23,6 @@ case class XSCoreParameters
   HasDiv: Boolean = true,
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
-  EnableStoreQueue: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
@@ -138,7 +137,6 @@ trait HasXSParameter {
   val HasDiv = coreParams.HasDiv
   val HasIcache = coreParams.HasICache
   val HasDcache = coreParams.HasDCache
-  val EnableStoreQueue = coreParams.EnableStoreQueue
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
