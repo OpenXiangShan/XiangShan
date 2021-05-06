@@ -1151,7 +1151,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (sfence.valid) {
     state := s_idle
-    when (state === s_mem_resp && !mem.resp.fire()) {
+    when (state === s_mem_resp && !mem.resp.fire() || state === s_mem_req && mem.req.fire()) {
       sfenceLatch := true.B
     }
   }
