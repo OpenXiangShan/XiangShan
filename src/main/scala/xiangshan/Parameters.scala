@@ -61,6 +61,8 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
+  EnableSleepQueue: Boolean = true,
+  SleepQueueSize: Int = 16,
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
@@ -190,6 +192,8 @@ trait HasXSParameter {
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
   val NRFpReadPorts = coreParams.NRFpReadPorts
   val NRFpWritePorts = coreParams.NRFpWritePorts
+  val EnableSleepQueue = coreParams.EnableSleepQueue
+  val SleepQueueSize = if (EnableSleepQueue) coreParams.SleepQueueSize else coreParams.IssQueSize
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize

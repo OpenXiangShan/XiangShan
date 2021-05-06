@@ -120,7 +120,7 @@ class ReservationStation
     val flush = Input(Bool())
 
     val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
-    val rsIdx = if (feedback) Output(UInt(log2Up(iqSize).W)) else null
+    val feedbackIdx = if (feedback) Output(UInt(log2Up(iqSize).W)) else null
     val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
@@ -196,7 +196,7 @@ class ReservationStation
   }
 
   if (feedback) {
-    io.rsIdx := RegNext(select.io.deq.bits) // NOTE: just for feeback
+    io.feedbackIdx := RegNext(select.io.deq.bits) // NOTE: just for feeback
     io.isFirstIssue := select.io.isFirstIssue
   }
   io.deq.bits := DontCare
@@ -364,17 +364,17 @@ class ReservationStationSelect
 
   if (feedback) {
     when (io.memfeedback.valid) {
-      when (stateQueue(io.memfeedback.bits.rsIdx) === s_wait) {
+      when (stateQueue(io.memfeedback.bits.feedbackIdx) === s_wait) {
         val s_finish_state = if (exuCfg == StExeUnitCfg) {
-          Mux(dataStateQueue(io.memfeedback.bits.rsIdx) === d_sent || (dataReg && dataIdxReg === io.memfeedback.bits.rsIdx),
+          Mux(dataStateQueue(io.memfeedback.bits.feedbackIdx) === d_sent || (dataReg && dataIdxReg === io.memfeedback.bits.feedbackIdx),
             s_idle, s_sent)
         } else { s_idle }
-        stateQueue(io.memfeedback.bits.rsIdx) := Mux(io.memfeedback.bits.hit, s_finish_state, s_replay)
+        stateQueue(io.memfeedback.bits.feedbackIdx) := Mux(io.memfeedback.bits.hit, s_finish_state, s_replay)
       }
       when (!io.memfeedback.bits.hit) {
-        countQueue(io.memfeedback.bits.rsIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.rsIdx))
+        countQueue(io.memfeedback.bits.feedbackIdx) := replayDelay(cntCountQueue(io.memfeedback.bits.feedbackIdx))
       }
-      assert(stateQueue(io.memfeedback.bits.rsIdx) === s_wait, "mem feedback but rs dont wait for it")
+      assert(stateQueue(io.memfeedback.bits.feedbackIdx) === s_wait, "mem feedback but rs dont wait for it")
     }
   }
 
@@ -485,7 +485,7 @@ class ReservationStationSelect
     XSPerfAccumulate("replayTimesSum", PopCount(io.memfeedback.valid && !io.memfeedback.bits.hit))
     for (i <- 0 until iqSize) {
       // NOTE: maybe useless, for logical queue and phyical queue make this no sense
-      XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.rsIdx === i.U)
+      XSPerfAccumulate(s"replayTimeOfEntry${i}", io.memfeedback.valid && !io.memfeedback.bits.hit && io.memfeedback.bits.feedbackIdx === i.U)
     }
     io.isFirstIssue := RegNext(ParallelPriorityMux(selectMask.asBools zip cntCountQueue) === 0.U) 
   }

@@ -13,7 +13,7 @@ import xiangshan.cache._
 class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val feedbackIdx = Input(UInt(log2Up(SleepQueueSize).W))
     val isFirstIssue = Input(Bool())
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
@@ -44,7 +44,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.data := io.in.bits.src2 // FIXME: remove data from pipeline
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
-  io.out.bits.rsIdx := io.rsIdx
+  io.out.bits.feedbackIdx := io.feedbackIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -84,12 +84,12 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.rsFeedback.valid := io.in.valid
   io.rsFeedback.bits.hit := !s1_tlb_miss
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
-  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.feedbackIdx := io.in.bits.feedbackIdx
   io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
   XSDebug(io.rsFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
     io.rsFeedback.bits.hit,
-    io.rsFeedback.bits.rsIdx
+    io.rsFeedback.bits.feedbackIdx
   )
 
 
@@ -147,7 +147,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val flush = Input(Bool())
     val rsFeedback = ValidIO(new RSFeedback)
     val dtlb = new TlbRequestIO()
-    val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+    val feedbackIdx = Input(UInt(log2Up(SleepQueueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
     val stout = DecoupledIO(new ExuOutput) // writeback store
@@ -160,7 +160,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
-  store_s0.io.rsIdx := io.rsIdx
+  store_s0.io.feedbackIdx := io.feedbackIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))

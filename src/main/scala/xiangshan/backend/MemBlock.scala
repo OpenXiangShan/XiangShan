@@ -12,7 +12,7 @@ import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
-import xiangshan.backend.issue.ReservationStation
+import xiangshan.backend.issue.{ReservationStation, SleepQueue}
 import xiangshan.backend.regfile.RfReadPort
 import utils._
 
@@ -120,6 +120,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
   io.fromFpBlock.readFpRf.foreach(_.addr := DontCare)
+
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -150,8 +151,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val slowPortsCnt = slowPorts.length
 
-    // if tlb miss, replay
-    val feedback = true
+    // If tlb miss, replay
+    // Now we use an extra replay queue SleepQueue, so reservation station 
+    // feedback is no longer needed
+    // TODO: parameterize
+    val feedback = !EnableSleepQueue
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
@@ -179,7 +183,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
-    rs.io.memfeedback := DontCare
+    if(!EnableSleepQueue){
+      rs.io.memfeedback := DontCare
+    }
 
     rs.suggestName(s"rs_${cfg.name}")
 
@@ -209,6 +215,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
   io.intWakeUpFp.foreach(_.ready := true.B)
 
+  val sleepQueues = if (EnableSleepQueue) {
+    (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
+      val sleepQueue = Module(new SleepQueue(s"sleepq_${cfg.name}", SleepQueueSize))
+      sleepQueue.io.enq.bits := reservationStations(i).io.deq.bits
+      sleepQueue.io.redirect <> redirect
+      sleepQueue.io.flush    <> io.fromCtrlBlock.flush
+      sleepQueue
+    })
+  } else {
+    null
+  }
+
   val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
@@ -224,12 +242,29 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
-    loadUnits(i).io.rsFeedback    <> reservationStations(i).io.memfeedback
-    loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
-    loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
-    // get input form dispatch
-    loadUnits(i).io.ldin          <> reservationStations(i).io.deq
+    // get input form rs/sleepqueue
+    if(!EnableSleepQueue){
+      loadUnits(i).io.ldin        <> reservationStations(i).io.deq
+      loadUnits(i).io.feedbackIdx := reservationStations(i).io.feedbackIdx
+    }else{
+      // fixme
+      loadUnits(i).io.ldin.valid := reservationStations(i).io.deq.valid && sleepQueues(i).io.enq.ready || sleepQueues(i).io.deq.valid
+      // TODO: priority
+      // Current strategy: sleeped inst first
+      loadUnits(i).io.ldin.bits := Mux(sleepQueues(i).io.deq.valid,
+        sleepQueues(i).io.deq.bits,
+        reservationStations(i).io.deq.bits
+      )
+      loadUnits(i).io.feedbackIdx := Mux(sleepQueues(i).io.deq.valid,
+        sleepQueues(i).io.deqIdx,
+        sleepQueues(i).io.enqIdx
+      )
+      // fixme
+      reservationStations(i).io.deq.ready := loadUnits(i).io.ldin.ready && !sleepQueues(i).io.deq.valid && sleepQueues(i).io.enq.ready
+      sleepQueues(i).io.deq.ready := loadUnits(i).io.ldin.ready
+      sleepQueues(i).io.enq.valid := loadUnits(i).io.ldin.ready && !sleepQueues(i).io.deq.valid && reservationStations(i).io.deq.valid
+    }
     // dcache access
     loadUnits(i).io.dcache        <> dcache.io.lsu.load(i)
     // forward
@@ -244,6 +279,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
 
+    // Inst state feedback
+    if(!EnableSleepQueue){
+      loadUnits(i).io.rsFeedback <> reservationStations(i).io.memfeedback
+      loadUnits(i).io.isFirstIssue:= reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
+    }else{
+      loadUnits(i).io.rsFeedback <> sleepQueues(i).io.memfeedback
+      loadUnits(i).io.isFirstIssue := sleepQueues(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
+    }
+
     // update waittable
     // TODO: read pc
     io.fromCtrlBlock.waitTableUpdate(i) := DontCare
@@ -254,15 +298,34 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.StuCnt) {
     val stu = storeUnits(i)
     val rs = reservationStations(exuParameters.LduCnt + i)
+    val sleepq = sleepQueues(exuParameters.LduCnt + i)
     val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
-    stu.io.rsFeedback <> rs.io.memfeedback
-    stu.io.rsIdx       <> rs.io.rsIdx
-    stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
-    stu.io.stin        <> rs.io.deq
+    // get input form rs/sleepqueue
+    if(!EnableSleepQueue){
+      stu.io.stin        <> rs.io.deq
+      stu.io.feedbackIdx := rs.io.feedbackIdx
+    }else{
+      // fixme
+      stu.io.stin.valid := rs.io.deq.valid && sleepq.io.enq.ready || sleepq.io.deq.valid
+      // TODO: priority
+      // Current strategy: sleeped inst first
+      stu.io.stin.bits := Mux(sleepq.io.deq.valid,
+        sleepq.io.deq.bits,
+        rs.io.deq.bits
+      )
+      stu.io.feedbackIdx := Mux(sleepq.io.deq.valid,
+        sleepq.io.deqIdx,
+        sleepq.io.enqIdx
+      )
+      // fixme
+      rs.io.deq.ready := stu.io.stin.ready && !sleepq.io.deq.valid && sleepq.io.enq.ready
+      sleepq.io.deq.ready := stu.io.stin.ready
+      sleepq.io.enq.valid := stu.io.stin.ready && !sleepq.io.deq.valid && rs.io.deq.valid
+    }
     stu.io.lsq         <> lsq.io.storeIn(i)
 
     // rs.io.storeData <> lsq.io.storeDataIn(i)
@@ -271,6 +334,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
+
+    // Inst state feedback
+    if(!EnableSleepQueue){
+      stu.io.rsFeedback <> rs.io.memfeedback
+      stu.io.isFirstIssue := rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
+    }else{
+      stu.io.rsFeedback <> sleepq.io.memfeedback
+      stu.io.isFirstIssue := sleepq.io.isFirstIssue // NOTE: just for dtlb's perf cnt
+    }
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
@@ -353,9 +425,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
   atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, reservationStations(atomic_rs0).io.stData.bits, reservationStations(atomic_rs1).io.stData.bits)
-  atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
   atomicsUnit.io.flush <> io.fromCtrlBlock.flush
+  if(!EnableSleepQueue){
+    atomicsUnit.io.feedbackIdx := Mux(st0_atomics, reservationStations(atomic_rs0).io.feedbackIdx, reservationStations(atomic_rs1).io.feedbackIdx)
+  }else{
+    atomicsUnit.io.feedbackIdx := Mux(st0_atomics, sleepQueues(atomic_rs0).io.deqIdx, sleepQueues(atomic_rs1).io.deqIdx)
+  }
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
@@ -377,12 +453,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   when (state === s_atomics_0) {
-    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs0).io.memfeedback
+    if(!EnableSleepQueue){
+      atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs0).io.memfeedback
+    }else{
+      atomicsUnit.io.rsFeedback <> sleepQueues(atomic_rs0).io.memfeedback
+    }
 
     assert(!storeUnits(0).io.rsFeedback.valid)
   }
   when (state === s_atomics_1) {
-    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs1).io.memfeedback
+    if(!EnableSleepQueue){
+      atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs1).io.memfeedback
+    }else{
+      atomicsUnit.io.rsFeedback <> sleepQueues(atomic_rs1).io.memfeedback
+    }
 
     assert(!storeUnits(1).io.rsFeedback.valid)
   }

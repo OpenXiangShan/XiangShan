@@ -416,7 +416,7 @@ class RoqCommitIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
-  val rsIdx = UInt(log2Up(IssQueSize).W)
+  val feedbackIdx = UInt(log2Up(SleepQueueSize).W)
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
