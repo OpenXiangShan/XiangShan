@@ -251,8 +251,8 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
-  val src1Type, src2Type, src3Type = SrcType()
-  val lsrc1, lsrc2, lsrc3 = UInt(5.W)
+  val srcType = Vec(3, SrcType())
+  val lsrc = Vec(3, UInt(5.W))
   val ldest = UInt(5.W)
   val fuType = FuType()
   val fuOpType = FuOpType()
@@ -272,7 +272,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
     val signals =
-      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen,
+      Seq(srcType(0), srcType(1), srcType(2), fuType, fuOpType, rfWen, fpWen,
         isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
     signals zip decoder map { case (s, d) => s := d }
     commitType := DontCare
@@ -304,20 +304,22 @@ class LSIdx(implicit p: Parameters) extends XSBundle {
 
 // CfCtrl -> MicroOp at Rename Stage
 class MicroOp(implicit p: Parameters) extends CfCtrl {
-  val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
-  val src1State, src2State, src3State = SrcState()
+  val srcState = Vec(3, SrcState())
+  val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
+  val pdest =UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
   val roqIdx = new RoqPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
-  def needRfRPort(index: Int, rfType: Int) : Bool = {
+  def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = true) : Bool = {
     (index, rfType) match {
-      case (0, 0) => ctrl.src1Type === SrcType.reg && ctrl.lsrc1 =/= 0.U && src1State === SrcState.rdy
-      case (1, 0) => ctrl.src2Type === SrcType.reg && ctrl.lsrc2 =/= 0.U && src1State === SrcState.rdy
-      case (0, 1) => ctrl.src1Type === SrcType.fp && src1State === SrcState.rdy
-      case (1, 1) => ctrl.src2Type === SrcType.fp && src1State === SrcState.rdy
-      case (2, 1) => ctrl.src3Type === SrcType.fp && src1State === SrcState.rdy
+      case (0, 0) => ctrl.srcType(0) === SrcType.reg && ctrl.lsrc(0) =/= 0.U && (srcState(0) === SrcState.rdy || ignoreState.B)
+      case (1, 0) => ctrl.srcType(1) === SrcType.reg && ctrl.lsrc(1) =/= 0.U && (srcState(1) === SrcState.rdy || ignoreState.B)
+      case (0, 1) => ctrl.srcType(0) === SrcType.fp && (srcState(0) === SrcState.rdy || ignoreState.B)
+      case (1, 1) => ctrl.srcType(1) === SrcType.fp && (srcState(1) === SrcState.rdy || ignoreState.B)
+      case (2, 1) => ctrl.srcType(2) === SrcType.fp && (srcState(2) === SrcState.rdy || ignoreState.B)
       case _ => false.B
     }
   }

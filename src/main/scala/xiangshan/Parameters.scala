@@ -201,6 +201,7 @@ trait HasXSParameter {
   val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val TlbEntrySize = coreParams.TlbEntrySize
   val TlbSPEntrySize = coreParams.TlbSPEntrySize
+  val useFakePTW = false
   val PtwL3EntrySize = coreParams.PtwL3EntrySize
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
@@ -217,6 +218,7 @@ trait HasXSParameter {
     nMissEntries = 2
   )
 
+  val useFakeL1plusCache = false
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -224,6 +226,7 @@ trait HasXSParameter {
     nMissEntries = 8
   )
 
+  val useFakeDCache = false
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -241,6 +244,7 @@ trait HasXSParameter {
   val l1BusDataWidth = 256
 
   // L2 configurations
+  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache
   val L1BusWidth = 256
   val L2Size = 512 * 1024 // 512KB
   val L2BlockSize = 64
@@ -249,7 +253,7 @@ trait HasXSParameter {
 
   // L3 configurations
   val L2BusWidth = 256
-  
+
   // icache prefetcher
   val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
     enable = true,
@@ -287,12 +291,13 @@ trait HasXSParameter {
     ),
   )
 
-  val loadExuConfigs = coreParams.loadExuConfigs 
-  val storeExuConfigs = coreParams.storeExuConfigs 
+  val loadExuConfigs = coreParams.loadExuConfigs
+  val storeExuConfigs = coreParams.storeExuConfigs
 
-  val intExuConfigs = coreParams.intExuConfigs 
+  val intExuConfigs = coreParams.intExuConfigs
 
-  val fpExuConfigs = coreParams.fpExuConfigs 
+  val fpExuConfigs = coreParams.fpExuConfigs
 
-  val exuConfigs = coreParams.exuConfigs 
+  val exuConfigs = coreParams.exuConfigs
+
 }

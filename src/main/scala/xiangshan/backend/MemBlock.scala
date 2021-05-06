@@ -38,7 +38,7 @@ class MemBlock(
   val numIntWakeUpFp: Int
 )(implicit p: Parameters) extends LazyModule {
 
-  val dcache = LazyModule(new DCache())
+  val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
 
   lazy val module = new MemBlockImp(this)

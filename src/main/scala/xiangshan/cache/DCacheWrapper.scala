@@ -6,8 +6,9 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLArbiter, TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLMessages}
+import freechips.rocketchip.tilelink._
 import system.L1CacheErrorInfo
+import device.RAMHelper
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
@@ -350,4 +351,84 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("num_loads", num_loads)
 
   io.mshrFull := missQueue.io.full
+}
+
+class AMOHelper() extends BlackBox {
+  val io = IO(new Bundle {
+    val clock  = Input(Clock())
+    val enable = Input(Bool())
+    val cmd    = Input(UInt(5.W))
+    val addr   = Input(UInt(64.W))
+    val wdata  = Input(UInt(64.W))
+    val mask   = Input(UInt(8.W))
+    val rdata  = Output(UInt(64.W))
+  })
+}
+
+class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+  val io = IO(new DCacheIO)
+
+  io := DontCare
+  // to LoadUnit
+  for (i <- 0 until LoadPipelineWidth) {
+    val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
+    fakeRAM.io.clk   := clock
+    fakeRAM.io.en    := io.lsu.load(i).resp.valid && !reset.asBool
+    fakeRAM.io.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
+    fakeRAM.io.wIdx  := 0.U
+    fakeRAM.io.wdata := 0.U
+    fakeRAM.io.wmask := 0.U
+    fakeRAM.io.wen   := false.B
+
+    io.lsu.load(i).req.ready := true.B
+    io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
+    io.lsu.load(i).resp.bits.data := fakeRAM.io.rdata
+    io.lsu.load(i).resp.bits.miss := false.B
+    io.lsu.load(i).resp.bits.replay := false.B
+    io.lsu.load(i).resp.bits.id := DontCare
+    io.lsu.load(i).s1_hit_way := 1.U
+    io.lsu.load(i).s1_disable_fast_wakeup := false.B
+  }
+  // to LSQ
+  io.lsu.lsq.valid := false.B
+  io.lsu.lsq.bits := DontCare
+  // to Store Buffer
+  io.lsu.store.req.ready := true.B
+  io.lsu.store.resp := DontCare
+  io.lsu.store.resp.valid := RegNext(io.lsu.store.req.valid)
+  io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
+  // to atomics
+  val amoHelper = Module(new AMOHelper)
+  amoHelper.io.clock := clock
+  amoHelper.io.enable := io.lsu.atomics.req.valid && !reset.asBool
+  amoHelper.io.cmd := io.lsu.atomics.req.bits.cmd
+  amoHelper.io.addr := io.lsu.atomics.req.bits.addr
+  amoHelper.io.wdata := io.lsu.atomics.req.bits.data
+  amoHelper.io.mask := io.lsu.atomics.req.bits.mask
+  io.lsu.atomics.req.ready := true.B
+  io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
+  assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
+  io.lsu.atomics.resp.bits.data := amoHelper.io.rdata
+  io.lsu.atomics.resp.bits.replay := false.B
+  io.lsu.atomics.resp.bits.id := 1.U
+}
+
+class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientNode = if (!useFakeDCache) TLIdentityNode() else null
+  val dcache = if (!useFakeDCache) LazyModule(new DCache()) else null
+  if (!useFakeDCache) {
+    clientNode := dcache.clientNode
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new DCacheIO)
+    if (useFakeDCache) {
+      val fake_dcache = Module(new FakeDCache())
+      io <> fake_dcache.io
+    }
+    else {
+      io <> dcache.module.io
+    }
+  }
 }

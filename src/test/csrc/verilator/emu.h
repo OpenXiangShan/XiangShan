@@ -19,6 +19,7 @@ struct EmuArgs {
   const char *snapshot_path;
   bool enable_waveform;
   bool enable_snapshot;
+  bool force_dump_result;
 
   EmuArgs() {
     seed = 0;
@@ -32,6 +33,7 @@ struct EmuArgs {
     image = NULL;
     enable_waveform = false;
     enable_snapshot = true;
+    force_dump_result = false;
   }
 };
 

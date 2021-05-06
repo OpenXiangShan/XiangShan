@@ -224,7 +224,7 @@ class FloatBlock
     }
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock  := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
   }
 

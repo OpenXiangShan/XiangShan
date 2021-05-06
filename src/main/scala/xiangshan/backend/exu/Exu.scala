@@ -32,6 +32,7 @@ case class ExuParameters
 case class ExuConfig
 (
   name: String,
+  blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
   wbFpPriority: Int
@@ -58,8 +59,9 @@ case class ExuConfig
       x
     }
   }
-  val hasCertainLatency = latency.latencyVal.nonEmpty
-  val hasUncertainlatency = latency.latencyVal.isEmpty
+  // NOTE: dirty code for MulDivExeUnit
+  val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
+  val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()

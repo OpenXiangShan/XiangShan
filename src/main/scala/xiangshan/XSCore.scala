@@ -7,7 +7,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
@@ -59,8 +59,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   with HasExeBlockHelper {
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
-  val l1pluscache = LazyModule(new L1plusCache())
-  val ptw = LazyModule(new PTW())
+  val l1pluscache = LazyModule(new L1plusCacheWrapper())
+  val ptw = LazyModule(new PTWWrapper())
   val memBlock = LazyModule(new MemBlock(
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
