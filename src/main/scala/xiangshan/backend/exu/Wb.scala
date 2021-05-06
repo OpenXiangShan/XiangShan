@@ -56,6 +56,7 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameter
   val directConnect = io.in.zip(priorities).filter(x => x._2 == 0).map(_._1)
   val mulReq = io.in.zip(priorities).filter(x => x._2 == 1).map(_._1)
   val otherReq = io.in.zip(priorities).filter(x => x._2 > 1).map(_._1)
+  // NOTE: 0 for direct connect; 1 for shared connect but non-blocked; other for shared and may blocked
 
   val portUsed = directConnect.size + mulReq.size
   require(portUsed <= numOut)
