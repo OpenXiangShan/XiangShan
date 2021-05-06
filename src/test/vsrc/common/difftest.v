@@ -569,6 +569,6 @@ endmodule
   input [63:0] ptwData_3
 );
   `DIFFTEST_MOD_DPIC_CALL_BEGIN_WITH_EN(ptwResp, PtwEvent) (
-    coreid, ptwResp, ptwData_0, ptwData_1, ptwData_2, ptwData_3
+    coreid, ptwResp, ptwAddr, ptwData_0, ptwData_1, ptwData_2, ptwData_3
   ) `DIFFTEST_MOD_DPIC_CALL_END_WITH_EN(PtwEvent)
 endmodule

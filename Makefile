@@ -77,34 +77,10 @@ SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
 DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
 DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
 
-SIM_VSRC = $(shell find ./src/test/vsrc -name "*.v" -or -name "*.sv")
+SIM_VSRC = $(shell find ./src/test/vsrc/common -name "*.v" -or -name "*.sv")
 
-include Makefile.emu
-
-EMU_VCS := simv
-
-VCS_SRC_FILE = $(TOP_V) \
-               $(BUILD_DIR)/plusarg_reader.v \
-               $(BUILD_DIR)/SDHelper.v
-
-VCS_TB_DIR = $(abspath ./src/test/vcs)
-VCS_TB_FILE = $(shell find $(VCS_TB_DIR) -name "*.c") \
-              $(shell find $(VCS_TB_DIR) -name "*.v")
-
-VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
-  -LDFLAGS -Wl,--no-as-needed \
-  -sverilog \
-  +lint=TFIPC-L \
-  -debug_all +vcd+vcdpluson \
-  +define+RANDOMIZE_GARBAGE_ASSIGN \
-  +define+RANDOMIZE_INVALID_ASSIGN \
-  +define+RANDOMIZE_REG_INIT \
-  +define+RANDOMIZE_MEM_INIT \
-  +define+RANDOMIZE_DELAY=1
-
-$(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
-	rm -rf csrc
-	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
+include verilator.mk
+include vcs.mk
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)
@@ -150,7 +126,7 @@ cache:
 release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
-clean:
+clean: vcs-clean
 	rm -rf ./build
 
 init:
