@@ -577,7 +577,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val do_deq = (!v(deqPtr) && !isEmptyDeq)
   val do_iss = io.ptw.req(0).fire() || (!v(issPtr) && !isEmptyIss)
   when (do_enq) {
-    enqPtr := enqPtr + enqPtrVec(Width - 1)
+    enqPtr := enqPtrVec(Width - 1)
   }
   when (do_deq) {
     deqPtr := deqPtr + 1.U
