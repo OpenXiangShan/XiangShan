@@ -419,6 +419,14 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   }
   XSDebug(p"[io.sfence] ${io.sfence}\n")
   XSDebug(p"[io.csr] ${io.csr}\n")
+
+  for (i <- 0 until PtwWidth) {
+    XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire())
+    XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
+  }
+  XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
+  XSPerfAccumulate(s"replay_again", cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isReplay && !fsm.io.req.ready)
+  XSPerfAccumulate(s"into_fsm_no_replay", cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay && fsm.io.req.ready)
 }
 
 /* Miss Queue dont care about duplicate req, which is done by PtwFilter
@@ -475,6 +483,19 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.out.bits.vpn := vpn(deqPtr)
   io.out.bits.source := source(deqPtr)
   io.empty := empty
+
+  XSPerfAccumulate("mq_in_count", io.in.fire())
+  XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)
+  val count = RegInit(0.U((log2Up(MSHRSize)+1).W))
+  when (do_enq =/= do_deq) {
+    count := Mux(do_enq, count + 1.U, count - 1.U)
+  }
+  when (io.sfence.valid) {
+    count := 0.U
+  }
+  for (i <- 0 until MSHRSize) {
+    XSPerfAccumulate(s"numExist${i}", count === 1.U)
+  }
 }
 
 class PTWRepeater(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -603,6 +624,11 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     }
     reqs
   }
+
+  XSPerfAccumulate("req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
+  XSPerfAccumulate("req_count_filter", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
+  XSPerfAccumulate("resp_count", PopCount(Cat(io.tlb.resp.fire())))
+  XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
 }
 
 /* ptw cache caches the page table of all the three layers
@@ -1023,6 +1049,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("l3_hit", l3Hit)
   XSPerfAccumulate("sp_hit", spHit)
   XSPerfAccumulate("pte_hit", l3Hit || spHit)
+  XSPerfAccumulate("rwHarzad", io.req.valid && !io.req.ready)
+  XSPerfAccumulate("out_blocked", io.resp.valid && !io.resp.ready)
   l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1AccessIndex${i}", l) }
   l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2AccessIndex${i}", l) }
   l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3AccessIndex${i}", l) }
@@ -1183,9 +1211,16 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSDebug(p"[fsm] state:${state} level:${level} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
 
   // perf
+  XSPerfAccumulate("fsm_count", io.req.fire())
+  for (i <- 0 until PtwWidth) {
+    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.source === i.U)
+  }
+  XSPerfAccumulate("fsm_busy", state =/= s_idle)
+  XSPerfAccumulate("fsm_idle", state === s_idle)
+  XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
-  XSPerfAccumulate("mem_blocked_cycle", mem.req.valid && !mem.req.ready)
+  XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 }
 
 class PTEHelper() extends BlackBox {
