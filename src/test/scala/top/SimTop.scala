@@ -71,7 +71,7 @@ class SimTop(implicit p: Parameters) extends Module {
 object SimTop extends App {
 
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args)
+    val (config, firrtlOpts) = ArgParser.parse(args, fpga = false)
     // generate verilog
     XiangShanStage.execute(
       firrtlOpts,

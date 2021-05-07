@@ -29,7 +29,7 @@ object ArgParser {
     val c = Class.forName(prefix + confString).getConstructor(Integer.TYPE)
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
-  def parse(args: Array[String]): (Parameters, Array[String]) = {
+  def parse(args: Array[String], fpga: Boolean = true): (Parameters, Array[String]) = {
     val default = new DefaultConfig(1)
     var firrtlOpts = Array[String]()
     @tailrec
@@ -68,6 +68,12 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    (nextOption(default, args.toList), firrtlOpts)
+    var config = nextOption(default, args.toList)
+    if(!fpga){
+      config = config.alter((site, here, up) => {
+        case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = false)
+      })
+    }
+    (config, firrtlOpts)
   }
 }

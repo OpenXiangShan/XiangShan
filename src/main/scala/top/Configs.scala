@@ -25,7 +25,6 @@ class MinimalConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
-        HasL2Cache = false,
         IssQueSize = 8,
         NRPhyRegs = 80,
         LoadQueueSize = 16,
@@ -44,7 +43,17 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-      ))
+        TlbEntrySize = 4,
+        TlbSPEntrySize = 2,
+        PtwL1EntrySize = 2,
+        PtwL2EntrySize = 2,
+        PtwL3EntrySize = 4,
+        PtwSPEntrySize = 2,
+        useFakeDCache = true,
+        useFakePTW = true,
+        useFakeL1plusCache = true,
+      )),
+      useFakeL3Cache = true
     )
   })
 )
