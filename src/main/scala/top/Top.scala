@@ -321,12 +321,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
 object TopMain extends App {
   override def main(args: Array[String]): Unit = {
-    val numCores = if(args.contains("--dual-core")) 2 else 1
-    val otherArgs = args.filterNot(_ == "--dual-core")
-    implicit val config = new DefaultConfig(numCores)
-    XiangShanStage.execute(otherArgs, Seq(
+    val (config, firrtlOpts) = ArgParser.parse(args)
+    XiangShanStage.execute(firrtlOpts, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop())
+        val soc = LazyModule(new XSTop()(config))
         soc.module
       })
     ))
