@@ -364,6 +364,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.refill.bits.level := fsm.io.refill.level
   cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
   cache.io.sfence := sfence
+  cache.io.refuseRefill := fsm.io.sfenceLatch
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
   missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !fsm.io.req.ready
@@ -661,6 +662,7 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val memAddr = Input(UInt(PAddrBits.W))
   }))
   val sfence = Input(new SfenceBundle)
+  val refuseRefill = Input(Bool())
 }
 
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -669,13 +671,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   // TODO: four caches make the codes dirty, think about how to deal with it
 
   val sfence = io.sfence
+  val refuseRefill = io.refuseRefill
   val refill = io.refill.bits
 
   val first_valid = io.req.valid
   val first_fire = first_valid && io.req.ready
   val first_req = io.req.bits
   val second_ready = Wire(Bool())
-  val second_valid = BoolStopWatch(first_fire, io.resp.fire(), true)
+  val second_valid = ValidHold(first_fire, io.resp.fire(), sfence.valid)
   val second_req = RegEnable(first_req, first_fire)
   // NOTE: if ptw cache resp may be blocked, hard to handle refill
   // when miss queue is full, please to block itlb and dtlb input
@@ -895,7 +898,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val memPte = memSelData.asTypeOf(new PteBundle)
 
   // TODO: handle sfenceLatch outsize
-  when (io.refill.valid && !memPte.isPf(refill.level) && sfence.valid) {
+  when (io.refill.valid && !memPte.isPf(refill.level) && !(sfence.valid || refuseRefill)) {
     when (refill.level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
@@ -1101,6 +1104,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
 
   val csr = Input(new TlbCsrBundle)
   val sfence = Input(new SfenceBundle)
+  val sfenceLatch = Output(Bool())
   val refill = Output(new Bundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
@@ -1207,6 +1211,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.refill.vpn := vpn
   io.refill.level := level
   io.refill.memAddr := memAddrReg
+  io.sfenceLatch := sfenceLatch
 
   XSDebug(p"[fsm] state:${state} level:${level} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
 
