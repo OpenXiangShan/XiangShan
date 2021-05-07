@@ -866,7 +866,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   resp.hit      := l3Hit || spHit
   resp.toFsm.l1Hit := l1Hit
   resp.toFsm.l2Hit := l2Hit
-  resp.toFsm.ppn   := Mux(l1Hit, l1HitPPN, l2HitPPN)
+  resp.toFsm.ppn   := Mux(l2Hit, l2HitPPN, l1HitPPN)
   resp.toTlb.tag   := second_req.vpn
   resp.toTlb.ppn   := Mux(l3Hit, l3HitPPN, spHitData.ppn)
   resp.toTlb.perm.map(_ := Mux(l3Hit, l3HitPerm, spHitPerm))
@@ -1192,7 +1192,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val resp = Reg(io.resp.bits.cloneType)
   when (finish && !sfenceLatch) {
     resp.source := RegEnable(io.req.bits.source, io.req.fire())
-    resp.resp.pf := level === 2.U || notFound
+    resp.resp.pf := level === 3.U || notFound
     resp.resp.entry.tag := vpn
     resp.resp.entry.ppn := memPte.ppn
     resp.resp.entry.perm.map(_ := memPte.getPerm())
