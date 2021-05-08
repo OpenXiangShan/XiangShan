@@ -203,9 +203,9 @@ class ReservationStation
   io.deq.bits.uop  := ctrl.io.out.bits
   io.deq.bits.uop.cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
   io.deq.valid     := ctrl.io.out.valid
-  io.deq.bits.src1 := data.io.out(0)
-  if (srcNum > 1) { io.deq.bits.src2 := data.io.out(1) }
-  if (srcNum > 2) { io.deq.bits.src3 := data.io.out(2) }
+  io.deq.bits.src(0) := data.io.out(0)
+  if (srcNum > 1) { io.deq.bits.src(1) := data.io.out(1) }
+  if (srcNum > 2) { io.deq.bits.src(2) := data.io.out(2) }
   if (exuCfg == JumpExeUnitCfg) { io.deq.bits.uop.cf.pc := data.io.pc }
 
   if (exuCfg == StExeUnitCfg) {
