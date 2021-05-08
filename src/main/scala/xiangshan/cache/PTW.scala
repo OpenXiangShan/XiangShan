@@ -343,11 +343,11 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 2)).io)
 
   // NOTE: when cache out but miss and fsm doesnt accept,
-  val blockNewReq = !missQueue.io.in.ready && cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay
+  val blockNewReq = false.B
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
   arb1.io.out.ready := arb2.io.in(1).ready && !blockNewReq
 
-  val blockMissQueue = !fsm.io.req.ready || BoolStopWatch(missQueue.io.out.fire(), fsm.io.resp.fire() || sfence.valid)
+  val blockMissQueue = !fsm.io.req.ready
   block_decoupled(missQueue.io.out, arb2.io.in(0), blockMissQueue)
   arb2.io.in(1).valid := arb1.io.out.valid && !blockNewReq
   arb2.io.in(1).bits.vpn := arb1.io.out.bits.vpn
@@ -487,7 +487,7 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   XSPerfAccumulate("mq_in_count", io.in.fire())
   XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)
-  val count = RegInit(0.U((log2Up(MSHRSize)+1).W))
+  val count = RegInit(0.U(log2Up(MSHRSize+1).W))
   when (do_enq =/= do_deq) {
     count := Mux(do_enq, count + 1.U, count - 1.U)
   }
@@ -544,6 +544,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
+  val counter = RegInit(0.U(log2Up(Size+1).W))
 
   val sfence = RegNext(io.sfence)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
@@ -556,8 +557,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val isEmptyIss = enqPtr === issPtr && !mayFullIss
   val accumEnqNum = (0 until Width).map(i => PopCount(reqs.take(i).map(_.valid)))
   val enqPtrVec = VecInit((0 until Width).map(i => enqPtr + accumEnqNum(i)))
-  val enqPtrFullVec = enqPtrVec.map(_ === deqPtr && mayFullDeq)
-  val canEnqueue = !Cat(enqPtrFullVec).orR
+  val canEnqueue = counter + accumEnqNum(Size - 1) <= Size.U
 
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
   io.tlb.resp.valid := ptwResp_valid
@@ -599,6 +599,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     }
   }
 
+  counter := counter - do_deq + Mux(do_enq, accumEnqNum(Size - 1), 0.U)
+
   when (sfence.valid) {
     v.map(_ := false.B)
     deqPtr := 0.U
@@ -607,6 +609,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     ptwResp_valid := false.B
     mayFullDeq := false.B
     mayFullIss := false.B
+    counter := 0.U
   }
 
   def canMerge(vpnReq: UInt, reqs: Seq[DecoupledIO[PtwReq]], index: Int) : Bool = {
@@ -630,6 +633,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   XSPerfAccumulate("req_count_filter", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
   XSPerfAccumulate("resp_count", PopCount(Cat(io.tlb.resp.fire())))
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
+  for (i <- 0 until Size) {
+    XSPerfAccumulate(s"counter${i}", counter === i.U)
+  }
 }
 
 /* ptw cache caches the page table of all the three layers
