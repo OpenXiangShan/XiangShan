@@ -606,6 +606,11 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   }
 
   counter := counter - do_deq + Mux(do_enq, accumEnqNum(Size - 1), 0.U)
+  assert(counter <= Size.U, "counter should be less than Size")
+  when (counter === 0.U) {
+    assert(!io.ptw.req(0).fire(), "when counter is 0, should not req")
+    assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
+  }
 
   when (sfence.valid) {
     v.map(_ := false.B)
