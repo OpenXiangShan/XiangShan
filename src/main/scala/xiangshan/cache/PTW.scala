@@ -543,6 +543,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     val sfence = Input(new SfenceBundle)
   })
 
+  require(Size >= Width)
+
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
@@ -563,7 +565,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val isEmptyIss = enqPtr === issPtr && !mayFullIss
   val accumEnqNum = (0 until Width).map(i => PopCount(reqs.take(i).map(_.valid)))
   val enqPtrVec = VecInit((0 until Width).map(i => enqPtr + accumEnqNum(i)))
-  val canEnqueue = counter + accumEnqNum(Size - 1) <= Size.U
+  val enqNum = PopCount(reqs.map(_.valid))
+  val canEnqueue = counter +& enqNum <= Size.U
 
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
   io.tlb.resp.valid := ptwResp_valid
@@ -584,7 +587,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val do_deq = (!v(deqPtr) && !isEmptyDeq)
   val do_iss = io.ptw.req(0).fire() || (!v(issPtr) && !isEmptyIss)
   when (do_enq) {
-    enqPtr := enqPtrVec(Width - 1)
+    enqPtr := enqPtr + enqNum
   }
   when (do_deq) {
     deqPtr := deqPtr + 1.U
@@ -605,11 +608,14 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     }
   }
 
-  counter := counter - do_deq + Mux(do_enq, accumEnqNum(Size - 1), 0.U)
+  counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)
   assert(counter <= Size.U, "counter should be less than Size")
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire(), "when counter is 0, should not req")
     assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
+  }
+  when (counter === Size.U) {
+    assert(mayFullDeq, "when counter is Size, should be full")
   }
 
   when (sfence.valid) {
