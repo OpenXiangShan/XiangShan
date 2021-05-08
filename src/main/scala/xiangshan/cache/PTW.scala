@@ -159,9 +159,15 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
 
-  def hit(vpn: UInt) = {
+  def hit(vpn: UInt, allType: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
-    if (hasLevel) {
+    if (allType) {
+      require(hasLevel)
+      val hit0 = tag(tagLen - 1,    vpnnLen*2) === vpn(tagLen - 1, vpnnLen*2)
+      val hit1 = tag(vpnnLen*2 - 1, vpnnLen)   === vpn(vpnnLen*2 - 1,  vpnnLen)
+      val hit2 = tag(vpnnLen - 1,     0)         === vpn(vpnnLen - 1, 0)
+      Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
+    } else if (hasLevel) {
       val hit0 = tag(tagLen - 1, tagLen - vpnnLen) === vpn(vpnLen - 1, vpnLen - vpnnLen)
       val hit1 = tag(tagLen - vpnnLen - 1, tagLen - vpnnLen * 2) === vpn(vpnLen - vpnnLen - 1, vpnLen - vpnnLen * 2)
       Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
@@ -595,7 +601,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   when (ptwResp_valid) {
     vpn.zip(v).map{case (pi, vi) =>
-      when (vi && ptwResp.entry.hit(pi)) { vi := false.B }
+      when (vi && ptwResp.entry.hit(pi, allType = true)) { vi := false.B }
     }
   }
 
