@@ -616,7 +616,7 @@ class ReservationStationCtrl
   } else {
     io.readyVec := srcQueueWire.map(Cat(_).andR)
   }
-  if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) {
+  if (exuCfg == LdExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
     ldWait.zip(sqIdx).map{ case (lw, sq) =>
