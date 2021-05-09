@@ -251,19 +251,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       // fixme
       loadUnits(i).io.ldin.valid := reservationStations(i).io.deq.valid && sleepQueues(i).io.enq.ready || sleepQueues(i).io.deq.valid
       // TODO: priority
-      // Current strategy: sleeped inst first
-      loadUnits(i).io.ldin.bits := Mux(sleepQueues(i).io.deq.valid,
-        sleepQueues(i).io.deq.bits,
-        reservationStations(i).io.deq.bits
+      // Current strategy: rs inst first
+      loadUnits(i).io.ldin.bits := Mux(reservationStations(i).io.deq.valid,
+        reservationStations(i).io.deq.bits,
+        sleepQueues(i).io.deq.bits
       )
-      loadUnits(i).io.feedbackIdx := Mux(sleepQueues(i).io.deq.valid,
-        sleepQueues(i).io.deqIdx,
-        sleepQueues(i).io.enqIdx
+      loadUnits(i).io.feedbackIdx := Mux(reservationStations(i).io.deq.valid,
+        sleepQueues(i).io.enqIdx,
+        sleepQueues(i).io.deqIdx
       )
       // fixme
-      reservationStations(i).io.deq.ready := loadUnits(i).io.ldin.ready && !sleepQueues(i).io.deq.valid && sleepQueues(i).io.enq.ready
-      sleepQueues(i).io.deq.ready := loadUnits(i).io.ldin.ready
-      sleepQueues(i).io.enq.valid := loadUnits(i).io.ldin.ready && !sleepQueues(i).io.deq.valid && reservationStations(i).io.deq.valid
+      reservationStations(i).io.deq.ready := loadUnits(i).io.ldin.ready && sleepQueues(i).io.enq.ready
+      sleepQueues(i).io.deq.ready := loadUnits(i).io.ldin.ready && !reservationStations(i).io.deq.valid 
+      sleepQueues(i).io.enq.valid := loadUnits(i).io.ldin.ready && reservationStations(i).io.deq.valid
     }
     // dcache access
     loadUnits(i).io.dcache        <> dcache.io.lsu.load(i)
@@ -313,18 +313,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       stu.io.stin.valid := rs.io.deq.valid && sleepq.io.enq.ready || sleepq.io.deq.valid
       // TODO: priority
       // Current strategy: sleeped inst first
-      stu.io.stin.bits := Mux(sleepq.io.deq.valid,
-        sleepq.io.deq.bits,
-        rs.io.deq.bits
+      stu.io.stin.bits := Mux(rs.io.deq.valid,
+        rs.io.deq.bits,
+        sleepq.io.deq.bits
       )
-      stu.io.feedbackIdx := Mux(sleepq.io.deq.valid,
-        sleepq.io.deqIdx,
-        sleepq.io.enqIdx
+      stu.io.feedbackIdx := Mux(rs.io.deq.valid,
+        sleepq.io.enqIdx,
+        sleepq.io.deqIdx
       )
       // fixme
-      rs.io.deq.ready := stu.io.stin.ready && !sleepq.io.deq.valid && sleepq.io.enq.ready
-      sleepq.io.deq.ready := stu.io.stin.ready
-      sleepq.io.enq.valid := stu.io.stin.ready && !sleepq.io.deq.valid && rs.io.deq.valid
+      rs.io.deq.ready := stu.io.stin.ready && sleepq.io.enq.ready
+      sleepq.io.deq.ready := stu.io.stin.ready && !rs.io.deq.valid
+      sleepq.io.enq.valid := stu.io.stin.ready && rs.io.deq.valid
     }
     stu.io.lsq         <> lsq.io.storeIn(i)
 
@@ -430,7 +430,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if(!EnableSleepQueue){
     atomicsUnit.io.feedbackIdx := Mux(st0_atomics, reservationStations(atomic_rs0).io.feedbackIdx, reservationStations(atomic_rs1).io.feedbackIdx)
   }else{
-    atomicsUnit.io.feedbackIdx := Mux(st0_atomics, sleepQueues(atomic_rs0).io.deqIdx, sleepQueues(atomic_rs1).io.deqIdx)
+    atomicsUnit.io.feedbackIdx := Mux(st0_atomics,
+      Mux(reservationStations(atomic_rs0).io.deq.valid, sleepQueues(atomic_rs0).io.enqIdx, sleepQueues(atomic_rs0).io.deqIdx),
+      Mux(reservationStations(atomic_rs1).io.deq.valid, sleepQueues(atomic_rs1).io.enqIdx, sleepQueues(atomic_rs1).io.deqIdx)
+    )
   }
 
   atomicsUnit.io.dtlb.resp.valid := false.B
