@@ -120,6 +120,6 @@ class SleepQueue
 
   // perf counters
   io.isFirstIssue := DontCare // TODO: fixme
-  // TODO
+  QueuePerf(sleepQueueSize, sleepQueueSize.U - PopCount(enqSelectVec), !io.enq.ready)
 
 }
