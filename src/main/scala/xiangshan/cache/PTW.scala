@@ -650,7 +650,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   XSPerfAccumulate("req_count_filter", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
   XSPerfAccumulate("resp_count", PopCount(Cat(io.tlb.resp.fire())))
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
-  for (i <- 0 until Size) {
+  for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)
   }
 }
