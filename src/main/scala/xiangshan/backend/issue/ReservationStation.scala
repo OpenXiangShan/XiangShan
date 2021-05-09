@@ -345,8 +345,8 @@ class ReservationStationSelect
 
   // deq
   val dequeue = Mux(RegNext(io.flush), false.B,
-                    if (feedback) bubbleReg else bubbleReg || issueFire)
-  val deqPtr = if (feedback) bubblePtrReg
+                    if (feedback || EnableSleepQueue && exuCfg == StExeUnitCfg) bubbleReg else bubbleReg || issueFire)
+  val deqPtr = if (feedback || EnableSleepQueue && exuCfg == StExeUnitCfg) bubblePtrReg
                else if (nonBlocked) Mux(selectReg, selectPtrReg, bubblePtrReg)
                else Mux(bubbleReg, bubblePtrReg, selectPtrReg)
   moveMask := {
@@ -392,7 +392,20 @@ class ReservationStationSelect
 
   when (issueFire) {
     if (feedback) { when (stateQueue(selectIndexReg) === s_valid) { stateQueue(selectIndexReg) := s_wait } }
-    else { stateQueue(selectIndexReg) := s_idle } // NOTE: reset the state for seclectMask timing to avoid operaion '<'
+    else {  
+      if (EnableSleepQueue && exuCfg == StExeUnitCfg) {
+        when (stateQueue(selectIndexReg) === s_valid) {
+          stateQueue(selectIndexReg) := Mux(
+            dataStateQueue(selectIndexReg) === d_sent || (dataReg && dataIdxReg === selectIndexReg),
+            s_idle, // Data sent before / in the same cycle
+            s_sent
+          )
+        }
+      } else {
+        stateQueue(selectIndexReg) := s_idle
+        // NOTE: reset the state for seclectMask timing to avoid operaion '<'
+      }
+    } 
   }
 
   // redirect and feedback && wakeup
@@ -445,7 +458,7 @@ class ReservationStationSelect
   io.validVec := validIdxQueue.zip(lastSelMask.asBools).map{ case (a, b) => a & b }
   io.indexVec := indexQueue
 
-  io.enq.ready := !isFull || (if(feedback || nonBlocked) dequeue else false.B)
+  io.enq.ready := !isFull || (if(feedback || nonBlocked || EnableSleepQueue && exuCfg == StExeUnitCfg) dequeue else false.B)
   io.enq.bits  := enqIdx
   io.deq.valid := selectValid
   io.deq.bits  := selectIndex
