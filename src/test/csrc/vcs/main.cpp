@@ -21,7 +21,8 @@ extern "C" void simv_init() {
 }
 
 extern "C" void simv_step() {
-  if (difftest_step()) {
+  if (assert_count > 0 || difftest_step()) {
     printf("Difftest error\n");
+    exit(1);
   }
 }
