@@ -360,7 +360,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val src1, src2, src3 = UInt((XLEN + 1).W)
+  val src = Vec(3, UInt((XLEN + 1).W))
 }
 
 class ExuOutput(implicit p: Parameters) extends XSBundle {

@@ -141,15 +141,15 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
 //    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 //
 //    io.enqIQData(i) := DontCare
-//    io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.srcType(0) === SrcType.pc,
+//    io.enqIQData(i).src(0) := Mux(uopReg(i).ctrl.srcType(0) === SrcType.pc,
 //      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
-//    io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.srcType(1) === SrcType.imm,
+//    io.enqIQData(i).src(1) := Mux(uopReg(i).ctrl.srcType(1) === SrcType.imm,
 //      uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
 //
 //    XSDebug(dataValidRegDebug(i),
 //      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src(0))}), " +
+//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src(1))})\n")
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))

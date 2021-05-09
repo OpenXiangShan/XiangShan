@@ -16,7 +16,7 @@ trait HasRedirectOut { this: XSModule =>
 
 class JumpDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val src1 = Input(UInt(XLEN.W))
+    val src = Input(UInt(XLEN.W))
     val pc = Input(UInt(XLEN.W)) // sign-ext to XLEN
     val immMin = Input(UInt(ImmUnion.maxLen.W))
     val func = Input(FuOpType())
@@ -24,7 +24,7 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     val result, target = Output(UInt(XLEN.W))
     val isAuipc = Output(Bool())
   })
-  val (src1, pc, immMin, func, isRVC) = (io.src1, io.pc, io.immMin, io.func, io.isRVC)
+  val (src1, pc, immMin, func, isRVC) = (io.src, io.pc, io.immMin, io.func, io.isRVC)
 
   val isJalr = JumpOpType.jumpOpisJalr(func)
   val isAuipc = JumpOpType.jumpOpisAuipc(func)
@@ -58,7 +58,7 @@ class Jump(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
   val isRVC = uop.cf.pd.isRVC
 
   val jumpDataModule = Module(new JumpDataModule)
-  jumpDataModule.io.src1 := src1
+  jumpDataModule.io.src := src1
   jumpDataModule.io.pc := pc
   jumpDataModule.io.immMin := immMin
   jumpDataModule.io.func := func

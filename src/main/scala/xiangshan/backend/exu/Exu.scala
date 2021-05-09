@@ -94,9 +94,9 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
       io.fromFp
     }
 
-    val src1 = in.bits.src1
-    val src2 = in.bits.src2
-    val src3 = in.bits.src3
+    val src1 = in.bits.src(0)
+    val src2 = in.bits.src(1)
+    val src3 = in.bits.src(2)
 
     fu.io.in.valid := in.valid && sel
     fu.io.in.bits.uop := in.bits.uop
