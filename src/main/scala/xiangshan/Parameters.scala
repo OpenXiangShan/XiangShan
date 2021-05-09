@@ -93,7 +93,7 @@ case class XSCoreParameters
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
-  PtwMissQueueSize: Int = 4,
+  PtwMissQueueSize: Int = 16,
   NumPerfCounters: Int = 16,
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
