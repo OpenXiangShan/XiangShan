@@ -306,7 +306,7 @@ class LSIdx(implicit p: Parameters) extends XSBundle {
 class MicroOp(implicit p: Parameters) extends CfCtrl {
   val srcState = Vec(3, SrcState())
   val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
-  val pdest =UInt(PhyRegIdxWidth.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val roqIdx = new RoqPtr
   val lqIdx = new LqPtr
@@ -323,6 +323,11 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
       case _ => false.B
     }
   }
+  def srcIsReady: Vec[Bool] = {
+    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcImm(t) || s === SrcState.rdy })
+  }
+  def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
+  def doWriteFpRf: Bool = ctrl.fpWen
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
