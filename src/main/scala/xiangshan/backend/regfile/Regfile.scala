@@ -33,6 +33,8 @@ class Regfile
     val debug_rports = Vec(32, new RfReadPort(len))
   })
 
+  println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + "write: " + numWirtePorts)
+
   val useBlackBox = false
   if (!useBlackBox) {
     val mem = Reg(Vec(NRPhyRegs, UInt(len.W)))
