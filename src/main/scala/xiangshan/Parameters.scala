@@ -117,7 +117,8 @@ case class XSCoreParameters
   L2NWays: Int = 8,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
-  useFakeL1plusCache: Boolean = false
+  useFakeL1plusCache: Boolean = false,
+  useFakeL2Cache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
@@ -243,7 +244,7 @@ trait HasXSParameter {
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache
   // L2 configurations
-  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache
+  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
   val L1BusWidth = 256
   val L2Size = coreParams.L2Size
   val L2BlockSize = 64

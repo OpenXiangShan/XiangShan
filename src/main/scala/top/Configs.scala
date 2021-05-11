@@ -70,12 +70,13 @@ class MinimalConfig(n: Int = 1) extends Config(
         L2NWays = 8,
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-        // TlbEntrySize = 4,
-        // TlbSPEntrySize = 2,
-        // PtwL1EntrySize = 2,
-        // PtwL2EntrySize = 64,
-        // PtwL3EntrySize = 128,
-        // PtwSPEntrySize = 2,
+        TlbEntrySize = 4,
+        TlbSPEntrySize = 2,
+        PtwL1EntrySize = 2,
+        PtwL2EntrySize = 64,
+        PtwL3EntrySize = 128,
+        PtwSPEntrySize = 2,
+        useFakeL2Cache = true,
       )),
     )
   })
