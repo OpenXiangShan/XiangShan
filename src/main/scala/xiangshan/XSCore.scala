@@ -7,11 +7,11 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters, L1plusCacheWrapper, PTWRepeater, PTWWrapper}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{Description, LazyModule, LazyModuleImp, ResourceAnchors, ResourceBindings, SimpleDevice}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.{HasSoCParameter, L1CacheErrorInfo}
 import utils._
@@ -54,9 +54,9 @@ case class EnviromentParameters
   DualCore: Boolean = false
 )
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule
+abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
-  with HasExeBlockHelper {
+{
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCacheWrapper())
@@ -69,10 +69,15 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
     numIntWakeUpFp = intExuConfigs.count(_.writeFpRf)
   ))
 
+}
+
+class XSCore()(implicit p: config.Parameters) extends XSCoreBase
+  with HasXSDts
+{
   lazy val module = new XSCoreImp(this)
 }
 
-class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
+class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter
   with HasExeBlockHelper {

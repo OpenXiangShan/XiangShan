@@ -49,11 +49,11 @@ class MinimalConfig(n: Int = 1) extends Config(
         PtwL2EntrySize = 2,
         PtwL3EntrySize = 4,
         PtwSPEntrySize = 2,
-        useFakeDCache = true,
+        useFakeDCache = false,
         useFakePTW = true,
         useFakeL1plusCache = true,
       )),
-      useFakeL3Cache = true
+      useFakeL3Cache = false
     )
   })
 )
