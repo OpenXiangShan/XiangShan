@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, ptw-multi-req ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
