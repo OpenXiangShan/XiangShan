@@ -20,9 +20,9 @@ extern "C" void simv_init() {
 
 }
 
-extern "C" void simv_step() {
-  if (assert_count > 0 || difftest_step()) {
-    printf("Difftest error\n");
-    exit(1);
+extern "C" int simv_step() {
+  if (assert_count > 0) {
+    return 1;
   }
+  return difftest_step();
 }
