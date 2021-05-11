@@ -7,7 +7,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer}
+import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO, FunctionUnit}
 import xiangshan.backend.regfile.Regfile
 import difftest._
 
@@ -128,7 +128,9 @@ class IntegerBlock
   val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
-    if (cfg.hasCertainLatency) {
+    if (cfg == MulDivExeUnitCfg) {// NOTE: dirty code, add mul to fast wake up, but leave div
+      certainLatency = mulCfg.latency.latencyVal.get
+    } else if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
     }
 

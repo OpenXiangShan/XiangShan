@@ -71,31 +71,10 @@ class SimTop(implicit p: Parameters) extends Module {
 object SimTop extends App {
 
   override def main(args: Array[String]): Unit = {
-    val useDRAMSim = args.contains("--with-dramsim3")
-    val numCores = if(args.contains("--dual-core")) 2 else 1
-    val disableLog = args.contains("--disable-log")
-    val disablePerf = args.contains("--disable-perf")
-
-    val firrtlArgs = args.
-      filterNot(_ == "--with-dramsim3").
-      filterNot(_ == "--dual-core").
-      filterNot(_ == "--disable-log").
-      filterNot(_ == "--disable-perf")
-
-    val config = new DefaultConfig(numCores).alter((site, here, up) => {
-      case DebugOptionsKey =>
-        val default = up(DebugOptionsKey)
-        DebugOptions(
-          FPGAPlatform = false,
-          EnableDebug = if(disableLog) false else default.EnableDebug,
-          EnablePerfDebug = if(disablePerf) false else default.EnablePerfDebug,
-          UseDRAMSim = if(useDRAMSim) true else default.UseDRAMSim
-        )
-    })
-
+    val (config, firrtlOpts) = ArgParser.parse(args, fpga = false)
     // generate verilog
     XiangShanStage.execute(
-      firrtlArgs,
+      firrtlOpts,
       Seq(
         ChiselGeneratorAnnotation(() => new SimTop()(config))
       )

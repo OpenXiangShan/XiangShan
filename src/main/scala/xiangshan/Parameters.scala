@@ -14,7 +14,6 @@ case object XSCoreParamsKey extends Field[XSCoreParameters]
 
 case class XSCoreParameters
 (
-  HasL2Cache: Boolean = false,
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
@@ -23,7 +22,6 @@ case class XSCoreParameters
   HasDiv: Boolean = true,
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
-  EnableStoreQueue: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
@@ -95,6 +93,9 @@ case class XSCoreParameters
   PtwL2EntrySize: Int = 2048, //(256 * 8)
   PtwMissQueueSize: Int = 8,
   NumPerfCounters: Int = 16,
+  useFakePTW: Boolean = false,
+  useFakeDCache: Boolean = false,
+  useFakeL1plusCache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
@@ -139,7 +140,6 @@ trait HasXSParameter {
   val HasDiv = coreParams.HasDiv
   val HasIcache = coreParams.HasICache
   val HasDcache = coreParams.HasDCache
-  val EnableStoreQueue = coreParams.EnableStoreQueue
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
@@ -198,7 +198,6 @@ trait HasXSParameter {
   val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val TlbEntrySize = coreParams.TlbEntrySize
   val TlbSPEntrySize = coreParams.TlbSPEntrySize
-  val useFakePTW = false
   val PtwL3EntrySize = coreParams.PtwL3EntrySize
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
@@ -216,7 +215,6 @@ trait HasXSParameter {
     nMissEntries = 2
   )
 
-  val useFakeL1plusCache = false
   val l1plusCacheParameters = L1plusCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -224,7 +222,6 @@ trait HasXSParameter {
     nMissEntries = 8
   )
 
-  val useFakeDCache = false
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -241,6 +238,9 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
+  val useFakeDCache = coreParams.useFakeDCache
+  val useFakePTW = coreParams.useFakePTW
+  val useFakeL1plusCache = coreParams.useFakeL1plusCache
   // L2 configurations
   val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache
   val L1BusWidth = 256
@@ -287,7 +287,21 @@ trait HasXSParameter {
       blockBytes = L2BlockSize,
       nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
     ),
-  )
+  )  
+  
+  // load violation predict
+  val ResetTimeMax2Pow = 20 //1078576
+  val ResetTimeMin2Pow = 10 //1024
+  // wait table parameters
+  val WaitTableSize = 1024
+  val MemPredPCWidth = log2Up(WaitTableSize)
+  val LWTUse2BitCounter = true
+  // store set parameters
+  val SSITSize = WaitTableSize
+  val LFSTSize = 32
+  val SSIDWidth = log2Up(LFSTSize)
+  val LFSTWidth = 4
+  val StoreSetEnable = true // LWT will be disabled if SS is enabled
 
   val loadExuConfigs = coreParams.loadExuConfigs
   val storeExuConfigs = coreParams.storeExuConfigs

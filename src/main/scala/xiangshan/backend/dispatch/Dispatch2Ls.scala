@@ -130,9 +130,9 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
 //
 //    io.enqIQData(i) := DontCare
 //    // assert(uopReg(i).ctrl.srcType(0) =/= SrcType.pc)
-//    io.enqIQData(i).src1 := io.readIntRf(readPort(i)).data
+//    io.enqIQData(i).src(0) := io.readIntRf(readPort(i)).data
 //    if (i >= exuParameters.LduCnt) {
-//      io.enqIQData(i).src2 := Mux(
+//      io.enqIQData(i).src(1) := Mux(
 //        uopReg(i).ctrl.srcType(1) === SrcType.imm,
 //        uopReg(i).ctrl.imm,
 //        Mux(uopReg(i).ctrl.srcType(1) === SrcType.fp,
@@ -142,8 +142,8 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
 //
 //    XSDebug(dataValidRegDebug(i),
 //      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPort(i)  }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-//        p"(${readPort(i)+1}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//        p"(${readPort(i)  }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src(0))}), " +
+//        p"(${readPort(i)+1}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src(1))})\n")
 //  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))

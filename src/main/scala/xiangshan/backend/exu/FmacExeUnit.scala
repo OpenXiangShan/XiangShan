@@ -14,7 +14,7 @@ class FmacExeUnit(implicit p: Parameters) extends Exu(FmacExeUnitCfg)
   val input = io.fromFp.bits
   val fmaOut = fma.io.out.bits
   val isRVD = !io.fromFp.bits.uop.ctrl.isRVF
-  fma.io.in.bits.src := VecInit(Seq(input.src1, input.src2, input.src3))
+  fma.io.in.bits.src := VecInit(Seq(input.src(0), input.src(1), input.src(2)))
   val instr_rm = io.fromFp.bits.uop.ctrl.fpu.rm
   fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
 

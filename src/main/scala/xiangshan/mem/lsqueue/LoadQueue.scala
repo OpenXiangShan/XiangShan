@@ -11,6 +11,7 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbReques
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.backend.ftq.FtqPtr
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -455,12 +456,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ((lqViolation, lqViolationUop), (wbViolation, wbViolationUop), (l1Violation, l1ViolationUop))
   }
 
-  def rollbackSel(a: Valid[MicroOp], b: Valid[MicroOp]): ValidIO[MicroOp] = {
+  def rollbackSel(a: Valid[MicroOpRbExt], b: Valid[MicroOpRbExt]): ValidIO[MicroOpRbExt] = {
     Mux(
       a.valid,
       Mux(
         b.valid,
-        Mux(isAfter(a.bits.roqIdx, b.bits.roqIdx), b, a), // a,b both valid, sel oldest
+        Mux(isAfter(a.bits.uop.roqIdx, b.bits.uop.roqIdx), b, a), // a,b both valid, sel oldest
         a // sel a
       ),
       b // sel b
@@ -474,21 +475,29 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // S2: select rollback (part1) and generate rollback request
   // rollback check
   // Wb/L1 rollback seq check is done in s2
-  val rollbackWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
-  val rollbackL1 = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
-  val rollbackL1Wb = Wire(Vec(StorePipelineWidth*2, Valid(new MicroOp)))
+  val rollbackWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
+  val rollbackL1 = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
+  val rollbackL1Wb = Wire(Vec(StorePipelineWidth*2, Valid(new MicroOpRbExt)))
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
-  val rollbackLq = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
+  val rollbackLq = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
+  // store ftq index for store set update
+  val stFtqIdxS2 = Wire(Vec(StorePipelineWidth, new FtqPtr))
+  val stFtqOffsetS2 = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (i <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(i)
     rollbackLq(i).valid := detectedRollback._1._1 && RegNext(io.storeIn(i).valid)
-    rollbackLq(i).bits := detectedRollback._1._2
+    rollbackLq(i).bits.uop := detectedRollback._1._2
+    rollbackLq(i).bits.flag := i.U
     rollbackWb(i).valid := detectedRollback._2._1 && RegNext(io.storeIn(i).valid)
-    rollbackWb(i).bits := detectedRollback._2._2
+    rollbackWb(i).bits.uop := detectedRollback._2._2
+    rollbackWb(i).bits.flag := i.U
     rollbackL1(i).valid := detectedRollback._3._1 && RegNext(io.storeIn(i).valid)
-    rollbackL1(i).bits := detectedRollback._3._2
+    rollbackL1(i).bits.uop := detectedRollback._3._2
+    rollbackL1(i).bits.flag := i.U
     rollbackL1Wb(2*i) := rollbackL1(i)
     rollbackL1Wb(2*i+1) := rollbackWb(i)
+    stFtqIdxS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqPtr)
+    stFtqOffsetS2(i) := RegNext(io.storeIn(i).bits.uop.cf.ftqOffset)
   }
 
   val rollbackL1WbSelected = ParallelOperation(rollbackL1Wb, rollbackSel)
@@ -505,18 +514,23 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   // FIXME: this is ugly
   val rollbackValidVec = Seq(rollbackL1WbVReg, rollbackLq0VReg, rollbackLq1VReg)
-  val rollbackUopVec = Seq(rollbackL1WbReg, rollbackLq0Reg, rollbackLq1Reg)
+  val rollbackUopExtVec = Seq(rollbackL1WbReg, rollbackLq0Reg, rollbackLq1Reg)
 
   // select uop in parallel
-  val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
+  val mask = getAfterMask(rollbackValidVec, rollbackUopExtVec.map(i => i.uop))
   val oneAfterZero = mask(1)(0)
-  val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-    rollbackUopVec(0),
-    Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+  val rollbackUopExt = Mux(oneAfterZero && mask(2)(0),
+    rollbackUopExtVec(0),
+    Mux(!oneAfterZero && mask(2)(1), rollbackUopExtVec(1), rollbackUopExtVec(2)))
+  val stFtqIdxS3 = RegNext(stFtqIdxS2)
+  val stFtqOffsetS3 = RegNext(stFtqOffsetS2)
+  val rollbackUop = rollbackUopExt.uop
+  val rollbackStFtqIdx = stFtqIdxS3(rollbackUopExt.flag)
+  val rollbackStFtqOffset = stFtqOffsetS3(rollbackUopExt.flag)
 
   // check if rollback request is still valid in parallel
   val rollbackValidVecChecked = Wire(Vec(3, Bool()))
-  for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopVec).zipWithIndex) {
+  for(((v, uop), idx) <- rollbackValidVec.zip(rollbackUopExtVec.map(i => i.uop)).zipWithIndex) {
     rollbackValidVecChecked(idx) := v && 
       (!lastCycleRedirect.valid || isBefore(uop.roqIdx, lastCycleRedirect.bits.roqIdx)) &&
       (!lastlastCycleRedirect.valid || isBefore(uop.roqIdx, lastlastCycleRedirect.bits.roqIdx))
@@ -524,7 +538,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   io.rollback.bits.roqIdx := rollbackUop.roqIdx
   io.rollback.bits.ftqIdx := rollbackUop.cf.ftqPtr
+  io.rollback.bits.stFtqIdx := rollbackStFtqIdx
   io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
+  io.rollback.bits.stFtqOffset := rollbackStFtqOffset
   io.rollback.bits.level := RedirectLevel.flush
   io.rollback.bits.interrupt := DontCare
   io.rollback.bits.cfiUpdate := DontCare
