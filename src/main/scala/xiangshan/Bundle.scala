@@ -3,7 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.{ImmUnion, WaitTableParameters, XDecode}
+import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
@@ -23,13 +23,13 @@ import chipsalliance.rocketchip.config.Parameters
 import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket(implicit p: Parameters) extends XSBundle with WaitTableParameters {
+class FetchPacket(implicit p: Parameters) extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
   val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val foldpc = Vec(PredictWidth, UInt(WaitTableAddrWidth.W))
+  val foldpc = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -179,16 +179,18 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow(implicit p: Parameters) extends XSBundle with WaitTableParameters {
+class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  val foldpc = UInt(WaitTableAddrWidth.W)
+  val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
+  val storeSetHit = Bool() // inst has been allocated an store set
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
+  val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
@@ -325,6 +327,11 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
 }
 
+class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
+  val uop = new MicroOp
+  val flag = UInt(1.W)
+}
+
 class Redirect(implicit p: Parameters) extends XSBundle {
   val roqIdx = new RoqPtr
   val ftqIdx = new FtqPtr
@@ -333,6 +340,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
 
+  val stFtqIdx = new FtqPtr // for load violation predict
+  val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
@@ -467,10 +476,18 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class WaitTableUpdateReq(implicit p: Parameters) extends XSBundle with WaitTableParameters {
+// Bundle for load violation predictor updating
+class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
-  val waddr = UInt(WaitTableAddrWidth.W)
+
+  // wait table update
+  val waddr = UInt(MemPredPCWidth.W)
   val wdata = Bool() // true.B by default
+
+  // store set update
+  // by default, ldpc/stpc should be xor folded
+  val ldpc = UInt(MemPredPCWidth.W)
+  val stpc = UInt(MemPredPCWidth.W)
 }
 
 class PerfInfoIO extends Bundle {

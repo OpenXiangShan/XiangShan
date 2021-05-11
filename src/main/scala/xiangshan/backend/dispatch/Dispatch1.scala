@@ -9,6 +9,7 @@ import xiangshan.backend.roq.{RoqEnqIO, RoqPtr}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.backend.decode.{LFST, DispatchToLFST, LookupLFST}
 
 
 class PreDispatchInfo(implicit p: Parameters) extends XSBundle {
@@ -44,8 +45,29 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
+    // to store set LFST
+    val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
+    // flush or replay, for LFST
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+    // LFST ctrl
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+    // LFST state sync
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
 
+
+  /**
+    * Store set LFST lookup
+    */
+  // store set LFST lookup may start from rename for better timing
+
+  val lfst = Module(new LFST)
+  lfst.io.redirect <> RegNext(io.redirect)
+  lfst.io.flush <> RegNext(io.flush)
+  lfst.io.storeIssue <> RegNext(io.storeIssue)
+  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+  lfst.io.dispatch := io.lfst
 
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
@@ -124,8 +146,54 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 //    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
+
+    // lookup store set LFST
+    lfst.io.lookup.raddr(i) := updatedUop(i).cf.ssid
+    lfst.io.lookup.ren(i) := updatedUop(i).cf.storeSetHit
+
+    // override load delay ctrl signal with store set result
+    if(StoreSetEnable) {
+      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) // classic store set
+      updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && !isStore(i) // store set lite
+      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // 2-bit store set
+    } else {
+      updatedUop(i).cf.loadWaitBit := io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // wait table does not require store to be delayed
+    }
+
+    // update store set LFST
+    io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
+    // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
+    io.lfst(i).bits.roqIdx := updatedUop(i).roqIdx
+    io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
+    io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
   }
 
+  // store set perf count
+  XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
 
   /**
     * Part 3:

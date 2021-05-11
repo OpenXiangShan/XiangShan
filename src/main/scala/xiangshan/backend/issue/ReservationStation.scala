@@ -105,7 +105,7 @@ class ReservationStation
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
-    val stIssuePtr = if (exuCfg == LdExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) Input(new SqPtr()) else null
 
     val fpRegValue = if (exuCfg == StExeUnitCfg) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
@@ -165,7 +165,7 @@ class ReservationStation
     c.valid := i.valid
     c.bits  := i.bits.uop
   }
-  if (exuCfg == LdExeUnitCfg) {
+  if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) {
     ctrl.io.stIssuePtr := RegNext(io.stIssuePtr)
   }
   if (exuCfg == StExeUnitCfg) {
@@ -541,7 +541,7 @@ class ReservationStationCtrl
     val listen = Output(Vec(srcNum, Vec(iqSize, Vec(fastPortsCnt + slowPortsCnt, Bool()))))
     val enqSrcReady = Output(Vec(srcNum, Bool()))
 
-    val stIssuePtr = if (exuCfg == LdExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) Input(new SqPtr()) else null
   })
 
   val selValid = io.sel.valid
@@ -619,6 +619,7 @@ class ReservationStationCtrl
   if (exuCfg == LdExeUnitCfg) {
     val ldWait = Reg(Vec(iqSize, Bool()))
     val sqIdx  = Reg(Vec(iqSize, new SqPtr()))
+    val ldWaitUpdated = WireInit(ldWait)
     ldWait.zip(sqIdx).map{ case (lw, sq) =>
       when (!isAfter(sq, io.stIssuePtr)) {
         lw := true.B
@@ -626,11 +627,12 @@ class ReservationStationCtrl
     }
     when (enqEn) {
       ldWait(enqPtr) := !enqUop.cf.loadWaitBit
+      ldWaitUpdated(enqPtr) := !enqUop.cf.loadWaitBit
       sqIdx(enqPtr)  := enqUop.sqIdx
     }
     ldWait.suggestName(s"${this.name}_ldWait")
     sqIdx.suggestName(s"${this.name}_sqIdx")
-    io.readyVec := srcQueueWire.map(Cat(_).andR).zip(ldWait).map{ case (s, l) => s&l }
+    io.readyVec := srcQueueWire.map(Cat(_).andR).zip(ldWaitUpdated).map{ case (s, l) => s&l }
   }
 
   val redirectHit = io.redirectVec(selPtr)

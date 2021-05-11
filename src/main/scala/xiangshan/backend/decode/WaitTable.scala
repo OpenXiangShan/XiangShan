@@ -6,19 +6,12 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-trait WaitTableParameters {
-  val WaitTableSize = 1024
-  val WaitTableAddrWidth = log2Up(WaitTableSize)
-  val ResetTimeMax2Pow = 20 //1078576
-  val ResetTimeMin2Pow = 10 //1024
-}
-
 // 21264-like wait table
-class WaitTable(implicit p: Parameters) extends XSModule with WaitTableParameters {
+class WaitTable(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val raddr = Vec(DecodeWidth, Input(UInt(WaitTableAddrWidth.W))) // decode pc(VaddrBits-1, 1)
+    val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // decode pc(VaddrBits-1, 1)
     val rdata = Vec(DecodeWidth, Output(Bool())) // loadWaitBit
-    val update = Vec(StorePipelineWidth, Input(new WaitTableUpdateReq)) // RegNext should be added outside
+    val update = Vec(StorePipelineWidth, Input(new MemPredUpdateReq)) // RegNext should be added outside
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
@@ -28,7 +21,7 @@ class WaitTable(implicit p: Parameters) extends XSModule with WaitTableParameter
 
   // read ports
   for (i <- 0 until DecodeWidth) {
-    io.rdata(i) := (data(io.raddr(i))(1) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
+    io.rdata(i) := (data(io.raddr(i))(LWTUse2BitCounter.B.asUInt) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
   }
 
   // write ports (with priority)
