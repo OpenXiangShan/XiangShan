@@ -23,7 +23,8 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
 // Synthesizable minimal XiangShan
 // * It is still an out-of-order, super-scalaer arch
 // * L1 cache included
-// * L2/L3 cache included
+// * L2 cache included
+// * L3 cache included
 class MinimalConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
@@ -47,6 +48,26 @@ class MinimalConfig(n: Int = 1) extends Config(
           FpDqDeqWidth = 4,
           LsDqDeqWidth = 4
         ),
+        icacheParameters = ICacheParameters(
+          nSets = 8, // 4KB ICache
+          tagECC = Some("parity"),
+          dataECC = Some("parity"),
+          replacer = Some("setplru"),
+          nMissEntries = 2
+        ),
+        dcacheParameters = DCacheParameters(
+          nSets = 8, // 4KB DCache
+          nWays = 4,
+          tagECC = Some("secded"),
+          dataECC = Some("secded"),
+          replacer = Some("setplru"),
+          nMissEntries = 4,
+          nProbeEntries = 4,
+          nReleaseEntries = 4,
+          nStoreReplayEntries = 4,
+        ),
+        L2Size = 16 * 1024, // 16KB
+        L2NWays = 8,
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
         // TlbEntrySize = 4,

@@ -92,6 +92,29 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
   NumPerfCounters: Int = 16,
+  icacheParameters: ICacheParameters = ICacheParameters(
+    tagECC = Some("parity"),
+    dataECC = Some("parity"),
+    replacer = Some("setplru"),
+    nMissEntries = 2
+  ),
+  l1plusCacheParameters: L1plusCacheParameters = L1plusCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    replacer = Some("setplru"),
+    nMissEntries = 8
+  ),
+  dcacheParameters: DCacheParameters = DCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    replacer = Some("setplru"),
+    nMissEntries = 16,
+    nProbeEntries = 16,
+    nReleaseEntries = 16,
+    nStoreReplayEntries = 16
+  ),
+  L2Size: Int = 512 * 1024, // 512KB
+  L2NWays: Int = 8,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false
@@ -206,29 +229,9 @@ trait HasXSParameter {
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
 
-  val icacheParameters = ICacheParameters(
-    tagECC = Some("parity"),
-    dataECC = Some("parity"),
-    replacer = Some("setplru"),
-    nMissEntries = 2
-  )
-
-  val l1plusCacheParameters = L1plusCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
-    nMissEntries = 8
-  )
-
-  val dcacheParameters = DCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
-    nMissEntries = 16,
-    nProbeEntries = 16,
-    nReleaseEntries = 16,
-    nStoreReplayEntries = 16
-  )
+  val icacheParameters = coreParams.icacheParameters
+  val l1plusCacheParameters = coreParams.l1plusCacheParameters
+  val dcacheParameters = coreParams.dcacheParameters
 
   val LRSCCycles = 100
 
@@ -242,9 +245,9 @@ trait HasXSParameter {
   // L2 configurations
   val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache
   val L1BusWidth = 256
-  val L2Size = 512 * 1024 // 512KB
+  val L2Size = coreParams.L2Size
   val L2BlockSize = 64
-  val L2NWays = 8
+  val L2NWays = coreParams.L2NWays
   val L2NSets = L2Size / L2BlockSize / L2NWays
 
   // L3 configurations
