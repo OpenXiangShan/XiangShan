@@ -168,6 +168,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // we don't need 'ready's from memBlock
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
   memBlock.io.intWakeUpFp <> floatBlock.io.intWakeUpOut
+  memBlock.io.intWbOut := integerBlock.io.intWbOut
+  memBlock.io.fpWbOut := floatBlock.io.fpWbOut
 
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare

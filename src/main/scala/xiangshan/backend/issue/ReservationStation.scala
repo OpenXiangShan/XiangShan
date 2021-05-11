@@ -31,8 +31,8 @@ class ReservationStation
   val exuCfg: ExuConfig,
   iqSize : Int,
   srcLen: Int,
-  fastPortsCfg: Seq[ExuConfig],
-  slowPortsCfg: Seq[ExuConfig],
+  fastPortsCnt: Int,
+  slowPortsCnt: Int,
   fixedDelay: Int,
   fastWakeup: Boolean,
   feedback: Boolean,
@@ -40,8 +40,6 @@ class ReservationStation
   val iqIdxWidth = log2Up(iqSize+1)
   val nonBlocked = if (exuCfg == MulDivExeUnitCfg) false else fixedDelay >= 0
   val srcNum = if (exuCfg == JumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
-  val fastPortsCnt = fastPortsCfg.size
-  val slowPortsCnt = slowPortsCfg.size
 
   // require(nonBlocked==fastWakeup)
   val config = RSConfig(
