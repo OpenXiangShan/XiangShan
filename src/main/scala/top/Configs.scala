@@ -23,7 +23,7 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
 // Synthesizable minimal XiangShan
 // * It is still an out-of-order, super-scalaer arch
 // * L1 cache included
-// * L2 cache included
+// * L2 cache NOT included
 // * L3 cache included
 class MinimalConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
@@ -78,6 +78,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         PtwSPEntrySize = 2,
         useFakeL2Cache = true,
       )),
+      L3Size = 32 * 1024, // 32KB
     )
   })
 )

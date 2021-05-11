@@ -13,12 +13,12 @@ case class SoCParameters
   cores: List[XSCoreParameters],
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
-  useFakeL3Cache: Boolean = false
+  useFakeL3Cache: Boolean = false,
+  L3Size: Int = 4 * 1024 * 1024 // 4MB
 ){
   val PAddrBits = cores.map(_.PAddrBits).reduce((x, y) => if(x > y) x else y)
   // L3 configurations
   val L3InnerBusWidth = 256
-  val L3Size = 4 * 1024 * 1024 // 4MB
   val L3BlockSize = 64
   val L3NBanks = 4
   val L3NWays = 8
