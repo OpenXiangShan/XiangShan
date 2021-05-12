@@ -360,7 +360,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   // smblockctl: memory block configurations
   // bits 0-3: store buffer flush threshold (default: 8 entries)
-  val smblockctl = RegInit(UInt(XLEN.W), "h7".U)
+  val smblockctl = RegInit(UInt(XLEN.W), "hf".U & StoreBufferThreshold.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
 
   val srnctl = RegInit(UInt(XLEN.W), "h1".U)
@@ -870,7 +870,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.intrNO := RegNext(difftestIntrNO)
     difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
@@ -879,7 +879,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.priviledgeMode := priviledgeMode
     difftest.io.mstatus := mstatus
     difftest.io.sstatus := mstatus & sstatusRmask

@@ -9,6 +9,7 @@ import xiangshan.backend.roq.{RoqEnqIO, RoqPtr}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.backend.decode.{LFST, DispatchToLFST, LookupLFST}
 
 
 class PreDispatchInfo(implicit p: Parameters) extends XSBundle {
@@ -44,8 +45,29 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
+    // to store set LFST
+    val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
+    // flush or replay, for LFST
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+    // LFST ctrl
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+    // LFST state sync
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
   })
 
+
+  /**
+    * Store set LFST lookup
+    */
+  // store set LFST lookup may start from rename for better timing
+
+  val lfst = Module(new LFST)
+  lfst.io.redirect <> RegNext(io.redirect)
+  lfst.io.flush <> RegNext(io.flush)
+  lfst.io.storeIssue <> RegNext(io.storeIssue)
+  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+  lfst.io.dispatch := io.lfst
 
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
@@ -66,7 +88,7 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
   /**
     * Part 2:
-    *   Update commitType, psrc1, psrc2, psrc3, old_pdest, roqIdx, lqIdx, sqIdx for the uops
+    *   Update commitType, psrc(0), psrc(1), psrc(2), old_pdest, roqIdx, lqIdx, sqIdx for the uops
     */
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
@@ -79,17 +101,17 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
     val pdestBypassedPsrc1 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc1) {
+      .foldLeft(io.fromRename(i).bits.psrc(0)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedPsrc2 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc2_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc2) {
+      .foldLeft(io.fromRename(i).bits.psrc(1)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedPsrc3 = io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc3_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc3) {
+      .foldLeft(io.fromRename(i).bits.psrc(2)) {
         (z, next) => Mux(next._2, next._1, z)
       }
     val pdestBypassedOldPdest = io.fromRename.take(i).map(_.bits.pdest)
@@ -102,7 +124,7 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       updatedPsrc2(i) := pdestBypassedPsrc2
     }
     else {
-      // for move elimination, the psrc1/psrc2 of consumer instruction always come from psrc1 of move
+      // for move elimination, the psrc(0)/psrc(1) of consumer instruction always come from psrc(0) of move
       updatedPsrc1(i) := Mux(io.renameBypass.move_eliminated_src1(i-1), updatedPsrc1(i-1), pdestBypassedPsrc1)
       updatedPsrc2(i) := Mux(io.renameBypass.move_eliminated_src2(i-1), updatedPsrc1(i-1), pdestBypassedPsrc2)
     }
@@ -110,10 +132,10 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedOldPdest(i) := pdestBypassedOldPdest
 
     updatedUop(i) := io.fromRename(i).bits
-    // update bypass psrc1/psrc2/psrc3/old_pdest
-    updatedUop(i).psrc1 := updatedPsrc1(i)
-    updatedUop(i).psrc2 := updatedPsrc2(i)
-    updatedUop(i).psrc3 := updatedPsrc3(i)
+    // update bypass psrc(0)/psrc(1)/psrc(2)/old_pdest
+    updatedUop(i).psrc(0) := updatedPsrc1(i)
+    updatedUop(i).psrc(1) := updatedPsrc2(i)
+    updatedUop(i).psrc(2) := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
     updatedUop(i).debugInfo.src1MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src1(i-1))
     updatedUop(i).debugInfo.src2MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src2(i-1))
@@ -124,8 +146,54 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 //    XSError(io.fromRename(i).valid && updatedUop(i).roqIdx.asUInt =/= io.enqRoq.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
+
+    // lookup store set LFST
+    lfst.io.lookup.raddr(i) := updatedUop(i).cf.ssid
+    lfst.io.lookup.ren(i) := updatedUop(i).cf.storeSetHit
+
+    // override load delay ctrl signal with store set result
+    if(StoreSetEnable) {
+      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) // classic store set
+      updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && !isStore(i) // store set lite
+      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // 2-bit store set
+    } else {
+      updatedUop(i).cf.loadWaitBit := io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // wait table does not require store to be delayed
+    }
+
+    // update store set LFST
+    io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
+    // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
+    io.lfst(i).bits.roqIdx := updatedUop(i).roqIdx
+    io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
+    io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
   }
 
+  // store set perf count
+  XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
+  XSPerfAccumulate("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
+    !isStore(i) && isLs(i)
+  )))
 
   /**
     * Part 3:
@@ -199,10 +267,11 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   /**
     * Part 4: send response to rename when dispatch queue accepts the uop
     */
+  val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && (isBlockBackward(i) || isNoSpecExec(i)))).orR
   for (i <- 0 until RenameWidth) {
     io.recv(i) := thisCanActualOut(i) && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-    io.fromRename(i).ready := !hasSpecialInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
     XSInfo(io.recv(i) && io.fromRename(i).valid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
@@ -220,9 +289,9 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
   XSPerfAccumulate("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
+  XSPerfAccumulate("empty", !hasValidInstr)
   XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
-  val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
   XSPerfAccumulate("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)

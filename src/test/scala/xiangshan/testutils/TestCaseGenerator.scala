@@ -35,8 +35,8 @@ object TestCaseGenerator {
 
   def genAluInput(fuOpType: UInt)(x: => ExuInput, src1: Long, src2: Long, imm: Long): ExuInput = {
     chiselTypeOf(x).Lit(
-      _.src1 -> src1.U,
-      _.src2 -> src2.U,
+      _.src(0) -> src1.U,
+      _.src(1) -> src2.U,
       _.uop.ctrl.imm -> imm.U,
       _.uop.ctrl.fuOpType -> fuOpType
     )
@@ -52,8 +52,8 @@ object TestCaseGenerator {
    */
   def genLsuInput(fuOpType: UInt)(x: => ExuInput, base: Long, offset: Long, stData: Long): ExuInput ={
     chiselTypeOf(x).Lit(
-      _.src1 -> base.U,
-      _.src2 -> stData.U,
+      _.src(0) -> base.U,
+      _.src(1) -> stData.U,
       _.uop.ctrl.imm -> offset.U,
       _.uop.ctrl.fuOpType -> fuOpType
     )

@@ -11,12 +11,13 @@ import difftest._
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
+    val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
-    val tlbFeedback   = ValidIO(new TlbFeedback)
+    val rsFeedback   = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
     val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
@@ -27,6 +28,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
+  val addr_valid = RegInit(false.B)
+  val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
   val atom_override_xtval = RegInit(false.B)
@@ -45,7 +48,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits  := in.src1
+  io.exceptionAddr.bits  := in.src(0)
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -68,25 +71,37 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.in.ready := true.B
     when (io.in.fire()) {
       in := io.in.bits
+      in.src(1) := in.src(1) // leave src2 unchanged
+      addr_valid := true.B
+    }
+    when (io.storeDataIn.fire()) {
+      in.src(1) := io.storeDataIn.bits.data
+      data_valid := true.B
+    }
+    when(data_valid && addr_valid) {
       state := s_tlb
+      addr_valid := false.B
+      data_valid := false.B
     }
   }
+
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
-  io.tlbFeedback.bits.hit    := true.B
-  io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
-  io.tlbFeedback.bits.flushState := DontCare
+  io.rsFeedback.valid       := RegNext(RegNext(io.in.valid))
+  io.rsFeedback.bits.hit    := true.B
+  io.rsFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.rsFeedback.bits.flushState := DontCare
+  io.rsFeedback.bits.sourceType := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
     // send req to dtlb
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
-    io.dtlb.req.bits.vaddr  := in.src1
+    io.dtlb.req.bits.vaddr  := in.src(0)
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
@@ -98,9 +113,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
-        "b01".U   -> (in.src1(0) === 0.U),   //h
-        "b10".U   -> (in.src1(1,0) === 0.U), //w
-        "b11".U   -> (in.src1(2,0) === 0.U)  //d
+        "b01".U   -> (in.src(0)(0) === 0.U),   //h
+        "b10".U   -> (in.src(0)(1,0) === 0.U), //w
+        "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
       exceptionVec(storeAddrMisaligned) := !addrAligned
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
@@ -166,7 +181,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     ))
 
     io.dcache.req.bits.addr := paddr
-    io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
+    io.dcache.req.bits.data := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.id   := DontCare
@@ -250,7 +265,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
-    difftest.io.coreid     := 0.U
+    difftest.io.coreid     := hardId.U
     difftest.io.atomicResp := io.dcache.resp.fire()
     difftest.io.atomicAddr := paddr_reg
     difftest.io.atomicData := data_reg

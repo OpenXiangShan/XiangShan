@@ -11,8 +11,8 @@ class MulDivExeUnit(implicit p: Parameters) extends Exu(MulDivExeUnitCfg) {
 
   val func = io.fromInt.bits.uop.ctrl.fuOpType
   val (src1, src2) = (
-    io.fromInt.bits.src1(XLEN - 1, 0),
-    io.fromInt.bits.src2(XLEN - 1, 0)
+    io.fromInt.bits.src(0)(XLEN - 1, 0),
+    io.fromInt.bits.src(1)(XLEN - 1, 0)
   )
 
   val mul = supportedFunctionUnits.collectFirst {

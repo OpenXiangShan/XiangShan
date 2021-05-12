@@ -24,8 +24,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   private val core = LazyModule(new XSCore())
   private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val l2xbar = TLXbar()
-
-  val l2cache = LazyModule(new InclusiveCache(
+  private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
       ways = L2NWays,
@@ -42,13 +41,27 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     ),
     fpga = debugOpts.FPGAPlatform
   ))
+
+  val memory_port = TLIdentityNode()
   val uncache = TLXbar()
 
-  l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
-  l2xbar := TLBuffer() := core.l1pluscache.clientNode
-  l2xbar := TLBuffer() := core.ptw.node
+  if (!useFakeDCache) {
+    l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
+  }
+  if (!useFakeL1plusCache) {
+    l2xbar := TLBuffer() := core.l1pluscache.clientNode
+  }
+  if (!useFakePTW) {
+    l2xbar := TLBuffer() := core.ptw.node
+  }
   l2xbar := TLBuffer() := l2prefetcher.clientNode
-  l2cache.node := TLBuffer() := l2xbar
+  if (useFakeL2Cache) {
+    memory_port := l2xbar
+  }
+  else {
+    l2cache.node := TLBuffer() := l2xbar
+    memory_port := l2cache.node
+  }
 
   uncache := TLBuffer() := core.frontend.instrUncache.clientNode
   uncache := TLBuffer() := core.memBlock.uncache.clientNode
@@ -63,7 +76,12 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
     l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
-    l2prefetcher.module.io.in <> l2cache.module.io
+    if (useFakeL2Cache) {
+      l2prefetcher.module.io.in := DontCare
+    }
+    else {
+      l2prefetcher.module.io.in <> l2cache.module.io
+    }
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
@@ -73,7 +91,9 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
     l2prefetcher.module.reset := l2_reset_gen.io.out
-    l2cache.module.reset := l2_reset_gen.io.out
+    if (!useFakeL2Cache) {
+      l2cache.module.reset := l2_reset_gen.io.out
+    }
   }
 }
 
@@ -201,7 +221,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := core_with_l2(i).l2cache.node
+    l3_xbar := TLBuffer() := core_with_l2(i).memory_port
   }
 
   private val clint = LazyModule(new TLTimer(
@@ -232,7 +252,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   ))
   plic.node := AXI4IdentityNode() := AXI4UserYanker() := TLToAXI4() := peripheralXbar
 
-  val l3cache = LazyModule(new InclusiveCache(
+  val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
       level = 3,
       ways = L3NWays,
@@ -249,8 +269,14 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     ),
     fpga = debugOpts.FPGAPlatform
   ))
+  val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
-  bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
+  if (useFakeL3Cache) {
+    bankedNode :*= l3Ignore :*= l3_xbar
+  }
+  else {
+    bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
+  }
 
   lazy val module = new LazyRawModuleImp(this) {
     val io = IO(new Bundle {
@@ -284,29 +310,21 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
       }
 
-      val l3_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-      l3_reset_gen.suggestName("l3_reset_gen")
-      l3cache.module.reset := l3_reset_gen.io.out
+      if (!useFakeL3Cache) {
+        val l3_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
+        l3_reset_gen.suggestName("l3_reset_gen")
+        l3cache.module.reset := l3_reset_gen.io.out
+      }
     }
   }
 }
 
-class DefaultConfig(n: Int) extends Config((site, here, up) => {
-  case XLen => 64
-  case DebugOptionsKey => DebugOptions()
-  case SoCParamsKey => SoCParameters(
-    cores = List.tabulate(n){ i => XSCoreParameters(HartId = i) }
-  )
-})
-
 object TopMain extends App {
   override def main(args: Array[String]): Unit = {
-    val numCores = if(args.contains("--dual-core")) 2 else 1
-    val otherArgs = args.filterNot(_ == "--dual-core")
-    implicit val config = new DefaultConfig(numCores)
-    XiangShanStage.execute(otherArgs, Seq(
+    val (config, firrtlOpts) = ArgParser.parse(args)
+    XiangShanStage.execute(firrtlOpts, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop())
+        val soc = LazyModule(new XSTop()(config))
         soc.module
       })
     ))

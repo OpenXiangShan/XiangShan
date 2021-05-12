@@ -83,7 +83,7 @@ int Difftest::step() {
   if (do_store_check()) {
     return 1;
   }
-  if (do_golden_memory_check()) {
+  if (do_golden_memory_update()) {
     return 1;
   }
 
@@ -94,6 +94,7 @@ int Difftest::step() {
   num_commit = 0; // reset num_commit this cycle to 0
   // interrupt has the highest priority
   if (dut.event.interrupt) {
+    dut.csr.this_pc = dut.event.exceptionPC;
     do_interrupt();
   } else if(dut.event.exception) { 
     // We ignored instrAddrMisaligned exception (0) for better debug interface
@@ -141,14 +142,14 @@ int Difftest::step() {
 
 void Difftest::do_interrupt() {
   state->record_abnormal_inst(dut.commit[0].pc, dut.commit[0].inst, RET_INT, dut.event.interrupt);
-  proxy->raise_intr(dut.event.interrupt);
+  proxy->raise_intr(dut.event.interrupt | (1ULL << 63));
   progress = true;
 }
 
 void Difftest::do_exception() {
   state->record_abnormal_inst(dut.event.exceptionPC, dut.commit[0].inst, RET_EXC, dut.event.exception);
   if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
-    printf("exception cause: %d\n", dut.event.exception);
+    // printf("exception cause: %d\n", dut.event.exception);
     struct DisambiguationState ds;
     ds.exceptionNo = dut.event.exception;
     ds.mtval = dut.csr.mtval;
@@ -198,64 +199,66 @@ void Difftest::do_instr_commit(int i) {
   // ds.mtval = dut.csr.mtval;
   // ds.stval = dut.csr.stval;
   // proxy->disambiguate_exec(&ds);
-  // } else {
-
-    // // Load instruction
-    // if (dut.load[i].fuType == 0xC || dut.load[i].fuType == 0xF) {
-    //   proxy->get_regs(ref_regs_ptr);
-    //   if (dut.commit[i].wen && ref_regs_ptr[dut.commit[i].wdest] != dut.commit[i].wdata) {
-    //     // printf("---[DIFF Core%d] This load instruction gets rectified!\n", coreid);
-    //     // printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", s->ltype[i], s->lpaddr[i], selectBit(s->wen, i), s->wdst[i], s->wdata[i], s->wpc[i]);
-    //     uint64_t golden;
-    //     int len = 0;
-    //     if (dut.load[i].fuType == 0xC) {
-    //       switch (dut.load[i].opType) {
-    //         case 0: len = 1; break;
-    //         case 1: len = 2; break;
-    //         case 2: len = 4; break;
-    //         case 3: len = 8; break;
-    //         case 4: len = 1; break;
-    //         case 5: len = 2; break;
-    //         case 6: len = 4; break;
-    //         default:
-    //           printf("Unknown fuOpType: 0x%x\n", dut.load[i].opType);
-    //       }
-    //     } else if (dut.load[i].fuType == 0xF) {
-    //       if (dut.load[i].opType % 2 == 0) {
-    //         len = 4;
-    //       } else if (dut.load[i].opType % 2 == 1) {
-    //         len = 8;
-    //       }
-    //     }
-    //     read_goldenmem(dut.load[i].paddr, &golden, len);
-    //     if (dut.load[i].fuType == 0xC) {
-    //       switch (dut.load[i].opType) {
-    //         case 0: golden = (int64_t)(int8_t)golden; break;
-    //         case 1: golden = (int64_t)(int16_t)golden; break;
-    //         case 2: golden = (int64_t)(int32_t)golden; break;
-    //       }
-    //     }
-    //     // printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_r[dut.commit[i].wdest]);
-    //     if (golden == dut.commit[i].wdata) {
-    //       // ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size(), i);
-    //       proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
-    //       if (dut.commit[i].wdest != 0) {
-    //         ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
-    //         proxy->set_regs(ref_regs_ptr);
-    //       }
-    //     } else if (dut.load[i].fuType == 0xF) {
-    //       proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
-    //       if (dut.commit[i].wdest != 0) {
-    //         ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
-    //         proxy->set_regs(ref_regs_ptr);
-    //       }
-    //       // printf("---    atomic instr carefully handled\n");
-    //     } else {
-    //       // printf("---    goldenmem check failed as well\n");
-    //     }
-      // }
-    // }
   // }
+
+  // Handle load instruction carefully for SMP
+  if (dut.load[i].fuType == 0xC || dut.load[i].fuType == 0xF) {
+    proxy->get_regs(ref_regs_ptr);
+    if (dut.commit[i].wen && ref_regs_ptr[dut.commit[i].wdest] != dut.commit[i].wdata) {
+      // printf("---[DIFF Core%d] This load instruction gets rectified!\n", this->id);
+      // printf("---    ltype: 0x%x paddr: 0x%lx wen: 0x%x wdst: 0x%x wdata: 0x%lx pc: 0x%lx\n", dut.load[i].opType, dut.load[i].paddr, dut.commit[i].wen, dut.commit[i].wdest, dut.commit[i].wdata, dut.commit[i].pc);
+      uint64_t golden;
+      int len = 0;
+      if (dut.load[i].fuType == 0xC) {
+        switch (dut.load[i].opType) {
+          case 0: len = 1; break;
+          case 1: len = 2; break;
+          case 2: len = 4; break;
+          case 3: len = 8; break;
+          case 4: len = 1; break;
+          case 5: len = 2; break;
+          case 6: len = 4; break;
+          default:
+            printf("Unknown fuOpType: 0x%x\n", dut.load[i].opType);
+        }
+      } else {  // dut.load[i].fuType == 0xF
+        if (dut.load[i].opType % 2 == 0) {
+          len = 4;
+        } else {  // dut.load[i].opType % 2 == 1
+          len = 8;
+        }
+      }
+      read_goldenmem(dut.load[i].paddr, &golden, len);
+      if (dut.load[i].fuType == 0xC) {
+        switch (dut.load[i].opType) {
+          case 0: golden = (int64_t)(int8_t)golden; break;
+          case 1: golden = (int64_t)(int16_t)golden; break;
+          case 2: golden = (int64_t)(int32_t)golden; break;
+        }
+      }
+      // printf("---    golden: 0x%lx  original: 0x%lx\n", golden, ref_regs_ptr[dut.commit[i].wdest]);
+      if (golden == dut.commit[i].wdata) {
+        proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
+        if (dut.commit[i].wdest != 0) {
+          ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
+          proxy->set_regs(ref_regs_ptr);
+        }
+      } else if (dut.load[i].fuType == 0xF) {  //  atomic instr carefully handled
+        proxy->memcpy_from_dut(dut.load[i].paddr, &golden, len);
+        if (dut.commit[i].wdest != 0) {
+          ref_regs_ptr[dut.commit[i].wdest] = dut.commit[i].wdata;
+          proxy->set_regs(ref_regs_ptr);
+        }
+      } else {
+        // goldenmem check failed as well, raise error
+        printf("---  SMP difftest mismatch!\n");
+        printf("---  Trying to probe local data of another core\n");
+        uint64_t buf;
+        difftest[(EMU_CORES-1) - this->id]->proxy->memcpy_from_ref(&buf, dut.load[i].paddr, len);
+        printf("---    content: %lx\n", buf);
+      }
+    }
+  }
 }
 
 void Difftest::do_first_instr_commit() {
@@ -294,21 +297,22 @@ int Difftest::do_store_check() {
   return 0;
 }
 
-inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
+inline int handle_atomic(int coreid, uint64_t atomicAddr, uint64_t atomicData, uint64_t atomicMask, uint8_t atomicFuop, uint64_t atomicOut) {
+  // We need to do atmoic operations here so as to update goldenMem
   if (!(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff)) {
-    printf("Mask f**ked: %lx\n", atomicMask);
+    printf("Unrecognized mask: %lx\n", atomicMask);
+    return 1;
   }
-  assert(atomicMask == 0xf || atomicMask == 0xf0 || atomicMask == 0xff);
 
   if (atomicMask == 0xff) {
     uint64_t rs = atomicData;  // rs2
-    uint64_t t  = atomicOut;
+    uint64_t t  = atomicOut;   // original value
     uint64_t ret;
     uint64_t mem;
     read_goldenmem(atomicAddr, &mem, 8);
-    if (mem != t && atomicFuop != 007 && atomicFuop != 003) {
-      printf("Atomic instr f**ked up, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", mem, t, atomicFuop, atomicAddr);
-      // assert(0);
+    if (mem != t && atomicFuop != 007 && atomicFuop != 003) {  // ignore sc_d & lr_d
+      printf("Core %d atomic instr mismatch goldenMem, mem: 0x%lx, t: 0x%lx, op: 0x%x, addr: 0x%lx\n", coreid, mem, t, atomicFuop, atomicAddr);
+      return 1;
     }
     switch (atomicFuop) {
       case 002: case 003: ret = t; break;
@@ -326,24 +330,25 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
     }
     update_goldenmem(atomicAddr, &ret, atomicMask, 8);
   }
+
   if (atomicMask == 0xf || atomicMask == 0xf0) {
     uint32_t rs = (uint32_t)atomicData;  // rs2
-    uint32_t t  = (uint32_t)atomicOut;
+    uint32_t t  = (uint32_t)atomicOut;   // original value
     uint32_t ret;
     uint32_t mem;
-    uint64_t mem_temp;
-    uint64_t ret_temp;
+    uint64_t mem_raw;
+    uint64_t ret_sel;
     atomicAddr = (atomicAddr & 0xfffffffffffffff8);
-    read_goldenmem(atomicAddr, &mem_temp, 8);
+    read_goldenmem(atomicAddr, &mem_raw, 8);
 
     if (atomicMask == 0xf)
-      mem = (uint32_t)mem_temp;
+      mem = (uint32_t)mem_raw;
     else
-      mem = (uint32_t)(mem_temp >> 32);
+      mem = (uint32_t)(mem_raw >> 32);
 
-    if (mem != t && atomicFuop != 006 && atomicFuop != 002) {
-      printf("Atomic instr f**ked up, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", mem_temp, mem, t, atomicFuop, atomicAddr);
-      // assert(0);
+    if (mem != t && atomicFuop != 006 && atomicFuop != 002) {  // ignore sc_w & lr_w
+      printf("Core %d atomic instr mismatch goldenMem, rawmem: 0x%lx mem: 0x%x, t: 0x%x, op: 0x%x, addr: 0x%lx\n", coreid, mem_raw, mem, t, atomicFuop, atomicAddr);
+      return 1;
     }
     switch (atomicFuop) {
       case 002: case 003: ret = t; break;
@@ -359,25 +364,25 @@ inline void handle_atomic(uint64_t atomicAddr, uint64_t atomicData, uint64_t ato
       case 052: case 053: ret = (t > rs) ? t : rs; break;
       default: printf("Unknown atomic fuOpType: 0x%x\n", atomicFuop);
     }
-    ret_temp = ret;
+    ret_sel = ret;
     if (atomicMask == 0xf0)
-      ret_temp = (ret_temp << 32);
-    update_goldenmem(atomicAddr, &ret_temp, atomicMask, 8);
+      ret_sel = (ret_sel << 32);
+    update_goldenmem(atomicAddr, &ret_sel, atomicMask, 8);
   }
-
+  return 0;
 }
 
-int Difftest::do_golden_memory_check() {
+int Difftest::do_golden_memory_update() {
   // Update Golden Memory info
-  // if (dut.sbuffer.resp) {
-  //   update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
-  // }
-
-  // if (dut.atomic.resp) {
-  //   handle_atomic(dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
-  // }
-
-  // TODO
+  if (dut.sbuffer.resp) {
+    dut.sbuffer.resp = 0;
+    update_goldenmem(dut.sbuffer.addr, dut.sbuffer.data, dut.sbuffer.mask, 64);
+  }
+  if (dut.atomic.resp) {
+    dut.atomic.resp = 0;
+    int ret = handle_atomic(id, dut.atomic.addr, dut.atomic.data, dut.atomic.mask, dut.atomic.fuop, dut.atomic.out);
+    if (ret) return ret;
+  }
   return 0;
 }
 
@@ -428,7 +433,7 @@ void Difftest::clear_step() {
 }
 
 void Difftest::display() {
-  state->display();
+  state->display(this->id);
 
   printf("\n==============  REF Regs  ==============\n");
   fflush(stdout);
@@ -436,8 +441,8 @@ void Difftest::display() {
   printf("priviledgeMode: %lu\n", dut.csr.priviledgeMode);
 }
 
-void DiffState::display() {
-  printf("\n============== Commit Group Trace ==============\n");
+void DiffState::display(int coreid) {
+  printf("\n============== Commit Group Trace (Core %d) ==============\n", coreid);
   for (int j = 0; j < DEBUG_GROUP_TRACE_SIZE; j++) {
     printf("commit group [%x]: pc %010lx cmtcnt %d %s\n",
         j, retire_group_pc_queue[j], retire_group_cnt_queue[j],
