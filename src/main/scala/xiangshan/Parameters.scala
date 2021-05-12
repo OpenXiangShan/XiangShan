@@ -92,6 +92,7 @@ case class XSCoreParameters
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 2048, //(256 * 8)
+  PtwMissQueueSize: Int = 8,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -227,6 +228,7 @@ trait HasXSParameter {
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
   val PtwL2EntrySize = coreParams.PtwL2EntrySize
+  val PtwMissQueueSize = coreParams.PtwMissQueueSize
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4

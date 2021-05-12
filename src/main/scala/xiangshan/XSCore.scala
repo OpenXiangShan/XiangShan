@@ -7,7 +7,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
@@ -199,13 +199,13 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater())
-  val dtlbRepeater = Module(new PTWRepeater())
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
   dtlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.tlb(0) <> dtlbRepeater.io.ptw
-  ptw.io.tlb(1) <> itlbRepeater.io.ptw
+  ptw.io.tlb(0) <> itlbRepeater.io.ptw
+  ptw.io.tlb(1) <> dtlbRepeater.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
 

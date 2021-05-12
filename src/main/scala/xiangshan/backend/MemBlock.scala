@@ -72,7 +72,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val ldFastWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, 0))
 
-    val ptw = new TlbPtwIO
+    val ptw = new TlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
