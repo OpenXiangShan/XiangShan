@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.HasFPUParameters
@@ -7,16 +8,19 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 
 
-class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
+class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
+  p => p(XSCoreParamsKey).LoadQueueSize
+){
+  override def cloneType = (new LqPtr).asInstanceOf[this.type]
+}
 
-object LqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): LqPtr = {
+object LqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): LqPtr = {
     val ptr = Wire(new LqPtr)
     ptr.flag := f
     ptr.value := v
@@ -47,7 +51,7 @@ trait HasLoadHelper { this: XSModule =>
   }
 }
 
-class LqEnqIO extends XSBundle {
+class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
@@ -56,7 +60,7 @@ class LqEnqIO extends XSBundle {
 }
 
 // Load Queue
-class LoadQueue extends XSModule
+class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
@@ -77,6 +81,7 @@ class LoadQueue extends XSModule
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
+    val lqFull = Output(Bool())
   })
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
@@ -640,14 +645,15 @@ class LoadQueue extends XSModule
   allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
 
   // perf counter
-  XSPerf("utilization", validCount)
-  XSPerf("rollback", io.rollback.valid) // rollback redirect generated
-  XSPerf("full", !allowEnqueue)
-  XSPerf("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
-  XSPerf("mmioCnt", io.uncache.req.fire())
-  XSPerf("refill", io.dcache.valid)
-  XSPerf("writeback", PopCount(VecInit(io.ldout.map(i => i.fire()))))
-  XSPerf("wbBlocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
+  QueuePerf(LoadQueueSize, validCount, !allowEnqueue)
+  io.lqFull := !allowEnqueue
+  XSPerfAccumulate("rollback", io.rollback.valid) // rollback redirect generated
+  XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
+  XSPerfAccumulate("mmioCnt", io.uncache.req.fire())
+  XSPerfAccumulate("refill", io.dcache.valid)
+  XSPerfAccumulate("writeback_success", PopCount(VecInit(io.ldout.map(i => i.fire()))))
+  XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
+  XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)

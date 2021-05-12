@@ -1,5 +1,6 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{XSDebug, XSInfo}
@@ -7,7 +8,7 @@ import xiangshan._
 import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants}
 
 // Fake Store buffer for XiangShan Out of Order LSU
-class FakeSbuffer extends XSModule {
+class FakeSbuffer(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
     val dcache = new DCacheLineIO

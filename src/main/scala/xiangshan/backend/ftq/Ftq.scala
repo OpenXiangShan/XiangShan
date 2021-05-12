@@ -1,16 +1,22 @@
 package xiangshan.backend.ftq
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerf}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, XSError}
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
+import scala.tools.nsc.doc.model.Val
 
-class FtqPtr extends CircularQueuePtr(FtqPtr.FtqSize) with HasCircularQueuePtrHelper
+class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
+  p => p(XSCoreParamsKey).FtqSize
+){
+  override def cloneType = (new FtqPtr).asInstanceOf[this.type]
+}
 
-object FtqPtr extends HasXSParameter {
-  def apply(f: Bool, v: UInt): FtqPtr = {
+object FtqPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): FtqPtr = {
     val ptr = Wire(new FtqPtr)
     ptr.flag := f
     ptr.value := v
@@ -18,8 +24,8 @@ object FtqPtr extends HasXSParameter {
   }
 }
 
-object GetPcByFtq extends HasXSParameter {
-  def apply(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
+trait HasFtqHelper { this: XSModule =>
+  def GetPcByFtq(ftqPC: UInt, ftqOffset: UInt, hasLastPrev: Bool, lastPacketPC: UInt) = {
     assert(ftqPC.getWidth == VAddrBits)
     assert(lastPacketPC.getWidth == VAddrBits)
     assert(ftqOffset.getWidth == log2Up(PredictWidth))
@@ -36,7 +42,7 @@ object GetPcByFtq extends HasXSParameter {
 }
 
 
-class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
+class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
     val raddr = Input(Vec(numRead, UInt(log2Up(FtqSize).W)))
@@ -59,34 +65,34 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int) extends XSModule {
 
 }
 
-class Ftq_4R_SRAMEntry extends XSBundle {
+class Ftq_4R_SRAMEntry(implicit p: Parameters) extends XSBundle {
   val ftqPC = UInt(VAddrBits.W)
   val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
-}
-
-// redirect and commit need read these infos
-class Ftq_2R_SRAMEntry extends XSBundle {
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasEntry = new RASEntry
   val hist = new GlobalHistory
-  val predHist = new GlobalHistory
-  val specCnt = Vec(PredictWidth, UInt(10.W))
   val br_mask = Vec(PredictWidth, Bool())
 }
 
-class Ftq_1R_Commit_SRAMEntry extends XSBundle {
+// redirect and commit need read these infos
+class Ftq_2R_SRAMEntry(implicit p: Parameters) extends XSBundle {
+  val rasSp = UInt(log2Ceil(RasSize).W)
+  val rasEntry = new RASEntry
+  val predHist = new GlobalHistory
+  val specCnt = Vec(PredictWidth, UInt(10.W))
+}
+
+class Ftq_1R_Commit_SRAMEntry(implicit p: Parameters) extends XSBundle {
   val metas = Vec(PredictWidth, new BpuMeta)
   val rvc_mask = Vec(PredictWidth, Bool())
 
   val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
 }
 
-class FtqRead extends Bundle {
+class FtqRead(implicit val p: Parameters) extends Bundle {
   val ptr = Output(new FtqPtr)
   val entry = Input(new FtqEntry)
 }
 
-class Ftq extends XSModule with HasCircularQueuePtrHelper {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val enq = Flipped(DecoupledIO(new FtqEntry))
     val leftOne = Output(Bool())
@@ -106,6 +112,10 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: exceptions)
     val ftqRead = Vec(1 + 6 + 1, Flipped(new FtqRead))
     val cfiRead = Flipped(new FtqRead)
+    val bpuInfo = new Bundle {
+      val bpRight = Output(UInt(XLEN.W))
+      val bpWrong = Output(UInt(XLEN.W))
+    }
   })
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -127,15 +137,15 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   ftq_pc_mem.io.waddr(0) := tailPtr.value
   ftq_pc_mem.io.wdata(0).ftqPC := io.enq.bits.ftqPC
   ftq_pc_mem.io.wdata(0).lastPacketPC := io.enq.bits.lastPacketPC
+  ftq_pc_mem.io.wdata(0).hist := io.enq.bits.hist
+  ftq_pc_mem.io.wdata(0).br_mask := io.enq.bits.br_mask
   val ftq_2r_sram = Module(new FtqNRSRAM(new Ftq_2R_SRAMEntry, 2))
   ftq_2r_sram.io.wen := real_fire
   ftq_2r_sram.io.waddr := tailPtr.value
   ftq_2r_sram.io.wdata.rasSp := io.enq.bits.rasSp
   ftq_2r_sram.io.wdata.rasEntry := io.enq.bits.rasTop
-  ftq_2r_sram.io.wdata.hist := io.enq.bits.hist
   ftq_2r_sram.io.wdata.predHist := io.enq.bits.predHist
   ftq_2r_sram.io.wdata.specCnt := io.enq.bits.specCnt
-  ftq_2r_sram.io.wdata.br_mask := io.enq.bits.br_mask
   val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
   pred_target_sram.io.wen := real_fire
   pred_target_sram.io.waddr := tailPtr.value
@@ -150,7 +160,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Up(PredictWidth).W))))
-  val cfiIsCall, cfiIsRet, cfiIsRVC = Reg(Vec(FtqSize, Bool()))
+  val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Reg(Vec(FtqSize, Bool()))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
 
   val s_invalid :: s_valid :: s_commited :: Nil = Enum(3)
@@ -164,6 +174,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     cfiIndex_vec(enqIdx) := io.enq.bits.cfiIndex
     cfiIsCall(enqIdx) := io.enq.bits.cfiIsCall
     cfiIsRet(enqIdx) := io.enq.bits.cfiIsRet
+    cfiIsJalr(enqIdx) := io.enq.bits.cfiIsJalr
     cfiIsRVC(enqIdx) := io.enq.bits.cfiIsRVC
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := io.enq.bits.target
@@ -172,24 +183,87 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   tailPtr := tailPtr + real_fire
 
   // exu write back, update some info
-  for ((wb, i) <- io.exuWriteback.zipWithIndex) {
+
+  // when redirect cfi offset < current offset, update all cfi info
+  val cfiWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
+  // when redirect cfi offset == current offset (and only), update cfi valid bit
+  val cfiValidWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
+
+  val cfiIndexValidWb_vec = Wire(Vec(FtqSize, Bool()))
+  val cfiIndexBitsWb_vec = Wire(Vec(FtqSize, UInt(log2Up(PredictWidth).W)))
+  val cfiInfoWb_vec = Wire(Vec(FtqSize, Vec(4, Bool())))
+
+  val nWbPorts = io.exuWriteback.size
+  def extractWbInfo(wb: Valid[ExuOutput]) = {
     val wbIdx = wb.bits.redirect.ftqIdx.value
     val offset = wb.bits.redirect.ftqOffset
     val cfiUpdate = wb.bits.redirect.cfiUpdate
-    when(wb.valid && wb.bits.redirectValid) {
-      mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
-      when(cfiUpdate.taken && offset < cfiIndex_vec(wbIdx).bits) {
-        cfiIndex_vec(wbIdx).valid := true.B
-        cfiIndex_vec(wbIdx).bits := offset
-        cfiIsCall(wbIdx) := wb.bits.uop.cf.pd.isCall
-        cfiIsRet(wbIdx) := wb.bits.uop.cf.pd.isRet
-        cfiIsRVC(wbIdx) := wb.bits.uop.cf.pd.isRVC
-      }
-      when (offset === cfiIndex_vec(wbIdx).bits) {
-        cfiIndex_vec(wbIdx).valid := cfiUpdate.taken
-      }
+    (wbIdx, offset, cfiUpdate)
+  }
+  def extractWbCfiInfo(wb: Valid[ExuOutput]) = {
+    val isCall = wb.bits.uop.cf.pd.isCall
+    val isRet = wb.bits.uop.cf.pd.isRet
+    val isJalr= wb.bits.uop.cf.pd.isJalr
+    val isRVC = wb.bits.uop.cf.pd.isRVC
+    VecInit(isCall, isRet, isJalr, isRVC)
+  }
+
+  def getFtqOffset(wb: Valid[ExuOutput]): UInt = extractWbInfo(wb)._2
+  def getFtqOffset(n: Int): UInt = extractWbInfo(io.exuWriteback(n))._2
+  // FtqSize * onehot
+  val wbPortSel_vec = Wire(Vec(FtqSize, Vec(nWbPorts, Bool())))
+  // in order to handle situation in which multiple cfi taken writebacks target the same ftqEntry
+  for (i <- 0 until FtqSize) {
+    val needToUpdateThisEntry =
+      VecInit(for (wb <- io.exuWriteback) yield {
+        val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+        wb.valid && wb.bits.redirectValid && cfiUpdate.taken && wbIdx === i.U && offset < cfiIndex_vec(wbIdx).bits
+      })
+    val updateCfiValidMask = 
+      VecInit(for (wb <- io.exuWriteback) yield {
+        val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+        wb.valid && wb.bits.redirectValid && wbIdx === i.U && offset === cfiIndex_vec(wbIdx).bits
+      })
+      
+    cfiWbEn_vec(i) := needToUpdateThisEntry.asUInt().orR()
+    cfiValidWbEn_vec(i) := updateCfiValidMask.asUInt().orR()
+
+    for (n <- 0 until nWbPorts) {
+      val hasFormerWriteBack = (
+        for (another <- 0 until nWbPorts if another != n) yield {
+          needToUpdateThisEntry(another) && getFtqOffset(another) < getFtqOffset(n)
+        }
+      ).reduce(_||_)
+      wbPortSel_vec(i)(n) := needToUpdateThisEntry(n) && !hasFormerWriteBack || !needToUpdateThisEntry.asUInt().orR() && updateCfiValidMask(n)
+    }
+
+    XSError(PopCount(wbPortSel_vec(i)) > 1.U, p"multiple wb ports are selected to update cfiIndex_vec($i)\n")
+
+    cfiIndexValidWb_vec(i) := cfiWbEn_vec(i) || cfiValidWbEn_vec(i) && extractWbInfo(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))._3.taken
+    cfiIndexBitsWb_vec(i) := getFtqOffset(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))
+    cfiInfoWb_vec(i) := extractWbCfiInfo(Mux1H(wbPortSel_vec(i) zip io.exuWriteback))
+  }
+
+  for (i <- 0 until FtqSize) {
+    when (cfiWbEn_vec(i) || cfiValidWbEn_vec(i)) {
+      cfiIndex_vec(i).valid := cfiIndexValidWb_vec(i)
+    }
+    when (cfiWbEn_vec(i)) {
+      cfiIndex_vec(i).bits := cfiIndexBitsWb_vec(i)
+      cfiIsCall(i) := cfiInfoWb_vec(i)(0)
+      cfiIsRet(i) := cfiInfoWb_vec(i)(1)
+      cfiIsJalr(i) := cfiInfoWb_vec(i)(2)
+      cfiIsRVC(i) := cfiInfoWb_vec(i)(3)
     }
   }
+
+  for (wb <- io.exuWriteback) {
+    val (wbIdx, offset, cfiUpdate) = extractWbInfo(wb)
+    when(wb.valid && wb.bits.redirectValid) {
+      mispredict_vec(wbIdx)(offset) := cfiUpdate.isMisPred
+    }
+  }
+
 
   // fix mispredict entry
   val lastIsMispredict = RegNext(
@@ -229,13 +303,13 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   // from 4r sram
   commitEntry.ftqPC := RegNext(ftq_pc_mem.io.rdata(0).ftqPC)
   commitEntry.lastPacketPC := RegNext(ftq_pc_mem.io.rdata(0).lastPacketPC)
+  commitEntry.hist := RegNext(ftq_pc_mem.io.rdata(0).hist)
+  commitEntry.br_mask := RegNext(ftq_pc_mem.io.rdata(0).br_mask)
   // from 2r sram
   commitEntry.rasSp := RegNext(ftq_2r_sram.io.rdata(0).rasSp)
   commitEntry.rasTop := RegNext(ftq_2r_sram.io.rdata(0).rasEntry)
-  commitEntry.hist := RegNext(ftq_2r_sram.io.rdata(0).hist)
   commitEntry.predHist := RegNext(ftq_2r_sram.io.rdata(0).predHist)
   commitEntry.specCnt := RegNext(ftq_2r_sram.io.rdata(0).specCnt)
-  commitEntry.br_mask := RegNext(ftq_2r_sram.io.rdata(0).br_mask)
   // from 1r sram
   commitEntry.metas := RegNext(ftq_1r_sram.io.rdata(0).metas)
   commitEntry.rvc_mask := RegNext(ftq_1r_sram.io.rdata(0).rvc_mask)
@@ -246,6 +320,7 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   commitEntry.cfiIndex := RegNext(RegNext(cfiIndex_vec(headPtr.value)))
   commitEntry.cfiIsCall := RegNext(RegNext(cfiIsCall(headPtr.value)))
   commitEntry.cfiIsRet := RegNext(RegNext(cfiIsRet(headPtr.value)))
+  commitEntry.cfiIsJalr := RegNext(RegNext(cfiIsJalr(headPtr.value)))
   commitEntry.cfiIsRVC := RegNext(RegNext(cfiIsRVC(headPtr.value)))
   commitEntry.target := RegNext(RegNext(update_target(headPtr.value)))
 
@@ -258,6 +333,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     ftq_pc_mem.io.raddr(1 + i) := req.ptr.value
     req.entry.ftqPC := ftq_pc_mem.io.rdata(1 + i).ftqPC
     req.entry.lastPacketPC := ftq_pc_mem.io.rdata(1 + i).lastPacketPC
+    req.entry.hist := ftq_pc_mem.io.rdata(1 + i).hist
+    req.entry.br_mask := ftq_pc_mem.io.rdata(1 + i).br_mask
     if(i == 0){ // jump, read npc
       pred_target_sram.io.raddr(0) := req.ptr.value
       pred_target_sram.io.ren(0) := true.B
@@ -269,10 +346,8 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
   io.cfiRead.entry := DontCare
   io.cfiRead.entry.rasTop := ftq_2r_sram.io.rdata(1).rasEntry
   io.cfiRead.entry.rasSp := ftq_2r_sram.io.rdata(1).rasSp
-  io.cfiRead.entry.hist := ftq_2r_sram.io.rdata(1).hist
   io.cfiRead.entry.predHist := ftq_2r_sram.io.rdata(1).predHist
   io.cfiRead.entry.specCnt := ftq_2r_sram.io.rdata(1).specCnt
-  io.cfiRead.entry.br_mask := ftq_2r_sram.io.rdata(1).br_mask
   // redirect, reset ptr
   when(io.flush || io.redirect.valid){
     val idx = Mux(io.flush, io.flushIdx, io.redirect.bits.ftqIdx)
@@ -290,16 +365,17 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  XSPerf("entry", validEntries)
-  XSPerf("stall", io.enq.valid && !io.enq.ready)
-  XSPerf("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
-  XSPerf("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+  XSPerfAccumulate("entry", validEntries)
+  XSPerfAccumulate("stall", io.enq.valid && !io.enq.ready)
+  XSPerfAccumulate("mispredictRedirect", io.redirect.valid && RedirectLevel.flushAfter === io.redirect.bits.level)
+  XSPerfAccumulate("replayRedirect", io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level))
+
+  val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
+  val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
 
   // Branch Predictor Perf counters
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     val fires = commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && !pd.notCFI}
-    val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
-    val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
     val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
     val isJTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJal}
     val isITypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJalr}
@@ -415,10 +491,13 @@ class Ftq extends XSModule with HasCircularQueuePtrHelper {
     )
 
     for((key, value) <- perfCountsMap) {
-      XSPerf(key, value)
+      XSPerfAccumulate(key, value)
     }
   }
 
   XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
   XSDebug(io.enq.fire(), p"ftq enq: ${io.enq.bits}")
+
+  io.bpuInfo.bpRight := PopCount(predRights)
+  io.bpuInfo.bpWrong := PopCount(predWrongs)
 }

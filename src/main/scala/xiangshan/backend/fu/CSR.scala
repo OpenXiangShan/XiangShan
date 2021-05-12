@@ -1,13 +1,14 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
+import difftest._
 
 trait HasExceptionNO {
   def instrAddrMisaligned = 0
@@ -102,7 +103,7 @@ trait HasExceptionNO {
     partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
 }
 
-class FpuCsrIO extends XSBundle {
+class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
@@ -110,15 +111,40 @@ class FpuCsrIO extends XSBundle {
 }
 
 
-class PerfCounterIO extends XSBundle {
-  val retiredInstr = Input(UInt(3.W))
-  val value = Input(UInt(XLEN.W))
+class PerfCounterIO(implicit p: Parameters) extends XSBundle {
+  val retiredInstr = UInt(3.W)
+  val frontendInfo = new Bundle {
+    val ibufFull  = Bool()
+  }
+  val ctrlInfo = new Bundle {
+    val roqFull   = Bool()
+    val intdqFull = Bool()
+    val fpdqFull  = Bool()
+    val lsdqFull  = Bool()
+  }
+  val memInfo = new Bundle {
+    val sqFull = Bool()
+    val lqFull = Bool()
+    val dcacheMSHRFull = Bool()
+  }
+  val bpuInfo = new Bundle {
+    val bpRight = UInt(XLEN.W)
+    val bpWrong = UInt(XLEN.W)
+  }
+  val cacheInfo = new Bundle {
+    val l2MSHRFull = Bool()
+    val l3MSHRFull = Bool()
+    val l2nAcquire = UInt(XLEN.W)
+    val l2nAcquireMiss = UInt(XLEN.W)
+    val l3nAcquire = UInt(XLEN.W)
+    val l3nAcquireMiss = UInt(XLEN.W)
+  }
 }
 
-class CSRFileIO extends XSBundle {
+class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val hartId = Input(UInt(64.W))
   // output (for func === CSROpType.jmp)
-  val perf = new PerfCounterIO
+  val perf = Input(new PerfCounterIO)
   val isPerfCnt = Output(Bool())
   // to FPU
   val fpu = Flipped(new FpuCsrIO)
@@ -138,32 +164,9 @@ class CSRFileIO extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
 }
 
-class CSR extends FunctionUnit with HasCSRConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 {
   val csrio = IO(new CSRFileIO)
-  val difftestIO = IO(new Bundle() {
-    val intrNO = Output(UInt(64.W))
-    val cause = Output(UInt(64.W))
-    val priviledgeMode = Output(UInt(2.W))
-    val mstatus = Output(UInt(64.W))
-    val sstatus = Output(UInt(64.W))
-    val mepc = Output(UInt(64.W))
-    val sepc = Output(UInt(64.W))
-    val mtval = Output(UInt(64.W))
-    val stval = Output(UInt(64.W))
-    val mtvec = Output(UInt(64.W))
-    val stvec = Output(UInt(64.W))
-    val mcause = Output(UInt(64.W))
-    val scause = Output(UInt(64.W))
-    val satp = Output(UInt(64.W))
-    val mip = Output(UInt(64.W))
-    val mie = Output(UInt(64.W))
-    val mscratch = Output(UInt(64.W))
-    val sscratch = Output(UInt(64.W))
-    val mideleg = Output(UInt(64.W))
-    val medeleg = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   val cfIn = io.in.bits.uop.cf
   val cfOut = Wire(new CtrlFlow)
@@ -355,6 +358,14 @@ class CSR extends FunctionUnit with HasCSRConst
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
 
+  // smblockctl: memory block configurations
+  // bits 0-3: store buffer flush threshold (default: 8 entries)
+  val smblockctl = RegInit(UInt(XLEN.W), "h7".U)
+  csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
+
+  val srnctl = RegInit(UInt(XLEN.W), "h1".U)
+  csrio.customCtrl.move_elim_enable := srnctl(0)
+
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   csrio.tlb := tlbBundle
@@ -442,6 +453,26 @@ class CSR extends FunctionUnit with HasCSRConst
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
+  val ibufFull  = RegInit(0.U(XLEN.W))
+  ibufFull := ibufFull + RegNext(csrio.perf.frontendInfo.ibufFull)
+  val roqFull   = RegInit(0.U(XLEN.W))
+  roqFull := roqFull + RegNext(csrio.perf.ctrlInfo.roqFull)
+  val intdqFull = RegInit(0.U(XLEN.W))
+  intdqFull := intdqFull + RegNext(csrio.perf.ctrlInfo.intdqFull)
+  val fpdqFull  = RegInit(0.U(XLEN.W))
+  fpdqFull := fpdqFull + RegNext(csrio.perf.ctrlInfo.fpdqFull)
+  val lsdqFull  = RegInit(0.U(XLEN.W))
+  lsdqFull := lsdqFull + RegNext(csrio.perf.ctrlInfo.lsdqFull)
+  val sqFull    = RegInit(0.U(XLEN.W))
+  sqFull := sqFull + RegNext(csrio.perf.memInfo.sqFull)
+  val lqFull    = RegInit(0.U(XLEN.W))
+  lqFull := lqFull + RegNext(csrio.perf.memInfo.lqFull)
+  val dcacheMSHRFull = RegInit(0.U(XLEN.W))
+  dcacheMSHRFull := dcacheMSHRFull + RegNext(csrio.perf.memInfo.dcacheMSHRFull)
+  val bpRight   = RegInit(0.U(XLEN.W))
+  bpRight := bpRight + RegNext(csrio.perf.bpuInfo.bpRight)
+  val bpWrong   = RegInit(0.U(XLEN.W))
+  bpWrong := bpWrong + RegNext(csrio.perf.bpuInfo.bpWrong)
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -486,6 +517,8 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Spfctl, spfctl),
     MaskedRegMap(Sdsid, sdsid),
     MaskedRegMap(Slvpredctl, slvpredctl),
+    MaskedRegMap(Smblockctl, smblockctl),
+    MaskedRegMap(Srnctl, srnctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
@@ -526,13 +559,24 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
+    MaskedRegMap(Mhpmevent3, ibufFull),
+    MaskedRegMap(Mhpmevent4, roqFull),
+    MaskedRegMap(Mhpmevent5, intdqFull),
+    MaskedRegMap(Mhpmevent6, fpdqFull),
+    MaskedRegMap(Mhpmevent7, lsdqFull),
+    MaskedRegMap(Mhpmevent8, sqFull),
+    MaskedRegMap(Mhpmevent9, lqFull),
+    MaskedRegMap(Mhpmevent10, dcacheMSHRFull),
+    MaskedRegMap(Mhpmevent11, bpRight),
+    MaskedRegMap(Mhpmevent12, bpWrong),
   )
-  val MhpmcounterStart = Mhpmcounter3
-  val MhpmeventStart   = Mhpmevent3
-  for (i <- 0 until nrPerfCnts) {
-    perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
-    perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
-  }
+  // TODO: mechanism should be implemented later
+  // val MhpmcounterStart = Mhpmcounter3
+  // val MhpmeventStart   = Mhpmevent3
+  // for (i <- 0 until nrPerfCnts) {
+  //   perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
+  //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
+  // }
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
@@ -824,25 +868,35 @@ class CSR extends FunctionUnit with HasCSRConst
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
   if (!env.FPGAPlatform) {
-    difftestIO.intrNO := RegNext(difftestIntrNO)
-    difftestIO.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
-    difftestIO.priviledgeMode := priviledgeMode
-    difftestIO.mstatus := mstatus
-    difftestIO.sstatus := mstatus & sstatusRmask
-    difftestIO.mepc := mepc
-    difftestIO.sepc := sepc
-    difftestIO.mtval:= mtval
-    difftestIO.stval:= stval
-    difftestIO.mtvec := mtvec
-    difftestIO.stvec := stvec
-    difftestIO.mcause := mcause
-    difftestIO.scause := scause
-    difftestIO.satp := satp
-    difftestIO.mip := mipReg
-    difftestIO.mie := mie
-    difftestIO.mscratch := mscratch
-    difftestIO.sscratch := sscratch
-    difftestIO.mideleg := mideleg
-    difftestIO.medeleg := medeleg
+    val difftest = Module(new DifftestArchEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.intrNO := RegNext(difftestIntrNO)
+    difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
+    difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
+  }
+
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestCSRState)
+    difftest.io.clock := clock
+    difftest.io.coreid := 0.U
+    difftest.io.priviledgeMode := priviledgeMode
+    difftest.io.mstatus := mstatus
+    difftest.io.sstatus := mstatus & sstatusRmask
+    difftest.io.mepc := mepc
+    difftest.io.sepc := sepc
+    difftest.io.mtval:= mtval
+    difftest.io.stval:= stval
+    difftest.io.mtvec := mtvec
+    difftest.io.stvec := stvec
+    difftest.io.mcause := mcause
+    difftest.io.scause := scause
+    difftest.io.satp := satp
+    difftest.io.mip := mipReg
+    difftest.io.mie := mie
+    difftest.io.mscratch := mscratch
+    difftest.io.sscratch := sscratch
+    difftest.io.mideleg := mideleg
+    difftest.io.medeleg := medeleg
   }
 }

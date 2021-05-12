@@ -1,11 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, HasTLDump}
+import utils.{XSDebug, HasTLDump, XSPerfAccumulate}
 import freechips.rocketchip.tilelink.{TLBundleC, TLBundleD, TLEdgeOut, TLPermissions, TLArbiter}
 
-class WritebackReq extends DCacheBundle {
+class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val param  = UInt(TLPermissions.cWidth.W)
   val voluntary = Bool()
@@ -18,7 +19,7 @@ class WritebackReq extends DCacheBundle {
   }
 }
 
-class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
+class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val id = Input(UInt())
@@ -129,9 +130,16 @@ class WritebackEntry(edge: TLEdgeOut) extends DCacheModule with HasTLDump
       state := s_invalid
     }
   }
+
+  // performance counters
+  XSPerfAccumulate("wb_req", io.req.fire())
+  XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
+  XSPerfAccumulate("wb_probe_resp", state === s_release_req && release_done && !req.voluntary)
+  XSPerfAccumulate("penalty_blocked_by_channel_C", io.mem_release.valid && !io.mem_release.ready)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_release_resp)
 }
 
-class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
+class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
@@ -203,4 +211,7 @@ class WritebackQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   when (io.block_miss_req) {
     XSDebug("block_miss_req\n")
   }
+
+  // performance counters
+  XSPerfAccumulate("wb_req", io.req.fire())
 }

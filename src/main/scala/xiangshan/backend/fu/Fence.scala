@@ -1,12 +1,12 @@
 package xiangshan.backend.fu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.FenceOpType
 
-class FenceToSbuffer extends XSBundle {
+class FenceToSbuffer extends Bundle {
   val flushSb = Output(Bool())
   val sbIsEmpty = Input(Bool())
 }
@@ -14,7 +14,7 @@ class FenceToSbuffer extends XSBundle {
 // class Fence extends FunctionUnit(FuConfig(
   // /*FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,*/ latency = UncertainLatency()
 // )){
-class Fence extends FunctionUnit{ // TODO: check it
+class Fence(implicit p: Parameters) extends FunctionUnit{ // TODO: check it
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))

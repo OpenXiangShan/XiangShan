@@ -18,14 +18,14 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheControlParameters, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{HasXSLog, MicroOp}
+import xiangshan.MicroOp
 import xiangshan.cache.{DCache, DCacheLineIO, DCacheWordIO, L1plusCache, L1plusCacheIO, MemoryOpConstants, Uncache}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
 import scala.util.Random
 
-class L2NonInclusiveGetTestTopIO extends Bundle {
+class L2NonInclusiveGetTestTopIO(implicit p: Parameters) extends Bundle {
   val l1plus = new L1plusCacheIO()
   val dcacheStore = new DCacheLineIO()
   val l2Flush = new DCacheWordIO
@@ -75,7 +75,7 @@ class L2NonInclusiveGetTestTop()(implicit p: Parameters) extends LazyModule {
   // connect uncache access to l2 control node
   l2.ctlnode.get := DebugIdentityNode() := uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(Flipped(new L2NonInclusiveGetTestTopIO))
 
@@ -117,8 +117,6 @@ class L2NonInclusiveGetTest extends AnyFlatSpec with ChiselScalatestTester with 
   val FLUSH32_ADDR = L2_FLUSH_BASE_ADDR + 0x240
 
   val r = scala.util.Random
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,

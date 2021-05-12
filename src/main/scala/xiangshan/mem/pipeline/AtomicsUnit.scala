@@ -1,13 +1,14 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
+import difftest._
 
-class AtomicsUnit extends XSModule with MemoryOpConstants{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
     val out           = Decoupled(new ExuOutput)
@@ -20,16 +21,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
-
-  val difftestIO = IO(new Bundle() {
-    val atomicResp = Output(Bool())
-    val atomicAddr = Output(UInt(64.W))
-    val atomicData = Output(UInt(64.W))
-    val atomicMask = Output(UInt(8.W))
-    val atomicFuop = Output(UInt(8.W))
-    val atomicOut  = Output(UInt(64.W))
-  })
-  difftestIO <> DontCare
 
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
@@ -88,6 +79,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
   io.tlbFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.tlbFeedback.bits.flushState := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -100,6 +92,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
+    io.dtlb.req.bits.debug.isFirstIssue := false.B
 
     when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
       // exception handling
@@ -255,11 +248,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   }
 
   if (!env.FPGAPlatform) {
-    difftestIO.atomicResp := WireInit(io.dcache.resp.fire())
-    difftestIO.atomicAddr := WireInit(paddr_reg)
-    difftestIO.atomicData := WireInit(data_reg)
-    difftestIO.atomicMask := WireInit(mask_reg)
-    difftestIO.atomicFuop := WireInit(fuop_reg)
-    difftestIO.atomicOut  := resp_data_wire
+    val difftest = Module(new DifftestAtomicEvent)
+    difftest.io.clock      := clock
+    difftest.io.coreid     := 0.U
+    difftest.io.atomicResp := io.dcache.resp.fire()
+    difftest.io.atomicAddr := paddr_reg
+    difftest.io.atomicData := data_reg
+    difftest.io.atomicMask := mask_reg
+    difftest.io.atomicFuop := fuop_reg
+    difftest.io.atomicOut  := resp_data_wire
   }
 }

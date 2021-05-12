@@ -1,5 +1,6 @@
 package xiangshan.backend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,9 +9,9 @@ import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.mem.{HasFpLoadHelper, HasLoadHelper}
+import difftest._
 
-
-class FpBlockToCtrlIO extends XSBundle {
+class FpBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val wbRegs = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
 }
@@ -21,7 +22,7 @@ class FloatBlock
   memSlowWakeUpIn: Seq[ExuConfig],
   fastWakeUpOut: Seq[ExuConfig],
   slowWakeUpOut: Seq[ExuConfig],
-) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
+)(implicit p: Parameters) extends XSModule with HasExeBlockHelper with HasFpLoadHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
@@ -30,6 +31,7 @@ class FloatBlock
     val intWakeUpFp = Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
+    val intWakeUpOut = Vec(intSlowWakeUpIn.size, DecoupledIO(new ExuOutput))
 
     // from csr
     val frm = Input(UInt(3.W))
@@ -39,24 +41,28 @@ class FloatBlock
   val flush = io.fromCtrlBlock.flush
 
   val intWakeUpFpReg = Wire(Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput))))
-  intWakeUpFpReg.zip(io.intWakeUpFp).foreach{
-    case (inReg, wakeUpIn) =>
-      val in = WireInit(wakeUpIn)
-      wakeUpIn.ready := in.ready
-      in.valid := wakeUpIn.valid && !wakeUpIn.bits.uop.roqIdx.needFlush(redirect, flush)
-      PipelineConnect(in, inReg,
-        inReg.fire() || inReg.bits.uop.roqIdx.needFlush(redirect, flush), false.B
-      )
+  for((w, r) <- io.intWakeUpFp.zip(intWakeUpFpReg)){
+    val in = WireInit(w)
+    w.ready := in.ready
+    in.valid := w.valid && !w.bits.uop.roqIdx.needFlush(redirect, flush)
+    PipelineConnect(in, r, r.fire() || r.bits.uop.roqIdx.needFlush(redirect, flush), false.B)
   }
-  val intRecoded = WireInit(intWakeUpFpReg)
-  for(((rec, reg), cfg) <- intRecoded.zip(intWakeUpFpReg).zip(intSlowWakeUpIn)){
-    rec.bits.data := Mux(reg.bits.uop.ctrl.fpu.typeTagOut === S,
-      recode(reg.bits.data(31, 0), S),
-      recode(reg.bits.data(63, 0), D)
+  // to memBlock's store rs
+  io.intWakeUpOut <> intWakeUpFpReg.map(x => WireInit(x))
+
+  val intRecoded = intWakeUpFpReg.map(x => {
+    val rec = Wire(DecoupledIO(new ExuOutput))
+    rec.valid := x.valid && x.bits.uop.ctrl.fpWen
+    rec.bits := x.bits
+    rec.bits.data := Mux(x.bits.uop.ctrl.fpu.typeTagOut === S,
+      recode(x.bits.data(31, 0), S),
+      recode(x.bits.data(63, 0), D)
     )
     rec.bits.redirectValid := false.B
-    reg.ready := rec.ready || !rec.valid
-  }
+    x.ready := rec.ready || !rec.valid
+    rec
+  })
+
   val memRecoded = WireInit(io.memWakeUpFp)
   for((rec, reg) <- memRecoded.zip(io.memWakeUpFp)){
     rec.bits.data := fpRdataHelper(reg.bits.uop, reg.bits.data)
@@ -109,7 +115,7 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN + 1,
       inBlockFastPorts.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -166,7 +172,9 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(x => x._1 <> x._2)
+  fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(
+    x => x._1 <> fpOutValid(x._2, connectReady = true)
+  )
 
   for((exu, i) <- exeUnits.zipWithIndex){
     val out, outReg = Wire(DecoupledIO(new ExuOutput))
@@ -197,7 +205,7 @@ class FloatBlock
     }
   }
 
-  XSPerf("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
+  XSPerfAccumulate("competition", fpWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> fpWbArbiter.io.out
@@ -208,5 +216,15 @@ class FloatBlock
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
+  fpRf.io.debug_rports := DontCare
 
+  if (!env.FPGAPlatform) {
+    for ((rport, rat) <- fpRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
+      rport.addr := rat
+    }
+    val difftest = Module(new DifftestArchFpRegState)
+    difftest.io.clock  := clock
+    difftest.io.coreid := 0.U
+    difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
+  }
 }

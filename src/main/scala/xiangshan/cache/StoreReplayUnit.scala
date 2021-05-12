@@ -1,12 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import utils.XSDebug
+import utils.{TransactionLatencyCounter, XSDebug, XSPerfAccumulate, XSPerfHistogram}
 import bus.tilelink._
 
-class StoreReplayEntry extends DCacheModule
+class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val id = Input(UInt())
@@ -117,10 +117,21 @@ class StoreReplayEntry extends DCacheModule
   when (io.lsu.resp.fire()) {
     XSDebug(s"StoreReplayEntryTransaction resp %d\n", io.id)
   }
+
+  // performance counters
+  XSPerfAccumulate("store_req", io.lsu.req.fire())
+  XSPerfAccumulate("store_penalty", state =/= s_invalid)
+  // this is useless
+  // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
+  XSPerfAccumulate("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
+  XSPerfAccumulate("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
+
+  val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
 }
 
 
-class StoreReplayQueue extends DCacheModule
+class StoreReplayQueue(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val lsu       = Flipped(new DCacheLineIO)
@@ -190,4 +201,9 @@ class StoreReplayQueue extends DCacheModule
   when (io.pipe_resp.fire()) {
     io.pipe_resp.bits.dump()
   }
+
+  // performance counters
+  XSPerfAccumulate("store_req", io.lsu.req.fire())
+  val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
+  XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 }

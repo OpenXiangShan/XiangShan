@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
 
@@ -16,7 +15,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
   val ptwl1Replacer = Some("plru")
-  def ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -33,7 +31,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2SetIdxLen = log2Up(PtwL2LineNum)
   val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
   val ptwl2Replacer = Some("setplru")
-  def ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
 
   // ptwl3: 16-way group-associated
   val PtwL3WayNum = 16
@@ -46,12 +43,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3SetIdxLen = log2Up(PtwL3LineNum)
   val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
   val ptwl3Replacer = Some("setplru")
-  def ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
 
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
   val spReplacer = Some("plru")
-  def spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
@@ -99,11 +94,11 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
 }
 
-abstract class PtwBundle extends XSBundle with HasPtwConst
+abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
 abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
-  with HasXSParameter with HasXSLog with HasPtwConst
+  with HasXSParameter with HasPtwConst
 
-class PteBundle extends PtwBundle{
+class PteBundle(implicit p: Parameters) extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
@@ -134,15 +129,15 @@ class PteBundle extends PtwBundle{
   }
 
   def getPerm() = {
-    val p = Wire(new PtePermBundle)
-    p.d := perm.d
-    p.a := perm.a
-    p.g := perm.g
-    p.u := perm.u
-    p.x := perm.x
-    p.w := perm.w
-    p.r := perm.r
-    p
+    val pm = Wire(new PtePermBundle)
+    pm.d := perm.d
+    pm.a := perm.a
+    pm.g := perm.g
+    pm.u := perm.u
+    pm.x := perm.x
+    pm.w := perm.w
+    pm.r := perm.r
+    pm
   }
 
   override def toPrintable: Printable = {
@@ -150,7 +145,7 @@ class PteBundle extends PtwBundle{
   }
 }
 
-class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false) extends PtwBundle {
+class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
@@ -190,7 +185,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   }
 }
 
-class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends PtwBundle {
+class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
 
   val tag  = UInt(tagLen.W)
@@ -237,7 +232,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean) extends Pt
   }
 }
 
-class PtwReq extends PtwBundle {
+class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
   override def toPrintable: Printable = {
@@ -245,7 +240,7 @@ class PtwReq extends PtwBundle {
   }
 }
 
-class PtwResp extends PtwBundle {
+class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
 
@@ -254,7 +249,7 @@ class PtwResp extends PtwBundle {
   }
 }
 
-class PtwIO extends PtwBundle {
+class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
@@ -297,13 +292,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
-  val difftestIO = IO(new Bundle() {
-    val ptwResp = Output(Bool())
-    val ptwAddr = Output(UInt(64.W))
-    val ptwData = Output(Vec(4, UInt(64.W)))
-  })
-
-  difftestIO <> DontCare
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
   arb.io.in <> VecInit(io.tlb.map(_.req))
@@ -311,7 +299,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
   val vpn = req.vpn
-  val sfence = io.sfence
+  val sfence = RegNext(io.sfence)
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
@@ -383,8 +371,18 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val levelNext = level + 1.U
   val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
+  // Access Perf
+  val l1AccessPerf = Wire(Vec(PtwL1EntrySize, Bool()))
+  val l2AccessPerf = Wire(Vec(PtwL2WayNum, Bool()))
+  val l3AccessPerf = Wire(Vec(PtwL3WayNum, Bool()))
+  val spAccessPerf = Wire(Vec(PtwSPEntrySize, Bool()))
+  l1AccessPerf.map(_ := false.B)
+  l2AccessPerf.map(_ := false.B)
+  l3AccessPerf.map(_ := false.B)
+  spAccessPerf.map(_ := false.B)
 
   // l1
+  val ptwl1replace = ReplacementPolicy.fromString(ptwl1Replacer, PtwL1EntrySize)
   val l1HitReg = Reg(Bool())
   val l1HitPPNReg = Reg(UInt(ppnLen.W))
   val (l1Hit, l1HitPPN) = {
@@ -395,6 +393,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
 
+    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     for (i <- 0 until PtwL1EntrySize) {
       XSDebug(validOneCycle, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn)}\n")
     }
@@ -408,6 +407,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // l2
+  val ptwl2replace = ReplacementPolicy.fromString(ptwl2Replacer,PtwL2WayNum,PtwL2LineNum)
   val l2HitReg = Reg(Bool())
   val l2HitPPNReg = Reg(UInt(ppnLen.W))
   val (l2Hit, l2HitPPN) = {
@@ -431,6 +431,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl2replace.access(genPtwL2SetIdx(vpn), hitWay) }
 
+    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     XSDebug(validOneCycle, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL2WayNum) {
       XSDebug(RegNext(validOneCycle), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
@@ -441,6 +442,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // l3
+  val ptwl3replace = ReplacementPolicy.fromString(ptwl3Replacer,PtwL3WayNum,PtwL3LineNum)
   val l3HitReg = Reg(Bool())
   val (l3Hit, l3HitData) = {
     val ridx = genPtwL3SetIdx(vpn)
@@ -455,6 +457,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { ptwl3replace.access(genPtwL3SetIdx(vpn), hitWay) }
 
+    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(validOneCycle) }
     XSDebug(validOneCycle, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until PtwL3WayNum) {
       XSDebug(RegNext(validOneCycle), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).hit(vpn)}\n")
@@ -473,6 +476,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(vpn))
 
   // super page
+  val spreplace = ReplacementPolicy.fromString(spReplacer, PtwSPEntrySize)
   val spHitReg = Reg(Bool())
   val (spHit, spHitData) = {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn) && spv(i) }
@@ -482,6 +486,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
 
+    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(validOneCycle) }
     for (i <- 0 until PtwSPEntrySize) {
       XSDebug(validOneCycle, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn)} spv:${spv(i)}\n")
     }
@@ -583,6 +588,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
     resp(i).bits.pf := level === 3.U || notFound
   }
 
+  // refill Perf
+  val l1RefillPerf = Wire(Vec(PtwL1EntrySize, Bool()))
+  val l2RefillPerf = Wire(Vec(PtwL2WayNum, Bool()))
+  val l3RefillPerf = Wire(Vec(PtwL3WayNum, Bool()))
+  val spRefillPerf = Wire(Vec(PtwSPEntrySize, Bool()))
+  l1RefillPerf.map(_ := false.B)
+  l2RefillPerf.map(_ := false.B)
+  l3RefillPerf.map(_ := false.B)
+  spRefillPerf.map(_ := false.B)
+
   // refill
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level === 0.U && !memPte.isLeaf()) {
@@ -591,8 +606,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
       l1(refillIdx).refill(vpn, memSelData)
+      ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
+
+      for (i <- 0 until PtwL1EntrySize) {
+          l1RefillPerf(i) := i.U === refillIdx
+      }
 
       XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(vpn, memSelData)}\n")
       XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
@@ -614,8 +634,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl2replace.access(refillIdx, victimWay)
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+      for (i <- 0 until PtwL2WayNum) {
+        l2RefillPerf(i) := i.U === victimWay
+      }
 
       XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l2 refill] refilldata:0x${
@@ -644,8 +669,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
         ),
         waymask = victimWayOH
       )
+      ptwl3replace.access(refillIdx, victimWay)
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+
+        for (i <- 0 until PtwL3WayNum) {
+          l3RefillPerf(i) := i.U === victimWay
+        }
 
       XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l3 refill] refilldata:0x${
@@ -665,8 +695,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(PtwSPEntrySize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
       sp(refillIdx).refill(vpn, memSelData, level)
+      spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
+
+      for (i <- 0 until PtwSPEntrySize) {
+        spRefillPerf(i) := i.U === refillIdx
+      }
 
       XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(vpn, memSelData, level)}\n")
       XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
@@ -675,7 +710,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
       rfOH.suggestName(s"sp_rfOH")
     }
   }
-
+  
   // sfence
   when (sfence.valid) {
     state := s_idle
@@ -717,13 +752,24 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   }
 
   // Perf Count
-  XSPerf("access", validOneCycle)
-  XSPerf("l1_hit", l1Hit)
-  XSPerf("l2_hit", l2Hit)
-  XSPerf("l3_hit", l3Hit)
-  XSPerf("mem_count", memReqFire)
-  XSPerf("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
-  XSPerf("mem_blocked_cycle", mem.a.valid && !memReqReady)
+  XSPerfAccumulate("access", validOneCycle)
+  XSPerfAccumulate("l1_hit", l1Hit)
+  XSPerfAccumulate("l2_hit", l2Hit)
+  XSPerfAccumulate("l3_hit", l3Hit)
+  XSPerfAccumulate("sp_hit", spHit)
+  XSPerfAccumulate("pte_hit", pteHit)
+  XSPerfAccumulate("mem_count", memReqFire)
+  XSPerfAccumulate("mem_cycle", BoolStopWatch(memReqFire, memRespFire, true))
+  XSPerfAccumulate("mem_blocked_cycle", mem.a.valid && !memReqReady)
+  l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1AccessIndex${i}", l) }
+  l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2AccessIndex${i}", l) }
+  l3AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3AccessIndex${i}", l) }
+  spAccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPAccessIndex${i}", l) }
+  l1RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L1RefillIndex${i}", l) }
+  l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2RefillIndex${i}", l) }
+  l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3RefillIndex${i}", l) }
+  spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPRefillIndex${i}", l) }
+
 
   // debug info
   for (i <- 0 until PtwWidth) {
@@ -754,14 +800,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer) {
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
 }
 
-class PTWRepeater extends XSModule with HasXSParameter with HasXSLog with HasPtwConst {
+class PTWRepeater(implicit p: Parameters) extends XSModule with HasXSParameter with HasPtwConst {
   val io = IO(new Bundle {
     val tlb = Flipped(new TlbPtwIO)
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
   })
 
-  val (tlb, ptw, sfence) = (io.tlb, io.ptw, io.sfence.valid)
+  val (tlb, ptw, sfence) = (io.tlb, io.ptw, RegNext(io.sfence.valid))
   val req = RegEnable(tlb.req.bits, tlb.req.fire())
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
   val haveOne = BoolStopWatch(tlb.req.fire(), tlb.resp.fire() || sfence)

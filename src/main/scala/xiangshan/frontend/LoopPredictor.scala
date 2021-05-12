@@ -1,29 +1,29 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.ExcitingUtils._
 import chisel3.experimental.chiselName
 
 trait LTBParams extends HasXSParameter with HasBPUParameter {
   //  +-----------+---------+--------------+-----------+
   //  |    tag    |   idx   |    4 bits    | 0 (1 bit) |
   //  +-----------+---------+--------------+-----------+
-  val tagLen = 24
+  val tagLen = 23
   val nRows = 16
   val idxLen = log2Up(nRows)
   val cntBits = 10
 }
 
-abstract class LTBBundle extends XSBundle with LTBParams
-abstract class LTBModule extends XSModule with LTBParams { val debug = true }
+abstract class LTBBundle(implicit p: Parameters) extends XSBundle with LTBParams
+abstract class LTBModule(implicit p: Parameters) extends XSModule with LTBParams { val debug = true }
 
 // class LoopMeta extends LTBBundle {
 // }
 
-class LoopEntry extends LTBBundle {
+class LoopEntry(implicit p: Parameters) extends LTBBundle {
   val tag = UInt(tagLen.W)
   // how many times has the same loop trip count been seen in a row?
   val conf = UInt(3.W)
@@ -41,26 +41,26 @@ class LoopEntry extends LTBBundle {
   def isUnconf = conf === 0.U
 }
 
-class LTBColumnReq extends LTBBundle {
+class LTBColumnReq(implicit p: Parameters) extends LTBBundle {
   val pc = UInt(VAddrBits.W) // only for debug!!!
   val idx = UInt(idxLen.W)
   val tag = UInt(tagLen.W)
 }
 
-class LTBColumnResp extends LTBBundle {
+class LTBColumnResp(implicit p: Parameters) extends LTBBundle {
   // exit the loop
   val exit = Bool()
   val specCnt = UInt(cntBits.W)
 }
 
-class LTBColumnUpdate extends LTBBundle {
+class LTBColumnUpdate(implicit p: Parameters) extends LTBBundle {
   // val misPred = Bool()
   val pc = UInt(VAddrBits.W)
   // val specCnt = UInt(cntBits.W)
   // val taken = Bool()
 }
 
-class LTBColumnRedirect extends LTBBundle {
+class LTBColumnRedirect(implicit p: Parameters) extends LTBBundle {
   val mispred = Bool()
   val pc = UInt(VAddrBits.W)
   val specCnt = UInt(cntBits.W)
@@ -69,7 +69,7 @@ class LTBColumnRedirect extends LTBBundle {
 }
 
 @chiselName
-class LTBColumn extends LTBModule {
+class LTBColumn(implicit p: Parameters) extends LTBModule {
   val io = IO(new Bundle() {
     // if3 send req
     val req = Input(new LTBColumnReq)
@@ -90,13 +90,13 @@ class LTBColumn extends LTBModule {
   val updateValid = RegNext(io.update.valid)
   val updatePC = RegNext(io.update.bits.pc)
   val updateIdx = ltbAddr.getBankIdx(io.update.bits.pc)
-  val updateTag = RegNext(ltbAddr.getTag(io.update.bits.pc)(tagLen - 1, 0))
+  val updateTag = RegNext(ltbAddr.getTag(io.update.bits.pc))
   // val update = RegNext(io.update.bits)
 
   val redirectValid = RegNext(io.redirect.valid)
   val redirectPC = RegNext(io.redirect.bits.pc)
   val redirectIdx = ltbAddr.getBankIdx(io.redirect.bits.pc)
-  val redirectTag = RegNext(ltbAddr.getTag(io.redirect.bits.pc)(tagLen - 1, 0))
+  val redirectTag = RegNext(ltbAddr.getTag(io.redirect.bits.pc))
   val redirect = RegNext(io.redirect.bits)
   val isReplay = RegNext(io.redirect.bits.isReplay)
 
@@ -110,7 +110,7 @@ class LTBColumn extends LTBModule {
   val if4_pc = RegEnable(if3_pc, io.if3_fire)
 
   val if3_entry = WireInit(ltb.read(if3_idx))
-  val if4_entry = Reg(new LoopEntry)
+  val if4_entry = RegInit(0.U.asTypeOf(new LoopEntry))
 
   val valid = RegInit(false.B)
   when (io.if4_fire) { valid := false.B }
@@ -159,6 +159,10 @@ class LTBColumn extends LTBModule {
   val wen = WireInit(false.B)
   when(wen) {ltb.write(if4_rIdx, wEntry)}
 
+  val loop_entry_is_learned = WireInit(false.B)
+  val loop_learned_entry_conflict = WireInit(false.B)
+  val loop_conf_entry_evicted = WireInit(false.B)
+
   when(redirectValid && redirect.mispred && !isReplay && !doingReset) {
     wen := true.B
     when(tagMatch) {
@@ -170,6 +174,7 @@ class LTBColumn extends LTBModule {
         when(cntMatch) {
           XSDebug("[redirect] 1\n")
           wEntry.conf := if4_rEntry.conf + 1.U
+          loop_entry_is_learned := true.B
           wEntry.specCnt := 0.U
         }.otherwise {
           XSDebug("[redirect] 2\n")
@@ -194,10 +199,12 @@ class LTBColumn extends LTBModule {
       when(if4_rEntry.isLearned) {
         XSDebug("[redirect] 5\n")
         // do nothing? or release this entry
+        loop_learned_entry_conflict := true.B
       }.elsewhen(if4_rEntry.isConf) {
         when(if4_rEntry.age === 0.U) {
           XSDebug("[redirect] 6\n")
           wEntry.tag := redirectTag
+          loop_conf_entry_evicted := true.B
           wEntry.conf := 1.U
           wEntry.specCnt := 0.U
           wEntry.tripCnt := redirect.specCnt
@@ -266,6 +273,11 @@ class LTBColumn extends LTBModule {
   }
 
   if (BPUDebug && debug) {
+    // Perf counters
+    XSPerfAccumulate("loop_entry_is_learned ", loop_entry_is_learned)
+    XSPerfAccumulate("loop_learned_entry_conflict ", loop_learned_entry_conflict)
+    XSPerfAccumulate("loop_conf_entry_evicted ", loop_conf_entry_evicted)
+
     //debug info
     XSDebug(doingReset, "Reseting...\n")
     XSDebug(io.repair, "Repair...\n")
@@ -302,7 +314,7 @@ class LTBColumn extends LTBModule {
 }
 
 @chiselName
-class LoopPredictor extends BasePredictor with LTBParams {
+class LoopPredictor(implicit p: Parameters) extends BasePredictor with LTBParams {
   class LoopResp extends Resp {
     val exit = Vec(PredictWidth, Bool())
   }
@@ -338,9 +350,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val updateValid = io.update.valid
   val update = io.update.bits
 
-  val do_redirect = RegNext(io.redirect)
-  val redirectValid = do_redirect.valid
-  val redirect = do_redirect.bits.cfiUpdate
+  val redirectValid = io.redirect.valid
+  val redirect = io.redirect.bits.cfiUpdate
   val redirectPC = redirect.pc
   val redirectBank = ltbAddr.getBank(redirectPC)
  
@@ -363,7 +374,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.redirect.bits.specCnt := redirect.specCnt(i)
     ltbs(i).io.redirect.bits.mispred := redirect.isMisPred
     ltbs(i).io.redirect.bits.taken := redirect.taken
-    ltbs(i).io.redirect.bits.isReplay := do_redirect.bits.flushItself
+    ltbs(i).io.redirect.bits.isReplay := io.redirect.bits.flushItself
 
     ltbs(i).io.repair := redirectValid && redirectBank =/= i.U
   }
@@ -384,7 +395,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     io.meta.specCnts(i) := ltbResps(i).specCnt
   }
 
-  XSPerf("LoopExit", io.resp.exit.reduce(_||_))
+  XSPerfAccumulate("LoopExit", io.resp.exit.reduce(_||_))
 
   if (BPUDebug && debug) {
     // debug info
@@ -394,7 +405,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
     XSDebug("[IF4][req] updatePC=%x, updateValid=%d, isBr=%b\n", update.ftqPC, updateValid, update.br_mask.asUInt)
-    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, do_redirect.bits.flushItself)
+    XSDebug("[IF4][req] redirectPC=%x redirectBank=%d, redirectValid=%d, isBr=%d, isReplay=%d\n", redirect.pc, redirectBank, redirectValid, redirect.pd.isBr, io.redirect.bits.flushItself)
     XSDebug("[IF4][req] isMisPred=%d\n", redirect.isMisPred)
 
     XSDebug(redirectValid, "[redirect SpecCnt] ")

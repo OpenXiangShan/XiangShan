@@ -80,3 +80,7 @@ object ParallelPriorityEncoder {
   def apply(in: Seq[Bool]): UInt = ParallelPriorityMux(in, (0 until in.size).map(_.asUInt))
   def apply(in: Bits): UInt = apply(in.asBools)
 }
+
+object ParallelSingedExpandingAdd {
+  def apply(in: Seq[SInt]): SInt = ParallelOperation(in, (a: SInt, b: SInt) => a +& b)
+}

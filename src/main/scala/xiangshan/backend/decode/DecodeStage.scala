@@ -1,11 +1,12 @@
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-class DecodeStage extends XSModule {
+class DecodeStage(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
@@ -21,14 +22,14 @@ class DecodeStage extends XSModule {
   val waittable = Module(new WaitTable)
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
-    
+
     // read waittable, update loadWaitBit
     waittable.io.raddr(i) := io.in(i).bits.foldpc
     decoders(i).io.enq.ctrl_flow.loadWaitBit := waittable.io.rdata(i)
 
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
-    io.in(i).ready := io.out(i).ready
+    io.in(i).ready       := io.out(i).ready
   }
 
   for (i <- 0 until StorePipelineWidth) {
@@ -36,6 +37,11 @@ class DecodeStage extends XSModule {
   }
   waittable.io.csrCtrl <> io.csrCtrl
 
-  val loadWaitBitSet = PopCount(VecInit((0 until DecodeWidth).map(i => waittable.io.rdata(i) && io.out(i).fire())))
-  XSPerf("loadWaitBitSet", loadWaitBitSet, acc = true) // rollback redirect generated
+  val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
+  XSPerfAccumulate("loadWaitBitSet", loadWaitBitSet)
+
+  val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
+  XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
+  XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
+  XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
 }

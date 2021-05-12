@@ -1,14 +1,14 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.BusyTableReadIO
-import xiangshan.backend.exu.Exu._
 
-class Dispatch2Ls extends XSModule {
+class Dispatch2Ls(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
     val readIntRf = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
@@ -146,7 +146,25 @@ class Dispatch2Ls extends XSModule {
 //        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
 
-  XSPerf("in", PopCount(io.fromDq.map(_.valid)))
-  XSPerf("waitInstr", PopCount(io.fromDq.map(r => r.valid && !r.ready)))
-
+  XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
+  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))
+  XSPerfAccumulate("out_load0", io.enqIQCtrl(0).fire())
+  XSPerfAccumulate("out_load1", io.enqIQCtrl(1).fire())
+  XSPerfAccumulate("out_store0", io.enqIQCtrl(2).fire())
+  XSPerfAccumulate("out_store1", io.enqIQCtrl(3).fire())
+  val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
+  XSPerfAccumulate("blocked", block_num)
+  XSPerfAccumulate("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))
+  XSPerfAccumulate("load_deq", PopCount(loadCanAccept))
+  XSPerfAccumulate("load_deq_exceed_limit", Mux(PopCount(loadCanAccept) >= 2.U, PopCount(loadCanAccept) - 2.U, 0.U))
+  XSPerfAccumulate("store_deq", PopCount(storeCanAccept))
+  XSPerfAccumulate("store_deq_exceed_limit", Mux(PopCount(storeCanAccept) >= 2.U, PopCount(storeCanAccept) - 2.U, 0.U))
+  XSPerfAccumulate("load0_blocked_by_load0", loadIndexGen.io.mapping(0).valid && !io.enqIQCtrl(0).ready && io.enqIQCtrl(1).ready)
+  XSPerfAccumulate("load0_blocked_by_load1", loadIndexGen.io.mapping(0).valid && io.enqIQCtrl(0).ready && !io.enqIQCtrl(1).ready)
+  XSPerfAccumulate("load1_blocked_by_load0", loadIndexGen.io.mapping(1).valid && !io.enqIQCtrl(0).ready && io.enqIQCtrl(1).ready)
+  XSPerfAccumulate("load1_blocked_by_load1", loadIndexGen.io.mapping(1).valid && io.enqIQCtrl(0).ready && !io.enqIQCtrl(1).ready)
+  XSPerfAccumulate("store0_blocked_by_store0", storeIndexGen.io.mapping(0).valid && !io.enqIQCtrl(2).ready && io.enqIQCtrl(3).ready)
+  XSPerfAccumulate("store0_blocked_by_store1", storeIndexGen.io.mapping(0).valid && io.enqIQCtrl(2).ready && !io.enqIQCtrl(3).ready)
+  XSPerfAccumulate("store1_blocked_by_store0", storeIndexGen.io.mapping(1).valid && !io.enqIQCtrl(2).ready && io.enqIQCtrl(3).ready)
+  XSPerfAccumulate("store1_blocked_by_store1", storeIndexGen.io.mapping(1).valid && io.enqIQCtrl(2).ready && !io.enqIQCtrl(3).ready)
 }

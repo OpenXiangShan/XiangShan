@@ -1,14 +1,13 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.BusyTableReadIO
-import xiangshan.backend.exu.Exu._
 
-class Dispatch2Fp extends XSModule {
+class Dispatch2Fp(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp)))
     val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
@@ -148,6 +147,29 @@ class Dispatch2Fp extends XSModule {
 //        p"(${readPortIndexReg(i)+2.U}, ${uopReg(i).psrc3}, ${Hexadecimal(io.enqIQData(i).src3)})\n")
 //  }
 
-  XSPerf("in", PopCount(io.fromDq.map(_.valid)))
-
+  XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
+  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))
+  XSPerfAccumulate("out_fmac0", io.enqIQCtrl(0).fire())
+  XSPerfAccumulate("out_fmac1", io.enqIQCtrl(1).fire())
+  XSPerfAccumulate("out_fmac2", io.enqIQCtrl(2).fire())
+  XSPerfAccumulate("out_fmac3", io.enqIQCtrl(3).fire())
+  XSPerfAccumulate("out_fmisc0", io.enqIQCtrl(4).fire())
+  XSPerfAccumulate("out_fmisc1", io.enqIQCtrl(5).fire())
+  val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
+  XSPerfAccumulate("blocked", block_num)
+  XSPerfAccumulate("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))
+  XSPerfAccumulate("misc_deq", PopCount(fmiscCanAccept))
+  XSPerfAccumulate("misc_deq_exceed_limit", Mux(PopCount(fmiscCanAccept) >= 2.U, PopCount(fmiscCanAccept) - 2.U, 0.U))
+  XSPerfAccumulate("mac0_blocked_by_mac0", io.enqIQCtrl(0).valid && !io.enqIQCtrl(0).ready)
+  XSPerfAccumulate("mac1_blocked_by_mac1", io.enqIQCtrl(1).valid && !io.enqIQCtrl(1).ready)
+  XSPerfAccumulate("mac2_blocked_by_mac2", io.enqIQCtrl(2).valid && !io.enqIQCtrl(2).ready)
+  XSPerfAccumulate("mac3_blocked_by_mac3", io.enqIQCtrl(3).valid && !io.enqIQCtrl(3).ready)
+  XSPerfAccumulate("misc0_blocked_by_mac", fmiscIndexGen.io.mapping(0).valid && fmiscReady && (io.enqIQCtrl(2).valid || io.enqIQCtrl(3).valid))
+  XSPerfAccumulate("misc0_blocked_by_mac2", fmiscIndexGen.io.mapping(0).valid && fmiscReady && io.enqIQCtrl(2).valid && !io.enqIQCtrl(3).valid)
+  XSPerfAccumulate("misc0_blocked_by_mac3", fmiscIndexGen.io.mapping(0).valid && fmiscReady && !io.enqIQCtrl(2).valid && io.enqIQCtrl(3).valid)
+  XSPerfAccumulate("misc0_blocked_by_misc1", fmiscIndexGen.io.mapping(0).valid && io.enqIQCtrl(4).ready && !io.enqIQCtrl(5).ready && !io.enqIQCtrl(2).valid && !io.enqIQCtrl(3).valid)
+  XSPerfAccumulate("misc1_blocked_by_mac", fmiscIndexGen.io.mapping(1).valid && fmiscReady && (io.enqIQCtrl(2).valid || io.enqIQCtrl(3).valid))
+  XSPerfAccumulate("misc1_blocked_by_mac2", fmiscIndexGen.io.mapping(1).valid && fmiscReady && io.enqIQCtrl(2).valid && !io.enqIQCtrl(3).valid)
+  XSPerfAccumulate("misc1_blocked_by_mac3", fmiscIndexGen.io.mapping(1).valid && fmiscReady && !io.enqIQCtrl(2).valid && io.enqIQCtrl(3).valid)
+  XSPerfAccumulate("misc1_blocked_by_misc0", fmiscIndexGen.io.mapping(1).valid && !io.enqIQCtrl(4).ready && io.enqIQCtrl(5).ready && !io.enqIQCtrl(2).valid && !io.enqIQCtrl(3).valid)
 }

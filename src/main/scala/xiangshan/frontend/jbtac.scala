@@ -1,13 +1,13 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.ALUOpType
 
 
-class JBTACUpdateBundle extends XSBundle {
+class JBTACUpdateBundle(implicit p: Parameters) extends XSBundle {
  val fetchPC = UInt(VAddrBits.W)
  val fetchIdx = UInt(log2Up(PredictWidth).W)
  val hist = UInt(HistoryLength.W)
@@ -17,7 +17,7 @@ class JBTACUpdateBundle extends XSBundle {
  val isRVC = Bool()
 }
 
-class JBTACPred extends XSBundle {
+class JBTACPred(implicit p: Parameters) extends XSBundle {
  val hit = Bool()
  val target = UInt(VAddrBits.W)
  val hitIdx = UInt(log2Up(PredictWidth).W)
@@ -25,7 +25,7 @@ class JBTACPred extends XSBundle {
  val isRVC = Bool()
 }
 
-class JBTAC extends XSModule {
+class JBTAC(implicit p: Parameters) extends XSModule {
  val io = IO(new Bundle {
    val in = new Bundle {
      val pc = Flipped(Decoupled(UInt(VAddrBits.W)))

@@ -17,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters, InclusiveCacheControlParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.{HasXSLog, XSBundle, HasXSParameter}
+import xiangshan.{XSBundle, HasXSParameter}
 import xiangshan.cache.{DCache, Uncache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -27,18 +27,18 @@ import utils.MaskExpand
 import scala.util.Random
 
 // GetGenerator: a tilelink module that generate get of different addr and sizes
-class GetGeneratorReq extends XSBundle
+class GetGeneratorReq(implicit p: Parameters) extends XSBundle
 {
   val address  = Output(UInt(PAddrBits.W))
   val size  = Output(UInt(8.W))
 }
 
-class GetGeneratorResp extends XSBundle
+class GetGeneratorResp(implicit p: Parameters) extends XSBundle
 {
   val data  = Output(UInt((64 * 8).W))
 }
 
-class GetGeneratorIO extends XSBundle
+class GetGeneratorIO(implicit p: Parameters) extends XSBundle
 {
   val req  = DecoupledIO(new GetGeneratorReq)
   val resp = Flipped(DecoupledIO(new GetGeneratorResp))
@@ -60,7 +60,6 @@ class GetGenerator()(implicit p: Parameters) extends LazyModule with HasXSParame
 
 class GetGeneratorImp(outer: GetGenerator) extends LazyModuleImp(outer)
   with HasXSParameter
-  with HasXSLog
 {
 
   val io = IO(Flipped(new GetGeneratorIO))
@@ -235,7 +234,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
   // connect uncache access to l2 control node
   l2.ctlnode.get := DebugIdentityNode() := uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this) with HasXSLog {
+  lazy val module = new LazyModuleImp(this) {
 
     val io = IO(new UnalignedGetTestTopIO)
 
@@ -395,8 +394,6 @@ class UnalignedGetTestTopWrapper()(implicit p: Parameters) extends LazyModule {
 }
 
 class UnalignedGetTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
-
-  top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,

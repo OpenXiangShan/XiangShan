@@ -5,11 +5,10 @@
 
 package xiangshan.backend.decode
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
-
+import freechips.rocketchip.util.{UIntIsOneOf, uintToBitPat}
 import xiangshan._
 import utils._
 import xiangshan.backend._
@@ -33,7 +32,7 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  |  isRVF
     //   |            |            |            |           |           |  |  |  |  |  |  |  selImm
     List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
-  
+
     val table: Array[(BitPat, List[BitPat])]
 }
 
@@ -391,7 +390,7 @@ object ImmUnion {
 /**
  * IO bundle for the Decode unit
  */
-class DecodeUnitIO extends XSBundle {
+class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
   val deq = new Bundle { val cf_ctrl = Output(new CfCtrl) }
 }
@@ -399,7 +398,7 @@ class DecodeUnitIO extends XSBundle {
 /**
  * Decode unit that takes in a single CtrlFlow and generates a CfCtrl.
  */
-class DecodeUnit extends XSModule with DecodeUnitConstants {
+class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitIO)
 
   val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
@@ -427,7 +426,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   // fill in exception vector
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
-  
+
   // fix frflags
   //                           fflags    zero csrrs rd    csr
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
@@ -447,6 +446,8 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
       x._1 -> minBits
     }
   ))
+
+  cs.isMove := BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
 
   cf_ctrl.ctrl := cs
 

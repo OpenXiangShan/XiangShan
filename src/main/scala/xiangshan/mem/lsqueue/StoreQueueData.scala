@@ -1,19 +1,19 @@
 package xiangshan.mem
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
-import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
 
 // Data module define
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
-class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters {
+class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
@@ -53,13 +53,13 @@ class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   }
 }
 
-class SQData8Entry extends XSBundle {
+class SQData8Entry(implicit p: Parameters) extends XSBundle {
   // val paddr = UInt(PAddrBits.W)
   val valid = Bool()
   val data = UInt((XLEN/8).W)
 }
 
-class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQData8Entry))
@@ -144,13 +144,13 @@ class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int) ext
   })
 }
 
-class SQDataEntry extends XSBundle {
+class SQDataEntry(implicit p: Parameters) extends XSBundle {
   // val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
 }
 
-class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class StoreQueueData(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQDataEntry))

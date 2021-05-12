@@ -8,7 +8,7 @@ import chisel3.util._
 import chisel3.util.random.LFSR
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property.cover
-import xiangshan.{HasXSLog, XSCoreParameters}
+import xiangshan.{XSCoreParameters}
 
 abstract class ReplacementPolicy {
   def nBits: Int
@@ -47,7 +47,7 @@ object ReplacementPolicy {
 
 class RandomReplacement(n_ways: Int) extends ReplacementPolicy {
   private val replace = Wire(Bool())
-  replace := true.B
+  replace := false.B
   def nBits = 16
   def perSet = false
   private val lfsr = LFSR(nBits, replace)
@@ -72,7 +72,6 @@ abstract class SetAssocReplacementPolicy {
   def access(set: UInt, touch_way: UInt): Unit
   def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]): Unit
   def way(set: UInt): UInt
-  def miss(set: UInt): Unit
 }
 
 
@@ -332,7 +331,7 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
   }
 
   def way(set: UInt) = logic.get_replace_way(state_vec(set))
-  def miss(set: UInt) = {}
+
 }
 
 class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolicy {
@@ -341,8 +340,8 @@ class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolic
   def miss(set: UInt) =  random.miss 
   def way(set: UInt) = random.way
 
-  def access(set: UInt, touch_way: UInt) = {}
-  def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]) = {}
+  def access(set: UInt, touch_way: UInt) = random.access(touch_way)
+  def access(sets: Seq[UInt], touch_ways: Seq[Valid[UInt]]) = random.access(touch_ways)
 
 }
 

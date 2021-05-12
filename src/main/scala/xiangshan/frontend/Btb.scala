@@ -1,10 +1,10 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.ALUOpType
 import utils._
 import chisel3.experimental.chiselName
 
@@ -18,13 +18,13 @@ trait BTBParams extends HasXSParameter with HasIFUConst {
   val extendedNRows = nRows
 }
 
-class BtbDataEntry extends XSBundle with BTBParams {
+class BtbDataEntry(implicit p: Parameters) extends XSBundle with BTBParams {
   val lower = UInt(lowerBitsSize.W)
   val extended = Bool()
 }
 
 object BtbDataEntry {
-  def apply(lower: UInt, extended: Bool) = {
+  def apply(lower: UInt, extended: Bool)(implicit p: Parameters) = {
     val e = Wire(new BtbDataEntry)
     e.lower := lower
     e.extended := extended
@@ -32,7 +32,7 @@ object BtbDataEntry {
   }
 }
 
-class BtbMetaEntry() extends XSBundle with BTBParams {
+class BtbMetaEntry()(implicit p: Parameters) extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
   val tag = UInt((VAddrBits - log2Ceil(nRows) - log2Ceil(PredictWidth) - instOffsetBits).W)
@@ -41,7 +41,7 @@ class BtbMetaEntry() extends XSBundle with BTBParams {
 }
 
 object BtbMetaEntry {
-  def apply(tag: UInt, isBr: UInt, isRVC: Bool) = {
+  def apply(tag: UInt, isBr: UInt, isRVC: Bool)(implicit p: Parameters) = {
     val e = Wire(new BtbMetaEntry)
     e.valid := true.B
     e.tag := tag
@@ -51,7 +51,7 @@ object BtbMetaEntry {
   }
 }
 
-class BTB extends BasePredictor with BTBParams{
+class BTB(implicit p: Parameters) extends BasePredictor with BTBParams{
   class BTBResp extends Resp {
     val targets = Vec(PredictWidth, UInt(VAddrBits.W))
     val hits = Vec(PredictWidth, Bool())
@@ -60,6 +60,7 @@ class BTB extends BasePredictor with BTBParams{
   }
   class BTBMeta extends Meta {
     val writeWay =  Vec(PredictWidth, UInt(log2Up(BtbWays).W))
+    val hits = Vec(PredictWidth, Bool())
   }
   class BTBFromOthers extends FromOthers {}
 
@@ -76,10 +77,10 @@ class BTB extends BasePredictor with BTBParams{
   val if2_pc = RegEnable(if1_packetAlignedPC, io.pc.valid)
 
   // layout: way 0 bank 0, way 0 bank 1, ..., way 0 bank BtbBanks-1, way 1 bank 0, ..., way 1 bank BtbBanks-1
-  val data = Module(new SRAMTemplate(new BtbDataEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true))
-  val meta = Module(new SRAMTemplate(new BtbMetaEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true))
+  val data = Module(new SRAMTemplate(new BtbDataEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true, singlePort = true))
+  val meta = Module(new SRAMTemplate(new BtbMetaEntry, set = nRows, way=BtbWays*BtbBanks, shouldReset = true, holdRead = true, singlePort = true))
 
-  val edata = Module(new SRAMTemplate(UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
+  val edata = Module(new SRAMTemplate(UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true, singlePort = true))
 
   val if1_mask = io.inMask
   val if2_mask = RegEnable(if1_mask, io.pc.valid)
@@ -157,6 +158,7 @@ class BTB extends BasePredictor with BTBParams{
     io.resp.isBrs(b) := meta_entry.isBr
     io.resp.isRVC(b) := meta_entry.isRVC
     io.meta.writeWay(b) := writeWay(b)
+    io.meta.hits(b) := if2_bankHits(b)
     // io.meta.hitJal(b)   := if2_bankHits(b) && meta_entry.btbType === BTBtype.J
   }
 
@@ -185,13 +187,16 @@ class BTB extends BasePredictor with BTBParams{
   val updateBank = u.cfiIndex.bits
   val updateRow = btbAddr.getBankIdx(cfi_pc)
   val updateIsBr = u.br_mask(u.cfiIndex.bits)
-  val updateTaken = u.cfiIndex.valid
+  val updateTaken = u.cfiIndex.valid && u.valids(u.cfiIndex.bits)
+  val updateIndirectMisPred = u.mispred(u.cfiIndex.bits) && u.cfiIsJalr
   // TODO: remove isRVC
   val metaWrite = BtbMetaEntry(btbAddr.getTag(cfi_pc), updateIsBr, u.cfiIsRVC)
   val dataWrite = BtbDataEntry(new_lower, new_extended)
   
-
-  val updateValid = do_update.valid && updateTaken
+  val cfi_hit = u.metas(u.cfiIndex.bits).btbHit
+  // for brs and jals, prediction is right once hit, so we only update on not hit or jalr mispreds
+  val updateValid = do_update.valid && updateTaken && (!cfi_hit || updateIndirectMisPred)
+  in_ready := !updateValid
   // Update btb
   require(isPow2(BtbBanks))
   // this is one hot, since each fetch bundle has at most 1 taken instruction
@@ -199,6 +204,35 @@ class BTB extends BasePredictor with BTBParams{
   meta.io.w.apply(updateValid, metaWrite, updateRow, updateWayMask)
   data.io.w.apply(updateValid, dataWrite, updateRow, updateWayMask)
   edata.io.w.apply(updateValid && new_extended, u.target, updateRow, "b1".U)
+
+  
+  if (!env.FPGAPlatform) {
+    val alloc_conflict =
+      VecInit((0 until BtbBanks).map(i =>
+        if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i) && if2_mask(i)))
+    XSPerfAccumulate("btb_alloc_conflict", PopCount(alloc_conflict))
+    XSPerfAccumulate("btb_update_req", updateValid)
+    XSPerfAccumulate("ebtb_update_req", updateValid && new_extended)
+    XSPerfAccumulate("btb_wr_conflict", updateValid && io.pc.valid)
+    XSPerfAccumulate("ebtb_wr_conflict", updateValid && new_extended && io.pc.valid)
+    XSPerfAccumulate("btb_update_indirect_mispred", updateValid && updateIndirectMisPred)
+    def btb_perf(hit_cond: Bool)(str: String, cfi_cond: PreDecodeInfoForDebug => UInt): Unit = {
+      XSPerfAccumulate(str, PopCount((u.takens zip u.valids zip u.metas zip u.pd) map {
+          case (((t, v), m), pd)  => t && v && (m.btbHit.asBool === hit_cond) && cfi_cond(pd).asBool && do_update.valid && updateTaken}))
+    }
+    val btb_miss_perf = btb_perf(false.B)(_,_)
+    val btb_hit_perf = btb_perf(true.B)(_,_)
+    btb_hit_perf("btb_commit_hits", pd => !pd.notCFI)
+    btb_hit_perf("btb_commit_hit_brs", pd => pd.isBr)
+    btb_hit_perf("btb_commit_hit_jals", pd => pd.isJal)
+    btb_hit_perf("btb_commit_hit_jalrs", pd => pd.isJalr)
+    btb_hit_perf("btb_commit_hit_rets", pd => pd.isRet)
+    btb_miss_perf("btb_commit_misses", pd => !pd.notCFI)
+    btb_miss_perf("btb_commit_miss_brs", pd => pd.isBr)
+    btb_miss_perf("btb_commit_miss_jals", pd => pd.isJal)
+    btb_miss_perf("btb_commit_miss_jalrs", pd => pd.isJalr)
+    btb_miss_perf("btb_commit_miss_rets", pd => pd.isRet)
+  }
 
   if (BPUDebug && debug) {
     val debug_verbose = true

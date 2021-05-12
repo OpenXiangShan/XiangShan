@@ -75,7 +75,7 @@ class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1
 }
 
 class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
-  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false) extends Module {
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false, bypassWrite: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val r = Flipped(new SRAMReadBus(gen, set, way))
     val w = Flipped(new SRAMWriteBus(gen, set, way))
@@ -102,10 +102,33 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
   when (wen) { array.write(setIdx, wdata, waymask.asBools) }
 
-  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.setIdx, realRen)
-               else array.read(io.r.req.bits.setIdx, realRen)).map(_.asTypeOf(gen))
-  io.r.resp.data := VecInit(rdata)
+  val raw_rdata = array.read(io.r.req.bits.setIdx, realRen)
 
+  // bypass for dual-port SRAMs
+  require(!bypassWrite || bypassWrite && !singlePort)
+  def need_bypass(wen: Bool, waddr: UInt, wmask: UInt, ren: Bool, raddr: UInt) : UInt = {
+    val need_check = RegNext(ren && wen)
+    val waddr_reg = RegNext(waddr)
+    val raddr_reg = RegNext(raddr)
+    require(wmask.getWidth == way)
+    val bypass = Fill(way, need_check && waddr_reg === raddr_reg) & RegNext(wmask)
+    bypass.asTypeOf(UInt(way.W))
+  }
+  val bypass_wdata = if (bypassWrite) VecInit(RegNext(io.w.req.bits.data).map(_.asTypeOf(wordType)))
+    else VecInit((0 until way).map(_ => LFSR64().asTypeOf(wordType)))
+  val bypass_mask = need_bypass(io.w.req.valid, io.w.req.bits.setIdx, io.w.req.bits.waymask.getOrElse("b1".U), io.r.req.valid, io.r.req.bits.setIdx)
+  val mem_rdata = {
+    if (singlePort) raw_rdata
+    else VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
+      case ((m, r), w) => Mux(m, w, r)
+    })
+  }
+
+  // hold read data for SRAMs
+  val rdata = (if (holdRead) HoldUnless(mem_rdata, RegNext(realRen))
+              else mem_rdata).map(_.asTypeOf(gen))
+
+  io.r.resp.data := VecInit(rdata)
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 

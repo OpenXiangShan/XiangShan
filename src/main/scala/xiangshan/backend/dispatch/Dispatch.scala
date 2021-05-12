@@ -1,11 +1,11 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import chisel3.ExcitingUtils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.{RenameBypassInfo, BusyTableReadIO}
 import xiangshan.mem.LsqEnqIO
@@ -20,7 +20,7 @@ case class DispatchParameters
   LsDqDeqWidth: Int
 )
 
-class Dispatch extends XSModule {
+class Dispatch(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
@@ -49,6 +49,12 @@ class Dispatch extends XSModule {
       val intIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
       val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
       // ls: hardwired to (0, 1, 2, 4)
+    }
+    val ctrlInfo = new Bundle {
+      val roqFull   = Output(Bool())
+      val intdqFull = Output(Bool())
+      val fpdqFull  = Output(Bool())
+      val lsdqFull  = Output(Bool())
     }
   })
 
@@ -114,4 +120,9 @@ class Dispatch extends XSModule {
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 //  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+
+  io.ctrlInfo <> DontCare
+  io.ctrlInfo.intdqFull := intDq.io.dqFull
+  io.ctrlInfo.fpdqFull := fpDq.io.dqFull
+  io.ctrlInfo.lsdqFull := lsDq.io.dqFull
 }

@@ -1,14 +1,13 @@
 package xiangshan.backend.dispatch
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.exu.Exu._
-import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.rename.BusyTableReadIO
 
-class Dispatch2Int extends XSModule {
+class Dispatch2Int(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
     val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
@@ -153,6 +152,33 @@ class Dispatch2Int extends XSModule {
 //        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
 //  }
 
-  XSPerf("in", PopCount(io.fromDq.map(_.valid)))
-
+  XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
+  XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))
+  XSPerfAccumulate("out_jmp", io.enqIQCtrl(0).fire())
+  XSPerfAccumulate("out_mdu0", io.enqIQCtrl(1).fire())
+  XSPerfAccumulate("out_mdu1", io.enqIQCtrl(2).fire())
+  XSPerfAccumulate("out_alu0", io.enqIQCtrl(3).fire())
+  XSPerfAccumulate("out_alu1", io.enqIQCtrl(4).fire())
+  XSPerfAccumulate("out_alu2", io.enqIQCtrl(5).fire())
+  XSPerfAccumulate("out_alu3", io.enqIQCtrl(6).fire())
+  val block_num = PopCount(io.fromDq.map(deq => deq.valid && !deq.ready))
+  XSPerfAccumulate("blocked", block_num)
+  XSPerfAccumulate("blocked_index", Mux(block_num =/= 0.U, PriorityEncoder(io.fromDq.map(deq => deq.valid && !deq.ready)), 0.U))
+  XSPerfAccumulate("jump_deq_try", PopCount(jmpCanAccept))
+  XSPerfAccumulate("jump_deq_exceed_limit", Mux(PopCount(jmpCanAccept) >= 1.U, PopCount(jmpCanAccept) - 1.U, 0.U))
+  XSPerfAccumulate("mdu_deq_try", PopCount(mduCanAccept))
+  XSPerfAccumulate("mdu_deq_exceed_limit", Mux(PopCount(mduCanAccept) >= 2.U, PopCount(mduCanAccept) - 2.U, 0.U))
+  XSPerfAccumulate("alu0_blocked_by_alu0", io.enqIQCtrl(3).valid && !io.enqIQCtrl(3).ready)
+  XSPerfAccumulate("alu1_blocked_by_alu1", io.enqIQCtrl(4).valid && !io.enqIQCtrl(4).ready)
+  XSPerfAccumulate("alu2_blocked_by_alu2", io.enqIQCtrl(5).valid && !io.enqIQCtrl(5).ready)
+  XSPerfAccumulate("alu3_blocked_by_alu3", io.enqIQCtrl(6).valid && !io.enqIQCtrl(6).ready)
+  XSPerfAccumulate("jump_blocked_by_alu1", jmpIndexGen.io.mapping(0).valid && io.enqIQCtrl(4).valid && io.enqIQCtrl(0).ready)
+  XSPerfAccumulate("mdu0_blocked_by_alu", mduIndexGen.io.mapping(0).valid && mduReady && (io.enqIQCtrl(5).valid || io.enqIQCtrl(6).valid))
+  XSPerfAccumulate("mdu0_blocked_by_alu2", mduIndexGen.io.mapping(0).valid && mduReady && io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid)
+  XSPerfAccumulate("mdu0_blocked_by_alu3", mduIndexGen.io.mapping(0).valid && mduReady && !io.enqIQCtrl(5).valid && io.enqIQCtrl(6).valid)
+  XSPerfAccumulate("mdu0_blocked_by_mdu1", mduIndexGen.io.mapping(0).valid && io.enqIQCtrl(1).ready && !io.enqIQCtrl(2).ready && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid)
+  XSPerfAccumulate("mdu1_blocked_by_alu", mduIndexGen.io.mapping(1).valid && mduReady && (io.enqIQCtrl(5).valid || io.enqIQCtrl(6).valid))
+  XSPerfAccumulate("mdu1_blocked_by_alu2", mduIndexGen.io.mapping(1).valid && mduReady && io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid)
+  XSPerfAccumulate("mdu1_blocked_by_alu3", mduIndexGen.io.mapping(1).valid && mduReady && !io.enqIQCtrl(5).valid && io.enqIQCtrl(6).valid)
+  XSPerfAccumulate("mdu1_blocked_by_mdu0", mduIndexGen.io.mapping(1).valid && !io.enqIQCtrl(1).ready && io.enqIQCtrl(2).ready && !io.enqIQCtrl(5).valid && !io.enqIQCtrl(6).valid)
 }

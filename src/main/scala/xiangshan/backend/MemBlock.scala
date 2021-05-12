@@ -5,27 +5,27 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
+import system.L1CacheErrorInfo
 import xiangshan._
-import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
-import xiangshan.backend.roq.{RoqPtr, RoqLsqIO}
+import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
-import xiangshan.backend.fu.{HasExceptionNO, FenceToSbuffer}
-import xiangshan.backend.issue.{ReservationStation}
+import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
+import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
 
-class LsBlockToCtrlIO extends XSBundle {
+class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
 }
 
-class IntBlockToMemBlockIO extends XSBundle {
+class IntBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readIntRf = Vec(NRMemReadPorts, new RfReadPort(XLEN))
 }
 
-class FpBlockToMemBlockIO extends XSBundle {
+class FpBlockToMemBlockIO(implicit p: Parameters) extends XSBundle {
   val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort(XLEN + 1))
 }
 
@@ -33,7 +33,8 @@ class MemBlock(
   val fastWakeUpIn: Seq[ExuConfig],
   val slowWakeUpIn: Seq[ExuConfig],
   val fastWakeUpOut: Seq[ExuConfig],
-  val slowWakeUpOut: Seq[ExuConfig]
+  val slowWakeUpOut: Seq[ExuConfig],
+  val numIntWakeUpFp: Int
 )(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
@@ -45,7 +46,6 @@ class MemBlock(
 class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
   with HasFPUParameters
   with HasExeBlockHelper
   with HasFpLoadHelper
@@ -55,6 +55,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val slowWakeUpIn = outer.slowWakeUpIn
   val fastWakeUpOut = outer.fastWakeUpOut
   val slowWakeUpOut = outer.slowWakeUpOut
+  val numIntWakeUpFp = outer.numIntWakeUpFp
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -63,8 +64,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
+    val intWakeUpFp = Vec(numIntWakeUpFp, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOutInt = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val wakeUpOutFp = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
+
+    val ldFastWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, 0))
 
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
@@ -75,33 +79,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val exceptionAddr = new ExceptionAddrIO // to csr
       val roq = Flipped(new RoqLsqIO) // roq to lsq
     }
-  })
-  val difftestIO = IO(new Bundle() {
-    val fromSbuffer = new Bundle() {
-      val sbufferResp = Output(Bool())
-      val sbufferAddr = Output(UInt(64.W))
-      val sbufferData = Output(Vec(64, UInt(8.W)))
-      val sbufferMask = Output(UInt(64.W))
-    }
-    val fromSQ = new Bundle() {
-      val storeCommit = Output(UInt(2.W))
-      val storeAddr   = Output(Vec(2, UInt(64.W)))
-      val storeData   = Output(Vec(2, UInt(64.W)))
-      val storeMask   = Output(Vec(2, UInt(8.W)))
-    }
-    val fromAtomic = new Bundle() {
-      val atomicResp = Output(Bool())
-      val atomicAddr = Output(UInt(64.W))
-      val atomicData = Output(UInt(64.W))
-      val atomicMask = Output(UInt(8.W))
-      val atomicFuop = Output(UInt(8.W))
-      val atomicOut  = Output(UInt(64.W))
+
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val error = new L1CacheErrorInfo
+    val memInfo = new Bundle {
+      val sqFull = Output(Bool())
+      val lqFull = Output(Bool())
+      val dcacheMSHRFull = Output(Bool())
     }
   })
-  difftestIO <> DontCare
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+
+  io.error <> RegNext(RegNext(dcache.io.error))
 
   val redirect = io.fromCtrlBlock.redirect
 
@@ -137,21 +128,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // load has uncertain latency, so only use external wake up data
     val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
       .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
+      .map(a => (a._1, a._2.bits.data)) ++
+      (if (cfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadExuConfigs.zip(loadUnits.map(_.io.ldout.bits.data)) else Seq())
+
     val fastPortsCnt = fastDatas.length
 
     val slowPorts = (
-      (loadExuConfigs.zip(if(cfg == Exu.stExeUnitCfg) wakeUpFp else exeWbReqs)) ++
+      (loadExuConfigs.zip(if(cfg == StExeUnitCfg) wakeUpFp else exeWbReqs)) ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
         .map{
-          case (Exu.jumpExeUnitCfg, value) if cfg == Exu.stExeUnitCfg =>
-            val jumpOut = Wire(Flipped(DecoupledIO(new ExuOutput)))
-            jumpOut.bits := RegNext(value.bits)
-            jumpOut.valid := RegNext(
-              value.valid && !value.bits.uop.roqIdx.needFlush(redirect, io.fromCtrlBlock.flush)
-            )
-            jumpOut.ready := true.B
-            (Exu.jumpExeUnitCfg, jumpOut)
+          case (JumpExeUnitCfg, _) if cfg == StExeUnitCfg =>
+            (JumpExeUnitCfg, io.intWakeUpFp.head)
           case (config, value) => (config, value)
         }
     ).map(a => (a._1, decoupledIOToValidIO(a._2)))
@@ -163,7 +151,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStation(cfg, XLEN + 1,
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
       fastDatas.map(_._1),
       slowPorts.map(_._1),
       fixedDelay = certainLatency,
@@ -182,14 +170,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 
-    rs.io.fastDatas <> fastDatas.map(_._2.bits.data)
+    rs.io.fastDatas <> fastDatas.map(_._2)
     rs.io.slowPorts <> slowPorts.map(_._2)
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
     rs.io.memfeedback := DontCare
 
-    rs.suggestName(s"rsd_${cfg.name}")
+    rs.suggestName(s"rs_${cfg.name}")
 
     rs
   })
@@ -197,7 +185,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for(rs <- reservationStations){
     rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
-      .map(_._2)
+      .map(_._2) ++
+      (if (rs.exuCfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
@@ -209,9 +198,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       assert(w.ready === true.B)
   }
 
+  io.ldFastWakeUpInt.fastUops <> loadUnits.map(_.io.fastUop)
+  io.ldFastWakeUpInt.fast <> loadUnits.map(_.io.ldout).map(decoupledIOToValidIO)
   io.wakeUpOutInt.slow <> exeWbReqs
   io.wakeUpOutFp.slow <> wakeUpFp
   io.wakeUpIn.slow.foreach(_.ready := true.B)
+  io.intWakeUpFp.foreach(_.ready := true.B)
 
   val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
@@ -221,13 +213,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   io.ptw         <> dtlb.io.ptw
-  dtlb.io.sfence <> io.sfence
-  dtlb.io.csr    <> io.tlbCsr
-  if (!env.FPGAPlatform) {
-    difftestIO.fromSbuffer <> sbuffer.difftestIO
-    difftestIO.fromSQ <> lsq.difftestIO.fromSQ
-    difftestIO.fromAtomic <> atomicsUnit.difftestIO
-  }
+  dtlb.io.sfence <> RegNext(io.sfence)
+  dtlb.io.csr    <> RegNext(io.tlbCsr)
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -235,6 +222,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
     loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.memfeedback
     loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
+    loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
@@ -243,7 +231,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
- 
+
     // Lsq to load unit's rs
     reservationStations(i).io.stIssuePtr := lsq.io.issuePtrExt
 
@@ -268,11 +256,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.flush       <> io.fromCtrlBlock.flush
     stu.io.tlbFeedback <> rs.io.memfeedback
     stu.io.rsIdx       <> rs.io.rsIdx
+    stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
-    // sync issue info to rs 
+    // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
 
@@ -298,14 +287,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncache        <> uncache.io.lsq
   // delay dcache refill for 1 cycle for better timing
   // TODO: remove RegNext after fixing refill paddr timing
-  // lsq.io.dcache         <> dcache.io.lsu.lsq 
-  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq) 
+  // lsq.io.dcache         <> dcache.io.lsu.lsq
+  lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
   lsq.io.sqempty        <> sbuffer.io.sqempty
 
   // Sbuffer
+  sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
   sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
   sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
@@ -314,11 +304,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  io.fenceToSbuffer.sbIsEmpty := sbuffer.io.flush.empty
+  io.fenceToSbuffer.sbIsEmpty := RegNext(sbuffer.io.flush.empty)
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
-  sbuffer.io.flush.valid := fenceFlush || atomicsFlush
+  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
@@ -388,5 +378,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
+
+  io.memInfo.sqFull := RegNext(lsq.io.sqFull)
+  io.memInfo.lqFull := RegNext(lsq.io.lqFull)
+  io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 }
 

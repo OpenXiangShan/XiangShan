@@ -1,5 +1,6 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -53,27 +54,27 @@ trait HasFoldedHistory {
   }
 }
 
-abstract class TageBundle extends XSBundle
+abstract class TageBundle(implicit p: Parameters) extends XSBundle
   with HasIFUConst with HasTageParameter
   with PredictorUtils
-abstract class TageModule extends XSModule
+abstract class TageModule(implicit p: Parameters) extends XSModule
   with HasIFUConst with HasTageParameter
   with PredictorUtils
   { val debug = true }
 
 
-class TageReq extends TageBundle {
+class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val mask = UInt(PredictWidth.W)
 }
 
-class TageResp extends TageBundle {
+class TageResp(implicit p: Parameters) extends TageBundle {
   val ctr = UInt(TageCtrBits.W)
   val u = UInt(2.W)
 }
 
-class TageUpdate extends TageBundle {
+class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   // update tag and ctr
@@ -86,7 +87,7 @@ class TageUpdate extends TageBundle {
   val u = Vec(TageBanks, UInt(2.W))
 }
 
-class FakeTageTable() extends TageModule {
+class FakeTageTable()(implicit p: Parameters) extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
@@ -96,7 +97,10 @@ class FakeTageTable() extends TageModule {
 
 }
 @chiselName
-class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int)
+class TageTable
+(
+  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int
+)(implicit p: Parameters)
   extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
@@ -199,10 +203,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     waymask = Mux(doing_clear_u_lo, Fill(TageBanks, "b1".U), io.update.uMask.asUInt)
   )
 
-  val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
-  val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(TageCtrBits.W))))
-  val wrbypass_ctr_valids = Reg(Vec(wrBypassEntries, Vec(TageBanks, Bool())))
+  val wrbypass_tags    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(tagLen.W))))
+  val wrbypass_idxs    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
+  val wrbypass_ctrs    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(TageBanks, UInt(TageCtrBits.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(TageBanks, Bool()))))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
@@ -215,7 +219,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_hit      = wrbypass_hits.reduce(_||_)
   // val wrbypass_rhit     = wrbypass_rhits.reduce(_||_)
-  val wrbypass_hit_idx  = PriorityEncoder(wrbypass_hits)
+  val wrbypass_hit_idx  = ParallelPriorityEncoder(wrbypass_hits)
   // val wrbypass_rhit_idx = PriorityEncoder(wrbypass_rhits)
 
   // val wrbypass_rctr_hits = VecInit((0 until TageBanks).map( b => wrbypass_ctr_valids(wrbypass_rhit_idx)(b)))
@@ -248,21 +252,33 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
     update_hi_wdata(w)    := io.update.u(w)(1)
     update_lo_wdata(w)    := io.update.u(w)(0)
-  }
 
-  when (io.update.mask.reduce(_||_)) {
-    when (wrbypass_hits.reduce(_||_)) {
-      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := update_wdata(updateBank).ctr
-      wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank) := true.B
-    } .otherwise {
-      wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
-      (0 until TageBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
-      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
-      wrbypass_tags(wrbypass_enq_idx) := update_tag
-      wrbypass_idxs(wrbypass_enq_idx) := update_idx
-      wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+    when (io.update.mask.reduce(_||_)) {
+      when (wrbypass_hit) {
+        when (io.update.mask(w)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(w) := update_wdata(w).ctr
+          wrbypass_ctr_valids(wrbypass_hit_idx)(w) := true.B
+        }
+      } .otherwise {
+        // reset valid bit first
+        wrbypass_ctr_valids(wrbypass_enq_idx)(w) := false.B
+        when (io.update.mask(w)) {
+          wrbypass_ctr_valids(wrbypass_enq_idx)(w) := true.B
+          wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdata(w).ctr
+        }
+      }
     }
   }
+  
+  when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_tags(wrbypass_enq_idx) := update_tag
+    wrbypass_idxs(wrbypass_enq_idx) := update_idx
+    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+  }
+
+  XSPerfAccumulate("tage_table_wrbypass_hit", io.update.mask.reduce(_||_) && wrbypass_hit)
+  XSPerfAccumulate("tage_table_wrbypass_enq", io.update.mask.reduce(_||_) && !wrbypass_hit)
+  XSPerfAccumulate("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
 
   if (BPUDebug && debug) {
     val u = io.update
@@ -270,27 +286,27 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val ub = PriorityEncoder(u.uMask)
     val idx = if2_idx
     val tag = if2_tag
-    XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, mask=%b, mask=%b\n",
-      io.req.bits.pc, io.req.bits.hist, idx, tag, io.req.bits.mask, if2_mask)
+    XSDebug(io.req.valid, 
+      p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+      p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
+      p"tag=$tag, mask=${Binary(if2_mask)}\n")
     for (i <- 0 until TageBanks) {
-      XSDebug(RegNext(io.req.valid) && if3_req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n",
-        i.U, if3_idx, if3_req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
+      XSDebug(RegNext(io.req.valid && io.req.bits.mask(i)) && if3_req_rhits(i),
+        p"TageTableResp[$i]: idx=$if3_idx, hit:${if3_req_rhits(i)}, " +
+        p"ctr:${io.resp(i).bits.ctr}, u:${io.resp(i).bits.u}\n")
+      XSDebug(io.update.mask(i),
+        p"update Table bank $i: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+        p"taken:${u.taken(i)}, alloc:${u.alloc(i)}, oldCtr:${u.oldCtr(i)}\n")
+      XSDebug(io.update.mask(i),
+        p"update Table bank $i: writing tag:${update_tag}, " +
+        p"ctr: ${update_wdata(b).ctr} in idx $update_idx\n")
+      val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(i)
+      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i) && io.update.mask(i),
+        p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
+        p"ctr:$hitCtr, newCtr:${update_wdata(i).ctr}")
     }
 
-    XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", if3_req_rhits.asUInt, if3_mask)
     XSDebug(RegNext(io.req.valid) && !if3_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
-
-    XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
-      u.pc, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
-    XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
-      update_wdata(b).tag, update_wdata(b).ctr, update_idx)
-    XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, hist:%x, bank:%d, writing in u:%b\n",
-      u.pc, u.hist, ub, io.update.u(ub))
-
-    val updateBank = PriorityEncoder(io.update.mask)
-    XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank),
-      "wrbypass hits, wridx:%d, tag:%x, idx:%d, hitctr:%d, bank:%d\n",
-      wrbypass_hit_idx, update_tag, update_idx, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), updateBank)
 
     // when (wrbypass_rhit && wrbypass_ctr_valids(wrbypass_rhit_idx).reduce(_||_)) {
     //   for (b <- 0 until TageBanks) {
@@ -310,7 +326,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
 }
 
-abstract class BaseTage extends BasePredictor with HasTageParameter {
+abstract class BaseTage(implicit p: Parameters) extends BasePredictor with HasTageParameter {
   class TAGEResp extends Resp {
     val takens = Vec(PredictWidth, Bool())
     val hits = Vec(PredictWidth, Bool())
@@ -330,13 +346,13 @@ abstract class BaseTage extends BasePredictor with HasTageParameter {
   override val io = IO(new TageIO)
 }
 
-class FakeTage extends BaseTage {
+class FakeTage(implicit p: Parameters) extends BaseTage {
   io.resp <> DontCare
   io.meta <> DontCare
 }
 
 @chiselName
-class Tage extends BaseTage {
+class Tage(implicit p: Parameters) extends BaseTage {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) =>
@@ -367,10 +383,12 @@ class Tage extends BaseTage {
   val debug_hist_s3 = RegEnable(debug_hist_s2, enable=s3_fire)
 
   val u = io.update.bits
-  val updateValids = u.valids.map(v => v && io.update.valid)
+  val updateValids =
+    VecInit(u.valids zip u.br_mask map {
+      case (v, b) => v && b && io.update.valid
+    })
   val updateHist = u.predHist.asUInt
 
-  val updateBrMask = u.br_mask
   val updateMetas = VecInit(u.metas.map(_.tageMeta))
   val updateMisPred = u.mispred
 
@@ -400,7 +418,8 @@ class Tage extends BaseTage {
   val if4_providerCtrs = RegEnable(if3_providerCtrs, s3_fire)
 
 
-  val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i) && updateBrMask(i)))
+  val updateTageMisPreds = VecInit((0 until PredictWidth).map(i => updateMetas(i).taken =/= u.takens(i)))
+  val updateMisPreds = u.mispred zip u.valids map {case (m, v) => m && v}
 
   // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
@@ -454,10 +473,9 @@ class Tage extends BaseTage {
 
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
-    val updateIsBr = updateBrMask(w)
-    val isUpdateTaken = updateValid && u.takens(w) && updateIsBr
-    val updateMisPred = updateTageMisPreds(w)
-    when (updateValid && updateIsBr) {
+    val isUpdateTaken = updateValid && u.takens(w)
+    val updateMisPred = updateMisPreds(w)
+    when (updateValid) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -482,6 +500,7 @@ class Tage extends BaseTage {
         updateUMask(allocate.bits)(w) := true.B
         updateU(allocate.bits)(w) := 0.U
       }.otherwise {
+        
         val provider = updateMeta.provider
         val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
         for (i <- 0 until TageNTables) {
@@ -510,6 +529,41 @@ class Tage extends BaseTage {
   }
 
 
+  def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
+  def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
+  def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
+    pred_perf(name, pred_cnt)
+    commit_perf(name, commit_cnt)
+  }
+  for (i <- 0 until TageNTables) {
+    val pred_i_provided =
+      VecInit(io.meta map (m => m.provider.valid && m.provider.bits === i.U))
+    val commit_i_provided =
+      VecInit(updateMetas zip updateValids map {
+        case (m, v) => m.provider.valid && m.provider.bits === i.U && v
+      })
+    tage_perf(s"tage_table_${i}_provided",
+      PopCount(pred_i_provided),
+      PopCount(commit_i_provided))
+  }
+  tage_perf("tage_use_bim",
+    PopCount(VecInit(io.meta map (!_.provider.valid))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+        case (m, v) => !m.provider.valid && v}))
+    )
+  def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
+  tage_perf("tage_use_altpred",
+    PopCount(VecInit(io.meta map (
+      m => m.provider.valid && unconf(m.providerCtr)))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
+    })))
+  tage_perf("tage_provided",
+    PopCount(io.meta.map(_.provider.valid)),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && v
+    })))
+
   if (BPUDebug && debug) {
     for (b <- 0 until TageBanks) {
       val m = updateMetas(b)
@@ -533,13 +587,4 @@ class Tage extends BaseTage {
 }
 
 
-class Tage_SC extends Tage with HasSC {}
-
-object TageTest extends App {
-  override def main(args: Array[String]): Unit = {
-    (new ChiselStage).execute(args, Seq(
-      ChiselGeneratorAnnotation(() => new Tage),
-      RunFirrtlTransformAnnotation(new RenameDesiredNames)
-    ))
-  }
-}
+class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}

@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
-import xiangshan.cache.{DCache, HasDCacheParameters, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import chipsalliance.rocketchip.config.Parameters
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 
 object MemMap {
   def apply (base: String, top: String, width: String, description: String, mode: String): ((String, String), Map[String, String]) = {
@@ -19,17 +20,18 @@ object MemMap {
 object AddressSpace {
   def SimpleMemMapList = List(
     //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
-    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
-    MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
-    MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    "RW"),
+    MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RWX"),
+    MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
     MemMap("h00_3001_0000", "h00_3004_FFFF",   "h0", "GPU",         "RWC"),
     MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
-    MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
-    MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
-    MemMap("h00_3801_0000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
+    MemMap("h00_3802_0000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
     MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
     MemMap("h00_8000_0000", "h1F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
@@ -168,7 +170,7 @@ object AddressSpace {
   }
 }
 
-class PMAChecker extends XSModule with HasDCacheParameters
+class PMAChecker(implicit p: Parameters) extends XSModule with HasDCacheParameters
 {
   val io = IO(new Bundle() {
     val paddr = Input(UInt(VAddrBits.W))

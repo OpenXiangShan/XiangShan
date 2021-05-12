@@ -328,7 +328,7 @@ class SRAM_TSMC28(SRAM):
 
   def __split(self):
     (name, width, depth, mask_gran, mask_seg, ports) = self.conf
-    if ports == ["mrw"]:
+    '''if ports == ["mrw"] and mask_gran >= 32:
       new_conf = (name + "_sub", str(depth), str(mask_gran), "rw")
       line_field = ("name", "depth", "width", "ports")
       new_line = " ".join(map(lambda x: " ".join(x), zip(line_field, new_conf)))
@@ -336,7 +336,7 @@ class SRAM_TSMC28(SRAM):
       self.sub_srams.append(new_sram)
       reshaper = Spliter(self.conf, new_sram.conf)
       reshaper.generate(self.mem)
-      return True
+      return True'''
     return False
 
   def __reshape(self):

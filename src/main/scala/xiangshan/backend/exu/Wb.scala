@@ -1,10 +1,11 @@
 package xiangshan.backend.exu
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 
-class ExuWbArbiter(n: Int) extends XSModule {
+class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
     val out = DecoupledIO(new ExuOutput)
@@ -43,7 +44,7 @@ class ExuWbArbiter(n: Int) extends XSModule {
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 }
 
-class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
+class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends XSModule {
 
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
 

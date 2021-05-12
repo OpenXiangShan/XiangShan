@@ -6,10 +6,10 @@ import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
-import xiangshan.{HasXSLog, MicroOp, Redirect}
+import xiangshan.{MicroOp, Redirect}
 
 // One miss entry deals with one mmio request
-class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
+class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -118,7 +118,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
   }
 }
 
-class UncacheIO extends DCacheBundle {
+class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = Flipped(new DCacheWordIO)
 }
 
@@ -142,7 +142,6 @@ class Uncache()(implicit p: Parameters) extends LazyModule with HasDCacheParamet
 class UncacheImp(outer: Uncache)
   extends LazyModuleImp(outer)
     with HasDCacheParameters
-    with HasXSLog
     with HasTLDump
 {
   val io = IO(new UncacheIO)

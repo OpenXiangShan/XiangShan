@@ -1,14 +1,14 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 
-import utils.XSDebug
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
 
-import utils.{HasTLDump, XSDebug}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
 
-class ProbeReq extends DCacheBundle
+class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
   val source = UInt()
   val opcode = UInt()
@@ -21,7 +21,7 @@ class ProbeReq extends DCacheBundle
   }
 }
 
-class ProbeEntry extends DCacheModule {
+class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new ProbeReq))
     val pipe_req  = DecoupledIO(new MainPipeReq)
@@ -76,9 +76,15 @@ class ProbeEntry extends DCacheModule {
       state := s_invalid
     }
   }
+
+  // perfoemance counters
+  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
+  XSPerfAccumulate("probe_penalty", state =/= s_invalid)
+  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr)
+  XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
-class ProbeQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
+class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))

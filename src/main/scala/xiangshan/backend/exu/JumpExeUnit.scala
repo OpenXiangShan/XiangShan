@@ -1,14 +1,14 @@
 package xiangshan.backend.exu
 
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.IntToFP
-import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump, CSRFileIO}
+import xiangshan.backend.fu.{CSR, CSRFileIO, Fence, FenceToSbuffer, FunctionUnit, Jump}
 
-class JumpExeUnit extends Exu(jumpExeUnitCfg)
+class JumpExeUnit(implicit p: Parameters) extends Exu(JumpExeUnitCfg)
 {
   val csrio = IO(new CSRFileIO)
   val fenceio = IO(new Bundle {
@@ -16,31 +16,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val fencei = Output(Bool())
     val sbuffer = new FenceToSbuffer
   })
-  val difftestIO = IO(new Bundle() {
-    val fromCSR = new Bundle() {
-      val intrNO = Output(UInt(64.W))
-      val cause = Output(UInt(64.W))
-      val priviledgeMode = Output(UInt(2.W))
-      val mstatus = Output(UInt(64.W))
-      val sstatus = Output(UInt(64.W))
-      val mepc = Output(UInt(64.W))
-      val sepc = Output(UInt(64.W))
-      val mtval = Output(UInt(64.W))
-      val stval = Output(UInt(64.W))
-      val mtvec = Output(UInt(64.W))
-      val stvec = Output(UInt(64.W))
-      val mcause = Output(UInt(64.W))
-      val scause = Output(UInt(64.W))
-      val satp = Output(UInt(64.W))
-      val mip = Output(UInt(64.W))
-      val mie = Output(UInt(64.W))
-      val mscratch = Output(UInt(64.W))
-      val sscratch = Output(UInt(64.W))
-      val mideleg = Output(UInt(64.W))
-      val medeleg = Output(UInt(64.W))
-    }
-  })
-  difftestIO <> DontCare
 
   val jmp = supportedFunctionUnits.collectFirst{
     case j: Jump => j
@@ -56,10 +31,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   }.get
 
   csr.csrio <> csrio
-
-  if (!env.FPGAPlatform) {
-    difftestIO.fromCSR <> csr.difftestIO
-  }
 
   fenceio.sfence <> fence.sfence
   fenceio.fencei <> fence.fencei

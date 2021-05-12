@@ -1,12 +1,12 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import chisel3.ExcitingUtils._
 
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
@@ -51,10 +51,10 @@ trait HasTlbConst extends HasXSParameter {
   }
 }
 
-abstract class TlbBundle extends XSBundle with HasTlbConst
-abstract class TlbModule extends XSModule with HasTlbConst
+abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
+abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
-class PtePermBundle extends TlbBundle {
+class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val d = Bool()
   val a = Bool()
   val g = Bool()
@@ -69,7 +69,7 @@ class PtePermBundle extends TlbBundle {
   }
 }
 
-class TlbPermBundle extends TlbBundle {
+class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   // pagetable perm (software defined)
   val d = Bool()
@@ -92,7 +92,7 @@ class TlbPermBundle extends TlbBundle {
   }
 }
 
-class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
+class comBundle(implicit p: Parameters) extends TlbBundle with HasCircularQueuePtrHelper{
   val roqIdx = new RoqPtr
   val valid = Bool()
   val bits = new PtwReq
@@ -108,7 +108,7 @@ object Compare {
 
 // multi-read && single-write
 // input is data, output is hot-code(not one-hot)
-class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) extends TlbModule {
+class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
   val io = IO(new Bundle {
     val r = new Bundle {
       val req = Input(Vec(readWidth, gen))
@@ -135,7 +135,7 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) exten
   }
 }
 
-class TlbSPMeta extends TlbBundle {
+class TlbSPMeta(implicit p: Parameters) extends TlbBundle {
   val tag = UInt(vpnLen.W) // tag is vpn
   val level = UInt(1.W) // 1 for 2MB, 0 for 1GB
 
@@ -155,7 +155,7 @@ class TlbSPMeta extends TlbBundle {
 
 }
 
-class TlbData(superpage: Boolean = false) extends TlbBundle {
+class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBundle {
   val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
   val ppn = UInt(ppnLen.W)
   val perm = new TlbPermBundle
@@ -220,12 +220,13 @@ object TlbCmd {
   def isAtom(a: UInt) = a(2)
 }
 
-class TlbReq extends TlbBundle {
+class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
   val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
+    val isFirstIssue = Bool()
   }
 
   override def toPrintable: Printable = {
@@ -233,7 +234,7 @@ class TlbReq extends TlbBundle {
   }
 }
 
-class TlbResp extends TlbBundle {
+class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = UInt(PAddrBits.W)
   val miss = Bool()
   val mmio = Bool()
@@ -249,22 +250,24 @@ class TlbResp extends TlbBundle {
       val instr = Bool()
     }
   }
+  val ptwBack = Bool() // when ptw back, wake up replay rs's state
+
   override def toPrintable: Printable = {
-    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr}"
+    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
   }
 }
 
-class TlbRequestIO() extends TlbBundle {
+class TlbRequestIO()(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class BlockTlbRequestIO() extends TlbBundle {
+class BlockTlbRequestIO()(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new TlbReq)
   val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
-class TlbPtwIO extends TlbBundle {
+class TlbPtwIO(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new PtwReq)
   val resp = Flipped(DecoupledIO(new PtwResp))
 
@@ -273,7 +276,7 @@ class TlbPtwIO extends TlbBundle {
   }
 }
 
-class TlbIO(Width: Int) extends TlbBundle {
+class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO
   val sfence = Input(new SfenceBundle)
@@ -283,7 +286,7 @@ class TlbIO(Width: Int) extends TlbBundle {
 }
 
 
-class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
+class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
   val req    = io.requestor.map(_.req)
@@ -349,6 +352,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      nReplace.access(nRefillIdx)
       XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
       val refillIdx = sRefillIdx
@@ -365,6 +369,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
         pf    = resp.pf
       )
+      sReplace.access(sRefillIdx)
       XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }
   }
@@ -426,11 +431,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
     XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(hitVec.asUInt)} pfHitVec:${Hexadecimal(pfHitVec.asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
-    val multiHit = {
-      val hitSum = PopCount(hitVec)
-      !(hitSum===0.U || hitSum===1.U)
-    }
-
     // resp  // TODO: A/D has not being concerned
     val paddr = Cat(hitppn, reqAddrReg.off)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
@@ -439,6 +439,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := miss
+    resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
     val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
@@ -467,23 +468,26 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
     // TODO: MMIO check
 
-    (hit, miss, pfHitVec, multiHit)
+    (hit, miss, hitVec, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
   val hitVec = readResult.map(res => res._1)
   val missVec = readResult.map(res => res._2)
-  val pfHitVecVec = readResult.map(res => res._3)
-  val multiHitVec = readResult.map(res => res._4)
+  val hitVecVec = readResult.map(res => res._3)
+  val validRegVec = readResult.map(res => res._4)
   val hasMissReq = Cat(missVec).orR
 
   // ptw
   val waiting = RegInit(false.B)
   when (ptw.req.fire()) {
     waiting := true.B
-  }.elsewhen (sfence.valid || ptw.resp.valid) {
+  }
+  when (sfence.valid || ptw.resp.valid) {
     waiting := false.B
   }
+  assert(!ptw.resp.valid || waiting)
+
   // ptw <> DontCare // TODO: need check it
   ptw.req.valid := hasMissReq && !waiting && !RegNext(refill)
   ptw.resp.ready := waiting
@@ -527,22 +531,41 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   if (isDtlb) {
     for (i <- 0 until Width) {
-      XSPerf("access" + Integer.toString(i, 10), valid(i) && vmEnable)
+      XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
     }
     for (i <- 0 until Width) {
-      XSPerf("miss" + Integer.toString(i, 10), valid(i) && vmEnable && missVec(i))
+      XSPerfAccumulate("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
     }
-    XSPerf("ptw_req_count", ptw.req.fire())
-    XSPerf("ptw_req_cycle", waiting)
-    XSPerf("wait_blocked_count", waiting && hasMissReq)
-    XSPerf("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
   } else {
-    XSPerf("access", valid(0) && vmEnable)
-    XSPerf("miss", valid(0) && vmEnable && missVec(0))
-    XSPerf("ptw_req_count", ptw.req.fire())
-    XSPerf("ptw_req_cycle", waiting)
-    XSPerf("wait_blocked_count", waiting && hasMissReq)
-    XSPerf("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+    // NOTE: ITLB is blocked, so every resp will be valid only when hit
+    // every req will be ready only when hit
+    XSPerfAccumulate("access", io.requestor(0).req.fire() && vmEnable)
+    XSPerfAccumulate("miss", ptw.req.fire())
+  }
+  val reqCycleCnt = Reg(UInt(16.W))
+  when (ptw.req.fire()) {
+    reqCycleCnt := 1.U
+  }
+  when (waiting) {
+    reqCycleCnt := reqCycleCnt + 1.U
+  }
+  XSPerfAccumulate("ptw_req_count", ptw.req.fire())
+  XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
+  XSPerfAccumulate("wait_blocked_count", waiting && hasMissReq)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  for (i <- 0 until TlbEntrySize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
+    XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
+  }
+  for (i <- 0 until TlbSPEntrySize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + TlbEntrySize) && v }
+    XSPerfAccumulate(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
+  }
+  for (i <- 0 until TlbEntrySize) {
+    XSPerfAccumulate(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
+  }
+  for (i <- 0 until TlbSPEntrySize) {
+    XSPerfAccumulate(s"SuperRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
   }
 
   // Log
@@ -578,7 +601,7 @@ object TLB {
     width: Int,
     isDtlb: Boolean,
     shouldBlock: Boolean
-  ) = {
+  )(implicit p: Parameters) = {
     require(in.length == width)
 
     val tlb = Module(new TLB(width, isDtlb))

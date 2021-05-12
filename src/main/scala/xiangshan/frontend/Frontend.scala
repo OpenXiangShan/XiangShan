@@ -8,6 +8,8 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
 import xiangshan.backend.fu.HasExceptionNO
+import system.L1CacheErrorInfo
+
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
@@ -21,7 +23,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasL1plusCacheParameters 
   with HasXSParameter
   with HasExceptionNO
-  with HasXSLog
 {
   val io = IO(new Bundle() {
     val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
@@ -33,6 +34,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val error  = new L1CacheErrorInfo
+    val frontendInfo = new Bundle {
+      val ibufFull  = Output(Bool())
+    }
   })
 
   val ifu = Module(new IFU)
@@ -44,7 +49,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // from backend
   ifu.io.redirect <> io.backend.redirect_cfiUpdate
-  ifu.io.bp_ctrl <> io.csrCtrl.bp_ctrl
+  ifu.io.bp_ctrl <> RegNext(io.csrCtrl.bp_ctrl)
   ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
   ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
   ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
@@ -57,18 +62,19 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
   l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
   l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
+  assert(RegNext(!l1plusPrefetcher.io.mem_grant.valid || (l1plusPrefetcher.io.mem_grant.ready && grantClientId === l1plusPrefetcherId.U)))
   io.icacheMemGrant.ready := Mux(grantClientId === icacheMissQueueId.U,
     ifu.io.icacheMemGrant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
-  ifu.io.fencei := io.fencei
+  ifu.io.fencei := RegNext(io.fencei)
 
 
   instrUncache.io.req <> ifu.io.mmio_acquire
   instrUncache.io.resp <> ifu.io.mmio_grant
   instrUncache.io.flush <> ifu.io.mmio_flush
   // to tlb
-  ifu.io.sfence := io.sfence
-  ifu.io.tlbCsr := io.tlbCsr
+  ifu.io.sfence := RegNext(io.sfence)
+  ifu.io.tlbCsr := RegNext(io.tlbCsr)
   // from icache and l1plus prefetcher
   io.l1plusFlush := ifu.io.l1plusFlush
   l1plusPrefetcher.io.in.valid := ifu.io.prefetchTrainReq.valid
@@ -93,6 +99,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   // ifu to backend
   io.backend.fetchInfo <> ifu.io.toFtq
 
+  io.error <> RegNext(RegNext(ifu.io.error))
+
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),
   //     p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
@@ -100,5 +108,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   // }
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
-  XSPerf("FrontendBubble", frontendBubble)
+  XSPerfAccumulate("FrontendBubble", frontendBubble)
+
+  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 }

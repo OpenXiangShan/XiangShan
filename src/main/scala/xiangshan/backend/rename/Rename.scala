@@ -1,5 +1,6 @@
 package xiangshan.backend.rename
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -7,14 +8,16 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
 
-class RenameBypassInfo extends XSBundle {
+class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val move_eliminated_src1 = Vec(RenameWidth-1, Bool())
+  val move_eliminated_src2 = Vec(RenameWidth-1, Bool())
 }
 
-class Rename extends XSModule with HasCircularQueuePtrHelper {
+class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -25,6 +28,9 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
+    val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -48,6 +54,8 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
   val intRat = Module(new RenameTable(float = false)).io
   val fpRat = Module(new RenameTable(float = true)).io
   val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
+  intRat.debug_rdata <> io.debug_int_rat
+  fpRat.debug_rdata <> io.debug_fp_rat
 
   allPhyResource.map{ case (rat, freelist, _) =>
     rat.redirect := io.redirect.valid
@@ -202,6 +210,20 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       val intMatch = needIntDest(j) && needIntDest(i)
       (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
     }).reverse)
+    io.renameBypass.move_eliminated_src1(i-1) :=
+      // the producer move instruction writes to non-zero register
+      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
+      // the consumer instruction uses the move's destination register
+      io.in(i).bits.ctrl.src1Type === SrcType.reg && io.in(i).bits.ctrl.lsrc1 === io.in(i-1).bits.ctrl.ldest &&
+      // CSR control (by srnctl)
+      io.csrCtrl.move_elim_enable
+    io.renameBypass.move_eliminated_src2(i-1) :=
+      // the producer move instruction writes to non-zero register
+      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
+      // the consumer instruction uses the move's destination register
+      io.in(i).bits.ctrl.src2Type === SrcType.reg && io.in(i).bits.ctrl.lsrc2 === io.in(i-1).bits.ctrl.ldest &&
+      // CSR control (by srnctl)
+      io.csrCtrl.move_elim_enable
   }
 
   val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
@@ -247,4 +269,14 @@ class Rename extends XSModule with HasCircularQueuePtrHelper {
       freelist.deallocPregs(i) := io.roqCommits.info(i).old_pdest
     }
   }
+
+  XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
+  XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
+  XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
+  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+
+
 }

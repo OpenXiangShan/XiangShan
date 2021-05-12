@@ -5,8 +5,8 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import xiangshan._
 import xiangshan.cache._
-import utils.{XSPerf, _}
-import chisel3.ExcitingUtils._
+import utils._
+
 
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
@@ -41,7 +41,7 @@ case class L2PrefetcherParameters(
   }
 }
 
-class L2Prefetcher()(implicit p: Parameters) extends LazyModule with HasPrefetchParameters {
+class L2Prefetcher()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "l2prefetcher",
@@ -54,26 +54,34 @@ class L2Prefetcher()(implicit p: Parameters) extends LazyModule with HasPrefetch
   lazy val module = new L2PrefetcherImp(this)
 }
 
-class L2PrefetcherIO extends XSBundle with HasPrefetchParameters {
+class L2PrefetcherIO(implicit p: Parameters) extends XSBundle {
   // val in = Flipped(DecoupledIO(new MissReq))
   val in = Flipped(new PrefetcherIO(PAddrBits))
   val enable = Input(Bool())
 }
 
 // prefetch DCache lines in L2 using StreamPrefetch
-class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasPrefetchParameters with HasXSLog {  
+class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with HasXSParameter {  
   val io = IO(new L2PrefetcherIO)
+
+  val enable_prefetcher = RegNext(io.enable)
+
+  val bopParams = l2PrefetcherParameters.bopParams 
+  val streamParams = l2PrefetcherParameters.streamParams
+  val q = p.alterPartial({
+    case BOPParamsKey => bopParams
+    case StreamParamsKey => streamParams
+  })
 
   val (bus, edge) = outer.clientNode.out.head
   if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "bop") {
-    val bopParams = l2PrefetcherParameters.bopParams
-    val dPrefetch = Module(new BestOffsetPrefetch(bopParams))
-    dPrefetch.io.train.valid := io.in.acquire.valid && io.enable
+    val dPrefetch = Module(new BestOffsetPrefetch()(q))
+    dPrefetch.io.train.valid := io.in.acquire.valid && enable_prefetcher
     dPrefetch.io.train.bits.addr := io.in.acquire.bits.address
     dPrefetch.io.train.bits.write := io.in.acquire.bits.write
     dPrefetch.io.train.bits.miss := true.B
 
-    bus.a.valid := dPrefetch.io.req.valid && io.enable
+    bus.a.valid := dPrefetch.io.req.valid && enable_prefetcher
     bus.a.bits := DontCare
     bus.a.bits := edge.Hint(
       fromSource = dPrefetch.io.req.bits.id,
@@ -81,23 +89,22 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
       lgSize = log2Up(bopParams.blockBytes).U,
       param = Mux(dPrefetch.io.req.bits.write, TLHints.PREFETCH_WRITE, TLHints.PREFETCH_READ)
     )._2
-    dPrefetch.io.req.ready := Mux(io.enable, bus.a.ready, true.B)
+    dPrefetch.io.req.ready := Mux(enable_prefetcher, bus.a.ready, true.B)
 
-    dPrefetch.io.resp.valid := bus.d.valid && io.enable
+    dPrefetch.io.resp.valid := bus.d.valid && enable_prefetcher
     dPrefetch.io.resp.bits.id := bus.d.bits.source(bopParams.totalWidth - 1, 0)
-    bus.d.ready := Mux(io.enable, dPrefetch.io.resp.ready, true.B)
+    bus.d.ready := Mux(enable_prefetcher, dPrefetch.io.resp.ready, true.B)
 
     dPrefetch.io.finish.ready := true.B
 
   } else if (l2PrefetcherParameters.enable && l2PrefetcherParameters._type == "stream") {
-    val streamParams = l2PrefetcherParameters.streamParams
-    val dPrefetch = Module(new StreamPrefetch(streamParams))
-    dPrefetch.io.train.valid := io.in.acquire.valid && io.enable
+    val dPrefetch = Module(new StreamPrefetch()(q))
+    dPrefetch.io.train.valid := io.in.acquire.valid && enable_prefetcher
     dPrefetch.io.train.bits.addr := io.in.acquire.bits.address
     dPrefetch.io.train.bits.write := io.in.acquire.bits.write
     dPrefetch.io.train.bits.miss := true.B
 
-    bus.a.valid := dPrefetch.io.req.valid && io.enable
+    bus.a.valid := dPrefetch.io.req.valid && enable_prefetcher
     bus.a.bits := DontCare
     bus.a.bits := edge.Hint(
       fromSource = dPrefetch.io.req.bits.id,
@@ -105,11 +112,11 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
       lgSize = log2Up(l2PrefetcherParameters.blockBytes).U,
       param = Mux(dPrefetch.io.req.bits.write, TLHints.PREFETCH_WRITE, TLHints.PREFETCH_READ) // TODO
     )._2
-    dPrefetch.io.req.ready := Mux(io.enable, bus.a.ready, true.B)
+    dPrefetch.io.req.ready := Mux(enable_prefetcher, bus.a.ready, true.B)
 
-    dPrefetch.io.resp.valid := bus.d.valid && io.enable
+    dPrefetch.io.resp.valid := bus.d.valid && enable_prefetcher
     dPrefetch.io.resp.bits.id := bus.d.bits.source(l2PrefetcherParameters.totalWidth - 1, 0)
-    bus.d.ready := Mux(io.enable, dPrefetch.io.resp.ready, true.B)
+    bus.d.ready := Mux(enable_prefetcher, dPrefetch.io.resp.ready, true.B)
 
     dPrefetch.io.finish.ready := true.B
 
@@ -127,9 +134,9 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
   bus.e.valid := false.B
   bus.e.bits := DontCare
 
-  XSPerf("reqCnt", bus.a.fire())
+  XSPerfAccumulate("reqCnt", bus.a.fire())
   (0 until l2PrefetcherParameters.nEntries).foreach(i => {
-    XSPerf(
+    XSPerfAccumulate(
       "entryPenalty" + "%02d".format(i),
       BoolStopWatch(
         start = bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U,
@@ -137,7 +144,7 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
         startHighPriority = true
       )
     )
-    // XSPerf("entryReq" + "%02d".format(i), bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U)
+    // XSPerfAccumulate("entryReq" + "%02d".format(i), bus.a.fire() && bus.a.bits.source(l2PrefetcherParameters.totalWidth - 1, 0) === i.U)
   })
 }
 
