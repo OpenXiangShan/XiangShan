@@ -85,6 +85,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqFull = Output(Bool())
   })
 
+  println("LoadQueue: size:" + LoadQueueSize)
+
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
   val dataModule = Module(new LoadQueueData(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))

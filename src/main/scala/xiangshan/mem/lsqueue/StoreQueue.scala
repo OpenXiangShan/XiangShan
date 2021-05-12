@@ -55,6 +55,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqFull = Output(Bool())
   })
 
+  println("StoreQueue: size:" + StoreQueueSize)
+
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
