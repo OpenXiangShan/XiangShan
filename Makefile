@@ -137,7 +137,7 @@ bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
 
 bsp:
-	mill -i mill.contrib.BSP/install
+	mill -i mill.bsp.BSP/install
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
