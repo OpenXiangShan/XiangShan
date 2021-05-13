@@ -22,7 +22,8 @@ case class RSConfig (
   dataIdBits: Int,
   numFastWakeup: Int,
   numWakeup: Int,
-  numValueBroadCast: Int
+  numValueBroadCast: Int,
+  hasFeedback: Boolean = false
 )
 
 class ReservationStation
@@ -53,7 +54,8 @@ class ReservationStation
     numFastWakeup = fastPortsCnt,
     // for now alu and fmac are not in slowPorts
     numWakeup = fastPortsCnt + (4 + slowPortsCnt),
-    numValueBroadCast = (4 + slowPortsCnt)
+    numValueBroadCast = (4 + slowPortsCnt),
+    hasFeedback = feedback
   )
 
   val io = IO(new Bundle {
@@ -77,9 +79,9 @@ class ReservationStation
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
 
-    val memfeedback = if (feedback) Flipped(ValidIO(new RSFeedback)) else null
-    val rsIdx = if (feedback) Output(UInt(log2Up(iqSize).W)) else null
-    val isFirstIssue = if (feedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
+    val memfeedback = if (config.hasFeedback) Flipped(ValidIO(new RSFeedback)) else null
+    val rsIdx = if (config.hasFeedback) Output(UInt(log2Up(iqSize).W)) else null
+    val isFirstIssue = if (config.hasFeedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
   val statusArray = Module(new StatusArray(config))
@@ -142,8 +144,20 @@ class ReservationStation
   // select the issue instructions
   select.io.request := statusArray.io.canIssue
   select.io.grant(0).ready := io.deq.ready
-  statusArray.io.issueGranted(0).valid := io.deq.ready
-  statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
+  if (config.hasFeedback) {
+    statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
+    statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
+    statusArray.io.deqResp(0).valid := io.memfeedback.valid
+    statusArray.io.deqResp(0).bits.rsMask := UIntToOH(io.memfeedback.bits.rsIdx)
+    statusArray.io.deqResp(0).bits.success := io.memfeedback.bits.hit
+  }
+  else {
+    statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
+    statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
+    statusArray.io.deqResp(0).valid := select.io.grant(0).fire
+    statusArray.io.deqResp(0).bits.rsMask := select.io.grant(0).bits
+    statusArray.io.deqResp(0).bits.success := io.deq.ready
+  }
   payloadArray.io.read(0).addr := select.io.grant(0).bits
   io.fastUopOut.valid := (if (fixedDelay == 0) select.io.grant(0).valid else false.B) && payloadArray.io.read(0).data.doWriteIntRf
   io.fastUopOut.bits := payloadArray.io.read(0).data
@@ -263,6 +277,11 @@ class ReservationStation
   // payload: send to function units
   // TODO: these should be done outside RS
   PipelineConnect(s1_out, io.deq, io.deq.ready || io.deq.bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
+  val pipeline_fire = s1_out.valid && io.deq.ready
+  if (config.hasFeedback) {
+    io.rsIdx := RegEnable(OHToUInt(select.io.grant(0).bits), pipeline_fire)
+    io.isFirstIssue := false.B
+  }
 
   for (i <- 0 until config.numSrc) {
     io.deq.bits.src(i) := bypassNetwork.io.target(i)
@@ -273,11 +292,6 @@ class ReservationStation
     io.stData.valid := io.deq.valid
     io.stData.bits.data := io.deq.bits.src(1)
     io.stData.bits.uop := io.deq.bits.uop
-  }
-  if (feedback) {
-    assert(!io.memfeedback.valid || io.memfeedback.bits.hit)
-    io.rsIdx := DontCare
-    io.isFirstIssue := DontCare
   }
 
   // logs

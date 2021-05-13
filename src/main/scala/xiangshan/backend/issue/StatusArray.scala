@@ -48,6 +48,10 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
     val wakeup = Vec(config.numWakeup, Flipped(ValidIO(new MicroOp)))
     val wakeupMatch = Vec(config.numEntries, Vec(config.numSrc, Output(UInt(config.numWakeup.W))))
     val issueGranted = Vec(config.numDeq, Flipped(ValidIO(UInt(config.numEntries.W))))
+    val deqResp = Vec(config.numDeq, Flipped(ValidIO(new Bundle {
+      val rsMask = UInt(config.numEntries.W)
+      val success = Bool()
+    })))
   })
 
   val statusArray = Reg(Vec(config.numEntries, new StatusEntry(config)))
@@ -58,14 +62,20 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
   }
 
   // instruction is ready for issue
-  val readyVec = VecInit(statusArray.map(_.srcState.asUInt.andR))
-  val readyVecNext = VecInit(statusArrayNext.map(_.srcState.asUInt.andR))
+  val readyVec = VecInit(statusArray.map(s => s.srcState.asUInt.andR && !s.scheduled))
+  val readyVecNext = VecInit(statusArrayNext.map(s => s.srcState.asUInt.andR && !s.scheduled))
 
   // update srcState when enqueue, wakeup
   def wakeupMatch(psrc: UInt, srcType: UInt) = {
     val matchVec = VecInit(io.wakeup.map(w => w.valid && w.bits.pdest === psrc && SrcType.isReg(srcType)))
     XSError(PopCount(matchVec) > 1.U, p"matchVec ${Binary(matchVec.asUInt)} should be one-hot\n")
     matchVec.asUInt
+  }
+  def deqRespSel(i: Int) : (Bool, Bool) = {
+    val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i)))
+    XSError(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
+    val successVec = io.deqResp.map(_.bits.success)
+    (mask.asUInt.orR, Mux1H(mask, successVec))
   }
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     val selVec = VecInit(io.update.map(u => u.enable && u.addr(i)))
@@ -81,16 +91,25 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       statusNext.srcState := VecInit(updateStatus.srcState.zip(wakeupEn).map {
         case (update, wakeup) => update || wakeup
       })
+      statusNext.scheduled := false.B
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
       XSError(status.valid, p"should not update a valid entry\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
+      val (deqResp, deqGrant) = deqRespSel(i)
+      XSError(deqResp && !status.valid, "should not deq an invalid entry\n")
+      if (config.hasFeedback) {
+        XSError(deqResp && !status.scheduled, "should not deq an un-scheduled entry\n")
+      }
       val wakeupEnVec = VecInit(status.psrc.zip(status.srcType).map{ case (p, t) => wakeupMatch(p, t) })
       val wakeupEn = wakeupEnVec.map(_.orR)
       io.wakeupMatch(i) := wakeupEnVec
-      statusNext.valid := status.valid && !status.roqIdx.needFlush(io.redirect, io.flush) && !hasIssued
+      statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
+      // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
+      statusNext.scheduled := Mux(deqResp && !deqGrant, false.B, status.scheduled || hasIssued)
+      XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {
         case (current, wakeup) => current || wakeup
       })
