@@ -63,7 +63,7 @@ class ReservationStation
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
-    val stIssuePtr = if (exuCfg == LdExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) Input(new SqPtr()) else null
 
     val fpRegValue = if (exuCfg == StExeUnitCfg) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null

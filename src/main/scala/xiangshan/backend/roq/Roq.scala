@@ -261,6 +261,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val roqFull = Output(Bool())
   })
 
+  println("Roq: size:" + RoqSize + " wbports:" + numWbPorts  + " commitwidth:" + CommitWidth)
+
   // instvalid field
   // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val valid = Mem(RoqSize, Bool())

@@ -50,6 +50,9 @@ class Dispatch(implicit p: Parameters) extends XSModule {
       val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
       // ls: hardwired to (0, 1, 2, 4)
     }
+    val csrCtrl = Input(new CustomCSRCtrlIO)
+    // LFST state sync
+    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     val ctrlInfo = new Bundle {
       val roqFull   = Output(Bool())
       val intdqFull = Output(Bool())
@@ -80,6 +83,10 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
+  dispatch1.io.csrCtrl <> io.csrCtrl
+  dispatch1.io.storeIssue <> io.storeIssue
+  dispatch1.io.redirect <> io.redirect
+  dispatch1.io.flush <> io.flush
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
