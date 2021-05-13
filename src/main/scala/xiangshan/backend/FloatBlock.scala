@@ -32,7 +32,7 @@ class FloatBlock
     val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val intWakeUpOut = Vec(intSlowWakeUpIn.size, DecoupledIO(new ExuOutput))
-    val fpWbOut = Vec(4, ValidIO(new ExuOutput))
+    val fpWbOut = Vec(8, ValidIO(new ExuOutput))
 
     // from csr
     val frm = Input(UInt(3.W))
@@ -91,7 +91,11 @@ class FloatBlock
     NRFpWritePorts,
     isFp = true
   ))
-  io.fpWbOut := VecInit(fpWbArbiter.io.out.drop(4))
+  io.fpWbOut.zip(fpWbArbiter.io.out).map{ case (wakeup, wb) =>
+    wakeup.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(redirect, flush))
+    wakeup.bits := RegNext(wb.bits)
+    wakeup.bits.data := ieee(RegNext(wb.bits.data))
+  }
 
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)

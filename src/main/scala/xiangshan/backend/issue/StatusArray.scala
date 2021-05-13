@@ -24,6 +24,7 @@ class StatusArrayUpdateIO(config: RSConfig)(implicit p: Parameters) extends Bund
 class StatusEntry(config: RSConfig)(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
   val scheduled = Bool()
+  val credit = UInt(4.W)
   val srcState = Vec(config.numSrc, Bool())
   val psrc = Vec(config.numSrc, UInt(config.dataIdBits.W))
   val srcType = Vec(config.numSrc, SrcType())
@@ -67,7 +68,9 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
 
   // update srcState when enqueue, wakeup
   def wakeupMatch(psrc: UInt, srcType: UInt) = {
-    val matchVec = VecInit(io.wakeup.map(w => w.valid && w.bits.pdest === psrc && SrcType.isReg(srcType)))
+    val matchVec = VecInit(io.wakeup.map(w =>
+      w.valid && w.bits.pdest === psrc && (SrcType.isReg(srcType) && w.bits.ctrl.rfWen && psrc =/= 0.U || SrcType.isFp(srcType) && w.bits.ctrl.fpWen)
+    ))
     XSError(PopCount(matchVec) > 1.U, p"matchVec ${Binary(matchVec.asUInt)} should be one-hot\n")
     matchVec.asUInt
   }
@@ -91,7 +94,8 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       statusNext.srcState := VecInit(updateStatus.srcState.zip(wakeupEn).map {
         case (update, wakeup) => update || wakeup
       })
-      statusNext.scheduled := false.B
+      statusNext.scheduled := updateStatus.scheduled
+      statusNext.credit := updateStatus.credit
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
@@ -108,8 +112,11 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       io.wakeupMatch(i) := wakeupEnVec
       statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
-      statusNext.scheduled := Mux(deqResp && !deqGrant, false.B, status.scheduled || hasIssued)
+      statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
       XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
+      statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
+      XSError(status.credit > 0.U && !status.scheduled,
+        p"instructions $i with credit ${status.credit} must not be scheduled\n")
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {
         case (current, wakeup) => current || wakeup
       })

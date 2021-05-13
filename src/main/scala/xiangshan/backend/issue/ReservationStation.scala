@@ -23,7 +23,9 @@ case class RSConfig (
   numFastWakeup: Int,
   numWakeup: Int,
   numValueBroadCast: Int,
-  hasFeedback: Boolean = false
+  hasFeedback: Boolean = false,
+  delayedRf: Boolean = false,
+  fixedLatency: Int = -1
 )
 
 class ReservationStation
@@ -55,7 +57,9 @@ class ReservationStation
     // for now alu and fmac are not in slowPorts
     numWakeup = fastPortsCnt + (4 + slowPortsCnt),
     numValueBroadCast = (4 + slowPortsCnt),
-    hasFeedback = feedback
+    hasFeedback = feedback,
+    delayedRf = exuCfg == StExeUnitCfg,
+    fixedLatency = fixedDelay
   )
 
   val io = IO(new Bundle {
@@ -67,7 +71,7 @@ class ReservationStation
 
     val stIssuePtr = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) Input(new SqPtr()) else null
 
-    val fpRegValue = if (exuCfg == StExeUnitCfg) Input(UInt(srcLen.W)) else null
+    val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
@@ -86,7 +90,7 @@ class ReservationStation
 
   val statusArray = Module(new StatusArray(config))
   val select = Module(new SelectPolicy(config))
-  val dataArray = Module(new DataArray(config.numEntries, config.numSrc, config.numDeq, config.numEnq, config.numValueBroadCast, config.dataBits))
+  val dataArray = Module(new DataArray(config))
   val payloadArray = Module(new PayloadArray(new MicroOp, config))
 
   io.numExist := PopCount(statusArray.io.isValid)
@@ -104,7 +108,9 @@ class ReservationStation
   statusArray.io.update(0).enable := do_enqueue
   statusArray.io.update(0).addr := select.io.allocate(0).bits
   statusArray.io.update(0).data.valid := true.B
-  statusArray.io.update(0).data.scheduled := false.B
+  val needFpSource = io.fromDispatch.bits.needRfRPort(1, 1, false)
+  statusArray.io.update(0).data.scheduled := (if (config.delayedRf) needFpSource else false.B)
+  statusArray.io.update(0).data.credit := (if (config.delayedRf) Mux(needFpSource, 2.U, 0.U) else 0.U)
   statusArray.io.update(0).data.srcState := VecInit(io.fromDispatch.bits.srcIsReady.take(config.numSrc))
   statusArray.io.update(0).data.psrc := VecInit(io.fromDispatch.bits.psrc.take(config.numSrc))
   statusArray.io.update(0).data.srcType := VecInit(io.fromDispatch.bits.ctrl.srcType.take(config.numSrc))
@@ -129,7 +135,7 @@ class ReservationStation
     case AluExeUnitCfg => io.fastDatas.drop(2).take(4)
     case _ => io.fastDatas
   }
-  val wakeupValid = io.fastUopsIn.map(_.valid) ++ RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(p => p.valid && p.bits.uop.doWriteIntRf)
+  val wakeupValid = io.fastUopsIn.map(_.valid) ++ RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
   val wakeupDest = io.fastUopsIn.map(_.bits) ++ RegNext(VecInit(fastNotInSlowWakeup.map(_.bits))) ++ io.slowPorts.map(_.bits.uop)
   require(wakeupValid.size == config.numWakeup)
   require(wakeupDest.size == config.numWakeup)
@@ -159,8 +165,19 @@ class ReservationStation
     statusArray.io.deqResp(0).bits.success := io.deq.ready
   }
   payloadArray.io.read(0).addr := select.io.grant(0).bits
-  io.fastUopOut.valid := (if (fixedDelay == 0) select.io.grant(0).valid else false.B) && payloadArray.io.read(0).data.doWriteIntRf
-  io.fastUopOut.bits := payloadArray.io.read(0).data
+  if (fixedDelay >= 0) {
+    val wakeupQueue = Module(new WakeupQueue(fixedDelay))
+    val fuCheck = (if (exuCfg == MulDivExeUnitCfg) payloadArray.io.read(0).data.ctrl.fuType === FuType.mul else true.B)
+    wakeupQueue.io.in.valid := select.io.grant(0).fire && fuCheck
+    wakeupQueue.io.in.bits := payloadArray.io.read(0).data
+    wakeupQueue.io.redirect := io.redirect
+    wakeupQueue.io.flush := io.flush
+    io.fastUopOut := wakeupQueue.io.out
+  }
+  else {
+    io.fastUopOut.valid := false.B
+    io.fastUopOut.bits := DontCare
+  }
 
   // select whether the source is from (whether regfile or imm)
   // for read-after-issue, it's done over the selected uop
@@ -197,12 +214,16 @@ class ReservationStation
    * Note: this is only needed when read-before-issue
    */
   // dispatch data: the next cycle after enqueue
-  dataArray.io.write(0).enable := RegNext(statusArray.io.update(0).enable)
+  dataArray.io.write(0).enable := RegNext(do_enqueue)
   dataArray.io.write(0).mask := RegNext(statusArray.io.update(0).data.srcState)
   dataArray.io.write(0).addr := RegNext(select.io.allocate(0).bits)
   dataArray.io.write(0).data := immBypassedData
+  if (config.delayedRf) {
+    dataArray.io.delayedWrite(0).valid := RegNext(RegNext(do_enqueue && needFpSource))
+    dataArray.io.delayedWrite(0).bits := io.fpRegValue
+  }
   // data broadcast: from function units (only slow wakeup date are needed)
-  val broadcastValid = RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(p => p.valid && p.bits.uop.doWriteIntRf)
+  val broadcastValid = RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
   val broadcastValue = fastNotInSlowData ++ VecInit(io.slowPorts.map(_.bits.data))
   require(broadcastValid.size == config.numValueBroadCast)
   require(broadcastValue.size == config.numValueBroadCast)

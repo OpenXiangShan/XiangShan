@@ -33,21 +33,22 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
     new DataArrayMultiWriteIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
-class DataArrayIO(numEntries: Int, numSrc: Int, numRead: Int, numWrite: Int, numMultiWrite: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
-  val read = Vec(numRead, new DataArrayReadIO(numEntries, numSrc, dataBits))
-  val write = Vec(numWrite, new DataArrayWriteIO(numEntries, numSrc, dataBits))
-  val multiWrite = Vec(numMultiWrite, new DataArrayMultiWriteIO(numEntries, numSrc, dataBits))
+class DataArrayIO(config: RSConfig)(implicit p: Parameters) extends XSBundle {
+  val read = Vec(config.numDeq, new DataArrayReadIO(config.numEntries, config.numSrc, config.dataBits))
+  val write = Vec(config.numEnq, new DataArrayWriteIO(config.numEntries, config.numSrc, config.dataBits))
+  val multiWrite = Vec(config.numValueBroadCast, new DataArrayMultiWriteIO(config.numEntries, config.numSrc, config.dataBits))
+  val delayedWrite = if (config.delayedRf) Vec(config.numEnq, Flipped(ValidIO(UInt(config.dataBits.W)))) else null
 
   override def cloneType: DataArrayIO.this.type =
-    new DataArrayIO(numEntries, numSrc, numRead, numWrite, numMultiWrite, dataBits).asInstanceOf[this.type]
+    new DataArrayIO(config).asInstanceOf[this.type]
 }
 
-class DataArray(numEntries: Int, numSrc: Int, numRead: Int, numWrite: Int, numMultiWrite: Int, dataBits: Int)(implicit p: Parameters) extends XSModule {
-  val io = IO(new DataArrayIO(numEntries, numSrc, numRead, numWrite, numMultiWrite, dataBits))
+class DataArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
+  val io = IO(new DataArrayIO(config))
 
   // single array for each source
   def genSingleArray(raddr: Seq[UInt], wen: Seq[Bool], waddr: Seq[UInt], wdata: Seq[UInt]) = {
-    val dataArray = Reg(Vec(numEntries, UInt(dataBits.W)))
+    val dataArray = Reg(Vec(config.numEntries, UInt(config.dataBits.W)))
 
     // write
     for (((en, addr), wdata) <- wen.zip(waddr).zip(wdata)) {
@@ -69,10 +70,14 @@ class DataArray(numEntries: Int, numSrc: Int, numRead: Int, numWrite: Int, numMu
     rdata
   }
 
-  for (i <- 0 until numSrc) {
-    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable)
-    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i))
-    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data)
+  for (i <- 0 until config.numSrc) {
+    val delayedWen = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.valid) else Seq()
+    val delayedWaddr = if (i == 1 && config.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
+    val delayedWdata = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.bits) else Seq()
+
+    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen
+    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr
+    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata
 
     val rdata = genSingleArray(io.read.map(_.addr), wen, waddr, wdata)
     io.read.zip(rdata).map{ case (rport, data) => rport.data(i) := data }
