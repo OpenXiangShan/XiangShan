@@ -115,7 +115,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
       XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
-      XSError(status.credit > 0.U && !status.scheduled,
+      XSError(status.valid && status.credit > 0.U && !status.scheduled,
         p"instructions $i with credit ${status.credit} must not be scheduled\n")
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {
         case (current, wakeup) => current || wakeup
