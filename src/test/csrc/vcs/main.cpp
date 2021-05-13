@@ -24,5 +24,16 @@ extern "C" int simv_step() {
   if (assert_count > 0) {
     return 1;
   }
+  if (difftest_state() != -1) {
+    int trapCode = difftest_state();
+    switch (trapCode) {
+      case 0:
+        eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP\n" ANSI_COLOR_RESET);
+        break;
+      default:
+        eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
+    }
+    return trapCode + 1;
+  }
   return difftest_step();
 }
