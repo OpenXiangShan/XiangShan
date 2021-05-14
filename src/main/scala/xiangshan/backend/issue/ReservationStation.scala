@@ -103,7 +103,8 @@ class ReservationStation
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
   io.fromDispatch.ready := select.io.allocate(0).valid
-  val do_enqueue = io.fromDispatch.fire() && !io.fromDispatch.bits.roqIdx.needFlush(io.redirect, io.flush)
+  // agreement with dispatch: don't enqueue when io.redirect.valid
+  val do_enqueue = io.fromDispatch.fire() && !io.redirect.valid && !io.flush
   select.io.allocate(0).ready := do_enqueue
   statusArray.io.update(0).enable := do_enqueue
   statusArray.io.update(0).addr := select.io.allocate(0).bits

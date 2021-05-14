@@ -90,7 +90,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       val wakeupEnVec = VecInit(updateStatus.psrc.zip(updateStatus.srcType).map{ case (p, t) => wakeupMatch(p, t) })
       val wakeupEn = wakeupEnVec.map(_.orR)
       io.wakeupMatch(i) := wakeupEnVec
-      statusNext.valid := !updateStatus.roqIdx.needFlush(io.redirect, io.flush)
+      statusNext.valid := true.B
       statusNext.srcState := VecInit(updateStatus.srcState.zip(wakeupEn).map {
         case (update, wakeup) => update || wakeup
       })
