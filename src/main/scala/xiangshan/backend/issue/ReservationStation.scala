@@ -25,7 +25,8 @@ case class RSConfig (
   numValueBroadCast: Int,
   hasFeedback: Boolean = false,
   delayedRf: Boolean = false,
-  fixedLatency: Int = -1
+  fixedLatency: Int = -1,
+  checkWaitBit: Boolean = false
 )
 
 class ReservationStation
@@ -59,7 +60,8 @@ class ReservationStation
     numValueBroadCast = (4 + slowPortsCnt),
     hasFeedback = feedback,
     delayedRf = exuCfg == StExeUnitCfg,
-    fixedLatency = fixedDelay
+    fixedLatency = fixedDelay,
+    checkWaitBit = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) true else false
   )
 
   val io = IO(new Bundle {
@@ -69,7 +71,7 @@ class ReservationStation
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
     val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
-    val stIssuePtr = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) Input(new SqPtr()) else null
+    val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
 
     val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
@@ -111,11 +113,16 @@ class ReservationStation
   statusArray.io.update(0).data.valid := true.B
   val needFpSource = io.fromDispatch.bits.needRfRPort(1, 1, false)
   statusArray.io.update(0).data.scheduled := (if (config.delayedRf) needFpSource else false.B)
+  statusArray.io.update(0).data.blocked := (if (config.checkWaitBit) io.fromDispatch.bits.cf.loadWaitBit else false.B)
   statusArray.io.update(0).data.credit := (if (config.delayedRf) Mux(needFpSource, 2.U, 0.U) else 0.U)
   statusArray.io.update(0).data.srcState := VecInit(io.fromDispatch.bits.srcIsReady.take(config.numSrc))
   statusArray.io.update(0).data.psrc := VecInit(io.fromDispatch.bits.psrc.take(config.numSrc))
   statusArray.io.update(0).data.srcType := VecInit(io.fromDispatch.bits.ctrl.srcType.take(config.numSrc))
   statusArray.io.update(0).data.roqIdx := io.fromDispatch.bits.roqIdx
+  statusArray.io.update(0).data.sqIdx := io.fromDispatch.bits.sqIdx
+  if (config.checkWaitBit) {
+    statusArray.io.stIssuePtr := io.stIssuePtr
+  }
   payloadArray.io.write(0).enable := do_enqueue
   payloadArray.io.write(0).addr := select.io.allocate(0).bits
   payloadArray.io.write(0).data := io.fromDispatch.bits

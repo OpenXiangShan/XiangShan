@@ -6,6 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.mem.SqPtr
 
 class StatusArrayUpdateIO(config: RSConfig)(implicit p: Parameters) extends Bundle {
   val enable = Input(Bool())
@@ -22,13 +23,17 @@ class StatusArrayUpdateIO(config: RSConfig)(implicit p: Parameters) extends Bund
 }
 
 class StatusEntry(config: RSConfig)(implicit p: Parameters) extends XSBundle {
+  // states
   val valid = Bool()
   val scheduled = Bool()
+  val blocked = Bool()
   val credit = UInt(4.W)
   val srcState = Vec(config.numSrc, Bool())
+  // data
   val psrc = Vec(config.numSrc, UInt(config.dataIdBits.W))
   val srcType = Vec(config.numSrc, SrcType())
   val roqIdx = new RoqPtr
+  val sqIdx = new SqPtr
 
   override def cloneType: StatusEntry.this.type =
     new StatusEntry(config).asInstanceOf[this.type]
@@ -37,7 +42,8 @@ class StatusEntry(config: RSConfig)(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
+class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
+  with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -53,6 +59,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       val rsMask = UInt(config.numEntries.W)
       val success = Bool()
     })))
+    val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
   })
 
   val statusArray = Reg(Vec(config.numEntries, new StatusEntry(config)))
@@ -63,8 +70,8 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
   }
 
   // instruction is ready for issue
-  val readyVec = VecInit(statusArray.map(s => s.srcState.asUInt.andR && !s.scheduled))
-  val readyVecNext = VecInit(statusArrayNext.map(s => s.srcState.asUInt.andR && !s.scheduled))
+  val readyVec = VecInit(statusArray.map(s => s.srcState.asUInt.andR && !s.scheduled && !s.blocked))
+  val readyVecNext = VecInit(statusArrayNext.map(s => s.srcState.asUInt.andR && !s.scheduled && !s.blocked))
 
   // update srcState when enqueue, wakeup
   def wakeupMatch(psrc: UInt, srcType: UInt) = {
@@ -95,10 +102,12 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
         case (update, wakeup) => update || wakeup
       })
       statusNext.scheduled := updateStatus.scheduled
+      statusNext.blocked := updateStatus.blocked
       statusNext.credit := updateStatus.credit
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
+      statusNext.sqIdx := updateStatus.sqIdx
       XSError(status.valid, p"should not update a valid entry\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
@@ -114,6 +123,12 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
       XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
+      if (config.checkWaitBit) {
+        statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
+      }
+      else {
+        statusNext.blocked := false.B
+      }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
         p"instructions $i with credit ${status.credit} must not be scheduled\n")
