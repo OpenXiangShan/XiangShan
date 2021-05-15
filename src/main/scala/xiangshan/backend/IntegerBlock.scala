@@ -94,6 +94,7 @@ class IntegerBlock
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val memFastWakeUp = new WakeUpBundle(exuParameters.LduCnt, 0)
+    val intWbOut = Vec(4, ValidIO(new ExuOutput))
 
     val csrio = new CSRFileIO
     val fenceio = new Bundle {
@@ -117,7 +118,12 @@ class IntegerBlock
   val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
   val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
-
+  val intWbArbiter = Module(new Wb(
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRIntWritePorts,
+    isFp = false
+  ))
+  io.intWbOut := VecInit(intWbArbiter.io.out.drop(4))
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
 
@@ -142,7 +148,8 @@ class IntegerBlock
     val fastPortsCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
-    val slowPorts = (inBlockListenPorts ++ slowWakeUpIn.zip(io.wakeUpIn.slow)).map(a => (a._1, decoupledIOToValidIO(a._2)))
+    // only load+mul need slowPorts
+    val slowPorts = intWbArbiter.io.out.drop(4)
     val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == LdExeUnitCfg) || (cfg == StExeUnitCfg)
@@ -150,8 +157,8 @@ class IntegerBlock
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
     val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
-      fastDatas.map(_._1),
-      slowPorts.map(_._1),
+      fastDatas.map(_._1).length,
+      slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
       feedback = feedback
@@ -173,7 +180,7 @@ class IntegerBlock
     }
 
     rs.io.fastDatas <> fastDatas.map(_._2)
-    rs.io.slowPorts <> slowPorts.map(_._2)
+    rs.io.slowPorts := slowPorts
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.fromInt <> rs.io.deq
@@ -228,11 +235,7 @@ class IntegerBlock
   intRf.io.readPorts.zipWithIndex.map { case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
-  val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
-    NRIntWritePorts,
-    isFp = false
-  ))
+
   intWbArbiter.io.in <> exeUnits.map(e => {
     val w = WireInit(e.io.out)
     if(e.config.writeFpRf){

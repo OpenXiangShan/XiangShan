@@ -169,11 +169,11 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   }
 
   if (config.readIntRf) {
-    io.fromInt.ready := inReady(readIntFu)
+    io.fromInt.ready := !io.fromInt.valid || inReady(readIntFu)
   }
 
   if (config.readFpRf) {
-    io.fromFp.ready := inReady(readFpFu)
+    io.fromFp.ready := !io.fromFp.valid || inReady(readFpFu)
   }
 
   def assignDontCares(out: ExuOutput) = {
