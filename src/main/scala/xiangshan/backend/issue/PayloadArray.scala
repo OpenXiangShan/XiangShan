@@ -29,23 +29,30 @@ class PayloadArray[T <: Data](gen: T, config: RSConfig)(implicit p: Parameters) 
     val write = Vec(config.numEnq, new PayloadArrayWriteIO(gen, config))
   })
 
-  val payload = Mem(config.numEntries, gen)
+  val payload = Reg(Vec(config.numEntries, gen))
 
-  // TODO: timing
   // read ports
-  val raddr = VecInit(io.read.map(r => OHToUInt(r.addr)))
-  io.read.map(_.data).zip(raddr).map {
-    case (data, addr) => data := payload.read(addr)
+  io.read.map(_.data).zip(io.read.map(_.addr)).map {
+    case (data, addr) => data := Mux1H(addr, payload)
+    XSError(PopCount(addr) > 1.U, f"raddr ${Binary(addr)} is not one-hot\n")
   }
 
   // write ports
-  for (w <- io.write) {
-    when (w.enable) {
-      payload.write(OHToUInt(w.addr), w.data)
+  for (i <- 0 until config.numEntries) {
+    val wenVec = VecInit(io.write.map(w => w.enable && w.addr(i)))
+    val wen = wenVec.asUInt.orR
+    val wdata = Mux1H(wenVec, io.write.map(_.data))
+    when (wen) {
+      payload(i) := wdata
     }
+    XSError(PopCount(wenVec) > 1.U, f"wenVec ${Binary(wenVec.asUInt)} is not one-hot\n")
+  }
 
+  for (w <- io.write) {
+    // check for writing to multiple entries
     XSError(w.enable && PopCount(w.addr.asBools) =/= 1.U,
       p"write address ${Binary(w.addr)} is not one-hot\n")
+    // write log
     XSDebug(w.enable, p"write to address ${OHToUInt(w.addr)}\n")
   }
 

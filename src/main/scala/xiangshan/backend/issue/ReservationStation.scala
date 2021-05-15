@@ -26,7 +26,8 @@ case class RSConfig (
   hasFeedback: Boolean = false,
   delayedRf: Boolean = false,
   fixedLatency: Int = -1,
-  checkWaitBit: Boolean = false
+  checkWaitBit: Boolean = false,
+  optBuf: Boolean = false
 )
 
 class ReservationStation
@@ -61,7 +62,8 @@ class ReservationStation
     hasFeedback = feedback,
     delayedRf = exuCfg == StExeUnitCfg,
     fixedLatency = fixedDelay,
-    checkWaitBit = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) true else false
+    checkWaitBit = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) true else false,
+    optBuf = if (exuCfg == AluExeUnitCfg) true else false
   )
 
   val io = IO(new Bundle {
@@ -292,7 +294,7 @@ class ReservationStation
   }
   // data: send to bypass network
   // TODO: these should be done outside RS
-  val bypassNetwork = Module(new BypassNetwork(config.numSrc, config.numFastWakeup, config.dataBits))
+  val bypassNetwork = Module(new BypassNetwork(config.numSrc, config.numFastWakeup, config.dataBits, config.optBuf))
   bypassNetwork.io.hold := !io.deq.ready
   bypassNetwork.io.source := s1_out.bits.src.take(config.numSrc)
   bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).map { case (by, (m, d)) =>
