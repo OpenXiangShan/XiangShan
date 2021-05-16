@@ -131,7 +131,7 @@ class FloatBlock
       slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = false,1
+      feedback = false,1, 1
     ))
 
     rs.io.redirect <> redirect // TODO: remove it
@@ -153,7 +153,7 @@ class FloatBlock
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
-    exeUnits(i).io.fromFp <> rs.io.deq
+    exeUnits(i).io.fromFp <> rs.io.deq(0)
     // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
@@ -165,8 +165,8 @@ class FloatBlock
     val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeFpRf
     ).map(x => {
-      val raw = WireInit(x.io.fastUopOut)
-      raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.fpWen
+      val raw = WireInit(x.io.fastUopOut(0))
+      raw.valid := x.io.fastUopOut(0).valid && raw.bits.ctrl.fpWen
       raw
     })
     rs.io.fastUopsIn <> inBlockUops
@@ -234,7 +234,7 @@ class FloatBlock
     difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
   }
 
-  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq(0).valid))
   XSPerfAccumulate("fp_rs_deq_count", rsDeqCount)
   XSPerfHistogram("fp_rs_deq_count", rsDeqCount, true.B, 0, 6, 1)
 }

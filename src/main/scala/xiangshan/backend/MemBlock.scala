@@ -153,7 +153,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = feedback, 1)
+      feedback = feedback, 1, 1)
     )
 
     rs.io.redirect <> redirect // TODO: remove it
@@ -222,7 +222,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
-    loadUnits(i).io.ldin          <> reservationStations(i).io.deq
+    loadUnits(i).io.ldin          <> reservationStations(i).io.deq(0)
     // dcache access
     loadUnits(i).io.dcache        <> dcache.io.lsu.load(i)
     // forward
@@ -255,7 +255,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
-    stu.io.stin        <> rs.io.deq
+    stu.io.stin        <> rs.io.deq(0)
     stu.io.lsq         <> lsq.io.storeIn(i)
 
     // Lsq to load unit's rs
@@ -264,12 +264,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.storeDataIn(i) := rs.io.stData
 
     // sync issue info to rs
-    lsq.io.storeIssue(i).valid := rs.io.deq.valid
-    lsq.io.storeIssue(i).bits := rs.io.deq.bits
+    lsq.io.storeIssue(i).valid := rs.io.deq(0).valid
+    lsq.io.storeIssue(i).bits := rs.io.deq(0).bits
 
     // sync issue info to store set LFST
-    io.toCtrlBlock.stIn(i).valid := rs.io.deq.valid
-    io.toCtrlBlock.stIn(i).bits := rs.io.deq.bits
+    io.toCtrlBlock.stIn(i).valid := rs.io.deq(0).valid
+    io.toCtrlBlock.stIn(i).bits := rs.io.deq(0).bits
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
@@ -323,21 +323,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val atomic_rs0  = exuParameters.LduCnt + 0
   val atomic_rs1  = exuParameters.LduCnt + 1
-  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType)
-  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType)
+  val st0_atomics = reservationStations(atomic_rs0).io.deq(0).valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq(0).bits.uop.ctrl.fuType)
+  val st1_atomics = reservationStations(atomic_rs1).io.deq(0).valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq(0).bits.uop.ctrl.fuType)
 
   val st0_data_atomics = reservationStations(atomic_rs0).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.stData.bits.uop.ctrl.fuType)
   val st1_data_atomics = reservationStations(atomic_rs1).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.stData.bits.uop.ctrl.fuType)
 
   when (st0_atomics) {
-    reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready
+    reservationStations(atomic_rs0).io.deq(0).ready := atomicsUnit.io.in.ready
     storeUnits(0).io.stin.valid := false.B
 
     state := s_atomics_0
     assert(!st1_atomics)
   }
   when (st1_atomics) {
-    reservationStations(atomic_rs1).io.deq.ready := atomicsUnit.io.in.ready
+    reservationStations(atomic_rs1).io.deq(0).ready := atomicsUnit.io.in.ready
     storeUnits(1).io.stin.valid := false.B
 
     state := s_atomics_1
@@ -349,7 +349,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
-  atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
+  atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq(0).bits, reservationStations(atomic_rs1).io.deq(0).bits)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
   atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, reservationStations(atomic_rs0).io.stData.bits, reservationStations(atomic_rs1).io.stData.bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
@@ -394,8 +394,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
 
-  val ldDeqCount = PopCount(reservationStations.take(2).map(_.io.deq.valid))
-  val stDeqCount = PopCount(reservationStations.drop(2).map(_.io.deq.valid))
+  val ldDeqCount = PopCount(reservationStations.take(2).map(_.io.deq(0).valid))
+  val stDeqCount = PopCount(reservationStations.drop(2).map(_.io.deq(0).valid))
   val rsDeqCount = ldDeqCount + stDeqCount
   XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
   XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)
