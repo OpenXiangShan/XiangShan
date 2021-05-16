@@ -124,89 +124,92 @@ class IntegerBlock
     isFp = false
   ))
   io.intWbOut := VecInit(intWbArbiter.io.out.drop(4))
-  def needWakeup(cfg: ExuConfig): Boolean =
-    (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
-
-  def needData(a: ExuConfig, b: ExuConfig): Boolean =
-    (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
-
-  // val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
-  val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
-  val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
-    var certainLatency = -1
-    if (cfg == MulDivExeUnitCfg) {// NOTE: dirty code, add mul to fast wake up, but leave div
-      certainLatency = mulCfg.latency.latencyVal.get
-    } else if (cfg.hasCertainLatency) {
-      certainLatency = cfg.latency.latencyVal.get
-    }
-
-    val readIntRf = cfg.readIntRf
-
-    val inBlockWbData = exeUnits.filter(e => e.config.hasCertainLatency && readIntRf).map(a => (a.config, a.io.out.bits.data))
-    val fastDatas = inBlockWbData ++ fastWakeUpIn.zip(io.wakeUpIn.fast.map(_.bits.data)) ++
-      (if (cfg == AluExeUnitCfg && EnableLoadFastWakeUp) memFastWakeUpIn.zip(io.memFastWakeUp.fast.map(_.bits.data)) else Seq())
-    val fastPortsCnt = fastDatas.length
-
-    val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
-    // only load+mul need slowPorts
-    val slowPorts = intWbArbiter.io.out.drop(4)
-    val extraListenPortsCnt = slowPorts.length
-
-    val feedback = (cfg == LdExeUnitCfg) || (cfg == StExeUnitCfg)
-
-    println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
-
-    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
-      fastDatas.map(_._1).length,
-      slowPorts.length,
-      fixedDelay = certainLatency,
-      fastWakeup = certainLatency >= 0,
-      feedback = feedback
-    ))
-
-    rs.io.redirect <> redirect
-    rs.io.flush <> flush // TODO: remove it
-    rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
-
-    rs.io.srcRegValue := DontCare
-    val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
-    val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
-    rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    if (cfg.intSrcCnt > 1) rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg == JumpExeUnitCfg) {
-      rs.io.jumpPc := io.fromCtrlBlock.jumpPc
-      rs.io.jalr_target := io.fromCtrlBlock.jalr_target
-    }
-
-    rs.io.fastDatas <> fastDatas.map(_._2)
-    rs.io.slowPorts := slowPorts
-
-    exeUnits(i).io.redirect <> redirect
-    exeUnits(i).io.fromInt <> rs.io.deq
-    exeUnits(i).io.flush <> flush
-    // rs.io.memfeedback := DontCare
-
-    rs.suggestName(s"rs_${cfg.name}")
-
-    rs
-  })
-
-  for (rs <- reservationStations) {
-    val inBlockUops = reservationStations.filter(x =>
-      x.exuCfg.hasCertainLatency && x.exuCfg.writeIntRf
-    ).map(x => {
-      val raw = WireInit(x.io.fastUopOut)
-      raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.rfWen
-      raw
-    })
-    rs.io.fastUopsIn <> inBlockUops ++ io.wakeUpIn.fastUops ++
-      (if (rs.exuCfg == AluExeUnitCfg && EnableLoadFastWakeUp) io.memFastWakeUp.fastUops else Seq())
+  for (exe <- exeUnits) {
+    exe.io.redirect <> redirect
+    exe.io.flush <> flush
   }
 
-  io.wakeUpOut.fastUops <> reservationStations.filter(
-    rs => rs.exuCfg.hasCertainLatency
-  ).map(_.io.fastUopOut).map(intUopValid)
+  val jmp_rs = Module(new ReservationStation("rs_jmp", JumpExeUnitCfg, IssQueSize, XLEN, 6, 4, -1, false, false, 1))
+  val mul_rs_0 = Module(new ReservationStation("rs_mul_0", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1))
+  val mul_rs_1 = Module(new ReservationStation("rs_mul_1", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1))
+  val alu_rs_0 = Module(new ReservationStation("rs_alu_0", AluExeUnitCfg, IssQueSize, XLEN,
+    8, 4, 0, true, false, 2
+  ))
+  val alu_rs_1 = Module(new ReservationStation("rs_alu_1", AluExeUnitCfg, IssQueSize, XLEN,
+    8, 4, 0, true, false, 2
+  ))
+
+  val aluFastData = VecInit(exeUnits.drop(3).map(_.io.out.bits.data))
+  val mulFastData = VecInit(exeUnits.drop(1).take(2).map(_.io.out.bits.data))
+  val memFastData = VecInit(io.memFastWakeUp.fast.map(_.bits.data))
+  val slowPorts = intWbArbiter.io.out.drop(4)
+
+  jmp_rs.io.numExist <> io.toCtrlBlock.numExist(0)
+  jmp_rs.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(0))
+  jmp_rs.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
+  jmp_rs.io.jumpPc := io.fromCtrlBlock.jumpPc
+  jmp_rs.io.jalr_target := io.fromCtrlBlock.jalr_target
+  jmp_rs.io.fastDatas <> mulFastData ++ aluFastData
+  jmp_rs.io.deq <> jmpExeUnit.io.fromInt
+
+  mul_rs_0.io.numExist <> io.toCtrlBlock.numExist(1)
+  mul_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(1))
+  mul_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
+  mul_rs_0.io.fastDatas <> mulFastData ++ aluFastData
+  mul_rs_0.io.deq <> mduExeUnits(0).io.fromInt
+
+  mul_rs_1.io.numExist <> io.toCtrlBlock.numExist(2)
+  mul_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(2))
+  mul_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
+  mul_rs_1.io.fastDatas <> mulFastData ++ aluFastData
+  mul_rs_1.io.deq <> mduExeUnits(1).io.fromInt
+
+  io.toCtrlBlock.numExist(3) := alu_rs_0.io.numExist >> 1
+  io.toCtrlBlock.numExist(4) := alu_rs_0.io.numExist >> 1
+  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(3).take(2))
+  alu_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
+  alu_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
+  alu_rs_0.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
+  alu_rs_0.io.deq <> aluExeUnits(0).io.fromInt
+  aluExeUnits(1).io.fromInt.valid := false.B
+  aluExeUnits(1).io.fromInt.bits := DontCare
+
+  io.toCtrlBlock.numExist(5) := alu_rs_1.io.numExist >> 1
+  io.toCtrlBlock.numExist(6) := alu_rs_1.io.numExist >> 1
+  alu_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(5))
+  alu_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
+  alu_rs_1.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
+  alu_rs_1.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
+  alu_rs_1.io.deq <> aluExeUnits(2).io.fromInt
+  aluExeUnits(3).io.fromInt.valid := false.B
+  aluExeUnits(3).io.fromInt.bits := DontCare
+
+  val reservationStations = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0, alu_rs_1)
+  val aluFastUop = Wire(Vec(4, ValidIO(new MicroOp)))
+  val mulFastUop = Wire(Vec(2, ValidIO(new MicroOp)))
+  val memFastUop = io.memFastWakeUp.fastUops
+  aluFastUop(0) := alu_rs_0.io.fastUopOut
+  aluFastUop(1).valid := false.B
+  aluFastUop(1).bits := DontCare
+  aluFastUop(2) := alu_rs_1.io.fastUopOut
+  aluFastUop(3).valid := false.B
+  aluFastUop(3).bits := DontCare
+  mulFastUop(0) := mul_rs_0.io.fastUopOut
+  mulFastUop(1) := mul_rs_1.io.fastUopOut
+
+  for (rs <- reservationStations) {
+    rs.io.redirect <> redirect
+    rs.io.redirect <> redirect
+    rs.io.flush <> flush
+    rs.io.slowPorts := slowPorts
+  }
+  jmp_rs.io.fastUopsIn := mulFastUop ++ aluFastUop
+  mul_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop
+  mul_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop
+  alu_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
+  alu_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
+
+  io.wakeUpOut.fastUops := mulFastUop ++ aluFastUop
 
   io.wakeUpOut.fast <> exeUnits.filter(
     x => x.config.hasCertainLatency

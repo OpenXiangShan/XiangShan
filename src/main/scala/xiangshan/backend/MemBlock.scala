@@ -153,17 +153,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = feedback)
+      feedback = feedback, 1)
     )
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush    <> io.fromCtrlBlock.flush // TODO: remove it
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.fromDispatch  <> io.fromCtrlBlock.enqIqCtrl(i)
+    rs.io.fromDispatch  <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
 
-    rs.io.srcRegValue(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
+    rs.io.srcRegValue(0)(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
     if (i >= exuParameters.LduCnt) {
-      rs.io.srcRegValue(1) := io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data
+      rs.io.srcRegValue(0)(1) := io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data
       rs.io.fpRegValue := io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data
     }
 

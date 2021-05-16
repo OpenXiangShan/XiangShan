@@ -131,22 +131,22 @@ class FloatBlock
       slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = false
+      feedback = false,1
     ))
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush <> flush // TODO: remove it
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
+    rs.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
 
     rs.io.srcRegValue := DontCare
     val src1Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3).data))
     val src2Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 1).data))
     val src3Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 2).data))
 
-    rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
+    rs.io.srcRegValue(0)(0) := src1Value(readPortIndex(i))
+    rs.io.srcRegValue(0)(1) := src2Value(readPortIndex(i))
+    if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(0)(2) := src3Value(readPortIndex(i))
 
     rs.io.fastDatas <> inBlockFastPorts.map(_._2)
     rs.io.slowPorts <> slowPorts

@@ -41,6 +41,7 @@ class ReservationStation
   fixedDelay: Int,
   fastWakeup: Boolean,
   feedback: Boolean,
+  enqNum: Int
 )(implicit p: Parameters) extends XSModule {
   val iqIdxWidth = log2Up(iqSize+1)
   val nonBlocked = if (exuCfg == MulDivExeUnitCfg) false else fixedDelay >= 0
@@ -50,7 +51,7 @@ class ReservationStation
   val config = RSConfig(
     name = myName,
     numEntries = iqSize,
-    numEnq = 1,
+    numEnq = enqNum,
     numDeq = 1,
     numSrc = srcNum,
     dataBits = srcLen,
@@ -68,14 +69,16 @@ class ReservationStation
 
   val io = IO(new Bundle {
     val numExist = Output(UInt(iqIdxWidth.W))
-    val fromDispatch = Flipped(DecoupledIO(new MicroOp))
+    // enq
+    val fromDispatch = Vec(config.numEnq, Flipped(DecoupledIO(new MicroOp)))
+    val srcRegValue = Vec(config.numEnq, Input(Vec(srcNum, UInt(srcLen.W))))
+    val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
+    // deq
     val deq = DecoupledIO(new ExuInput)
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
-    val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
     val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
 
-    val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
@@ -106,28 +109,33 @@ class ReservationStation
    */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  io.fromDispatch.ready := select.io.allocate(0).valid
-  // agreement with dispatch: don't enqueue when io.redirect.valid
-  val do_enqueue = io.fromDispatch.fire() && !io.redirect.valid && !io.flush
-  select.io.allocate(0).ready := do_enqueue
-  statusArray.io.update(0).enable := do_enqueue
-  statusArray.io.update(0).addr := select.io.allocate(0).bits
-  statusArray.io.update(0).data.valid := true.B
-  val needFpSource = io.fromDispatch.bits.needRfRPort(1, 1, false)
-  statusArray.io.update(0).data.scheduled := (if (config.delayedRf) needFpSource else false.B)
-  statusArray.io.update(0).data.blocked := (if (config.checkWaitBit) io.fromDispatch.bits.cf.loadWaitBit else false.B)
-  statusArray.io.update(0).data.credit := (if (config.delayedRf) Mux(needFpSource, 2.U, 0.U) else 0.U)
-  statusArray.io.update(0).data.srcState := VecInit(io.fromDispatch.bits.srcIsReady.take(config.numSrc))
-  statusArray.io.update(0).data.psrc := VecInit(io.fromDispatch.bits.psrc.take(config.numSrc))
-  statusArray.io.update(0).data.srcType := VecInit(io.fromDispatch.bits.ctrl.srcType.take(config.numSrc))
-  statusArray.io.update(0).data.roqIdx := io.fromDispatch.bits.roqIdx
-  statusArray.io.update(0).data.sqIdx := io.fromDispatch.bits.sqIdx
+  val doEnqueue = Wire(Vec(config.numEnq, Bool()))
+  val needFpSource = Wire(Vec(config.numEnq, Bool()))
+  for (i <- 0 until config.numEnq) {
+    io.fromDispatch(i).ready := select.io.allocate(i).valid
+    // agreement with dispatch: don't enqueue when io.redirect.valid
+    doEnqueue(i) := io.fromDispatch(i).fire() && !io.redirect.valid && !io.flush
+    select.io.allocate(i).ready := doEnqueue(i)
+    statusArray.io.update(i).enable := doEnqueue(i)
+    statusArray.io.update(i).addr := select.io.allocate(i).bits
+    statusArray.io.update(i).data.valid := true.B
+    needFpSource(i) := io.fromDispatch(i).bits.needRfRPort(1, 1, false)
+    statusArray.io.update(i).data.scheduled := (if (config.delayedRf) needFpSource(i) else false.B)
+    statusArray.io.update(i).data.blocked := (if (config.checkWaitBit) io.fromDispatch(i).bits.cf.loadWaitBit else false.B)
+    statusArray.io.update(i).data.credit := (if (config.delayedRf) Mux(needFpSource(i), 2.U, 0.U) else 0.U)
+    statusArray.io.update(i).data.srcState := VecInit(io.fromDispatch(i).bits.srcIsReady.take(config.numSrc))
+    statusArray.io.update(i).data.psrc := VecInit(io.fromDispatch(i).bits.psrc.take(config.numSrc))
+    statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(config.numSrc))
+    statusArray.io.update(i).data.roqIdx := io.fromDispatch(i).bits.roqIdx
+    statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
+    payloadArray.io.write(i).enable := doEnqueue(i)
+    payloadArray.io.write(i).addr := select.io.allocate(i).bits
+    payloadArray.io.write(i).data := io.fromDispatch(i).bits
+  }
+  // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
   if (config.checkWaitBit) {
     statusArray.io.stIssuePtr := io.stIssuePtr
   }
-  payloadArray.io.write(0).enable := do_enqueue
-  payloadArray.io.write(0).addr := select.io.allocate(0).bits
-  payloadArray.io.write(0).data := io.fromDispatch.bits
   // wakeup from other RS or function units
   val fastNotInSlowWakeup = exuCfg match {
     case LdExeUnitCfg => io.fastUopsIn.drop(2).take(4)
@@ -213,10 +221,14 @@ class ReservationStation
     }
     data
   }
-  val lastAllocateUop = RegNext(io.fromDispatch.bits)
-  val immBypassedData = VecInit(extractImm(lastAllocateUop).zip(io.srcRegValue).map {
-    case (imm, reg_data) => Mux(imm.valid, imm.bits, reg_data)
-  })
+  // lastAllocateUop: Vec(config.numEnq, new MicroOp)
+  val lastAllocateUop = RegNext(VecInit(io.fromDispatch.map(_.bits)))
+  val immBypassedData = Wire(Vec(config.numEnq, Vec(config.numSrc, UInt(config.dataBits.W))))
+  for (((uop, data), bypass) <- lastAllocateUop.zip(io.srcRegValue).zip(immBypassedData)) {
+    bypass := extractImm(uop).zip(data).map {
+      case (imm, reg_data) => Mux(imm.valid, imm.bits, reg_data)
+    }
+  }
 
   /**
    * S1: Data broadcast (from Regfile and FUs) and read
@@ -224,13 +236,15 @@ class ReservationStation
    * Note: this is only needed when read-before-issue
    */
   // dispatch data: the next cycle after enqueue
-  dataArray.io.write(0).enable := RegNext(do_enqueue)
-  dataArray.io.write(0).mask := RegNext(statusArray.io.update(0).data.srcState)
-  dataArray.io.write(0).addr := RegNext(select.io.allocate(0).bits)
-  dataArray.io.write(0).data := immBypassedData
-  if (config.delayedRf) {
-    dataArray.io.delayedWrite(0).valid := RegNext(RegNext(do_enqueue && needFpSource))
-    dataArray.io.delayedWrite(0).bits := io.fpRegValue
+  for (i <- 0 until config.numEnq) {
+    dataArray.io.write(i).enable := RegNext(doEnqueue(i))
+    dataArray.io.write(i).mask := RegNext(statusArray.io.update(i).data.srcState)
+    dataArray.io.write(i).addr := RegNext(select.io.allocate(i).bits)
+    dataArray.io.write(i).data := immBypassedData(i)
+    if (config.delayedRf) {
+      dataArray.io.delayedWrite(i).valid := RegNext(RegNext(doEnqueue(i) && needFpSource(i)))
+      dataArray.io.delayedWrite(i).bits := io.fpRegValue
+    }
   }
   // data broadcast: from function units (only slow wakeup date are needed)
   val broadcastValid = RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
@@ -258,13 +272,21 @@ class ReservationStation
   // for read-before-issue, we need to bypass the enqueue data here
   // for read-after-issue, we need to bypass the imm here
   // check enq data bypass (another form of broadcast except that we know where it hits) here
-  val enqRegSelected = RegNext(select.io.allocate(0).bits) === select.io.grant(0).bits
-  val enqSrcStateReg = RegNext(statusArray.io.update(0).data.srcState)
-  val enqBypassValid = enqSrcStateReg.map(_ && enqRegSelected)
+  // enqRegSelected: Vec(config.numEnq, Bool())
+  val enqRegSelected = VecInit(select.io.allocate.map(a => RegNext(a.bits) === select.io.grant(0).bits))
+  // enqSrcStateReg: Vec(config.numEnq, Vec(config.numSrc, Bool()))
+  // [i][j]: i-th enqueue, j-th source state
+  val enqSrcStateReg = RegNext(VecInit(statusArray.io.update.map(_.data.srcState)))
+  // enqBypassValid: Vec(config.numEnq, Vec(config.numSrc, Bool()))
+  val enqBypassValid = enqSrcStateReg.zip(enqRegSelected).map{ case (state, sel) => VecInit(state.map(_ && sel)) }
+
+  // bypass data for config.numDeq
+  val deqBypassValid = Mux1H(enqRegSelected, enqBypassValid)
+  val deqBypassData = Mux1H(enqRegSelected, immBypassedData)
   // dequeue data should be bypassed
   val deqUop = payloadArray.io.read(0).data
   val deqDataRead = dataArray.io.read(0).data
-  val deqData = VecInit(enqBypassValid.zip(immBypassedData).zip(deqDataRead).map {
+  val deqData = VecInit(deqBypassValid.zip(deqBypassData).zip(deqDataRead).map {
     case ((v, d), r) => Mux(v, d, r)
   })
 
@@ -326,8 +348,10 @@ class ReservationStation
   }
 
   // logs
-  XSDebug(io.fromDispatch.valid && !io.fromDispatch.ready, p"enq blocked, roqIdx ${io.fromDispatch.bits.roqIdx}\n")
-  XSDebug(io.fromDispatch.fire(), p"enq fire, roqIdx ${io.fromDispatch.bits.roqIdx}, srcState ${Binary(io.fromDispatch.bits.srcState.asUInt)}\n")
+  for (dispatch <- io.fromDispatch) {
+    XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, roqIdx ${dispatch.bits.roqIdx}\n")
+    XSDebug(dispatch.fire(), p"enq fire, roqIdx ${dispatch.bits.roqIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
+  }
   XSDebug(io.deq.fire(), p"deq fire, roqIdx ${io.deq.bits.uop.roqIdx}\n")
   XSDebug(io.deq.valid && !io.deq.ready, p"deq blocked, roqIdx ${io.deq.bits.uop.roqIdx}\n")
 }
