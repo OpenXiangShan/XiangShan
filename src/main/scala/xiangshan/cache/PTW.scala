@@ -501,7 +501,7 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     count := 0.U
   }
   for (i <- 0 until MSHRSize) {
-    XSPerfAccumulate(s"numExist${i}", count === 1.U)
+    XSPerfAccumulate(s"numExist${i}", count === i.U)
   }
 }
 
