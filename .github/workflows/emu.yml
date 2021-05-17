@@ -3,64 +3,11 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, ptw-pre-nl ]
   pull_request:
     branches: [ master ]
 
 jobs:
-  generate-verilog:
-    runs-on: self-hosted
-    continue-on-error: false
-    name: Generate Verilog
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-      - name: Check Wiring
-        run:
-          bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
-      - name: generate verilog file
-        run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --dual-core
-  emu-basics:
-    runs-on: self-hosted
-    continue-on-error: false
-    name: EMU - Basics
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-      - name: set env
-        run: |
-          echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
-          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
-      - name: Build EMU
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
-      - name: Basic Test - cputest
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci cputest 2> /dev/zero
-      - name: Basic Test - riscv-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --rvtest /home/ci-runner/xsenv/riscv-tests --ci riscv-tests 2> /dev/zero
-      - name: Simple Test - microbench
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci microbench 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/microbench.log
-      - name: Simple Test - CoreMark
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci coremark 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/coremark.log
-      - name: System Test - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci linux-hello 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/linux.log
-      - name: Floating-point Test - povray
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
-          cat perf.log | sort | tee $PERF_HOME/povray.log
   emu-performance:
     runs-on: self-hosted
     continue-on-error: false
