@@ -17,7 +17,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
   val SramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
 
+  val SourceWidth = if (EnablePtwPrefetch) PtwWidth + 1 else PtwWidth
+  val bSourceWidth = log2Up(SourceWidth)
   val bPtwWidth = log2Up(PtwWidth)
+
 
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
@@ -104,8 +107,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 }
 
 abstract class PtwBundle(implicit p: Parameters) extends XSBundle with HasPtwConst
-abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
-  with HasXSParameter with HasPtwConst
+abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer) with HasXSParameter with HasPtwConst {
+}
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
@@ -314,9 +317,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   /* Ptw processes multiple requests
    * Divide Ptw procedure into two stages: cache access ; mem access if cache miss
-   *           miss queue itlb       dtlb
-   *               |       |         |
-   *               ------arbiter------
+   *           [miss queue] [itlb]    [dtlb]   [prefetch]
+   *               |          |         |          |
+   *               ------arbiter--------------------
    *                            |
    *                    l1 - l2 - l3 - sp
    *                            |
@@ -341,17 +344,30 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   val missQueue = Module(new PtwMissQueue)
   val cache = Module(new PtwCache)
   val fsm = Module(new PtwFsm)
-  val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
+  val arb1 = Module(new Arbiter(new PtwReq, SourceWidth))
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
   }, 2))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 2)).io)
 
   // NOTE: when cache out but miss and fsm doesnt accept,
   val blockNewReq = false.B
-  arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
+  arb1.io.in.take(PtwWidth).zip(io.tlb.map(_.req(0))).map{ 
+    case (in, out) => in <> out
+  }
   arb1.io.out.ready := arb2.io.in(1).ready && !blockNewReq
+  
+  if (EnablePtwPrefetch) {
+    val PrefetchChannel = PtwWidth
+    val pre = Module(new PTWPrefetcherNextLine)
+    
+    arb1.io.in(PrefetchChannel) <> pre.io.req
+    pre.io.probe.valid := arb1.io.out.fire() && arb1.io.chosen === PrefetchChannel.U
+    pre.io.probe.bits.vpn := arb1.io.out.bits.vpn
+    
+    pre.io.sfence := sfence
+  }
 
   val blockMissQueue = !fsm.io.req.ready
   block_decoupled(missQueue.io.out, arb2.io.in(0), blockMissQueue)
@@ -443,18 +459,18 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Bundle {
       val vpn = UInt(vpnLen.W)
-      val source = UInt(bPtwWidth.W)
+      val source = UInt(bSourceWidth.W)
     }))
     val sfence = Input(new SfenceBundle)
     val out = Decoupled(new Bundle {
       val vpn = UInt(vpnLen.W)
-      val source = UInt(bPtwWidth.W)
+      val source = UInt(bSourceWidth.W)
     })
     val empty = Output(Bool())
   })
 
   val vpn = Reg(Vec(MSHRSize, UInt(vpnLen.W))) // request vpn
-  val source = Reg(Vec(MSHRSize, UInt(bPtwWidth.W))) // is itlb
+  val source = Reg(Vec(MSHRSize, UInt(bSourceWidth.W))) // is itlb
   val enqPtr = RegInit(0.U(log2Up(MSHRSize).W))
   val deqPtr = RegInit(0.U(log2Up(MSHRSize).W))
 
@@ -679,11 +695,11 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val vpn = UInt(vpnLen.W)
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val isReplay = Bool()
   }))
   val resp = DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val vpn = UInt(vpnLen.W)
     val isReplay = Bool()
     val hit = Bool()
@@ -1121,14 +1137,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
  */
 class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val l1Hit = Bool()
     val l2Hit = Bool()
     val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
   val resp = DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val resp = new PtwResp
   })
 
@@ -1265,6 +1281,32 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+}
+
+class PtwPrefectherNextLineIO()(implicit p: Parameters) extends XSBundle with HasPtwConst {
+  val probe = Flipped(ValidIO(new Bundle {
+    val vpn = UInt(vpnLen.W)
+  }))
+  val req = DecoupledIO(new PtwReq())
+  val sfence = Input(new SfenceBundle)
+}
+
+class PTWPrefetcherNextLine()(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new PtwPrefectherNextLineIO)
+
+  val v = BoolStopWatch(io.probe.valid, io.req.fire() || io.sfence.valid)
+  val vpn = RegEnable(nextLine(io.probe.bits.vpn), io.probe.valid)
+
+  io.req.valid := v
+  io.req.bits.vpn := vpn
+
+  def nextLine(vpn: UInt): UInt = {
+    val balign = log2Up(PtwL3SectorSize)
+    Cat(vpn(vpn.getWidth - 1, balign) + 1.U, 0.U(balign.W))
+  }
+
+  XSPerfAccumulate("ptw_pre_count", io.req.fire())
+  XSDebug(io.req.fire(), p"PTW.prefetch vpn:${Hexadecimal(io.req.bits.vpn)}\n")
 }
 
 class PTEHelper() extends BlackBox {
