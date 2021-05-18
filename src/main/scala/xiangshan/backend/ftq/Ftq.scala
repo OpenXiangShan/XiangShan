@@ -117,6 +117,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   })
 
+  println("Ftq: size:" + FtqSize)
+
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
 
   val validEntries = distanceBetween(tailPtr, headPtr)

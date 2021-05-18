@@ -71,8 +71,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val wakeUpOutFp = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     val ldFastWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, 0))
+    val intWbOut = Vec(4, Flipped(ValidIO(new ExuOutput)))
+    val fpWbOut = Vec(8, Flipped(ValidIO(new ExuOutput)))
 
-    val ptw = new TlbPtwIO
+    val ptw = new TlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -138,17 +140,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val fastPortsCnt = fastDatas.length
 
-    val slowPorts = (
-      (loadExuConfigs.zip(if(cfg == StExeUnitCfg) wakeUpFp else exeWbReqs)) ++
-      slowWakeUpIn.zip(io.wakeUpIn.slow)
-        .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-        .map{
-          case (JumpExeUnitCfg, _) if cfg == StExeUnitCfg =>
-            (JumpExeUnitCfg, io.intWakeUpFp.head)
-          case (config, value) => (config, value)
-        }
-    ).map(a => (a._1, decoupledIOToValidIO(a._2)))
-
+    val slowPorts = if (cfg == StExeUnitCfg) io.intWbOut ++ io.fpWbOut else io.intWbOut
     val slowPortsCnt = slowPorts.length
 
     // if tlb miss, replay
@@ -157,8 +149,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
     val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
-      fastDatas.map(_._1),
-      slowPorts.map(_._1),
+      fastDatas.map(_._1).length,
+      slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
       feedback = feedback)
@@ -176,7 +168,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     rs.io.fastDatas <> fastDatas.map(_._2)
-    rs.io.slowPorts <> slowPorts.map(_._2)
+    rs.io.slowPorts <> slowPorts
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq

@@ -78,11 +78,11 @@ object AddressSpace {
   def MemMapList = SimpleMemMapList
 
   def printMemmap(){
-    println("-------------------- memory map --------------------")
+    println("\nMemory map:")
     for(i <- MemMapList){
       println("[" + i._1._1 + " -> " + i._1._2 + "] Width:" + (if(i._2.get("width").get == "h0") "unlimited" else i._2.get("width").get) + " Description:" + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
     }
-    println("----------------------------------------------------")
+    println("")
   }
 
   def checkMemmap(){
