@@ -3,9 +3,9 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, 2021H1 ]
+    branches: [ master, yanqihu ]
   pull_request:
-    branches: [ master, 2021H1 ]
+    branches: [ master, yanqihu ]
 
 jobs:
   generate-verilog:
