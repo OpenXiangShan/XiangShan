@@ -3,8 +3,10 @@ package top
 import chisel3.stage.ChiselCli
 import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
-import firrtl.options.{HasShellOptions, Shell, ShellOption}
+import firrtl.options.PhaseManager.PhaseDependency
+import firrtl.options.{Dependency, HasShellOptions, Shell, ShellOption}
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
+import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.transforms.naming.{OverrideDesiredNameAnnotation, RenameDesiredNames}
 import xstransforms.ShowPrintTransform
 import xstransforms.PrintModuleName

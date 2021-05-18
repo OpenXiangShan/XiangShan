@@ -1,0 +1,73 @@
+// See LICENSE.SiFive for license details.
+
+package xiangshan
+
+import freechips.rocketchip.diplomacy._
+
+trait HasXSDts {
+  this: XSCore =>
+
+  val device: SimpleDevice = new SimpleDevice("cpu", Seq("ICT,xiangshan", "riscv")) {
+    override def parent: Some[Device] = Some(ResourceAnchors.cpus)
+
+    def cpuProperties: PropertyMap = Map(
+      "device_type" -> "cpu".asProperty,
+      "status" -> "okay".asProperty,
+      "clock-frequency" -> 0.asProperty,
+      "riscv,isa" -> "rv64imafdc".asProperty,
+      "timebase-frequency" -> 1000000.asProperty
+    )
+
+    def tileProperties: PropertyMap = {
+      val dcache = Map(
+        "d-cache-block-size" -> dcacheParameters.blockBytes.asProperty,
+        "d-cache-sets" -> dcacheParameters.nSets.asProperty,
+        "d-cache-size" -> (dcacheParameters.nSets * dcacheParameters.nWays * dcacheParameters.blockBytes).asProperty
+      )
+
+      val icache = Map(
+        "i-cache-block-size" -> icacheParameters.blockBytes.asProperty,
+        "i-cache-sets" -> icacheParameters.nSets.asProperty,
+        "i-cache-size" -> (icacheParameters.nSets * icacheParameters.nWays * icacheParameters.blockBytes).asProperty
+      )
+
+      val dtlb = Map(
+        "d-tlb-size" -> TlbEntrySize.asProperty,
+        "d-tlb-sets" -> 1.asProperty
+      )
+
+      val itlb = Map(
+        "i-tlb-size" -> TlbEntrySize.asProperty,
+        "i-tlb-sets" -> 1.asProperty
+      )
+
+      val mmu = Map(
+        "tlb-split" -> Nil,
+        "mmu-type" -> s"riscv,sv$VAddrBits".asProperty
+      )
+
+      val pmp = Nil
+
+      dcache ++ icache ++ dtlb ++ itlb ++ mmu ++ pmp
+    }
+
+    def nextLevelCacheProperty: PropertyOption = {
+      println(memBlock)
+      val outer = memBlock.dcache.clientNode.edges.out.flatMap(_.manager.managers)
+        .filter(_.supportsAcquireB)
+        .flatMap(_.resources.headOption)
+        .map(_.owner.label)
+        .distinct
+      if (outer.isEmpty) None
+      else Some("next-level-cache" -> outer.map(l => ResourceReference(l)).toList)
+    }
+
+    override def describe(resources: ResourceBindings): Description = {
+      val Description(name, mapping) = super.describe(resources)
+      Description(name, mapping ++ cpuProperties ++ nextLevelCacheProperty ++ tileProperties)
+    }
+  }
+  ResourceBinding {
+    Resource(device, "reg").bind(ResourceAddress(hardId))
+  }
+}
