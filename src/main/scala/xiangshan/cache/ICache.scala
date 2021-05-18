@@ -19,8 +19,6 @@ case class ICacheParameters(
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
     replacer: Option[String] = Some("random"),
-    nSDQ: Int = 17,
-    nRPQ: Int = 16,
     nMissEntries: Int = 1,
     nMMIOs: Int = 1,
     blockBytes: Int = 64

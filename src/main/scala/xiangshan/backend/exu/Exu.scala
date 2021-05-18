@@ -32,6 +32,7 @@ case class ExuParameters
 case class ExuConfig
 (
   name: String,
+  blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
   wbFpPriority: Int
@@ -58,8 +59,9 @@ case class ExuConfig
       x
     }
   }
-  val hasCertainLatency = latency.latencyVal.nonEmpty
-  val hasUncertainlatency = latency.latencyVal.isEmpty
+  // NOTE: dirty code for MulDivExeUnit
+  val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
+  val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
@@ -92,9 +94,9 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
       io.fromFp
     }
 
-    val src1 = in.bits.src1
-    val src2 = in.bits.src2
-    val src3 = in.bits.src3
+    val src1 = in.bits.src(0)
+    val src2 = in.bits.src(1)
+    val src3 = in.bits.src(2)
 
     fu.io.in.valid := in.valid && sel
     fu.io.in.bits.uop := in.bits.uop
@@ -167,11 +169,11 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   }
 
   if (config.readIntRf) {
-    io.fromInt.ready := inReady(readIntFu)
+    io.fromInt.ready := !io.fromInt.valid || inReady(readIntFu)
   }
 
   if (config.readFpRf) {
-    io.fromFp.ready := inReady(readFpFu)
+    io.fromFp.ready := !io.fromFp.valid || inReady(readFpFu)
   }
 
   def assignDontCares(out: ExuOutput) = {

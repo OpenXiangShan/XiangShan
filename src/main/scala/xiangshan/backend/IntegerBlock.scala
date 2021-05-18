@@ -3,11 +3,11 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.fu.{CSRFileIO, FenceToSbuffer}
+import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO, FunctionUnit}
 import xiangshan.backend.regfile.Regfile
 import difftest._
 
@@ -94,6 +94,7 @@ class IntegerBlock
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val memFastWakeUp = new WakeUpBundle(exuParameters.LduCnt, 0)
+    val intWbOut = Vec(4, ValidIO(new ExuOutput))
 
     val csrio = new CSRFileIO
     val fenceio = new Bundle {
@@ -117,7 +118,12 @@ class IntegerBlock
   val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
   val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
-
+  val intWbArbiter = Module(new Wb(
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRIntWritePorts,
+    isFp = false
+  ))
+  io.intWbOut := VecInit(intWbArbiter.io.out.drop(4))
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
 
@@ -128,7 +134,9 @@ class IntegerBlock
   val readPortIndex = Seq(1, 2, 3, 0, 1, 2, 3)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
-    if (cfg.hasCertainLatency) {
+    if (cfg == MulDivExeUnitCfg) {// NOTE: dirty code, add mul to fast wake up, but leave div
+      certainLatency = mulCfg.latency.latencyVal.get
+    } else if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
     }
 
@@ -140,7 +148,8 @@ class IntegerBlock
     val fastPortsCnt = fastDatas.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency && readIntRf).map(a => (a.config, a.io.out))
-    val slowPorts = (inBlockListenPorts ++ slowWakeUpIn.zip(io.wakeUpIn.slow)).map(a => (a._1, decoupledIOToValidIO(a._2)))
+    // only load+mul need slowPorts
+    val slowPorts = intWbArbiter.io.out.drop(4)
     val extraListenPortsCnt = slowPorts.length
 
     val feedback = (cfg == LdExeUnitCfg) || (cfg == StExeUnitCfg)
@@ -148,8 +157,8 @@ class IntegerBlock
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
     val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
-      fastDatas.map(_._1),
-      slowPorts.map(_._1),
+      fastDatas.map(_._1).length,
+      slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
       feedback = feedback
@@ -171,7 +180,7 @@ class IntegerBlock
     }
 
     rs.io.fastDatas <> fastDatas.map(_._2)
-    rs.io.slowPorts <> slowPorts.map(_._2)
+    rs.io.slowPorts := slowPorts
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.fromInt <> rs.io.deq
@@ -226,11 +235,7 @@ class IntegerBlock
   intRf.io.readPorts.zipWithIndex.map { case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
-  val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
-    NRIntWritePorts,
-    isFp = false
-  ))
+
   intWbArbiter.io.in <> exeUnits.map(e => {
     val w = WireInit(e.io.out)
     if(e.config.writeFpRf){
@@ -271,8 +276,11 @@ class IntegerBlock
     }
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock  := clock
-    difftest.io.coreid := 0.U
+    difftest.io.coreid := hardId.U
     difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
   }
 
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  XSPerfAccumulate("int_rs_deq_count", rsDeqCount)
+  XSPerfHistogram("int_rs_deq_count", rsDeqCount, true.B, 0, 7, 1)
 }

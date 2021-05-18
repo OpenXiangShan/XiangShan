@@ -7,11 +7,11 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, PTWRepeater}
+import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{Description, LazyModule, LazyModuleImp, ResourceAnchors, ResourceBindings, SimpleDevice}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.{HasSoCParameter, L1CacheErrorInfo}
 import utils._
@@ -54,13 +54,13 @@ case class EnviromentParameters
   DualCore: Boolean = false
 )
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule
+abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
-  with HasExeBlockHelper {
+{
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
-  val l1pluscache = LazyModule(new L1plusCache())
-  val ptw = LazyModule(new PTW())
+  val l1pluscache = LazyModule(new L1plusCacheWrapper())
+  val ptw = LazyModule(new PTWWrapper())
   val memBlock = LazyModule(new MemBlock(
     fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
     slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
@@ -69,10 +69,15 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
     numIntWakeUpFp = intExuConfigs.count(_.writeFpRf)
   ))
 
+}
+
+class XSCore()(implicit p: config.Parameters) extends XSCoreBase
+  with HasXSDts
+{
   lazy val module = new XSCoreImp(this)
 }
 
-class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
+class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter
   with HasExeBlockHelper {
@@ -168,6 +173,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   // we don't need 'ready's from memBlock
   memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
   memBlock.io.intWakeUpFp <> floatBlock.io.intWakeUpOut
+  memBlock.io.intWbOut := integerBlock.io.intWbOut
+  memBlock.io.fpWbOut := floatBlock.io.fpWbOut
 
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare
@@ -199,13 +206,13 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater())
-  val dtlbRepeater = Module(new PTWRepeater())
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
   dtlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.tlb(0) <> dtlbRepeater.io.ptw
-  ptw.io.tlb(1) <> itlbRepeater.io.ptw
+  ptw.io.tlb(0) <> itlbRepeater.io.ptw
+  ptw.io.tlb(1) <> dtlbRepeater.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr <> integerBlock.io.csrio.tlb
 

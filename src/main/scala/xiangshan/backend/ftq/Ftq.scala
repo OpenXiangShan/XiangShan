@@ -108,14 +108,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val frontendRedirect = Flipped(ValidIO(new Redirect))
     // exu write back, update info
     val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: exceptions)
-    val ftqRead = Vec(1 + 6 + 1, Flipped(new FtqRead))
+    // pc read reqs (0: jump/auipc 1~6: mispredict/load replay 7: store pc for store set update 8: exceptions)
+    val ftqRead = Vec(1 + 6 + 1 + 1, Flipped(new FtqRead))
     val cfiRead = Flipped(new FtqRead)
     val bpuInfo = new Bundle {
       val bpRight = Output(UInt(XLEN.W))
       val bpWrong = Output(UInt(XLEN.W))
     }
   })
+
+  println("Ftq: size:" + FtqSize)
 
   val headPtr, tailPtr = RegInit(FtqPtr(false.B, 0.U))
 
@@ -131,7 +133,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val real_fire = io.enq.fire() && !stage2Flush && !stage3Flush
 
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_4R_SRAMEntry, FtqSize, 9, 1))
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_4R_SRAMEntry, FtqSize, 10, 1))
   ftq_pc_mem.io.wen(0) := real_fire
   ftq_pc_mem.io.waddr(0) := tailPtr.value
   ftq_pc_mem.io.wdata(0).ftqPC := io.enq.bits.ftqPC

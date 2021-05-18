@@ -14,8 +14,10 @@ import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.RfReadPort
+import utils._
 
 class LsBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
+  val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
@@ -37,7 +39,7 @@ class MemBlock(
   val numIntWakeUpFp: Int
 )(implicit p: Parameters) extends LazyModule {
 
-  val dcache = LazyModule(new DCache())
+  val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
 
   lazy val module = new MemBlockImp(this)
@@ -69,8 +71,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val wakeUpOutFp = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
 
     val ldFastWakeUpInt = Flipped(new WakeUpBundle(exuParameters.LduCnt, 0))
+    val intWbOut = Vec(4, Flipped(ValidIO(new ExuOutput)))
+    val fpWbOut = Vec(8, Flipped(ValidIO(new ExuOutput)))
 
-    val ptw = new TlbPtwIO
+    val ptw = new TlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -99,6 +103,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
   val exeUnits = loadUnits ++ storeUnits
+
+  loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
+  storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
   val atomicsUnit = Module(new AtomicsUnit)
 
@@ -133,17 +140,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     val fastPortsCnt = fastDatas.length
 
-    val slowPorts = (
-      (loadExuConfigs.zip(if(cfg == StExeUnitCfg) wakeUpFp else exeWbReqs)) ++
-      slowWakeUpIn.zip(io.wakeUpIn.slow)
-        .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
-        .map{
-          case (JumpExeUnitCfg, _) if cfg == StExeUnitCfg =>
-            (JumpExeUnitCfg, io.intWakeUpFp.head)
-          case (config, value) => (config, value)
-        }
-    ).map(a => (a._1, decoupledIOToValidIO(a._2)))
-
+    val slowPorts = if (cfg == StExeUnitCfg) io.intWbOut ++ io.fpWbOut else io.intWbOut
     val slowPortsCnt = slowPorts.length
 
     // if tlb miss, replay
@@ -152,8 +149,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
     val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
-      fastDatas.map(_._1),
-      slowPorts.map(_._1),
+      fastDatas.map(_._1).length,
+      slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
       feedback = feedback)
@@ -171,7 +168,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     rs.io.fastDatas <> fastDatas.map(_._2)
-    rs.io.slowPorts <> slowPorts.map(_._2)
+    rs.io.slowPorts <> slowPorts
 
     // exeUnits(i).io.redirect <> redirect
     // exeUnits(i).io.fromInt <> rs.io.deq
@@ -220,7 +217,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
     loadUnits(i).io.flush         <> io.fromCtrlBlock.flush
-    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.memfeedback
+    loadUnits(i).io.rsFeedback    <> reservationStations(i).io.memfeedback
     loadUnits(i).io.rsIdx         := reservationStations(i).io.rsIdx // TODO: beautify it
     loadUnits(i).io.isFirstIssue  := reservationStations(i).io.isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
@@ -242,7 +239,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // update waittable
     // TODO: read pc
-    io.fromCtrlBlock.waitTableUpdate(i) := DontCare
+    io.fromCtrlBlock.memPredUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
   }
 
@@ -254,16 +251,25 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
     stu.io.flush       <> io.fromCtrlBlock.flush
-    stu.io.tlbFeedback <> rs.io.memfeedback
+    stu.io.rsFeedback <> rs.io.memfeedback
     stu.io.rsIdx       <> rs.io.rsIdx
     stu.io.isFirstIssue <> rs.io.isFirstIssue // NOTE: just for dtlb's perf cnt
     stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> rs.io.deq
     stu.io.lsq         <> lsq.io.storeIn(i)
 
+    // Lsq to load unit's rs
+    rs.io.stIssuePtr := lsq.io.issuePtrExt
+    // rs.io.storeData <> lsq.io.storeDataIn(i)
+    lsq.io.storeDataIn(i) := rs.io.stData
+
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq.valid
     lsq.io.storeIssue(i).bits := rs.io.deq.bits
+
+    // sync issue info to store set LFST
+    io.toCtrlBlock.stIn(i).valid := rs.io.deq.valid
+    io.toCtrlBlock.stIn(i).bits := rs.io.deq.bits
 
     io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
     io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
@@ -320,6 +326,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType)
   val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType)
 
+  val st0_data_atomics = reservationStations(atomic_rs0).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.stData.bits.uop.ctrl.fuType)
+  val st1_data_atomics = reservationStations(atomic_rs1).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.stData.bits.uop.ctrl.fuType)
+
   when (st0_atomics) {
     reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready
     storeUnits(0).io.stin.valid := false.B
@@ -341,6 +350,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
+  atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
+  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, reservationStations(atomic_rs0).io.stData.bits, reservationStations(atomic_rs1).io.stData.bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
   atomicsUnit.io.flush <> io.fromCtrlBlock.flush
@@ -365,14 +376,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   when (state === s_atomics_0) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs0).io.memfeedback
+    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs0).io.memfeedback
 
-    assert(!storeUnits(0).io.tlbFeedback.valid)
+    assert(!storeUnits(0).io.rsFeedback.valid)
   }
   when (state === s_atomics_1) {
-    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs1).io.memfeedback
+    atomicsUnit.io.rsFeedback <> reservationStations(atomic_rs1).io.memfeedback
 
-    assert(!storeUnits(1).io.tlbFeedback.valid)
+    assert(!storeUnits(1).io.rsFeedback.valid)
   }
 
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
@@ -382,5 +393,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
-}
 
+  val ldDeqCount = PopCount(reservationStations.take(2).map(_.io.deq.valid))
+  val stDeqCount = PopCount(reservationStations.drop(2).map(_.io.deq.valid))
+  val rsDeqCount = ldDeqCount + stDeqCount
+  XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
+  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("store_rs_deq_count", stDeqCount)
+  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
+  XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+}
