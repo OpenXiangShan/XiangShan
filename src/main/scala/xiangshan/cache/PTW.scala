@@ -363,7 +363,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     val pre = Module(new PTWPrefetcherNextLine)
     
     arb1.io.in(PrefetchChannel) <> pre.io.req
-    pre.io.probe.valid := arb1.io.out.fire() && arb1.io.chosen === PrefetchChannel.U
+    pre.io.probe.valid := arb1.io.out.fire() && arb1.io.chosen =/= PrefetchChannel.U
     pre.io.probe.bits.vpn := arb1.io.out.bits.vpn
     
     pre.io.sfence := sfence
