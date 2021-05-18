@@ -501,7 +501,7 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     count := 0.U
   }
   for (i <- 0 until MSHRSize) {
-    XSPerfAccumulate(s"numExist${i}", count === 1.U)
+    XSPerfAccumulate(s"numExist${i}", count === i.U)
   }
 }
 
@@ -526,6 +526,10 @@ class PTWRepeater(implicit p: Parameters) extends XSModule with HasPtwConst {
   tlb.resp.bits := resp
   tlb.resp.valid := haveOne && recv
   ptw.resp.ready := !recv
+
+  XSPerfAccumulate("req_count", ptw.req(0).fire())
+  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(tlb.req(0).fire(), tlb.resp.fire() || sfence))
+  XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire() || sfence))
 
   XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
   XSDebug(io.tlb.req(0).valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
@@ -646,13 +650,25 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     reqs
   }
 
-  XSPerfAccumulate("req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
-  XSPerfAccumulate("req_count_filter", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
-  XSPerfAccumulate("resp_count", PopCount(Cat(io.tlb.resp.fire())))
+  // perf
+  val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
+  when (io.ptw.req(0).fire() =/= io.ptw.resp.fire()) {
+    inflight_counter := Mux(io.ptw.req(0).fire(), inflight_counter + 1.U, inflight_counter - 1.U)
+  }
+  when (sfence.valid) {
+    inflight_counter := 0.U
+  }
+  XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
+  XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
+  XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire())
+  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
+  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire())
+  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire())
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
   for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)
   }
+
 }
 
 /* ptw cache caches the page table of all the three layers
