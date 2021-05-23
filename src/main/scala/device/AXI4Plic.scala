@@ -145,9 +145,9 @@ class AXI4Plic
     }
     }
 
-    val pendingVec = Cat(pending.map(x => Cat(x.reverse)))
+    val pendingVec = Cat(pending.reverse.map(x => Cat(x.reverse)))
     claimCompletion.zipWithIndex.map { case (r, hart) => {
-      val takenVec = pendingVec & Cat(enable(hart))
+      val takenVec = pendingVec & Cat(enable(hart).reverse)
       r := Mux(takenVec === 0.U, 0.U, PriorityEncoder(takenVec))
     }
     }
