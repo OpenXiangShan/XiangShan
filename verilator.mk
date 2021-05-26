@@ -122,7 +122,11 @@ endif
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM) $(EMU_ARGS)
 
 emu: $(EMU)
+
+emu-run: emu
+ifneq ($(REMOTE),localhost)
 	ls build
+endif
 	$(EMU) -i $(IMAGE) --diff=$(REF_SO) $(EMU_FLAGS)
 
 coverage:

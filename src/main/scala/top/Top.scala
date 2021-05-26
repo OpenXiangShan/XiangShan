@@ -8,20 +8,23 @@ import system._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
 import device.{AXI4Plic, TLTimer}
+import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
+import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
-import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
+import freechips.rocketchip.interrupts._
+import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
+import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
 
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
-  private val core = LazyModule(new XSCore())
+  private val core = LazyModule(new XSCore)
   private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val l2xbar = TLXbar()
   private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
@@ -41,6 +44,11 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     ),
     fpga = debugOpts.FPGAPlatform
   ))
+  if(!useFakeL2Cache) {
+    ResourceBinding {
+      Resource(l2cache.device, "reg").bind(ResourceAddress(hardId))
+    }
+  }
 
   val memory_port = TLIdentityNode()
   val uncache = TLXbar()
@@ -97,10 +105,14 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   }
 }
 
-abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
+abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
+  with HasSoCParameter
+  with BindingScope
+{
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
+  lazy val dts = DTS(bindingTree)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -143,6 +155,7 @@ trait HaveSlaveAXI4Port {
 
 trait HaveAXI4MemPort {
   this: BaseXSSoc =>
+  val device = new MemoryDevice
   // 40-bit physical address
   val memRange = AddressSet(0x00000000L, 0xffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
@@ -154,7 +167,8 @@ trait HaveAXI4MemPort {
           executable = true,
           supportsRead = TransferSizes(1, L3BlockSize),
           supportsWrite = TransferSizes(1, L3BlockSize),
-          interleavedId = Some(0)
+          interleavedId = Some(0),
+          resources = device.reg("mem")
         )
       ),
       beatBytes = L3OuterBusWidth / 8
@@ -179,7 +193,18 @@ trait HaveAXI4MemPort {
 trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
   // on-chip devices: 0x3800_000 - 0x3fff_ffff
   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-  val peripheralRange = AddressSet(0x0, 0x7fffffff).subtract(onChipPeripheralRange)
+  val uartRange = AddressSet(0x40600000, 0xf)
+  val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
+  val uartParams = AXI4SlaveParameters(
+    address = Seq(uartRange),
+    regionType = RegionType.UNCACHED,
+    supportsRead = TransferSizes(1, 8),
+    supportsWrite = TransferSizes(1, 8),
+    resources = uartDevice.reg
+  )
+  val peripheralRange = AddressSet(
+    0x0, 0x7fffffff
+  ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
   val peripheralNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
       address = peripheralRange,
@@ -187,7 +212,7 @@ trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
       supportsRead = TransferSizes(1, 8),
       supportsWrite = TransferSizes(1, 8),
       interleavedId = Some(0)
-    )),
+    ), uartParams),
     beatBytes = 8
   )))
 
@@ -210,6 +235,23 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
 {
+  ResourceBinding {
+    val width = ResourceInt(2)
+    val model = "freechips,rocketchip-unknown"
+    Resource(ResourceAnchors.root, "model").bind(ResourceString(model))
+    Resource(ResourceAnchors.root, "compat").bind(ResourceString(model + "-dev"))
+    Resource(ResourceAnchors.soc, "compat").bind(ResourceString(model + "-soc"))
+    Resource(ResourceAnchors.root, "width").bind(width)
+    Resource(ResourceAnchors.soc, "width").bind(width)
+    Resource(ResourceAnchors.cpus, "width").bind(ResourceInt(1))
+    def bindManagers(xbar: TLNexusNode) = {
+      ManagerUnification(xbar.edges.in.head.manager.managers).foreach{ manager =>
+        manager.resources.foreach(r => r.bind(manager.toResource))
+      }
+    }
+    bindManagers(l3_xbar.asInstanceOf[TLNexusNode])
+    bindManagers(peripheralXbar.asInstanceOf[TLNexusNode])
+  }
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
@@ -224,33 +266,47 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     l3_xbar := TLBuffer() := core_with_l2(i).memory_port
   }
 
-  private val clint = LazyModule(new TLTimer(
-    Seq(AddressSet(0x38000000L, 0x0000ffffL)),
-    sim = !debugOpts.FPGAPlatform, NumCores
-  ))
+  val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
+
+  val clintIntSinks = Array.fill(NumCores){
+    val clintSink = LazyModule(new IntSinkNodeToModule(2))
+    clintSink.sinkNode := clint.intnode
+    clintSink
+  }
 
   val fakeTreeNode = new GenericLogicalTreeNode
   val beu = LazyModule(
     new BusErrorUnit(new XSL1BusErrors(NumCores), BusErrorUnitParams(0x38010000), fakeTreeNode))
   beu.node := peripheralXbar
 
-  class BeuSinkNode()(implicit p: Parameters) extends LazyModule {
-    val intSinkNode = IntSinkNode(IntSinkPortSimple())
+  class IntSinkNodeToModule(val sinks: Int)(implicit p: Parameters) extends LazyModule {
+    val sinkNode = IntSinkNode(IntSinkPortSimple(1, sinks))
     lazy val module = new LazyModuleImp(this){
-      val interrupt = IO(Output(Bool()))
-      interrupt := intSinkNode.in.head._1.head
+      val out = IO(Output(Vec(sinks, Bool())))
+      out.zip(sinkNode.in.head._1).foreach{ case (o, i) => o := i }
     }
   }
-  val beuSink = LazyModule(new BeuSinkNode())
-  beuSink.intSinkNode := beu.intNode
 
-  val plic = LazyModule(new AXI4Plic(
-    Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
-    NumCores, NrExtIntr + 1,
-    !debugOpts.FPGAPlatform,
-  ))
-  plic.node := AXI4IdentityNode() := AXI4UserYanker() := TLToAXI4() := peripheralXbar
+  class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
+    val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
+    lazy val module = new LazyModuleImp(this){
+      val in = IO(Input(Vec(num, Bool())))
+      in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
+    }
+  }
+
+  val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
+  val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
+  val plicIntSinks = Array.fill(NumCores){
+    val plicSink = LazyModule(new IntSinkNodeToModule(1))
+    plicSink.sinkNode := plic.intnode
+    plicSink
+  }
+  plic.intnode := beu.intNode
+  plic.intnode := plicSource.sourceNode
+  
+  plic.node := peripheralXbar
 
   val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
@@ -269,6 +325,11 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     ),
     fpga = debugOpts.FPGAPlatform
   ))
+  if(!useFakeL3Cache){
+    ResourceBinding{
+      Resource(l3cache.device, "reg").bind(ResourceAddress(0))
+    }
+  }
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
@@ -279,6 +340,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   }
 
   lazy val module = new LazyRawModuleImp(this) {
+    ElaborationArtefacts.add("dts", dts)
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
@@ -295,16 +357,16 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     }
 
     withClockAndReset(childClock, childReset) {
-      plic.module.io.extra.get.intrVec <> Cat(beuSink.module.interrupt, io.extIntrs)
+      plicSource.module.in := io.extIntrs.asBools()
 
       for (i <- 0 until NumCores) {
         val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
         core_reset_gen.suggestName(s"core_${i}_reset_gen")
         core_with_l2(i).module.reset := core_reset_gen.io.out
         core_with_l2(i).module.io.hartId := i.U
-        core_with_l2(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
-        core_with_l2(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
-        core_with_l2(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
+        core_with_l2(i).module.io.externalInterrupt.msip := clintIntSinks(i).module.out(0)
+        core_with_l2(i).module.io.externalInterrupt.mtip := clintIntSinks(i).module.out(1)
+        core_with_l2(i).module.io.externalInterrupt.meip := plicIntSinks(i).module.out(0)
         beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
         beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
@@ -319,7 +381,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   }
 }
 
-object TopMain extends App {
+object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
     val (config, firrtlOpts) = ArgParser.parse(args)
     XiangShanStage.execute(firrtlOpts, Seq(
@@ -328,5 +390,8 @@ object TopMain extends App {
         soc.module
       })
     ))
+    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
+      writeOutputFile("./build", s"XSTop.${extension}", contents())
+    }
   }
 }

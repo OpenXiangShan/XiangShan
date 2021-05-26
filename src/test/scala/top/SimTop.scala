@@ -34,7 +34,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   soc.io.clock := clock.asBool()
   soc.io.reset := reset.asBool()
-  soc.io.extIntrs := 0.U
+  soc.io.extIntrs := simMMIO.io.interrupt.intrVec
 
   val io = IO(new Bundle(){
     val logCtrl = new LogCtrlIO
