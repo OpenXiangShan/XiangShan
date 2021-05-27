@@ -41,6 +41,8 @@ class ReservationStation
   fixedDelay: Int,
   fastWakeup: Boolean,
   feedback: Boolean,
+  enqNum: Int,
+  deqNum: Int
 )(implicit p: Parameters) extends XSModule {
   val iqIdxWidth = log2Up(iqSize+1)
   val nonBlocked = if (exuCfg == MulDivExeUnitCfg) false else fixedDelay >= 0
@@ -50,8 +52,8 @@ class ReservationStation
   val config = RSConfig(
     name = myName,
     numEntries = iqSize,
-    numEnq = 1,
-    numDeq = 1,
+    numEnq = enqNum,
+    numDeq = deqNum,
     numSrc = srcNum,
     dataBits = srcLen,
     dataIdBits = PhyRegIdxWidth,
@@ -68,18 +70,20 @@ class ReservationStation
 
   val io = IO(new Bundle {
     val numExist = Output(UInt(iqIdxWidth.W))
-    val fromDispatch = Flipped(DecoupledIO(new MicroOp))
-    val deq = DecoupledIO(new ExuInput)
+    // enq
+    val fromDispatch = Vec(config.numEnq, Flipped(DecoupledIO(new MicroOp)))
+    val srcRegValue = Vec(config.numEnq, Input(Vec(srcNum, UInt(srcLen.W))))
+    val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
+    // deq
+    val deq = Vec(config.numDeq, DecoupledIO(new ExuInput))
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
-    val srcRegValue = Input(Vec(srcNum, UInt(srcLen.W)))
 
     val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
 
-    val fpRegValue = if (config.delayedRf) Input(UInt(srcLen.W)) else null
     val jumpPc = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     val jalr_target = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
-    val fastUopOut = ValidIO(new MicroOp)
+    val fastUopOut = Vec(config.numDeq, ValidIO(new MicroOp))
     val fastUopsIn = Vec(config.numFastWakeup, Flipped(ValidIO(new MicroOp)))
     val fastDatas = Vec(config.numFastWakeup, Input(UInt(srcLen.W)))
     val slowPorts = Vec(slowPortsCnt, Flipped(ValidIO(new ExuOutput)))
@@ -106,28 +110,33 @@ class ReservationStation
    */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  io.fromDispatch.ready := select.io.allocate(0).valid
-  // agreement with dispatch: don't enqueue when io.redirect.valid
-  val do_enqueue = io.fromDispatch.fire() && !io.redirect.valid && !io.flush
-  select.io.allocate(0).ready := do_enqueue
-  statusArray.io.update(0).enable := do_enqueue
-  statusArray.io.update(0).addr := select.io.allocate(0).bits
-  statusArray.io.update(0).data.valid := true.B
-  val needFpSource = io.fromDispatch.bits.needRfRPort(1, 1, false)
-  statusArray.io.update(0).data.scheduled := (if (config.delayedRf) needFpSource else false.B)
-  statusArray.io.update(0).data.blocked := (if (config.checkWaitBit) io.fromDispatch.bits.cf.loadWaitBit else false.B)
-  statusArray.io.update(0).data.credit := (if (config.delayedRf) Mux(needFpSource, 2.U, 0.U) else 0.U)
-  statusArray.io.update(0).data.srcState := VecInit(io.fromDispatch.bits.srcIsReady.take(config.numSrc))
-  statusArray.io.update(0).data.psrc := VecInit(io.fromDispatch.bits.psrc.take(config.numSrc))
-  statusArray.io.update(0).data.srcType := VecInit(io.fromDispatch.bits.ctrl.srcType.take(config.numSrc))
-  statusArray.io.update(0).data.roqIdx := io.fromDispatch.bits.roqIdx
-  statusArray.io.update(0).data.sqIdx := io.fromDispatch.bits.sqIdx
+  val doEnqueue = Wire(Vec(config.numEnq, Bool()))
+  val needFpSource = Wire(Vec(config.numEnq, Bool()))
+  for (i <- 0 until config.numEnq) {
+    io.fromDispatch(i).ready := select.io.allocate(i).valid
+    // agreement with dispatch: don't enqueue when io.redirect.valid
+    doEnqueue(i) := io.fromDispatch(i).fire() && !io.redirect.valid && !io.flush
+    select.io.allocate(i).ready := doEnqueue(i)
+    statusArray.io.update(i).enable := doEnqueue(i)
+    statusArray.io.update(i).addr := select.io.allocate(i).bits
+    statusArray.io.update(i).data.valid := true.B
+    needFpSource(i) := io.fromDispatch(i).bits.needRfRPort(1, 1, false)
+    statusArray.io.update(i).data.scheduled := (if (config.delayedRf) needFpSource(i) else false.B)
+    statusArray.io.update(i).data.blocked := (if (config.checkWaitBit) io.fromDispatch(i).bits.cf.loadWaitBit else false.B)
+    statusArray.io.update(i).data.credit := (if (config.delayedRf) Mux(needFpSource(i), 2.U, 0.U) else 0.U)
+    statusArray.io.update(i).data.srcState := VecInit(io.fromDispatch(i).bits.srcIsReady.take(config.numSrc))
+    statusArray.io.update(i).data.psrc := VecInit(io.fromDispatch(i).bits.psrc.take(config.numSrc))
+    statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(config.numSrc))
+    statusArray.io.update(i).data.roqIdx := io.fromDispatch(i).bits.roqIdx
+    statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
+    payloadArray.io.write(i).enable := doEnqueue(i)
+    payloadArray.io.write(i).addr := select.io.allocate(i).bits
+    payloadArray.io.write(i).data := io.fromDispatch(i).bits
+  }
+  // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
   if (config.checkWaitBit) {
     statusArray.io.stIssuePtr := io.stIssuePtr
   }
-  payloadArray.io.write(0).enable := do_enqueue
-  payloadArray.io.write(0).addr := select.io.allocate(0).bits
-  payloadArray.io.write(0).data := io.fromDispatch.bits
   // wakeup from other RS or function units
   val fastNotInSlowWakeup = exuCfg match {
     case LdExeUnitCfg => io.fastUopsIn.drop(2).take(4)
@@ -159,36 +168,38 @@ class ReservationStation
     */
   // select the issue instructions
   select.io.request := statusArray.io.canIssue
-  select.io.grant(0).ready := io.deq.ready
-  if (config.hasFeedback) {
-    statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
-    statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
-    statusArray.io.deqResp(0).valid := io.memfeedback.valid
-    statusArray.io.deqResp(0).bits.rsMask := UIntToOH(io.memfeedback.bits.rsIdx)
-    statusArray.io.deqResp(0).bits.success := io.memfeedback.bits.hit
+  for (i <- 0 until config.numDeq) {
+    select.io.grant(i).ready := io.deq(i).ready
+    if (config.hasFeedback) {
+      require(config.numDeq == 1)
+      statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
+      statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
+      statusArray.io.deqResp(0).valid := io.memfeedback.valid
+      statusArray.io.deqResp(0).bits.rsMask := UIntToOH(io.memfeedback.bits.rsIdx)
+      statusArray.io.deqResp(0).bits.success := io.memfeedback.bits.hit
+    }
+    else {
+      statusArray.io.issueGranted(i).valid := select.io.grant(i).fire
+      statusArray.io.issueGranted(i).bits := select.io.grant(i).bits
+      statusArray.io.deqResp(i).valid := select.io.grant(i).fire
+      statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
+      statusArray.io.deqResp(i).bits.success := io.deq(i).ready
+    }
+    payloadArray.io.read(i).addr := select.io.grant(i).bits
+    if (fixedDelay >= 0) {
+      val wakeupQueue = Module(new WakeupQueue(fixedDelay))
+      val fuCheck = (if (exuCfg == MulDivExeUnitCfg) payloadArray.io.read(i).data.ctrl.fuType === FuType.mul else true.B)
+      wakeupQueue.io.in.valid := select.io.grant(i).fire && fuCheck
+      wakeupQueue.io.in.bits := payloadArray.io.read(i).data
+      wakeupQueue.io.redirect := io.redirect
+      wakeupQueue.io.flush := io.flush
+      io.fastUopOut(i) := wakeupQueue.io.out
+    }
+    else {
+      io.fastUopOut(i).valid := false.B
+      io.fastUopOut(i).bits := DontCare
+    }
   }
-  else {
-    statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
-    statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
-    statusArray.io.deqResp(0).valid := select.io.grant(0).fire
-    statusArray.io.deqResp(0).bits.rsMask := select.io.grant(0).bits
-    statusArray.io.deqResp(0).bits.success := io.deq.ready
-  }
-  payloadArray.io.read(0).addr := select.io.grant(0).bits
-  if (fixedDelay >= 0) {
-    val wakeupQueue = Module(new WakeupQueue(fixedDelay))
-    val fuCheck = (if (exuCfg == MulDivExeUnitCfg) payloadArray.io.read(0).data.ctrl.fuType === FuType.mul else true.B)
-    wakeupQueue.io.in.valid := select.io.grant(0).fire && fuCheck
-    wakeupQueue.io.in.bits := payloadArray.io.read(0).data
-    wakeupQueue.io.redirect := io.redirect
-    wakeupQueue.io.flush := io.flush
-    io.fastUopOut := wakeupQueue.io.out
-  }
-  else {
-    io.fastUopOut.valid := false.B
-    io.fastUopOut.bits := DontCare
-  }
-
   // select whether the source is from (whether regfile or imm)
   // for read-after-issue, it's done over the selected uop
   // for read-before-issue, it's done over the enqueue uop (and store the imm in dataArray to save space)
@@ -213,10 +224,14 @@ class ReservationStation
     }
     data
   }
-  val lastAllocateUop = RegNext(io.fromDispatch.bits)
-  val immBypassedData = VecInit(extractImm(lastAllocateUop).zip(io.srcRegValue).map {
-    case (imm, reg_data) => Mux(imm.valid, imm.bits, reg_data)
-  })
+  // lastAllocateUop: Vec(config.numEnq, new MicroOp)
+  val lastAllocateUop = RegNext(VecInit(io.fromDispatch.map(_.bits)))
+  val immBypassedData = Wire(Vec(config.numEnq, Vec(config.numSrc, UInt(config.dataBits.W))))
+  for (((uop, data), bypass) <- lastAllocateUop.zip(io.srcRegValue).zip(immBypassedData)) {
+    bypass := extractImm(uop).zip(data).map {
+      case (imm, reg_data) => Mux(imm.valid, imm.bits, reg_data)
+    }
+  }
 
   /**
    * S1: Data broadcast (from Regfile and FUs) and read
@@ -224,13 +239,15 @@ class ReservationStation
    * Note: this is only needed when read-before-issue
    */
   // dispatch data: the next cycle after enqueue
-  dataArray.io.write(0).enable := RegNext(do_enqueue)
-  dataArray.io.write(0).mask := RegNext(statusArray.io.update(0).data.srcState)
-  dataArray.io.write(0).addr := RegNext(select.io.allocate(0).bits)
-  dataArray.io.write(0).data := immBypassedData
-  if (config.delayedRf) {
-    dataArray.io.delayedWrite(0).valid := RegNext(RegNext(do_enqueue && needFpSource))
-    dataArray.io.delayedWrite(0).bits := io.fpRegValue
+  for (i <- 0 until config.numEnq) {
+    dataArray.io.write(i).enable := RegNext(doEnqueue(i))
+    dataArray.io.write(i).mask := RegNext(statusArray.io.update(i).data.srcState)
+    dataArray.io.write(i).addr := RegNext(select.io.allocate(i).bits)
+    dataArray.io.write(i).data := immBypassedData(i)
+    if (config.delayedRf) {
+      dataArray.io.delayedWrite(i).valid := RegNext(RegNext(doEnqueue(i) && needFpSource(i)))
+      dataArray.io.delayedWrite(i).bits := io.fpRegValue
+    }
   }
   // data broadcast: from function units (only slow wakeup date are needed)
   val broadcastValid = RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
@@ -254,27 +271,38 @@ class ReservationStation
   /**
    * S1: read data from regfile
    */
-  dataArray.io.read(0).addr := select.io.grant(0).bits
-  // for read-before-issue, we need to bypass the enqueue data here
-  // for read-after-issue, we need to bypass the imm here
-  // check enq data bypass (another form of broadcast except that we know where it hits) here
-  val enqRegSelected = RegNext(select.io.allocate(0).bits) === select.io.grant(0).bits
-  val enqSrcStateReg = RegNext(statusArray.io.update(0).data.srcState)
-  val enqBypassValid = enqSrcStateReg.map(_ && enqRegSelected)
-  // dequeue data should be bypassed
-  val deqUop = payloadArray.io.read(0).data
-  val deqDataRead = dataArray.io.read(0).data
-  val deqData = VecInit(enqBypassValid.zip(immBypassedData).zip(deqDataRead).map {
-    case ((v, d), r) => Mux(v, d, r)
-  })
+  val s1_out = Wire(Vec(config.numDeq, Decoupled(new ExuInput)))
+  for (i <- 0 until config.numDeq) {
+    dataArray.io.read(i).addr := select.io.grant(i).bits
+    // for read-before-issue, we need to bypass the enqueue data here
+    // for read-after-issue, we need to bypass the imm here
+    // check enq data bypass (another form of broadcast except that we know where it hits) here
+    // enqRegSelected: Vec(config.numEnq, Bool())
+    val enqRegSelected = VecInit(select.io.allocate.map(a => RegNext(a.bits) === select.io.grant(i).bits))
+    // enqSrcStateReg: Vec(config.numEnq, Vec(config.numSrc, Bool()))
+    // [i][j]: i-th enqueue, j-th source state
+    val enqSrcStateReg = RegNext(VecInit(statusArray.io.update.map(_.data.srcState)))
+    // enqBypassValid: Vec(config.numEnq, Vec(config.numSrc, Bool()))
+    val enqBypassValid = enqSrcStateReg.zip(enqRegSelected).map{ case (state, sel) => VecInit(state.map(_ && sel)) }
 
-  val s1_out = Wire(Decoupled(new ExuInput))
-  s1_out.valid := select.io.grant(0).valid && !deqUop.roqIdx.needFlush(io.redirect, io.flush)
-  s1_out.bits := DontCare
-  for (i <- 0 until config.numSrc) {
-    s1_out.bits.src(i) := deqData(i)
+    // bypass data for config.numDeq
+    val deqBypassValid = Mux1H(enqRegSelected, enqBypassValid)
+    val deqBypassData = Mux1H(enqRegSelected, immBypassedData)
+    // dequeue data should be bypassed
+    val deqUop = payloadArray.io.read(i).data
+    val deqDataRead = dataArray.io.read(i).data
+    val deqData = VecInit(deqBypassValid.zip(deqBypassData).zip(deqDataRead).map {
+      case ((v, d), r) => Mux(v, d, r)
+    })
+
+    s1_out(i).valid := select.io.grant(i).valid && !deqUop.roqIdx.needFlush(io.redirect, io.flush)
+    s1_out(i).bits := DontCare
+    for (j <- 0 until config.numSrc) {
+      s1_out(i).bits.src(j) := deqData(j)
+    }
+    s1_out(i).bits.uop := deqUop
   }
-  s1_out.bits.uop := deqUop
+
 
   /**
    * S1: detect bypass from fast wakeup
@@ -287,47 +315,53 @@ class ReservationStation
     }
   }
   val fastWakeupMatchRegVec = RegNext(fastWakeupMatchVec)
-  val targetFastWakeupMatch = Mux1H(select.io.grant(0).bits, fastWakeupMatchRegVec)
-  val wakeupBypassMask = Wire(Vec(config.numFastWakeup, Vec(config.numSrc, Bool())))
-  for (i <- 0 until config.numFastWakeup) {
-    wakeupBypassMask(i) := VecInit(targetFastWakeupMatch.map(_(i)))
-  }
-  // data: send to bypass network
-  // TODO: these should be done outside RS
-  val bypassNetwork = Module(new BypassNetwork(config.numSrc, config.numFastWakeup, config.dataBits, config.optBuf))
-  bypassNetwork.io.hold := !io.deq.ready
-  bypassNetwork.io.source := s1_out.bits.src.take(config.numSrc)
-  bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).map { case (by, (m, d)) =>
-    by.valid := m
-    by.data := d
-  }
+  for (i <- 0 until config.numDeq) {
+    val targetFastWakeupMatch = Mux1H(select.io.grant(i).bits, fastWakeupMatchRegVec)
+    val wakeupBypassMask = Wire(Vec(config.numFastWakeup, Vec(config.numSrc, Bool())))
+    for (j <- 0 until config.numFastWakeup) {
+      wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_(j)))
+    }
+    // data: send to bypass network
+    // TODO: these should be done outside RS
+    val bypassNetwork = Module(new BypassNetwork(config.numSrc, config.numFastWakeup, config.dataBits, config.optBuf))
+    bypassNetwork.io.hold := !io.deq(i).ready
+    bypassNetwork.io.source := s1_out(i).bits.src.take(config.numSrc)
+    bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).map { case (by, (m, d)) =>
+      by.valid := m
+      by.data := d
+    }
 
-  /**
-    * S2: to function units
-    */
-  // payload: send to function units
-  // TODO: these should be done outside RS
-  PipelineConnect(s1_out, io.deq, io.deq.ready || io.deq.bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
-  val pipeline_fire = s1_out.valid && io.deq.ready
-  if (config.hasFeedback) {
-    io.rsIdx := RegEnable(OHToUInt(select.io.grant(0).bits), pipeline_fire)
-    io.isFirstIssue := false.B
-  }
+    /**
+      * S2: to function units
+      */
+    // payload: send to function units
+    // TODO: these should be done outside RS
+    PipelineConnect(s1_out(i), io.deq(i), io.deq(i).ready || io.deq(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
+    val pipeline_fire = s1_out(i).valid && io.deq(i).ready
+    if (config.hasFeedback) {
+      io.rsIdx := RegEnable(OHToUInt(select.io.grant(i).bits), pipeline_fire)
+      io.isFirstIssue := false.B
+    }
 
-  for (i <- 0 until config.numSrc) {
-    io.deq.bits.src(i) := bypassNetwork.io.target(i)
-  }
+    for (j <- 0 until config.numSrc) {
+      io.deq(i).bits.src(j) := bypassNetwork.io.target(j)
+    }
 
-  // legacy things
-  if (exuCfg == StExeUnitCfg) {
-    io.stData.valid := io.deq.valid
-    io.stData.bits.data := io.deq.bits.src(1)
-    io.stData.bits.uop := io.deq.bits.uop
+    // legacy things
+    if (exuCfg == StExeUnitCfg) {
+      io.stData.valid := io.deq(i).valid
+      io.stData.bits.data := io.deq(i).bits.src(1)
+      io.stData.bits.uop := io.deq(i).bits.uop
+    }
   }
 
   // logs
-  XSDebug(io.fromDispatch.valid && !io.fromDispatch.ready, p"enq blocked, roqIdx ${io.fromDispatch.bits.roqIdx}\n")
-  XSDebug(io.fromDispatch.fire(), p"enq fire, roqIdx ${io.fromDispatch.bits.roqIdx}, srcState ${Binary(io.fromDispatch.bits.srcState.asUInt)}\n")
-  XSDebug(io.deq.fire(), p"deq fire, roqIdx ${io.deq.bits.uop.roqIdx}\n")
-  XSDebug(io.deq.valid && !io.deq.ready, p"deq blocked, roqIdx ${io.deq.bits.uop.roqIdx}\n")
+  for (dispatch <- io.fromDispatch) {
+    XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, roqIdx ${dispatch.bits.roqIdx}\n")
+    XSDebug(dispatch.fire(), p"enq fire, roqIdx ${dispatch.bits.roqIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
+  }
+  for (deq <- io.deq) {
+    XSDebug(deq.fire(), p"deq fire, roqIdx ${deq.bits.uop.roqIdx}\n")
+    XSDebug(deq.valid && !deq.ready, p"deq blocked, roqIdx ${deq.bits.uop.roqIdx}\n")
+  }
 }
