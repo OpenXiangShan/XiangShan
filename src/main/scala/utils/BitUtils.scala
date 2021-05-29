@@ -143,11 +143,11 @@ object XORFold {
 
 object OnesMoreThan {
   def apply(input: Seq[Bool], thres: Int): Bool = {
-    if (input.length < thres || input.length == 0) {
-      false.B
-    }
-    else if (thres == 0) {
+    if (thres == 0) {
       true.B
+    }
+    else if (input.length < thres) {
+      false.B
     }
     else {
       val tail = input.drop(1)
