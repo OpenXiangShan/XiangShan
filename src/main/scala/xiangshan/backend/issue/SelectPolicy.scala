@@ -29,11 +29,32 @@ class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
   }
 
   // TODO optimize timing
-  var maskedRequest = VecInit(io.request.asBools)
+  // naive selection
+  // var maskedRequest = VecInit(io.request.asBools)
+  // for (i <- 0 until config.numDeq) {
+  //   io.grant(i).valid := maskedRequest.asUInt.orR
+  //   io.grant(i).bits := PriorityEncoderOH(maskedRequest.asUInt)
+  //   maskedRequest = VecInit(maskedRequest.zip(io.grant(i).bits.asBools).map{ case(m, s) => m && !s })
+
+  //   XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
+  //     p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
+  //   XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
+  // }
+
+  // a better one: select from both directions
+  val request = io.request.asBools
+  // +1 is needed when numDeq is an odd number
+  val req_forward = new NaiveSelectOne(request, (config.numDeq + 1) / 2)
+  val req_backward = new NaiveSelectOne(request.reverse, config.numDeq / 2)
   for (i <- 0 until config.numDeq) {
-    io.grant(i).valid := maskedRequest.asUInt.orR
-    io.grant(i).bits := PriorityEncoderOH(maskedRequest.asUInt)
-    maskedRequest = VecInit(maskedRequest.zip(io.grant(i).bits.asBools).map{ case(m, s) => m && !s })
+    io.grant(i).valid := OnesMoreThan(request, i + 1)
+    val sel_index = (i / 2) + 1
+    if (i % 2 == 0) {
+      io.grant(i).bits := req_forward.getNthOH(sel_index).asUInt
+    }
+    else {
+      io.grant(i).bits := VecInit(req_backward.getNthOH(sel_index).reverse).asUInt
+    }
 
     XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
