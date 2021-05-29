@@ -143,11 +143,11 @@ object XORFold {
 
 object OnesMoreThan {
   def apply(input: Seq[Bool], thres: Int): Bool = {
-    if (input.length < thres || input.length == 0) {
-      false.B
-    }
-    else if (thres == 0) {
+    if (thres == 0) {
       true.B
+    }
+    else if (input.length < thres) {
+      false.B
     }
     else {
       val tail = input.drop(1)
@@ -165,24 +165,26 @@ class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   val n_sel = if (max_sel > 0) max_sel else n_bits
   require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
   private val matrix = Wire(Vec(n_bits, Vec(n_sel, Bool())))
-  // matrix[i][j]: input(i, 0) has j+1 one's
+  // matrix[i][j]: first i bits has j one's
   for (i <- 0 until n_bits) {
     for (j <- 0 until n_sel) {
       if (j == 0) {
-        matrix(i)(j) := (if (i == 0) bits(i) else bits(i) && !Cat(bits.take(i)).orR)
+        matrix(i)(j) := (if (i == 0) true.B else !Cat(bits.take(i)).orR)
       }
-      // it's impossible to select (j+1)-th one from i+1 elements
-      else if (i + 1 < j + 1) {
+      // it's impossible to select j-th one from i elements
+      else if (i < j) {
         matrix(i)(j) := false.B
       }
       else {
-        matrix(i)(j) := bits(i) && matrix(i - 1)(j - 1) || !bits(i) && matrix(i - 1)(j)
+        matrix(i)(j) := bits(i - 1) && matrix(i - 1)(j - 1) || !bits(i - 1) && matrix(i - 1)(j)
       }
     }
   }
 
   def getNthOH(n: Int): Vec[Bool] = {
     require(n > 0, s"n should be positive to select the n-th one")
-    VecInit(matrix.map(_(n - 1)))
+    require(n <= n_sel, s"n should not be larger than n_sel")
+    // bits(i) is true.B and bits(i - 1, 0) has n - 1
+    VecInit(bits.zip(matrix).map{ case (b, m) => b && m(n - 1) })
   }
 }
