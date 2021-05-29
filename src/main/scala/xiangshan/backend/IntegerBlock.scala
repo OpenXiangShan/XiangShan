@@ -132,11 +132,8 @@ class IntegerBlock
   val jmp_rs = Module(new ReservationStation("rs_jmp", JumpExeUnitCfg, IssQueSize, XLEN, 6, 4, -1, false, false, 1, 1))
   val mul_rs_0 = Module(new ReservationStation("rs_mul_0", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1, 1))
   val mul_rs_1 = Module(new ReservationStation("rs_mul_1", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1, 1))
-  val alu_rs_0 = Module(new ReservationStation("rs_alu_0", AluExeUnitCfg, 2*IssQueSize, XLEN,
-    8, 4, 0, true, false, 2, 2
-  ))
-  val alu_rs_1 = Module(new ReservationStation("rs_alu_1", AluExeUnitCfg, 2*IssQueSize, XLEN,
-    8, 4, 0, true, false, 2, 2
+  val alu_rs_0 = Module(new ReservationStation("rs_alu_0", AluExeUnitCfg, 4*IssQueSize, XLEN,
+    8, 4, 0, true, false, 4, 4
   ))
 
   val aluFastData = VecInit(exeUnits.drop(3).map(_.io.out.bits.data))
@@ -164,32 +161,29 @@ class IntegerBlock
   mul_rs_1.io.fastDatas <> mulFastData ++ aluFastData
   mul_rs_1.io.deq(0) <> mduExeUnits(1).io.fromInt
 
-  io.toCtrlBlock.numExist(3) := alu_rs_0.io.numExist >> 1
-  io.toCtrlBlock.numExist(4) := alu_rs_0.io.numExist >> 1
-  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(3).take(2))
+  io.toCtrlBlock.numExist(3) := alu_rs_0.io.numExist >> 2
+  io.toCtrlBlock.numExist(4) := alu_rs_0.io.numExist >> 2
+  io.toCtrlBlock.numExist(5) := alu_rs_0.io.numExist >> 2
+  io.toCtrlBlock.numExist(6) := alu_rs_0.io.numExist >> 2
+  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(3))
   alu_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
   alu_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
+  alu_rs_0.io.srcRegValue(2) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
+  alu_rs_0.io.srcRegValue(3) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
   alu_rs_0.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
   alu_rs_0.io.deq(0) <> aluExeUnits(0).io.fromInt
   alu_rs_0.io.deq(1) <> aluExeUnits(1).io.fromInt
+  alu_rs_0.io.deq(2) <> aluExeUnits(2).io.fromInt
+  alu_rs_0.io.deq(3) <> aluExeUnits(3).io.fromInt
 
-  io.toCtrlBlock.numExist(5) := alu_rs_1.io.numExist >> 1
-  io.toCtrlBlock.numExist(6) := alu_rs_1.io.numExist >> 1
-  alu_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(5))
-  alu_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
-  alu_rs_1.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
-  alu_rs_1.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
-  alu_rs_1.io.deq(0) <> aluExeUnits(2).io.fromInt
-  alu_rs_1.io.deq(1) <> aluExeUnits(3).io.fromInt
-
-  val reservationStations = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0, alu_rs_1)
+  val reservationStations = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0)
   val aluFastUop = Wire(Vec(4, ValidIO(new MicroOp)))
   val mulFastUop = Wire(Vec(2, ValidIO(new MicroOp)))
   val memFastUop = io.memFastWakeUp.fastUops
   aluFastUop(0) := alu_rs_0.io.fastUopOut(0)
   aluFastUop(1) := alu_rs_0.io.fastUopOut(1)
-  aluFastUop(2) := alu_rs_1.io.fastUopOut(0)
-  aluFastUop(3) := alu_rs_1.io.fastUopOut(1)
+  aluFastUop(2) := alu_rs_0.io.fastUopOut(2)
+  aluFastUop(3) := alu_rs_0.io.fastUopOut(3)
   mulFastUop(0) := mul_rs_0.io.fastUopOut(0)
   mulFastUop(1) := mul_rs_1.io.fastUopOut(0)
 
@@ -203,7 +197,7 @@ class IntegerBlock
   mul_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop
   mul_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop
   alu_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-  alu_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
+  // alu_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
 
   io.wakeUpOut.fastUops := mulFastUop ++ aluFastUop
 
