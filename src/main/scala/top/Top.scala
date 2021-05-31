@@ -377,6 +377,12 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         l3_reset_gen.suggestName("l3_reset_gen")
         l3cache.module.reset := l3_reset_gen.io.out
       }
+      // TODO: wrap this in a module
+      val freq = 100
+      val cnt = RegInit(freq.U)
+      val tick = cnt === 0.U
+      cnt := Mux(tick, freq.U, cnt - 1.U)
+      clint.module.io.rtcTick := tick
     }
   }
 }
