@@ -48,7 +48,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits  := in.src1
+  io.exceptionAddr.bits  := in.src(0)
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -71,11 +71,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.in.ready := true.B
     when (io.in.fire()) {
       in := io.in.bits
-      in.src2 := in.src2 // leave src2 unchanged
+      in.src(1) := in.src(1) // leave src2 unchanged
       addr_valid := true.B
     }
     when (io.storeDataIn.fire()) {
-      in.src2 := io.storeDataIn.bits.data
+      in.src(1) := io.storeDataIn.bits.data
       data_valid := true.B
     }
     when(data_valid && addr_valid) {
@@ -101,7 +101,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // send req to dtlb
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
-    io.dtlb.req.bits.vaddr  := in.src1
+    io.dtlb.req.bits.vaddr  := in.src(0)
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
@@ -113,9 +113,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
-        "b01".U   -> (in.src1(0) === 0.U),   //h
-        "b10".U   -> (in.src1(1,0) === 0.U), //w
-        "b11".U   -> (in.src1(2,0) === 0.U)  //d
+        "b01".U   -> (in.src(0)(0) === 0.U),   //h
+        "b10".U   -> (in.src(0)(1,0) === 0.U), //w
+        "b11".U   -> (in.src(0)(2,0) === 0.U)  //d
       ))
       exceptionVec(storeAddrMisaligned) := !addrAligned
       exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
@@ -181,7 +181,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     ))
 
     io.dcache.req.bits.addr := paddr
-    io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
+    io.dcache.req.bits.data := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.id   := DontCare

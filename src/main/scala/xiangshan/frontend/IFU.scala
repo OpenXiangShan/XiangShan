@@ -9,7 +9,6 @@ import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import xiangshan.backend.ftq.FtqPtr
-import xiangshan.backend.decode.WaitTableParameters
 import system.L1CacheErrorInfo
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
@@ -99,7 +98,7 @@ class PrevHalfInstr(implicit p: Parameters) extends XSBundle {
 }
 
 @chiselName
-class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCircularQueuePtrHelper with WaitTableParameters
+class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCircularQueuePtrHelper
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
@@ -453,7 +452,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
     val sawNTBr = b.sawNotTakenBranch
     val isBr = b.pd.isBr
     val taken = Mux(isMisPred, b.taken, b.predTaken)
-    val updatedGh = oldGh.update(sawNTBr, isBr && taken)
+    val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
     final_gh := updatedGh
     if1_gh := updatedGh
   }
@@ -518,7 +517,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
   fetchPacketWire.instrs := expandedInstrs
 
   fetchPacketWire.pc := if4_pd.pc
-  fetchPacketWire.foldpc := if4_pd.pc.map(i => XORFold(i(VAddrBits-1,1), WaitTableAddrWidth))
+  fetchPacketWire.foldpc := if4_pd.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
   fetchPacketWire.pdmask := if4_pd.mask
   fetchPacketWire.pd := if4_pd.pd

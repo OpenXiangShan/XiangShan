@@ -360,7 +360,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   // smblockctl: memory block configurations
   // bits 0-3: store buffer flush threshold (default: 8 entries)
-  val smblockctl = RegInit(UInt(XLEN.W), "h7".U)
+  val smblockctl = RegInit(UInt(XLEN.W), "hf".U & StoreBufferThreshold.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
 
   val srnctl = RegInit(UInt(XLEN.W), "h1".U)

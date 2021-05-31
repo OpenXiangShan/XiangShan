@@ -32,6 +32,7 @@ class FloatBlock
     val memWakeUpFp = Vec(memSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput)))
     val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
     val intWakeUpOut = Vec(intSlowWakeUpIn.size, DecoupledIO(new ExuOutput))
+    val fpWbOut = Vec(8, ValidIO(new ExuOutput))
 
     // from csr
     val frm = Input(UInt(3.W))
@@ -85,6 +86,16 @@ class FloatBlock
   fmiscExeUnits.foreach(_.frm := io.frm)
 
   val exeUnits = fmacExeUnits ++ fmiscExeUnits
+  val fpWbArbiter = Module(new Wb(
+    exeUnits.map(_.config) ++ intSlowWakeUpIn ++ memSlowWakeUpIn,
+    NRFpWritePorts,
+    isFp = true
+  ))
+  io.fpWbOut.zip(fpWbArbiter.io.out).map{ case (wakeup, wb) =>
+    wakeup.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(redirect, flush))
+    wakeup.bits := RegNext(wb.bits)
+    wakeup.bits.data := ieee(RegNext(wb.bits.data))
+  }
 
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
@@ -107,7 +118,7 @@ class FloatBlock
     val fastPortsCnt = inBlockFastPorts.length
 
     val inBlockListenPorts = exeUnits.filter(e => e.config.hasUncertainlatency).map(a => (a.config, a.io.out))
-    val slowPorts = (inBlockListenPorts ++ wakeUpInRecodeWithCfg).map(a => (a._1, decoupledIOToValidIO(a._2)))
+    val slowPorts = VecInit(fpWbArbiter.io.out.drop(4))
     val slowPortsCnt = slowPorts.length
 
     println(s"${i}: exu:${cfg.name} fastPortsCnt: ${fastPortsCnt} " +
@@ -116,33 +127,33 @@ class FloatBlock
     )
 
     val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN + 1,
-      inBlockFastPorts.map(_._1),
-      slowPorts.map(_._1),
+      inBlockFastPorts.map(_._1).length,
+      slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = false
+      feedback = false,1, 1
     ))
 
     rs.io.redirect <> redirect // TODO: remove it
     rs.io.flush <> flush // TODO: remove it
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl(i)
+    rs.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
 
     rs.io.srcRegValue := DontCare
     val src1Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3).data))
     val src2Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 1).data))
     val src3Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 2).data))
 
-    rs.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    rs.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(2) := src3Value(readPortIndex(i))
+    rs.io.srcRegValue(0)(0) := src1Value(readPortIndex(i))
+    rs.io.srcRegValue(0)(1) := src2Value(readPortIndex(i))
+    if (cfg.fpSrcCnt > 2) rs.io.srcRegValue(0)(2) := src3Value(readPortIndex(i))
 
     rs.io.fastDatas <> inBlockFastPorts.map(_._2)
-    rs.io.slowPorts <> slowPorts.map(_._2)
+    rs.io.slowPorts <> slowPorts
 
     exeUnits(i).io.redirect <> redirect
     exeUnits(i).io.flush <> flush
-    exeUnits(i).io.fromFp <> rs.io.deq
+    exeUnits(i).io.fromFp <> rs.io.deq(0)
     // rs.io.memfeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
@@ -154,8 +165,8 @@ class FloatBlock
     val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeFpRf
     ).map(x => {
-      val raw = WireInit(x.io.fastUopOut)
-      raw.valid := x.io.fastUopOut.valid && raw.bits.ctrl.fpWen
+      val raw = WireInit(x.io.fastUopOut(0))
+      raw.valid := x.io.fastUopOut(0).valid && raw.bits.ctrl.fpWen
       raw
     })
     rs.io.fastUopsIn <> inBlockUops
@@ -167,11 +178,6 @@ class FloatBlock
     io.toMemBlock.readFpRf(i).data := RegNext(ieee(fpRf.io.readPorts(i + 12).data))
   )
   // write fp rf arbiter
-  val fpWbArbiter = Module(new Wb(
-    exeUnits.map(_.config) ++ intSlowWakeUpIn ++ memSlowWakeUpIn,
-    NRFpWritePorts,
-    isFp = true
-  ))
   fpWbArbiter.io.in.drop(exeUnits.length).zip(wakeUpInRecode).foreach(
     x => x._1 <> fpOutValid(x._2, connectReady = true)
   )
@@ -228,7 +234,7 @@ class FloatBlock
     difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(p => ieee(p.data)))
   }
 
-  val rsDeqCount = PopCount(reservationStations.map(_.io.deq.valid))
+  val rsDeqCount = PopCount(reservationStations.map(_.io.deq(0).valid))
   XSPerfAccumulate("fp_rs_deq_count", rsDeqCount)
   XSPerfHistogram("fp_rs_deq_count", rsDeqCount, true.B, 0, 6, 1)
 }

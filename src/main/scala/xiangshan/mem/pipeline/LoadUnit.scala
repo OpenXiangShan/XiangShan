@@ -29,13 +29,13 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  // val s0_vaddr = io.in.bits.src1 + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  // val s0_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
   // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
-  val s0_vaddr_lo = io.in.bits.src1(11,0) + Cat(0.U(1.W), imm12)
+  val s0_vaddr_lo = io.in.bits.src(0)(11,0) + Cat(0.U(1.W), imm12)
   val s0_vaddr_hi = Mux(s0_vaddr_lo(12),
-    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12), io.in.bits.src1(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), io.in.bits.src1(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src1(VAddrBits-1, 12)),
+    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12), io.in.bits.src(0)(VAddrBits-1, 12)+1.U),
+    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
   )
   val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
   val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
@@ -82,10 +82,10 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("in", io.in.valid)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready && io.dcacheReq.ready)
   XSPerfAccumulate("stall_dcache", io.out.valid && io.out.ready && !io.dcacheReq.ready)
-  XSPerfAccumulate("addr_spec_success", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_failed", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12))
-  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
-  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src1(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_success", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_failed", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("addr_spec_success_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
+  XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && s0_vaddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
 }
 
 

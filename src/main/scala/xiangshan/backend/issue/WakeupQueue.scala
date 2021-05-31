@@ -1,0 +1,41 @@
+package xiangshan.backend.issue
+
+import chipsalliance.rocketchip.config.Parameters
+import chisel3._
+import chisel3.util._
+import xiangshan._
+import utils._
+
+class WakeupQueue(number: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val in  = Flipped(ValidIO(new MicroOp))
+    val out = ValidIO(new MicroOp)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+  })
+  if (number < 0) {
+    io.out.valid := false.B
+    io.out.bits := DontCare
+  } else if(number == 0) {
+    io.in <> io.out
+    io.out.valid := io.in.valid
+    // NOTE: no delay bypass don't care redirect
+  } else {
+    val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
+      val valid = Bool()
+      val bits = new MicroOp
+    })))
+    queue(0).valid := io.in.valid && !io.in.bits.roqIdx.needFlush(io.redirect, io.flush)
+    queue(0).bits  := io.in.bits
+    (0 until (number-1)).map{i =>
+      queue(i+1) := queue(i)
+      queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect, io.flush)
+    }
+    io.out.valid := queue(number-1).valid
+    io.out.bits := queue(number-1).bits
+    for (i <- 0 until number) {
+      XSDebug(queue(i).valid, p"BPQue(${i.U}): pc:${Hexadecimal(queue(i).bits.cf.pc)} roqIdx:${queue(i).bits.roqIdx}" +
+        p" pdest:${queue(i).bits.pdest} rfWen:${queue(i).bits.ctrl.rfWen} fpWen${queue(i).bits.ctrl.fpWen}\n")
+    }
+  }
+}

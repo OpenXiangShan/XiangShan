@@ -20,8 +20,8 @@ package object xiangshan {
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
     def isFp(srcType: UInt) = srcType===fp
-    def isPcImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
-    def isRegFp(srcType: UInt) = isReg(srcType) || isFp(srcType)
+    def isPcImm(srcType: UInt) = srcType(0)
+    def isRegFp(srcType: UInt) = !srcType(0)
 
     def apply() = UInt(2.W)
   }
@@ -439,7 +439,7 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(3)
+    CertainLatency(2)
   )
 
   val fmacCfg = FuConfig(

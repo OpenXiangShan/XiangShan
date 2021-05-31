@@ -74,7 +74,9 @@ VERILATOR_FLAGS =                   \
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
-EMU_HEADERS := $(shell find $(EMU_CSRC_DIR) -name "*.h")
+EMU_HEADERS := $(shell find $(EMU_CSRC_DIR) -name "*.h")     \
+               $(shell find $(SIM_CSRC_DIR) -name "*.h")     \
+               $(shell find $(DIFFTEST_CSRC_DIR) -name "*.h")
 EMU := $(BUILD_DIR)/emu
 
 $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
@@ -120,7 +122,11 @@ endif
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM) $(EMU_ARGS)
 
 emu: $(EMU)
+
+emu-run: emu
+ifneq ($(REMOTE),localhost)
 	ls build
+endif
 	$(EMU) -i $(IMAGE) --diff=$(REF_SO) $(EMU_FLAGS)
 
 coverage:

@@ -8,6 +8,7 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP = top.SimTop
 IMAGE ?= temp
+CONFIG ?= DefaultConfig
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -30,7 +31,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(FPGATOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	mill XiangShan.test.runMain $(FPGATOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/sim_sram.v
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
@@ -58,7 +59,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -77,34 +78,10 @@ SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
 DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
 DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
 
-SIM_VSRC = $(shell find ./src/test/vsrc -name "*.v" -or -name "*.sv")
+SIM_VSRC = $(shell find ./src/test/vsrc/common -name "*.v" -or -name "*.sv")
 
-include Makefile.emu
-
-EMU_VCS := simv
-
-VCS_SRC_FILE = $(TOP_V) \
-               $(BUILD_DIR)/plusarg_reader.v \
-               $(BUILD_DIR)/SDHelper.v
-
-VCS_TB_DIR = $(abspath ./src/test/vcs)
-VCS_TB_FILE = $(shell find $(VCS_TB_DIR) -name "*.c") \
-              $(shell find $(VCS_TB_DIR) -name "*.v")
-
-VCS_OPTS := -full64 +v2k -timescale=1ns/10ps \
-  -LDFLAGS -Wl,--no-as-needed \
-  -sverilog \
-  +lint=TFIPC-L \
-  -debug_all +vcd+vcdpluson \
-  +define+RANDOMIZE_GARBAGE_ASSIGN \
-  +define+RANDOMIZE_INVALID_ASSIGN \
-  +define+RANDOMIZE_REG_INIT \
-  +define+RANDOMIZE_MEM_INIT \
-  +define+RANDOMIZE_DELAY=1
-
-$(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
-	rm -rf csrc
-	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
+include verilator.mk
+include vcs.mk
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)
@@ -150,7 +127,7 @@ cache:
 release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
-clean:
+clean: vcs-clean
 	rm -rf ./build
 
 init:
@@ -160,7 +137,7 @@ bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
 
 bsp:
-	mill -i mill.contrib.BSP/install
+	mill -i mill.bsp.BSP/install
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 

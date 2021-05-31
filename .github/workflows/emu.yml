@@ -10,137 +10,101 @@ on:
 jobs:
   generate-verilog:
     runs-on: self-hosted
+    continue-on-error: false
     name: Generate Verilog
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
       - name: Check Wiring
-        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
-      - name: set env
-        run: |
-          echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+        run:
+          bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate verilog file
         run:
-          make verilog SIM_ARGS=--dual-core
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --dual-core
   emu-basics:
     runs-on: self-hosted
+    continue-on-error: false
     name: EMU - Basics
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
-      - name: Set env
+      - name: set env
         run: |
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "RVTEST_HOME=/home/ci-runner/xsenv/riscv-tests" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf" >> $GITHUB_ENV
+          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
       - name: Build EMU
-        run:
-          make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220 EMU_THREADS=8
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
       - name: Basic Test - cputest
         run: |
-          CPU_TEST_DIR=$AM_HOME/tests/cputest
-          echo $CPU_TEST_DIR
-          ret=0
-          for test in $(ls $CPU_TEST_DIR/tests)
-          do
-              t=${test%.c}
-              echo $t
-              numactl -m 1 -C 64-75 make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run | grep "HIT GOOD TRAP"
-              if [[ $? != 0 ]];
-              then
-                  echo $t fail
-                  ret=1
-              fi
-          done
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci cputest 2> /dev/zero
       - name: Basic Test - riscv-tests
         run: |
-          numactl -m 1 -C 64-75 make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --rvtest /home/ci-runner/xsenv/riscv-tests --ci riscv-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
-          numactl -m 1 -C 64-75 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-microbench.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci microbench 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/microbench.log
       - name: Simple Test - CoreMark
         run: |
-          numactl -m 1 -C 64-75 make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-coremark.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci coremark 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/coremark.log
       - name: System Test - Linux
         run: |
-          numactl -m 1 -C 64-75 make emu IMAGE=/home/ci-runner/xsenv/workloads/linux-hello/bbl.bin 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-linux.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci linux-hello 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/linux.log
       - name: Floating-point Test - povray
         run: |
-          numactl -m 1 -C 64-75 make emu IMAGE=/home/ci-runner/xsenv/workloads/povray/_3400001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/povray.log
   emu-performance:
     runs-on: self-hosted
+    continue-on-error: false
     name: EMU - Performance
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
-      - name: Set env
+      - name: set env
         run: |
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "DRAMSIM3_HOME=/home/ci-runner/xsenv/DRAMsim3" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf" >> $GITHUB_ENV
+          echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
       - name: Build EMU
-        run:
-          make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME DRAMSIM3_HOME=$DRAMSIM3_HOME -j220 EMU_THREADS=16 WITH_DRAMSIM3=1
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --dramsim3 /home/ci-runner/xsenv/DRAMsim3            \
+            --disable-log --with-dramsim3 --threads 16
       - name: SPEC06 Test - mcf
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/mcf/_2550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-mcf.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/mcf.log
       - name: SPEC06 Test - xalancbmk
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/xalancbmk/_6600001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-xalancbmk.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
       - name: SPEC06 Test - gcc
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gcc/_1250001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-gcc.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/gcc.log
       - name: SPEC06 Test - namd
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/namd/_4850001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-namd.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/namd.log
       - name: SPEC06 Test - milc
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/milc/_4150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-milc.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/milc.log
       - name: SPEC06 Test - lbm
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/lbm/_7550001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-lbm.log
-          exit $ret
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/lbm.log
       - name: SPEC06 Test - gromacs
         run: |
-          numactl -m 1 -C 64-83 make emu IMAGE=/home/ci-runner/xsenv/workloads/gromacs/_3150001000_.gz EMU_ARGS="-I 5000000" 2> perf.log
-          ret=${PIPESTATUS[0]}
-          cat perf.log | sort | tee $PERF_HOME/$(date +%s)-${GITHUB_SHA:0:5}-gromacs.log
-          exit $ret
-
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/gromacs.log

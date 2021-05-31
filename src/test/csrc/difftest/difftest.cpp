@@ -149,7 +149,7 @@ void Difftest::do_interrupt() {
 void Difftest::do_exception() {
   state->record_abnormal_inst(dut.event.exceptionPC, dut.commit[0].inst, RET_EXC, dut.event.exception);
   if (dut.event.exception == 12 || dut.event.exception == 13 || dut.event.exception == 15) {
-    printf("exception cause: %d\n", dut.event.exception);
+    // printf("exception cause: %d\n", dut.event.exception);
     struct DisambiguationState ds;
     ds.exceptionNo = dut.event.exception;
     ds.mtval = dut.csr.mtval;

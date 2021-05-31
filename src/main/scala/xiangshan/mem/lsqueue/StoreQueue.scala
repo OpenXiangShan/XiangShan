@@ -9,6 +9,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import difftest._
+import device.RAMHelper
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -53,6 +54,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput))) // used to update issuePtrExt
     val sqFull = Output(Bool())
   })
+
+  println("StoreQueue: size:" + StoreQueueSize)
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
@@ -401,6 +404,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
   when (io.sbuffer(1).fire()) {
     assert(io.sbuffer(0).fire())
+  }
+  if (useFakeDCache) {
+    for (i <- 0 until StorePipelineWidth) {
+      val ptr = deqPtrExt(i).value
+      val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
+      fakeRAM.io.clk   := clock
+      fakeRAM.io.en    := allocated(ptr) && commited(ptr) && !mmio(ptr)
+      fakeRAM.io.rIdx  := 0.U
+      fakeRAM.io.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
+      fakeRAM.io.wdata := dataModule.io.rdata(i).data
+      fakeRAM.io.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      fakeRAM.io.wen   := allocated(ptr) && commited(ptr) && !mmio(ptr)
+    }
   }
 
   if (!env.FPGAPlatform) {

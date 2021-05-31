@@ -1,8 +1,3 @@
-//******************************************************************************
-// Copyright (c) 2015 - 2018, The Regents of the University of California (Regents).
-// All Rights Reserved. See LICENSE and LICENSE.SiFive for license details.
-//------------------------------------------------------------------------------
-
 package xiangshan.backend.decode
 
 import chipsalliance.rocketchip.config.Parameters
@@ -23,7 +18,7 @@ abstract trait DecodeConstants {
   def Y = BitPat("b1")
 
   def decodeDefault: List[BitPat] = // illegal instruction
-    //   src1Type     src2Type     src3Type     fuType      fuOpType    rfWen
+    //   srcType(0)     srcType(1)     srcType(2)     fuType      fuOpType    rfWen
     //   |            |            |            |           |           |  fpWen
     //   |            |            |            |           |           |  |  isXSTrap
     //   |            |            |            |           |           |  |  |  noSpecExec
@@ -417,9 +412,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
-  cs.lsrc1 := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
-  cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
-  cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
+  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)
+  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location
   cs.ldest := Mux(cs.fpWen || cs.rfWen, ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
 
@@ -436,7 +431,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   // fix isXSTrap
   when (cs.isXSTrap) {
-    cs.lsrc1 := XSTrapDecode.lsrc1
+    cs.lsrc(0) := XSTrapDecode.lsrc1
   }
 
   cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
@@ -457,7 +452,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 //    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
 //    when (isLink(cs.ldest) && cs.fuOpType === JumpOpType.jal) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
 //    when (cs.fuOpType === JumpOpType.jalr) {
-//      when (isLink(cs.lsrc1)) { cf_ctrl.ctrl.fuOpType := JumpOpType.ret  }
+//      when (isLink(cs.lsrc(0))) { cf_ctrl.ctrl.fuOpType := JumpOpType.ret  }
 //      when (isLink(cs.ldest)) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
 //    }
 //  }
@@ -469,9 +464,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
     io.enq.ctrl_flow.instr, io.enq.ctrl_flow.pc, io.enq.ctrl_flow.exceptionVec.asUInt,
     io.enq.ctrl_flow.intrVec.asUInt, io.enq.ctrl_flow.crossPageIPFFix)
-  XSDebug("out: src1Type=%b src2Type=%b src3Type=%b lsrc1=%d lsrc2=%d lsrc3=%d ldest=%d fuType=%b fuOpType=%b\n",
-    io.deq.cf_ctrl.ctrl.src1Type, io.deq.cf_ctrl.ctrl.src2Type, io.deq.cf_ctrl.ctrl.src3Type,
-    io.deq.cf_ctrl.ctrl.lsrc1, io.deq.cf_ctrl.ctrl.lsrc2, io.deq.cf_ctrl.ctrl.lsrc3,
+  XSDebug("out: srcType(0)=%b srcType(1)=%b srcType(2)=%b lsrc(0)=%d lsrc(1)=%d lsrc(2)=%d ldest=%d fuType=%b fuOpType=%b\n",
+    io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
+    io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
     io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
   XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d imm=%x\n",
     io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
