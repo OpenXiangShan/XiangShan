@@ -1,4 +1,19 @@
 # Copyright 2020 zyy
+#***************************************************************************************
+# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
 import sh
 import os
 import os.path as osp
@@ -101,7 +116,7 @@ class SimulatorTaskGoBack:
         err_path = 'simulator_err.txt' if not is_goback else 'simulator_err_back.txt'
         aborted_signal = 'aborted' if not is_goback else 'aborted_back'
         completed_signal = 'completed' if not is_goback else 'completed_back'
-        print(self.final_options)        
+        print(self.final_options)
         try:
             cmd(
                 _out = osp.join(self.log_dir, out_path),
@@ -122,11 +137,11 @@ class SimulatorTaskGoBack:
         except sh.ErrorReturnCode_3 as e:
             # TODO
             pass
-        
+
         sh.rm(osp.join(self.log_dir, 'running'))
         sh.touch(osp.join(self.log_dir, completed_signal))
         return 0
-        
+
 def check_simulator(simulator_out_path: str):
     file = open(simulator_out_path, 'r')
     is_aborted = False
