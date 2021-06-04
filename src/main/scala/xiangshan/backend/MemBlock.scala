@@ -107,6 +107,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
+  // Atom unit and atom writeback
   val atomicsUnit = Module(new AtomicsUnit)
 
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
@@ -120,9 +121,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // 'wakeUpFp' is 1 cycle later than 'exeWbReqs'
   val wakeUpFp = Wire(Vec(exuParameters.LduCnt, Decoupled(new ExuOutput)))
 
+  def stEnqIqCtrl(i: Int) = io.fromCtrlBlock.enqIqCtrl(exuParameters.LduCnt + i)
+
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
   io.fromFpBlock.readFpRf.foreach(_.addr := DontCare)
+
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -153,13 +157,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       slowPorts.length,
       fixedDelay = certainLatency,
       fastWakeup = certainLatency >= 0,
-      feedback = feedback, 1, 1)
-    )
+      feedback = feedback, 1, 1,
+      if (cfg == StExeUnitCfg) Some("b01".U(2.W)) else None, // store addr rs only needs src1
+      true // checkWaitBit
+    ))
 
-    rs.io.redirect <> redirect // TODO: remove it
-    rs.io.flush    <> io.fromCtrlBlock.flush // TODO: remove it
+    rs.io.redirect <> redirect
+    rs.io.flush    <> io.fromCtrlBlock.flush
     rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.fromDispatch  <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
+    cfg match {
+      case LdExeUnitCfg => rs.io.fromDispatch  <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
+      case StExeUnitCfg => rs.io.fromDispatch  <> VecInit(io.fromCtrlBlock.enqIqCtrl(i))
+      case _ => throw new IllegalArgumentException
+    }    
 
     rs.io.srcRegValue(0)(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
     if (i >= exuParameters.LduCnt) {
@@ -184,6 +194,70 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
       .map(_._2) ++
       (if (rs.exuCfg == LdExeUnitCfg && EnableLoadFastWakeUp) loadUnits.map(_.io.fastUop) else Seq())
+  }
+
+  // Store data RSs
+  // TODO: use a single RS to save store data & store addr
+  val dataReservationStations = storeExuConfigs.zipWithIndex.map({ case (cfg, i) =>
+    var certainLatency = -1
+    if (cfg.hasCertainLatency) {
+      certainLatency = cfg.latency.latencyVal.get
+    }
+
+    val readIntRf = cfg.readIntRf
+    val readFpRf = cfg.readFpRf
+
+    // load has uncertain latency, so only use external wake up data
+    val fastDatas = fastWakeUpIn.zip(io.wakeUpIn.fast)
+      .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
+      .map(a => (a._1, a._2.bits.data))
+
+    val fastPortsCnt = fastDatas.length
+
+    val slowPorts = io.intWbOut ++ io.fpWbOut
+    val slowPortsCnt = slowPorts.length
+
+    // if tlb miss, replay
+    val feedback = false
+
+    println(s"${i}: exu:${cfg.name}_data fastPortsCnt: ${fastPortsCnt} slowPorts: ${slowPortsCnt} delay:${certainLatency} feedback:${feedback}")
+
+    val rs = Module(new ReservationStation(s"rs_${cfg.name}", cfg, IssQueSize, XLEN,
+      fastDatas.map(_._1).length,
+      slowPorts.length,
+      fixedDelay = certainLatency,
+      fastWakeup = certainLatency >= 0,
+      feedback = feedback, 1, 1,
+      Some("b10".U), // store data rs only needs src2
+      false // no need to check waitBit
+    ))
+
+    rs.io.redirect <> redirect
+    rs.io.flush    <> io.fromCtrlBlock.flush
+    rs.io.numExist <> io.toCtrlBlock.numExist(exuParameters.LduCnt + i)
+    rs.io.fromDispatch  <> VecInit(io.fromCtrlBlock.enqIqCtrl(exuParameters.LduCnt + i))
+
+    rs.io.srcRegValue(0)(0) := io.fromIntBlock.readIntRf(readPortIndex(exuParameters.LduCnt + i)).data
+    rs.io.srcRegValue(0)(1) := io.fromIntBlock.readIntRf(readPortIndex(exuParameters.LduCnt + i) + 1).data
+    rs.io.fpRegValue := io.fromFpBlock.readFpRf(i).data
+
+    rs.io.fastDatas <> fastDatas.map(_._2)
+    rs.io.slowPorts <> slowPorts
+
+    rs.io.fastUopsIn <> fastWakeUpIn.zip(io.wakeUpIn.fastUops)
+      .filter(x => (x._1.writeIntRf && rs.exuCfg.readIntRf) || (x._1.writeFpRf && rs.exuCfg.readFpRf))
+      .map(_._2)
+
+
+    rs.suggestName(s"rs_${cfg.name}_data")
+
+    rs
+  })
+
+  // Override store rs enq logic for store addr and data rs
+  for (i <- 0 until exuParameters.StuCnt) {
+    stEnqIqCtrl(i).ready := dataReservationStations(i).io.fromDispatch(0).ready &&
+      reservationStations(exuParameters.LduCnt + i).io.fromDispatch(0).ready
   }
 
   wakeUpFp.zip(exeWbReqs).foreach{
@@ -247,6 +321,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.StuCnt) {
     val stu = storeUnits(i)
     val rs = reservationStations(exuParameters.LduCnt + i)
+    val dataRs = dataReservationStations(i)
     val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
 
     stu.io.redirect    <> io.fromCtrlBlock.redirect
@@ -261,7 +336,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // Lsq to load unit's rs
     rs.io.stIssuePtr := lsq.io.issuePtrExt
     // rs.io.storeData <> lsq.io.storeDataIn(i)
-    lsq.io.storeDataIn(i) := rs.io.stData
+    lsq.io.storeDataIn(i) := dataRs.io.stData
+    dataRs.io.deq.map(i => i.ready := true.B) // data is always ready to go
 
     // sync issue info to rs
     lsq.io.storeIssue(i).valid := rs.io.deq(0).valid
@@ -326,8 +402,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val st0_atomics = reservationStations(atomic_rs0).io.deq(0).valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.deq(0).bits.uop.ctrl.fuType)
   val st1_atomics = reservationStations(atomic_rs1).io.deq(0).valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.deq(0).bits.uop.ctrl.fuType)
 
-  val st0_data_atomics = reservationStations(atomic_rs0).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs0).io.stData.bits.uop.ctrl.fuType)
-  val st1_data_atomics = reservationStations(atomic_rs1).io.stData.valid && FuType.storeIsAMO(reservationStations(atomic_rs1).io.stData.bits.uop.ctrl.fuType)
+  val st0_data_atomics = dataReservationStations(0).io.stData.valid && FuType.storeIsAMO(dataReservationStations(0).io.stData.bits.uop.ctrl.fuType)
+  val st1_data_atomics = dataReservationStations(1).io.stData.valid && FuType.storeIsAMO(dataReservationStations(1).io.stData.bits.uop.ctrl.fuType)
 
   when (st0_atomics) {
     reservationStations(atomic_rs0).io.deq(0).ready := atomicsUnit.io.in.ready
@@ -351,7 +427,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq(0).bits, reservationStations(atomic_rs1).io.deq(0).bits)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
-  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, reservationStations(atomic_rs0).io.stData.bits, reservationStations(atomic_rs1).io.stData.bits)
+  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, dataReservationStations(0).io.stData.bits, dataReservationStations(1).io.stData.bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, reservationStations(atomic_rs0).io.rsIdx, reservationStations(atomic_rs1).io.rsIdx)
   atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
   atomicsUnit.io.flush <> io.fromCtrlBlock.flush
