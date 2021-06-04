@@ -1,3 +1,19 @@
+#***************************************************************************************
+# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
+
 TOP = XSTop
 FPGATOP = top.TopMain
 BUILD_DIR = ./build
@@ -146,7 +162,7 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 	date -R
-  
+
 EMU_VCS := simv
 
 VCS_SRC_FILE = $(TOP_V) \
@@ -202,7 +218,7 @@ endif
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
 VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
-VME_MODULES ?= 
+VME_MODULES ?=
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -215,7 +231,7 @@ SNAPSHOT ?=
 #WAVEFORM = --dump-wave
 
 ifeq ($(SNAPSHOT),)
-SNAPSHOT_OPTION = 
+SNAPSHOT_OPTION =
 else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
