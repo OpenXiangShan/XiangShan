@@ -39,6 +39,8 @@ jobs:
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
+          cp $GITHUB_WORKSPACE/build/emu $PERF_HOME/emu
+          cp $GITHUB_WORKSPACE/build/SimTop.v $PERF_HOME/SimTop.v
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci cputest 2> /dev/zero
