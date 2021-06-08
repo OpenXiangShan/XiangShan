@@ -38,14 +38,14 @@ Some of the key directories are shown below.
 └── src
     ├── test               # test files (including diff-test, module-test, etc.)
     └── main/scala         # design files
-    		 ├── bus/tilelink  # tilelink utils
-    		 ├── device        # virtual device for simulation
-    		 ├── difftest      # diff-test chisel interface
-    		 ├── system        # SoC wrapper
-    		 ├── top           # top module
-    		 ├── utils         # utilization code
-    		 ├── xiangshan     # main design code
-    		 └── xstransforms  # some useful firrtl transforms
+        ├── bus/tilelink   # tilelink utils
+        ├── device         # virtual device for simulation
+        ├── difftest       # diff-test chisel interface
+        ├── system         # SoC wrapper
+        ├── top            # top module
+        ├── utils          # utilization code
+        ├── xiangshan      # main design code
+        └── xstransforms   # some useful firrtl transforms
 ```
 
 
