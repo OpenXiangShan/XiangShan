@@ -22,7 +22,7 @@ The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) o
 
 The micro-architecture overview is shown below.
 
-![xs-arch-single](xs-arch-single.svg)
+![xs-arch-single](xs-arch-simple.svg)
 
 
 
