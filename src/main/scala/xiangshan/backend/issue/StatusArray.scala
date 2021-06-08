@@ -27,7 +27,8 @@ class StatusEntry(config: RSConfig)(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
   val scheduled = Bool()
   val blocked = Bool()
-  val credit = UInt(4.W)
+  val credit = UInt(5.W)
+  val replayCnt = UInt(2.W)
   val srcState = Vec(config.numSrc, Bool())
   // data
   val psrc = Vec(config.numSrc, UInt(config.dataIdBits.W))
@@ -58,6 +59,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
     val deqResp = Vec(config.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(config.numEntries.W)
       val success = Bool()
+      val resptype = RSFeedbackType() // update credit if needs replay
     })))
     val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
   })
@@ -104,6 +106,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       statusNext.scheduled := updateStatus.scheduled
       statusNext.blocked := updateStatus.blocked
       statusNext.credit := updateStatus.credit
+      statusNext.replayCnt := 0.U // updateStatus.replayCnt
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
@@ -119,9 +122,36 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       val wakeupEnVec = VecInit(status.psrc.zip(status.srcType).map{ case (p, t) => wakeupMatch(p, t) })
       val wakeupEn = wakeupEnVec.map(_.orR)
       io.wakeupMatch(i) := wakeupEnVec
-      statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
-      // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
-      statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
+
+      // calculate credit
+      // Max(credit) >= sizeof(RS) to avoid deadlock
+      val tlbMissCredit = VecInit(Seq(5.U,5.U,10.U,20.U))
+      val mshrFullCredit = VecInit(Seq(5.U,5.U,10.U,20.U))
+      val dataInvalidCredit = VecInit(Seq(1.U,4.U,8.U,16.U))
+      val nextCredit = Mux1H(Seq(
+        (io.deqResp(0).bits.resptype === RSFeedbackType.tlbMiss)     -> tlbMissCredit(status.replayCnt),
+        (io.deqResp(0).bits.resptype === RSFeedbackType.mshrFull)    -> mshrFullCredit(status.replayCnt),
+        (io.deqResp(0).bits.resptype === RSFeedbackType.dataInvalid) -> dataInvalidCredit(status.replayCnt),
+        (io.deqResp(0).bits.resptype === RSFeedbackType.normal)      -> 0.U,
+      ))
+      // TODO: parameterize max(replayCnt)
+      statusNext.replayCnt := Mux(
+        deqResp && !deqGrant && status.replayCnt =/= 3.U, 
+        status.replayCnt + 1.U, 
+        status.replayCnt
+      )
+
+      statusNext.valid := Mux(
+        deqResp && deqGrant,
+        false.B,
+        status.valid && !status.roqIdx.needFlush(io.redirect, io.flush)
+      )
+      // (1) when deq is not granted, set its scheduled bit and wait; (2) set scheduled if issued
+      statusNext.scheduled := Mux(
+        deqResp && !deqGrant,
+        nextCredit >= 1.U, // wait if status.credit > 1
+        Mux(status.credit === 1.U, false.B, status.scheduled || hasIssued)
+      )
       XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
       if (config.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
@@ -129,7 +159,11 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       else {
         statusNext.blocked := false.B
       }
-      statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
+      statusNext.credit := Mux(
+        deqResp && !deqGrant,
+        nextCredit, // update credit if deq is not granted
+        Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
+      )
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
         p"instructions $i with credit ${status.credit} must not be scheduled\n")
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {

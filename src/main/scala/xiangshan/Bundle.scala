@@ -52,9 +52,10 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(2.W)
-  val mshrFull = 1.U(2.W)
-  val dataInvalid = 2.U(2.W)
+  val tlbMiss = 0.U(2.W)     // DTLB miss
+  val mshrFull = 1.U(2.W)    // L1 DCache MSHR full
+  val dataInvalid = 2.U(2.W) // store to load forward failed because of addr valid & data invalid
+  val normal = 3.U(2.W)      // normal deq
 
   def apply() = UInt(2.W)
 }

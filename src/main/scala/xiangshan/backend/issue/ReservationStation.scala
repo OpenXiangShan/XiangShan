@@ -133,6 +133,7 @@ class ReservationStation
     statusArray.io.update(i).data.scheduled := (if (config.delayedRf) needFpSource(i) else false.B)
     statusArray.io.update(i).data.blocked := (if (config.checkWaitBit) io.fromDispatch(i).bits.cf.loadWaitBit else false.B)
     statusArray.io.update(i).data.credit := (if (config.delayedRf) Mux(needFpSource(i), 2.U, 0.U) else 0.U)
+    statusArray.io.update(i).data.replayCnt := 0.U
     statusArray.io.update(i).data.srcState := (VecInit(io.fromDispatch(i).bits.srcIsReady.take(config.numSrc)).asUInt | ~srcMask).asBools
     statusArray.io.update(i).data.psrc := VecInit(io.fromDispatch(i).bits.psrc.take(config.numSrc))
     statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(config.numSrc))
@@ -186,6 +187,7 @@ class ReservationStation
       statusArray.io.deqResp(0).valid := io.memfeedback.valid
       statusArray.io.deqResp(0).bits.rsMask := UIntToOH(io.memfeedback.bits.rsIdx)
       statusArray.io.deqResp(0).bits.success := io.memfeedback.bits.hit
+      statusArray.io.deqResp(0).bits.resptype := io.memfeedback.bits.sourceType
     }
     else {
       statusArray.io.issueGranted(i).valid := select.io.grant(i).fire
@@ -193,6 +195,7 @@ class ReservationStation
       statusArray.io.deqResp(i).valid := select.io.grant(i).fire
       statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
       statusArray.io.deqResp(i).bits.success := io.deq(i).ready
+      statusArray.io.deqResp(i).bits.resptype := RSFeedbackType.normal
     }
     payloadArray.io.read(i).addr := select.io.grant(i).bits
     if (fixedDelay >= 0) {
