@@ -80,3 +80,17 @@ make emu CONFIG=MinimalConfig SIM_ARGS=--disable-log EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i $AM_HOME/apps/coremark/build/coremark-riscv64-noop.bin
 ```
 
+
+
+## Acknowledgement
+
+In the development of XiangShan, some sub-modules from open source community are employed. All relavant usage is listed below.
+
+| Sub-module           | Source                                                       | Detail                                                       |
+| -------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| L2 Cache & LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | We enhance the function and the timing of the original module, finally turning it into a Cache generator that can be configured as L2/LLC. |
+| Diplomacy & TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
+| FPU                  | [Berkeley hardfloat](https://github.com/ucb-bar/berkeley-hardfloat) | We use Berkeley-hardfloat as our FPU and implement a SRT-4 div/sqrt unit for it. Additionally, we split the FMA pipeline to optimize the timing. |
+
+We are grateful for the support of the open source community and encourage other open source projects to reuse our code within the scope of the [license](LICENSE).
+
