@@ -45,8 +45,7 @@ endif
 # Fork-wait 
 EMU_FORKWAIT ?= 
 ifeq ($(EMU_FORKWAIT),1)
-EMU_CXXFLAGS += -DEN_FROKWAIT
-VEXTRA_FLAGS += --trace
+EMU_CXXFLAGS += -DEN_FORKWAIT
 endif
 
 # Verilator coverage

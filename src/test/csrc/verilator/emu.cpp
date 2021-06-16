@@ -225,6 +225,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
 #ifdef EN_FORKWAIT
+  printf("[INFO]enable fork wait..\n");
   pid_t pid =-1;
   pid_t originPID = getpid();
   int status = -1;

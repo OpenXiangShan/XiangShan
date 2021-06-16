@@ -32,7 +32,6 @@
 #define SLOT_SIZE 3
 #define FAIT_EXIT    exit(EXIT_FAILURE);
 #define WAIT_INTERVAL 1
-#define EN_FORKWAIT
 
 typedef struct shinfo{
   int exitNum;
