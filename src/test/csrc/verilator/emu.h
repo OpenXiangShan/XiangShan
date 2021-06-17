@@ -32,6 +32,7 @@
 #define SLOT_SIZE 3
 #define FAIT_EXIT    exit(EXIT_FAILURE);
 #define WAIT_INTERVAL 1
+#define SNAPSHOT_INTERVAL 60 // unit: second
 
 typedef struct shinfo{
   int exitNum;
@@ -89,6 +90,9 @@ private:
   VerilatedVcdC* tfp;
   bool enable_waveform;
   EmuArgs args;
+#ifdef VM_SAVABLE
+  VerilatedSaveMem snapshot_slot[2];
+#endif
 #ifdef EN_FORKWAIT
   ForkShareMemory forkshm;
 #endif
