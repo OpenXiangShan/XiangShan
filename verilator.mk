@@ -42,6 +42,12 @@ ifneq ($(EMU_THREADS),0)
 VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi all
 endif
 
+# Verilator savable
+EMU_SNAPSHOT ?=
+ifeq ($(EMU_SNAPSHOT),1)
+VEXTRA_FLAGS += --savable
+EMU_CXXFLAGS += -DVM_SAVABLE
+
 # Fork-wait 
 EMU_FORKWAIT ?= 
 ifeq ($(EMU_FORKWAIT),1)
