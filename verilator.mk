@@ -47,6 +47,7 @@ EMU_SNAPSHOT ?=
 ifeq ($(EMU_SNAPSHOT),1)
 VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
+endif
 
 # Fork-wait 
 EMU_FORKWAIT ?= 
