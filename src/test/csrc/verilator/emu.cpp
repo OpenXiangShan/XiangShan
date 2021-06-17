@@ -123,7 +123,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   // init ram
   init_ram(args.image);
 
-#if (VM_TRACE == 1)
+#if VM_TRACE == 1
 #ifndef EN_FORKWAIT
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
@@ -142,6 +142,14 @@ Emulator::Emulator(int argc, const char *argv[]):
   enable_waveform = false;
 #endif
 
+#ifdef VM_SAVABLE
+  if (args.snapshot_path != NULL) {
+    printf("loading from snapshot `%s`...\n", args.snapshot_path);
+    snapshot_load(args.snapshot_path);
+    printf("model cycleCnt = %" PRIu64 "\n", dut_ptr->io_trap_cycleCnt);
+  }
+#endif
+
   // set log time range and log level
   dut_ptr->io_logCtrl_log_begin = args.log_begin;
   dut_ptr->io_logCtrl_log_end = args.log_end;
@@ -150,6 +158,15 @@ Emulator::Emulator(int argc, const char *argv[]):
 Emulator::~Emulator() {
   ram_finish();
   assert_finish();
+
+#ifdef VM_SAVABLE
+  if (args.enable_snapshot && trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
+    printf("Saving snapshots to file system. Please wait.\n");
+    snapshot_slot[0].save();
+    snapshot_slot[1].save();
+    printf("Please remove unused snapshots manually\n");
+  }
+#endif
 }
 
 inline void Emulator::reset_ncycles(size_t cycles) {
@@ -271,7 +288,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         break;
       }
     }
-
     // assertions
     if (assert_count > 0) {
       // for (int i = 0;  )
@@ -324,6 +340,22 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
     if (trapCode != STATE_RUNNING) break;
 
+#ifdef VM_SAVABLE
+    static int snapshot_count = 0;
+    if (args.enable_snapshot && trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
+      // save snapshot every 60s
+      time_t now = time(NULL);
+      snapshot_save(snapshot_filename(now));
+      lasttime_snapshot = t;
+      // dump one snapshot to file every 60 snapshots
+      snapshot_count++;
+      if (snapshot_count == 60) {
+        snapshot_slot[0].save();
+        snapshot_count = 0;
+      }
+    }
+#endif
+
 #ifdef EN_FORKWAIT  
     timer = uptime();
     if(timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess ){   //time out need to fork
@@ -374,8 +406,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   forkshm.info->resInfo = trapCode;
 #endif
 
+  display_trapinfo();
+
   return cycles;
 }
+
 
 inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   char buf_time[64];
@@ -386,12 +421,21 @@ inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   return buf + len;
 }
 
+#ifdef VM_SAVABLE
+inline char* Emulator::snapshot_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".snapshot");
+  return buf;
+}
+#endif
+
 
 inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
   strcpy(p, ".vcd");
-  printf("[%d]dump wave to %s...\n", getpid(), buf);
+  printf("dump wave to %s...\n", buf);
   return buf;
 }
 
@@ -495,5 +539,87 @@ void ForkShareMemory::shwait(){
             sleep(WAIT_INTERVAL);  
         }
     }
+}
+#endif
+
+#ifdef VM_SAVABLE
+void Emulator::snapshot_save(const char *filename) {
+  static int last_slot = 0;
+  VerilatedSaveMem &stream = snapshot_slot[last_slot];
+  last_slot = !last_slot;
+
+  stream.init(filename);
+  stream << *dut_ptr;
+  stream.flush();
+
+  long size = get_ram_size();
+  stream.unbuf_write(&size, sizeof(size));
+  stream.unbuf_write(get_ram_start(), size);
+
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  ref_difftest_getregs(&ref_r, 0);
+  stream.unbuf_write(ref_r, sizeof(ref_r));
+
+  uint64_t nemu_this_pc = get_nemu_this_pc(0);
+  stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
+
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  ref_difftest_memcpy_from_ref(buf, 0x80000000, size, 0);
+  stream.unbuf_write(buf, size);
+  munmap(buf, size);
+
+  struct SyncState sync_mastate;
+  ref_difftest_get_mastatus(&sync_mastate, 0);
+  stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
+
+  uint64_t csr_buf[4096];
+  ref_difftest_get_csr(csr_buf, 0);
+  stream.unbuf_write(&csr_buf, sizeof(csr_buf));
+
+  long sdcard_offset;
+  if(fp)
+    sdcard_offset = ftell(fp);
+  else
+    sdcard_offset = 0;
+  stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
+
+  // actually write to file in snapshot_finalize()
+}
+
+void Emulator::snapshot_load(const char *filename) {
+  VerilatedRestoreMem stream;
+  stream.open(filename);
+  stream >> *dut_ptr;
+
+  long size;
+  stream.read(&size, sizeof(size));
+  assert(size == get_ram_size());
+  stream.read(get_ram_start(), size);
+
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  stream.read(ref_r, sizeof(ref_r));
+  ref_difftest_setregs(&ref_r, 0);
+
+  uint64_t nemu_this_pc;
+  stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
+  set_nemu_this_pc(nemu_this_pc, 0);
+
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  stream.read(buf, size);
+  ref_difftest_memcpy_from_dut(0x80000000, buf, size, 0);
+  munmap(buf, size);
+
+  struct SyncState sync_mastate;
+  stream.read(&sync_mastate, sizeof(struct SyncState));
+  ref_difftest_set_mastatus(&sync_mastate, 0);
+
+  uint64_t csr_buf[4096];
+  stream.read(&csr_buf, sizeof(csr_buf));
+  ref_difftest_set_csr(csr_buf, 0);
+
+  long sdcard_offset = 0;
+  stream.read(&sdcard_offset, sizeof(sdcard_offset));
+  if(fp)
+    fseek(fp, sdcard_offset, SEEK_SET);
 }
 #endif
