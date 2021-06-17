@@ -157,7 +157,7 @@ object OnesMoreThan {
 }
 
 abstract class SelectOne {
-  def getNthOH(n: Int): Vec[Bool]
+  def getNthOH(n: Int): (Bool, Vec[Bool])
 }
 
 class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
@@ -181,10 +181,67 @@ class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
     }
   }
 
-  def getNthOH(n: Int): Vec[Bool] = {
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
     require(n > 0, s"n should be positive to select the n-th one")
     require(n <= n_sel, s"n should not be larger than n_sel")
     // bits(i) is true.B and bits(i - 1, 0) has n - 1
-    VecInit(bits.zip(matrix).map{ case (b, m) => b && m(n - 1) })
+    val selValid = OnesMoreThan(bits, n)
+    val sel = VecInit(bits.zip(matrix).map{ case (b, m) => b && m(n - 1) })
+    (selValid, sel)
+  }
+}
+
+class CircSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  val n_bits = bits.length
+  val n_sel = if (max_sel > 0) max_sel else n_bits
+  require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
+
+  val sel_forward = new NaiveSelectOne(bits, (n_sel + 1) / 2)
+  val sel_backward = new NaiveSelectOne(bits.reverse, n_sel / 2)
+
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+    val selValid = OnesMoreThan(bits, n)
+    val sel_index = (n + 1) / 2
+    if (n % 2 == 1) {
+      (selValid, sel_forward.getNthOH(sel_index)._2)
+    }
+    else {
+      (selValid, VecInit(sel_backward.getNthOH(sel_index)._2.reverse))
+    }
+  }
+}
+
+class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  val n_bits = bits.length
+  val n_sel = if (max_sel > 0) max_sel else n_bits
+  require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
+  require(n_sel > 1, "Select only one entry via OddEven causes odd entries to be ignored")
+
+  val n_even = (n_bits + 1) / 2
+  val sel_even = new CircSelectOne((0 until n_even).map(i => bits(2 * i)), n_sel / 2)
+  val n_odd = n_bits / 2
+  val sel_odd = new CircSelectOne((0 until n_odd).map(i => bits(2 * i + 1)), (n_sel + 1) / 2)
+
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+    val sel_index = (n + 1) / 2
+    if (n % 2 == 1) {
+      val selected = sel_even.getNthOH(sel_index)
+      val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 0) selected._2(i / 2) else false.B))
+      (selected._1, sel)
+    }
+    else {
+      val selected = sel_odd.getNthOH(sel_index)
+      val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 1) selected._2(i / 2) else false.B))
+      (selected._1, sel)
+    }
+  }
+}
+
+object SelectOne {
+  def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = policy.toLowerCase match {
+    case "naive" => new NaiveSelectOne(bits, max_sel)
+    case "circ" => new CircSelectOne(bits, max_sel)
+    case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+    case _ => throw new IllegalArgumentException(s"unknown select policy")
   }
 }
