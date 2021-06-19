@@ -39,6 +39,10 @@ jobs:
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
+      - uses: actions/upload-artifact@v2
+        with:
+          name: emulator
+          path: $GITHUB_WORKSPACE/build/emu
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci cputest 2> /dev/zero
@@ -80,6 +84,10 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /home/ci-runner/xsenv/DRAMsim3            \
             --disable-log --with-dramsim3 --threads 16
+      - uses: actions/upload-artifact@v2
+        with:
+          name: emulator-dramsim3
+          path: $GITHUB_WORKSPACE/build/emu
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
