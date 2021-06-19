@@ -51,7 +51,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr) // used to wake up delayed load/store
-    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput))) // used to update issuePtrExt
+    val storeAddrIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput))) // used to update issuePtrExt
+    val storeDataIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput))) // used to update issuePtrExt
     val sqFull = Output(Bool())
   })
 
@@ -72,7 +73,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val addrvalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio addr is valid
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio data is valid
   val allvalid  = VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i))) // non-mmio data & addr is valid
-  val issued = Reg(Vec(StoreQueueSize, Bool())) // inst has been issued by rs
+  val addrissued = Reg(Vec(StoreQueueSize, Bool())) // store addr has been issued by rs
+  val dataissued = Reg(Vec(StoreQueueSize, Bool())) // store data has been issued by rs
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
@@ -129,7 +131,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       allocated(index) := true.B
       datavalid(index) := false.B
       addrvalid(index) := false.B
-      issued(index) := false.B
+      addrissued(index) := false.B
+      dataissued(index) := false.B
       commited(index) := false.B
       pending(index) := false.B
     }
@@ -143,8 +146,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   // update state bit issued
   for (i <- 0 until StorePipelineWidth) {
-    when (io.storeIssue(i).valid) {
-      issued(io.storeIssue(i).bits.uop.sqIdx.value) := true.B
+    when (io.storeAddrIssue(i).valid) {
+      addrissued(io.storeAddrIssue(i).bits.uop.sqIdx.value) := true.B
+    }
+    when (io.storeDataIssue(i).valid) {
+      dataissued(io.storeDataIssue(i).bits.uop.sqIdx.value) := true.B
     }
   }
 
@@ -153,7 +159,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   require(IssuePtrMoveStride >= 2)
 
   val issueLookupVec = (0 until IssuePtrMoveStride).map(issuePtrExt + _.U)
-  val issueLookup = issueLookupVec.map(ptr => allocated(ptr.value) && issued(ptr.value) && ptr =/= enqPtrExt(0))
+  val issueLookup = issueLookupVec.map(ptr => allocated(ptr.value) && addrissued(ptr.value) && dataissued(ptr.value) && ptr =/= enqPtrExt(0))
   val nextIssuePtr = issuePtrExt + PriorityEncoder(VecInit(issueLookup.map(!_) :+ true.B))
   issuePtrExt := nextIssuePtr
 

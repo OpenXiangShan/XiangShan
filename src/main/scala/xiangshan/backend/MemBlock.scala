@@ -340,8 +340,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dataRs.io.deq.map(i => i.ready := true.B) // data is always ready to go
 
     // sync issue info to rs
-    lsq.io.storeIssue(i).valid := rs.io.deq(0).valid
-    lsq.io.storeIssue(i).bits := rs.io.deq(0).bits
+    lsq.io.storeAddrIssue(i).valid := rs.io.deq(0).valid
+    lsq.io.storeAddrIssue(i).bits := rs.io.deq(0).bits
+    lsq.io.storeDataIssue(i).valid := dataRs.io.deq(0).valid
+    lsq.io.storeDataIssue(i).bits := dataRs.io.deq(0).bits
 
     // sync issue info to store set LFST
     io.toCtrlBlock.stIn(i).valid := rs.io.deq(0).valid

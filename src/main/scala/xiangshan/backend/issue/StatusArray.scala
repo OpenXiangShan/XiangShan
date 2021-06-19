@@ -127,7 +127,7 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       // Max(credit) >= sizeof(RS) to avoid deadlock
       val tlbMissCredit = VecInit(Seq(5.U,5.U,10.U,20.U))
       val mshrFullCredit = VecInit(Seq(5.U,5.U,10.U,20.U))
-      val dataInvalidCredit = VecInit(Seq(1.U,4.U,8.U,16.U))
+      val dataInvalidCredit = VecInit(Seq(1.U,1.U,1.U,1.U)) // must >= 1 to set scheduled bit
       val nextCredit = Mux1H(Seq(
         (io.deqResp(0).bits.resptype === RSFeedbackType.tlbMiss)     -> tlbMissCredit(status.replayCnt),
         (io.deqResp(0).bits.resptype === RSFeedbackType.mshrFull)    -> mshrFullCredit(status.replayCnt),
@@ -155,6 +155,9 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
       if (config.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
+        when(io.deqResp(0).fire() && io.deqResp(0).bits.resptype === RSFeedbackType.dataInvalid) {
+          statusNext.blocked := true.B
+        }  
       }
       else {
         statusNext.blocked := false.B
