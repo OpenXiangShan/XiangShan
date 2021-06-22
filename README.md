@@ -77,7 +77,7 @@ Some of the key directories are shown below.
 Example:
 ```bash
 make emu CONFIG=MinimalConfig SIM_ARGS=--disable-log EMU_THREADS=2 -j10
-./build/emu -b 0 -e 0 -i $AM_HOME/apps/coremark/build/coremark-riscv64-noop.bin
+./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin
 ```
 
 
