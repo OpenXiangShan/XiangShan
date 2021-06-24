@@ -24,6 +24,7 @@
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
+#include <list>
 
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
@@ -123,6 +124,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   init_ram(args.image);
 
 #if VM_TRACE == 1
+#ifndef EN_FORKWAIT
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -132,6 +134,11 @@ Emulator::Emulator(int argc, const char *argv[]):
     tfp->open(waveform_filename(now));	// Open the dump file
   }
 #else
+  // VM_TRACE =1 && EN_FORKWAIT
+  enable_waveform = false;
+#endif
+#else
+  // VM_TRACE =0
   enable_waveform = false;
 #endif
 
@@ -234,6 +241,34 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     lasttime_poll = t;
   }
 
+#ifdef EN_FORKWAIT
+  printf("[INFO]enable fork wait..\n");
+  pid_t pid =-1;
+  pid_t originPID = getpid();
+  int status = -1;
+  int slotCnt = 1;
+  int waitProcess = 0;
+  uint32_t timer = 0;
+  std::list<pid_t> pidSlot = {};
+  enable_waveform = false;
+
+  //first process as a control process
+  if((pid = fork()) < 0 ){
+    perror("First fork failed..\n");
+    FAIT_EXIT;
+  } else if(pid > 0) {  //parent process
+    printf("[%d] Control process first fork...child: %d\n ",getpid(),pid);
+    prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    forkshm.shwait();
+    printf("[%d] Emulationg finished, Control process exit..",getpid());
+    return cycles;
+  } else {
+    forkshm.info->exitNum++;
+    forkshm.info->flag = true;
+    pidSlot.insert(pidSlot.begin(),  getpid());
+  }
+#endif
+
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
@@ -320,7 +355,41 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 #endif
-  }
+
+#ifdef EN_FORKWAIT  
+    timer = uptime();
+    if(timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess ){   //time out need to fork
+      lasttime_snapshot = timer;
+      if(slotCnt == SLOT_SIZE) {     //kill first wait process
+          pid_t temp = pidSlot.back();
+          pidSlot.pop_back();
+          kill(temp, SIGKILL); 
+          slotCnt--;
+          forkshm.info->exitNum--;
+      }
+      //fork-wait
+      if((pid = fork())<0){
+          eprintf("[%d]Error: could not fork process!\n",getpid());
+          return -1;
+      } else if(pid != 0) {       //father fork and wait.
+          waitProcess = 1;
+          wait(&status);
+          enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
+          if (enable_waveform) {
+            Verilated::traceEverOn(true);	// Verilator must compute traced signals
+            tfp = new VerilatedVcdC;
+            dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+            time_t now = time(NULL);
+            tfp->open(waveform_filename(now));	// Open the dump file
+          }
+      } else {        //child insert its pid
+          slotCnt++;
+          forkshm.info->exitNum++;
+          pidSlot.insert(pidSlot.begin(),  getpid());
+      }
+    } 
+#endif
+}
 
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
@@ -330,9 +399,18 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   save_coverage(coverage_start_time);
 #endif
 
+#ifdef EN_FORKWAIT
+  if(!waitProcess) display_trapinfo();
+  else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
+  forkshm.info->exitNum--;
+  forkshm.info->resInfo = trapCode;
+#endif
+
   display_trapinfo();
+
   return cycles;
 }
+
 
 inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   char buf_time[64];
@@ -351,6 +429,7 @@ inline char* Emulator::snapshot_filename(time_t t) {
   return buf;
 }
 #endif
+
 
 inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
@@ -421,6 +500,47 @@ void Emulator::display_trapinfo() {
     trigger_stat_dump();
   }
 }
+
+#ifdef EN_FORKWAIT
+ForkShareMemory::ForkShareMemory() {
+  if((key_n = ftok(".",'s')<0)) {
+      perror("Fail to ftok\n");
+      FAIT_EXIT
+  }
+  printf("key num:%d\n",key_n);
+
+  if((shm_id = shmget(key_n,1024,0666|IPC_CREAT))==-1) {
+      perror("shmget failed...\n");
+      FAIT_EXIT
+  }
+  printf("share memory id:%d\n",shm_id);
+
+  if((info = (shinfo*)(shmat(shm_id, NULL, 0))) == NULL ) {
+      perror("shmat failed...\n");
+      FAIT_EXIT
+  }
+
+  info->exitNum   = 0;
+  info->flag      = false;
+  info->resInfo   = -1;           //STATE_RUNNING
+}
+
+ForkShareMemory::~ForkShareMemory() {
+  if(shmdt(info) == -1 ){
+    perror("detach error\n");
+  }
+  shmctl(shm_id, IPC_RMID, NULL) ;
+}
+
+void ForkShareMemory::shwait(){
+    while(true){
+        if(info->exitNum == 0 && info->flag){ break;  } 
+        else {  
+            sleep(WAIT_INTERVAL);  
+        }
+    }
+}
+#endif
 
 #ifdef VM_SAVABLE
 void Emulator::snapshot_save(const char *filename) {

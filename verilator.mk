@@ -49,6 +49,12 @@ VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
+# Fork-wait 
+EMU_FORKWAIT ?= 
+ifeq ($(EMU_FORKWAIT),1)
+EMU_CXXFLAGS += -DEN_FORKWAIT
+endif
+
 # Verilator coverage
 EMU_COVERAGE ?=
 ifeq ($(EMU_COVERAGE),1)
