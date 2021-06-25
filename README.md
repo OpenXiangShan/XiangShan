@@ -8,7 +8,7 @@ Copyright 2020-2021 by Institute of Computing Technology, Chinese Academy of Sci
 
 
 
-## === Tutorial is Comming! ===
+## === Tutorial is Coming! ===
 
 A tutorial on XiangShan is held at RISC-V World Conference China 2021 in June.  Multiple technical reports will be included in the conference as well. Stay tuned!
 
@@ -84,7 +84,7 @@ make emu CONFIG=MinimalConfig SIM_ARGS=--disable-log EMU_THREADS=2 -j10
 
 ## Acknowledgement
 
-In the development of XiangShan, some sub-modules from open source community are employed. All relavant usage is listed below.
+In the development of XiangShan, some sub-modules from open source community are employed. All relevant usage is listed below.
 
 | Sub-module         | Source                                                       | Detail                                                       |
 | ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
