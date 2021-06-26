@@ -47,7 +47,7 @@ English Readme is [here](README.md).
 * 运行 `make verilog` 以生成 verilog 代码。输出文件为 `build/XSTop.v`。
 * 更多信息详见 `Makefile`。
 
-## 模拟运行
+## 仿真运行
 
 ### 环境搭建
 
@@ -57,11 +57,11 @@ English Readme is [here](README.md).
 * 项目使用 `mill` 进行 scala 编译，因此需要安装 `mill`，详见 [mill 手动安装指南](https://com-lihaoyi.github.io/mill/mill/Intro_to_Mill.html#_installation)（目前仅英文版本）。
 * 克隆本项目，运行 `make init` 以初始化本项目引用的开源子模块。
 
-### 运行模拟器
+### 运行仿真
 
-* 安装开源 verilog 模拟器 [Verilator](https://verilator.org/guide/latest/)。
-* 运行 `make emu` 以利用 Verilator 构建 C++ 模拟器 `./build/emu`。
-* 运行 `./build/emu --help` 可以获得模拟器的各种运行时参数。
+* 安装开源 verilog 仿真器 [Verilator](https://verilator.org/guide/latest/)。
+* 运行 `make emu` 以利用 Verilator 构建 C++ 仿真器 `./build/emu`。
+* 运行 `./build/emu --help` 可以获得仿真器的各种运行时参数。
 * 更多细节详见 `Makefile` 与 `verilator.mk`。
 
 运行示例：
