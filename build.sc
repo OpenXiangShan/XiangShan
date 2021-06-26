@@ -81,7 +81,7 @@ object chiseltest extends CommonModule with SbtModule {
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx10G")
+  override def forkArgs = Seq("-Xmx12G")
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -91,6 +91,9 @@ object XiangShan extends CommonModule with SbtModule {
   )
 
   object test extends Tests {
+
+    override def forkArgs = Seq("-Xmx12G")
+
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.0"
     )
