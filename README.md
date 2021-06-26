@@ -18,7 +18,7 @@ For more information, please refer to [this link](https://openxiangshan.github.i
 
 ## Architecture
 
-The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) on this [branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June, 2020. The current version of XiangShan, also known as Nanhu (南湖), is still under development on master branch.
+The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) on this [branch](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu), which has been developed since June 2020. The current version of XiangShan, also known as Nanhu (南湖), is still under development on the master branch.
 
 The micro-architecture overview is shown below.
 
@@ -75,22 +75,21 @@ Some of the key directories are shown below.
 * Refer to `Makefile` and `verilator.mk` for more information.
 
 Example:
+
 ```bash
 make emu CONFIG=MinimalConfig SIM_ARGS=--disable-log EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
-
-
 ## Acknowledgement
 
-In the development of XiangShan, some sub-modules from open source community are employed. All relevant usage is listed below.
+In the development of XiangShan, some sub-modules from the open-source community are employed. All relevant usage is listed below.
 
 | Sub-module         | Source                                                       | Detail                                                       |
 | ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | We enhance the function and the timing of the original module, finally turning it into a Cache generator that can be configured as L2/LLC. |
 | Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
-| FPU                | [Berkeley hardfloat](https://github.com/ucb-bar/berkeley-hardfloat) | We use Berkeley-hardfloat as our FPU and implement a SRT-4 div/sqrt unit for it. Additionally, we split the FMA pipeline to optimize the timing. |
+| FPU                | [Berkeley hardfloat](https://github.com/ucb-bar/berkeley-hardfloat) | We use Berkeley-hardfloat as our FPU and implement an SRT-4 div/sqrt unit for it. Additionally, we split the FMA pipeline to optimize the timing. |
 
-We are grateful for the support of the open source community and encourage other open source projects to reuse our code within the scope of the [license](LICENSE).
+We are grateful for the support of the open-source community and encourage other open-source projects to reuse our code within the scope of the [license](LICENSE).
 
