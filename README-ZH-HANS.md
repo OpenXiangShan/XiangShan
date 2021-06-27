@@ -7,11 +7,11 @@ English Readme is [here](README.md).
 
 ©2020-2021 中国科学院计算技术研究所版权所有。
 
-## === 教程即将登场 ===
+## 文档和报告
 
-香山的教程将于 2021 年 6 月的 [RISC-V 中国峰会](https://www.riscv-conf-china.com/cn/index.html)上放出。峰会群贤毕至，少长咸集，更有诸多科技报告以飨诸君。敬请期待！
+在 2021 年 6 月的 RISC-V 中国峰会上，我们给出了超过 20 个技术报告。报告已经更新到[我们的文档仓库](https://github.com/OpenXiangShan/XiangShan-doc)。
 
-详见[香山官方网站](https://openxiangshan.github.io)。
+未来更多的文档也将更新到相同的仓库。
 
 ## 处理器架构
 
