@@ -20,6 +20,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.{ImmUnion, Imm_U}
+import xiangshan.backend.exu.ExuConfig
 
 class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(numEntries.W))
@@ -98,4 +100,51 @@ class DataArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
     io.read.zip(rdata).map{ case (rport, data) => rport.data(i) := data }
   }
 
+}
+
+class ImmExtractor(numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val uop = Input(new MicroOp)
+    val data_in = Vec(numSrc, Input(UInt(dataBits.W)))
+    val data_out = Vec(numSrc, Output(UInt(dataBits.W)))
+  })
+  io.data_out := io.data_in
+}
+
+class JumpImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
+  val jump_pc = IO(Input(UInt(VAddrBits.W)))
+  val jalr_target = IO(Input(UInt(VAddrBits.W)))
+
+  when (SrcType.isPc(io.uop.ctrl.srcType(0))) {
+    io.data_out(0) := SignExt(jump_pc, XLEN)
+  }
+  io.data_out(1) := jalr_target
+}
+
+class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
+  when (SrcType.isImm(io.uop.ctrl.srcType(1))) {
+    val imm32 = Mux(io.uop.ctrl.selImm === SelImm.IMM_U,
+      ImmUnion.U.toImm32(io.uop.ctrl.imm),
+      ImmUnion.I.toImm32(io.uop.ctrl.imm)
+    )
+    io.data_out(1) := SignExt(imm32, XLEN)
+  }
+}
+
+object ImmExtractor {
+  def apply(config: RSConfig, exuCfg: ExuConfig, uop: MicroOp, data_in: Vec[UInt], pc: UInt, target: UInt)(implicit p: Parameters): Vec[UInt] = {
+    val immExt = exuCfg match {
+      case JumpExeUnitCfg => {
+        val ext = Module(new JumpImmExtractor)
+        ext.jump_pc := pc
+        ext.jalr_target := target
+        ext
+      }
+      case AluExeUnitCfg => Module(new AluImmExtractor)
+      case _ => Module(new ImmExtractor(config.numSrc, config.dataBits))
+    }
+    immExt.io.uop := uop
+    immExt.io.data_in := data_in
+    immExt.io.data_out
+  }
 }
