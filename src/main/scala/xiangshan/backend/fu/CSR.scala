@@ -1,3 +1,18 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
@@ -321,7 +336,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
-  val sipMask  = "h222".U & mideleg
+  val sipMask = "h222".U & mideleg
+  val sipWMask = "h2".U // ssip is writeable in smode
   val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
@@ -507,7 +523,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable, sipMask),
+    MaskedRegMap(Sip, mip.asUInt, sipWMask, MaskedRegMap.Unwritable, sipMask),
 
     //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
@@ -619,10 +635,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // Fix Mip/Sip write
   val fixMapping = Map(
     MaskedRegMap(Mip, mipReg.asUInt, mipFixMask),
-    MaskedRegMap(Sip, mipReg.asUInt, sipMask, MaskedRegMap.NoSideEffect, sipMask)
+    MaskedRegMap(Sip, mipReg.asUInt, sipWMask, MaskedRegMap.NoSideEffect, sipMask)
   )
-  val rdataDummy = Wire(UInt(XLEN.W))
-  MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
+  val rdataFix = Wire(UInt(XLEN.W))
+  val wdataFix = LookupTree(func, List(
+    CSROpType.wrt  -> src1,
+    CSROpType.set  -> (rdataFix | src1),
+    CSROpType.clr  -> (rdataFix & (~src1).asUInt()),
+    CSROpType.wrti -> csri,
+    CSROpType.seti -> (rdataFix | csri),
+    CSROpType.clri -> (rdataFix & (~csri).asUInt())
+  ))
+  MaskedRegMap.generate(fixMapping, addr, rdataFix, wen && permitted, wdataFix)
 
   when (csrio.fpu.fflags.valid) {
     fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
@@ -758,6 +782,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
+  mipWire.e.s := csrio.externalInterrupt.meip
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))

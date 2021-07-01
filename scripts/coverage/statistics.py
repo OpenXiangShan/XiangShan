@@ -1,5 +1,22 @@
 #/usr/bin/python3
 # -*- coding: UTF-8 -*-
+
+#***************************************************************************************
+# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
+
 import sys
 import re
 import copy
@@ -21,7 +38,7 @@ ROOT = "ROOT"
 NODE = "NODE"
 SELFCOVERAGE = "SELFCOVERAGE"
 TREECOVERAGE = "TREECOVERAGE"
-LINECOVERAGE = 0 
+LINECOVERAGE = 0
 TOGGLECOVERAGE = 1
 
 def check_one_hot(l):
@@ -72,7 +89,7 @@ def get_line_annotation(lines):
                 not_toggle_coverred_pattern_3.search(line) or not_toggle_coverred_pattern_4.search(line)
 
         assert not (toggle_coverred_match and not_toggle_coverred_match)
-        
+
         all_match = (line_coverred_match, not_line_coverred_match,
                 toggle_coverred_match, not_toggle_coverred_match)
         if not check_one_hot(all_match):
@@ -141,7 +158,7 @@ def get_modules(lines):
         submodule_match = submodule_pattern.search(line)
 
         assert not (module_match and endmodule_match)
-        
+
         if module_match:
             name = module_match.group(1)
             # print("module_match: module: %s" % name)

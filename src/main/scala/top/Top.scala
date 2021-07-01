@@ -1,3 +1,18 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package top
 
 import chisel3._
@@ -377,6 +392,12 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         l3_reset_gen.suggestName("l3_reset_gen")
         l3cache.module.reset := l3_reset_gen.io.out
       }
+      // TODO: wrap this in a module
+      val freq = 100
+      val cnt = RegInit(freq.U)
+      val tick = cnt === 0.U
+      cnt := Mux(tick, freq.U, cnt - 1.U)
+      clint.module.io.rtcTick := tick
     }
   }
 }

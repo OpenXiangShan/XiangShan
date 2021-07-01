@@ -1,3 +1,18 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 import os.Path
 import mill._
 import scalalib._
@@ -66,7 +81,7 @@ object chiseltest extends CommonModule with SbtModule {
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx10G")
+  override def forkArgs = Seq("-Xmx20G")
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -76,6 +91,9 @@ object XiangShan extends CommonModule with SbtModule {
   )
 
   object test extends Tests {
+
+    override def forkArgs = Seq("-Xmx12G")
+
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.0"
     )
@@ -83,10 +101,6 @@ object XiangShan extends CommonModule with SbtModule {
     def testFrameworks = Seq(
       "org.scalatest.tools.Framework"
     )
-
-    def testOnly(args: String*) = T.command {
-      super.runMain("org.scalatest.tools.Runner", args: _*)
-    }
   }
 
 }

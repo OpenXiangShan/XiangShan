@@ -1,3 +1,18 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 #ifndef __EMU_H
 #define __EMU_H
 
@@ -5,8 +20,40 @@
 #include "snapshot.h"
 #include "VSimTop.h"
 #include <verilated_vcd_c.h>	// Trace file format header
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/prctl.h>
+#include <stdlib.h>
+#include <unistd.h>
 
+#define FORK_INTERVAL 10 // unit: second
+#define SLOT_SIZE 3
+#define FAIT_EXIT    exit(EXIT_FAILURE);
+#define WAIT_INTERVAL 1
 #define SNAPSHOT_INTERVAL 60 // unit: second
+
+typedef struct shinfo{
+  int exitNum;
+  int resInfo;
+  bool flag;
+} shinfo;
+
+class ForkShareMemory{
+    //private
+    key_t  key_n ;
+    int shm_id;
+
+public:
+    shinfo *info;    
+
+    ForkShareMemory();
+    ~ForkShareMemory();
+
+    void shwait();
+};
+
 
 struct EmuArgs {
   uint32_t seed;
@@ -46,6 +93,9 @@ private:
   VerilatedSaveMem snapshot_slot[2];
 #endif
   EmuArgs args;
+#ifdef EN_FORKWAIT
+  ForkShareMemory forkshm;
+#endif
 
   enum {
     STATE_GOODTRAP = 0,

@@ -1,3 +1,18 @@
+#***************************************************************************************
+# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
 import os
 import argparse
 
@@ -28,7 +43,7 @@ def analyzeVerilog(filename):
                 cnt = cnt + 1
             line = f.readline()
         mymap[last] = cnt
-        printMap(mymap)    
+        printMap(mymap)
 
 logLevels = ['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR']
 
@@ -64,13 +79,13 @@ def main():
     parser.add_argument("-v", "--verilogFile", help="verilog file path", type=str)
     parser.add_argument("-l", "--logFile", help="log file path", type=str)
     args = parser.parse_args()
-    
+
     if args.verilogFile:
         analyzeVerilog(args.verilogFile)
-    
+
     if args.logFile:
         analyzeLog(args.logFile)
-    
+
     if not args.verilogFile and not args.logFile:
         parser.print_help()
 
