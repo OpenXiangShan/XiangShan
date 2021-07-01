@@ -41,6 +41,7 @@ static inline void print_help(const char *file) {
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
   printf("      --no-snapshot          disable saving snapshots\n");
   printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("      --no-diff              disable differential testing\n");
   printf("      --diff=PATH            set the path of REF for differential testing\n");
   printf("  -h, --help                 print program help info\n");
   printf("\n");
@@ -56,6 +57,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "no-snapshot",       0, NULL,  0  },
     { "force-dump-result", 0, NULL,  0  },
     { "diff",              1, NULL,  0  },
+    { "no-diff",           0, NULL,  0  },
     { "seed",              1, NULL, 's' },
     { "max-cycles",        1, NULL, 'C' },
     { "max-instr",         1, NULL, 'I' },
@@ -79,6 +81,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 2: args.enable_snapshot = false; continue;
           case 3: args.force_dump_result = true; continue;
           case 4: difftest_ref_so = optarg; continue;
+          case 5: args.enable_diff = false; continue;
         }
         // fall through
       default:
@@ -334,9 +337,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
 
-    if (difftest_step()) {
-      trapCode = STATE_ABORT;
-      break;
+    if (args.enable_diff) {
+      if (difftest_step()) {
+        trapCode = STATE_ABORT;
+        break;
+      }
     }
     if (trapCode != STATE_RUNNING) break;
 
@@ -620,6 +625,4 @@ void Emulator::snapshot_load(const char *filename) {
   long sdcard_offset = 0;
   stream.read(&sdcard_offset, sizeof(sdcard_offset));
   if(fp)
-    fseek(fp, sdcard_offset, SEEK_SET);
-}
-#endif
+    fse

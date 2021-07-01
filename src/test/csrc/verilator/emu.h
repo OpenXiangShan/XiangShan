@@ -67,6 +67,7 @@ struct EmuArgs {
   bool enable_waveform;
   bool enable_snapshot;
   bool force_dump_result;
+  bool enable_diff;
 
   EmuArgs() {
     seed = 0;
@@ -81,6 +82,7 @@ struct EmuArgs {
     enable_waveform = false;
     enable_snapshot = true;
     force_dump_result = false;
+    enable_diff = true;
   }
 };
 
