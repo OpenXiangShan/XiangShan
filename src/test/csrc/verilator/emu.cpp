@@ -343,7 +343,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
         break;
       }
     }
-    if (trapCode != STATE_RUNNING) break;
 
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
@@ -625,4 +624,6 @@ void Emulator::snapshot_load(const char *filename) {
   long sdcard_offset = 0;
   stream.read(&sdcard_offset, sizeof(sdcard_offset));
   if(fp)
-    fse
+    fseek(fp, sdcard_offset, SEEK_SET);
+}
+#endif
