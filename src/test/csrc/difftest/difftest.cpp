@@ -37,9 +37,6 @@ static const char *reg_name[DIFFTEST_NR_REG+1] = {
 Difftest **difftest = NULL;
 
 int difftest_init() {
-  // init global memory (used for consistency)
-  ref_misc_put_gmaddr(pmem);
-
   difftest = new Difftest*[EMU_CORES];
   for (int i = 0; i < EMU_CORES; i++) {
     difftest[i] = new Difftest(i);
