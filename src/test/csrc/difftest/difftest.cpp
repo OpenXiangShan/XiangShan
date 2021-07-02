@@ -41,7 +41,13 @@ int difftest_init() {
   for (int i = 0; i < EMU_CORES; i++) {
     difftest[i] = new Difftest(i);
   }
+  return 0;
+}
 
+int init_nemuproxy() {
+  for (int i = 0; i < EMU_CORES; i++) {
+    difftest[i]->update_nemuproxy(i);
+  }
   return 0;
 }
 
@@ -74,11 +80,14 @@ int difftest_step() {
 }
 
 Difftest::Difftest(int coreid) : id(coreid) {
-  proxy = new DIFF_PROXY(coreid);
   state = new DiffState();
   clear_step();
   // nemu_this_pc = 0x80000000;
   // pc_retire_pointer = DEBUG_GROUP_TRACE_SIZE - 1;
+}
+
+void Difftest::update_nemuproxy(int coreid) {
+  proxy = new DIFF_PROXY(coreid);
 }
 
 int Difftest::step() {

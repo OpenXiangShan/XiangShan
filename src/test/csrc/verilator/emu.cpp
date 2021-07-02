@@ -232,11 +232,12 @@ inline void Emulator::single_cycle() {
 
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
-  if (args.enable_diff) {
-    init_goldenmem();
-  }
   difftest_init();
   init_device();
+  if (args.enable_diff) {
+    init_goldenmem();
+    init_nemuproxy();
+  }
 
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
@@ -295,7 +296,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
     // instruction limitation
     for (int i = 0; i < EMU_CORES; i++) {
-      if (!core_max_instr[i]) {
+      auto trap = difftest[i]->get_trap_event();
+      if (trap->instrCnt >= core_max_instr[i]) {
         trapCode = STATE_LIMIT_EXCEEDED;
         break;
       }
@@ -337,11 +339,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     dut_ptr->io_perfInfo_dump = 0;
 
     // Naive instr cnt per core
-    for (int i = 0; i < EMU_CORES; i++) {
-      // update instr_cnt
-      uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
-      core_max_instr[i] -= commit_count;
-    }
+    // for (int i = 0; i < EMU_CORES; i++) {
+    //   // update instr_cnt
+    //   uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
+    //   core_max_instr[i] -= commit_count;
+    // }
 
     trapCode = difftest_state();
     if (trapCode != STATE_RUNNING) break;
