@@ -18,6 +18,8 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include "nemuproxy.h"
+#include "goldenmem.h"
+#include "device.h"
 #include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
@@ -229,6 +231,13 @@ inline void Emulator::single_cycle() {
 }
 
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
+
+  if (args.enable_diff) {
+    init_goldenmem();
+  }
+  difftest_init();
+  init_device();
+
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   // const int stuck_limit = 5000;
