@@ -53,15 +53,6 @@ int init_nemuproxy() {
 
 int difftest_state() {
   for (int i = 0; i < EMU_CORES; i++) {
-    // if (difftest[i]->step(&diff[i], i)) {
-    //     trapCode = STATE_ABORT;
-    //   }
-      // lastcommit[i] = max_cycle;
-
-      // // update instr_cnt
-      // uint64_t commit_count = (core_max_instr[i] >= diff[i].commit) ? diff[i].commit : core_max_instr[i];
-      // core_max_instr[i] -= commit_count;
-
     if (difftest[i]->get_trap_valid()) {
       return difftest[i]->get_trap_code();
     }
@@ -82,8 +73,6 @@ int difftest_step() {
 Difftest::Difftest(int coreid) : id(coreid) {
   state = new DiffState();
   clear_step();
-  // nemu_this_pc = 0x80000000;
-  // pc_retire_pointer = DEBUG_GROUP_TRACE_SIZE - 1;
 }
 
 void Difftest::update_nemuproxy(int coreid) {
@@ -156,8 +145,7 @@ int Difftest::step() {
     }
     return 1;
   }
-
-  // 
+ 
   return 0;
 }
 

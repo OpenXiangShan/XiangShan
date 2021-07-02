@@ -304,8 +304,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
     // assertions
     if (assert_count > 0) {
-      // for (int i = 0;  )
-      // difftest[0]->display();
       eprintf("The simulation stopped. There might be some assertion failed.\n");
       trapCode = STATE_ABORT;
       break;
@@ -338,17 +336,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     dut_ptr->io_perfInfo_clean = 0;
     dut_ptr->io_perfInfo_dump = 0;
 
-    // Naive instr cnt per core
-    // for (int i = 0; i < EMU_CORES; i++) {
-    //   // update instr_cnt
-    //   uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
-    //   core_max_instr[i] -= commit_count;
-    // }
-
-    trapCode = difftest_state();
-    if (trapCode != STATE_RUNNING) break;
-
     if (args.enable_diff) {
+      trapCode = difftest_state();
+      if (trapCode != STATE_RUNNING) break;
       if (difftest_step()) {
         trapCode = STATE_ABORT;
         break;
@@ -373,34 +363,34 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 
 #ifdef EN_FORKWAIT  
     timer = uptime();
-    if(timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess ){   //time out need to fork
+    if (timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess) {   // time out need to fork
       lasttime_snapshot = timer;
-      if(slotCnt == SLOT_SIZE) {     //kill first wait process
-          pid_t temp = pidSlot.back();
-          pidSlot.pop_back();
-          kill(temp, SIGKILL); 
-          slotCnt--;
-          forkshm.info->exitNum--;
+      if (slotCnt == SLOT_SIZE) {     // kill first wait process
+        pid_t temp = pidSlot.back();
+        pidSlot.pop_back();
+        kill(temp, SIGKILL); 
+        slotCnt--;
+        forkshm.info->exitNum--;
       }
-      //fork-wait
-      if((pid = fork())<0){
-          eprintf("[%d]Error: could not fork process!\n",getpid());
-          return -1;
-      } else if(pid != 0) {       //father fork and wait.
-          waitProcess = 1;
-          wait(&status);
-          enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
-          if (enable_waveform) {
-            Verilated::traceEverOn(true);	// Verilator must compute traced signals
-            tfp = new VerilatedVcdC;
-            dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
-            time_t now = time(NULL);
-            tfp->open(waveform_filename(now));	// Open the dump file
-          }
+      // fork-wait
+      if ((pid = fork()) < 0) {
+        eprintf("[%d]Error: could not fork process!\n",getpid());
+        return -1;
+      } else if (pid != 0) {       // father fork and wait.
+        waitProcess = 1;
+        wait(&status);
+        enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
+        if (enable_waveform) {
+          Verilated::traceEverOn(true);	// Verilator must compute traced signals
+          tfp = new VerilatedVcdC;
+          dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+          time_t now = time(NULL);
+          tfp->open(waveform_filename(now));	// Open the dump file
+        }
       } else {        //child insert its pid
-          slotCnt++;
-          forkshm.info->exitNum++;
-          pidSlot.insert(pidSlot.begin(),  getpid());
+        slotCnt++;
+        forkshm.info->exitNum++;
+        pidSlot.insert(pidSlot.begin(),  getpid());
       }
     } 
 #endif
