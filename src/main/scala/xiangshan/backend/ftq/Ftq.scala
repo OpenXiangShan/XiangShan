@@ -22,7 +22,6 @@ import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, Has
 import xiangshan._
 import xiangshan.frontend.{GlobalHistory, RASEntry}
 import xiangshan.frontend.PreDecodeInfoForDebug
-import scala.tools.nsc.doc.model.Val
 
 class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
   p => p(XSCoreParamsKey).FtqSize
