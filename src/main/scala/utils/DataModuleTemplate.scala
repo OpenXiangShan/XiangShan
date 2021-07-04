@@ -18,6 +18,38 @@ package utils
 import chisel3._
 import chisel3.util._
 
+class RawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean) extends Module {
+  val io = IO(new Bundle {
+    val rvec  = Vec(numRead,  Input(UInt(numEntries.W)))
+    val rdata = Vec(numRead,  Output(gen))
+    val wen   = Vec(numWrite, Input(Bool()))
+    val wvec  = Vec(numWrite, Input(UInt(numEntries.W)))
+    val wdata = Vec(numWrite, Input(gen))
+  })
+
+  val data = Reg(Vec(numEntries, gen))
+
+  // read ports
+  val rvec = if (isSync) RegNext(io.rvec) else io.rvec
+  for (i <- 0 until numRead) {
+    assert(PopCount(rvec(i)) <= 1.U)
+    io.rdata(i) := Mux1H(rvec(i), data)
+  }
+
+  // write ports
+  for (i <- 0 until numEntries) {
+    val w = VecInit((0 until numWrite).map(j => io.wen(j) && io.wvec(j)(i)))
+    assert(PopCount(w) <= 1.U)
+    when (w.asUInt.orR) {
+      data(i) := Mux1H(w, io.wdata)
+    }
+  }
+}
+
+
+class SyncRawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, true)
+class AsyncRawDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends RawDataModuleTemplate(gen, numEntries, numRead, numWrite, false)
+
 class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
