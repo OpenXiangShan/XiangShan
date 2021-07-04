@@ -145,8 +145,8 @@ class IntegerBlock
   }
 
   val jmp_rs = Module(new ReservationStation("rs_jmp", JumpExeUnitCfg, IssQueSize, XLEN, 6, 4, -1, false, false, 1, 1))
-  val mul_rs_0 = Module(new ReservationStation("rs_mul_0", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1, 1))
-  val mul_rs_1 = Module(new ReservationStation("rs_mul_1", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 1, 1))
+  val mul_rs_0 = Module(new ReservationStation("rs_mul_0", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
+  val mul_rs_1 = Module(new ReservationStation("rs_mul_1", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
   val alu_rs_0 = Module(new ReservationStation("rs_alu_0", AluExeUnitCfg, 4*IssQueSize, XLEN,
     8, 4, 0, true, false, 4, 4
   ))
@@ -157,22 +157,29 @@ class IntegerBlock
   val slowPorts = intWbArbiter.io.out.drop(4)
 
   jmp_rs.io.numExist <> io.toCtrlBlock.numExist(0)
-  jmp_rs.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(0))
-  jmp_rs.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
+  jmp_rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl.take(1)
+  jmp_rs.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(0).valid && FuType.jmpCanAccept(io.fromCtrlBlock.enqIqCtrl(0).bits.ctrl.fuType)
+  jmp_rs.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
   jmp_rs.io.jumpPc := io.fromCtrlBlock.jumpPc
   jmp_rs.io.jalr_target := io.fromCtrlBlock.jalr_target
   jmp_rs.io.fastDatas <> mulFastData ++ aluFastData
   jmp_rs.io.deq(0) <> jmpExeUnit.io.fromInt
 
   mul_rs_0.io.numExist <> io.toCtrlBlock.numExist(1)
-  mul_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(1))
-  mul_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
+  mul_rs_0.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl.take(2)
+  mul_rs_0.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(0).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(0).bits.ctrl.fuType)
+  mul_rs_0.io.fromDispatch(1).valid := io.fromCtrlBlock.enqIqCtrl(1).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(1).bits.ctrl.fuType)
+  mul_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
+  mul_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
   mul_rs_0.io.fastDatas <> mulFastData ++ aluFastData
   mul_rs_0.io.deq(0) <> mduExeUnits(0).io.fromInt
 
   mul_rs_1.io.numExist <> io.toCtrlBlock.numExist(2)
-  mul_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl(2))
-  mul_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
+  mul_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(2).take(2))
+  mul_rs_1.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(2).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(2).bits.ctrl.fuType)
+  mul_rs_1.io.fromDispatch(1).valid := io.fromCtrlBlock.enqIqCtrl(3).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(3).bits.ctrl.fuType)
+  mul_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
+  mul_rs_1.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
   mul_rs_1.io.fastDatas <> mulFastData ++ aluFastData
   mul_rs_1.io.deq(0) <> mduExeUnits(1).io.fromInt
 
@@ -180,7 +187,10 @@ class IntegerBlock
   io.toCtrlBlock.numExist(4) := alu_rs_0.io.numExist >> 2
   io.toCtrlBlock.numExist(5) := alu_rs_0.io.numExist >> 2
   io.toCtrlBlock.numExist(6) := alu_rs_0.io.numExist >> 2
-  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(3))
+  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.take(4))
+  for (i <- 0 until 4) {
+    alu_rs_0.io.fromDispatch(i).valid := io.fromCtrlBlock.enqIqCtrl(i).valid && FuType.aluCanAccept(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.fuType)
+  }
   alu_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
   alu_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
   alu_rs_0.io.srcRegValue(2) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
@@ -190,6 +200,14 @@ class IntegerBlock
   alu_rs_0.io.deq(1) <> aluExeUnits(1).io.fromInt
   alu_rs_0.io.deq(2) <> aluExeUnits(2).io.fromInt
   alu_rs_0.io.deq(3) <> aluExeUnits(3).io.fromInt
+
+  io.fromCtrlBlock.enqIqCtrl(0).ready := jmp_rs.io.fromDispatch(0).fire() || mul_rs_0.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(0).fire()
+  io.fromCtrlBlock.enqIqCtrl(1).ready := mul_rs_0.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(1).fire()
+  io.fromCtrlBlock.enqIqCtrl(2).ready := mul_rs_1.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(2).fire()
+  io.fromCtrlBlock.enqIqCtrl(3).ready := mul_rs_1.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(3).fire()
+  io.fromCtrlBlock.enqIqCtrl(4).ready := false.B
+  io.fromCtrlBlock.enqIqCtrl(5).ready := false.B
+  io.fromCtrlBlock.enqIqCtrl(6).ready := false.B
 
   val reservationStations = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0)
   val aluFastUop = Wire(Vec(4, ValidIO(new MicroOp)))
