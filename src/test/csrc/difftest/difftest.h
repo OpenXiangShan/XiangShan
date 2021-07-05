@@ -195,6 +195,7 @@ public:
   Difftest(int coreid);
   DIFF_PROXY *proxy;
   uint32_t num_commit = 0; // # of commits if made progress
+  bool has_commit = false; // 1st inst has been commited
   // Trigger a difftest checking procdure
   int step();
   inline bool get_trap_valid() {
@@ -237,6 +238,12 @@ public:
   inline ptw_event_t *get_ptw_event() {
     return &(dut.ptw);
   }
+  inline uint64_t get_nemu_this_pc() {
+    return nemu_this_pc;
+  }
+  inline void set_nemu_this_pc(uint64_t this_pc) {
+    nemu_this_pc = this_pc;
+  }
 
 private:
   const uint64_t firstCommit_limit = 5000;
@@ -249,7 +256,6 @@ private:
   uint64_t *dut_regs_ptr = (uint64_t*)&dut.regs;
 
   bool progress = false;
-  bool has_commit = false;
   uint64_t ticks = 0;
   uint64_t last_commit = 0;
 

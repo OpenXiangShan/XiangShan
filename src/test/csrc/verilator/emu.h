@@ -102,6 +102,9 @@ public:
     return trapCode == STATE_GOODTRAP || trapCode == STATE_LIMIT_EXCEEDED;
   };
   int get_trapcode() { return trapCode; }  
+#ifdef VM_SAVABLE
+  void recover_from_file();
+#endif
 };
 
 #endif

@@ -94,6 +94,9 @@ inline word_t paddr_read(paddr_t addr, int len) {
 
 inline void paddr_write(paddr_t addr, word_t data, int len) {
   if (in_pmem(addr)) pmem_write(addr, data, len);
-  else panic("write not in pmem!");
+  else {
+    printf("try to write addr 0x%lx\n", addr);
+    panic("write not in pmem!");
+  }
 }
 

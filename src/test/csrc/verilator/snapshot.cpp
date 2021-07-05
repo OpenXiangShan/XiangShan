@@ -27,6 +27,7 @@ void VerilatedSaveMem::flush() {
 }
 
 void VerilatedSaveMem::save() {
+  printf("Snapshot size is %d\n", size);
   if (size == 0) return;
   trailer();
   flush();
