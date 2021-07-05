@@ -16,3 +16,6 @@
 [submodule "timingScripts"]
 	path = timingScripts
 	url = https://github.com/RISCVERS/timingScripts.git
+[submodule "difftest"]
+	path = difftest
+	url = https://github.com/AugustusWillisWang/difftest.git
