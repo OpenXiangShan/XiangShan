@@ -52,6 +52,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val error  = new L1CacheErrorInfo
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
+      val bpuInfo = new Bundle {
+        val bpRight = Output(UInt(XLEN.W))
+        val bpWrong = Output(UInt(XLEN.W))
+      }
     }
   })
 
@@ -59,15 +63,16 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new Ibuffer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
   val instrUncache = outer.instrUncache.module
+  val ftq = Module(new Ftq)
 
   val needFlush = io.backend.redirect_cfiUpdate.valid
 
   // from backend
   ifu.io.redirect <> io.backend.redirect_cfiUpdate
   ifu.io.bp_ctrl <> RegNext(io.csrCtrl.bp_ctrl)
-  ifu.io.commitUpdate <> io.backend.commit_cfiUpdate
-  ifu.io.ftqEnqPtr <> io.backend.ftqEnqPtr
-  ifu.io.ftqLeftOne <> io.backend.ftqLeftOne
+  ifu.io.commitUpdate <> ftq.io.commit_ftqEntry
+  ifu.io.ftqEnqPtr <> ftq.io.enqPtr
+  ifu.io.ftqLeftOne <> ftq.io.leftOne
   // to icache
   val grantClientId = clientId(io.icacheMemGrant.bits.id)
   val grantEntryId = entryId(io.icacheMemGrant.bits.id)
@@ -82,6 +87,18 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     ifu.io.icacheMemGrant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
   ifu.io.fencei := RegNext(io.fencei)
+
+  ftq.io.enq <> ifu.io.toFtq
+  ftq.io.roq_commits <> io.backend.toFtq.roq_commits
+  ftq.io.redirect <> io.backend.toFtq.redirect
+  ftq.io.flush := io.backend.toFtq.flush
+  ftq.io.flushIdx := io.backend.toFtq.flushIdx
+  ftq.io.flushOffset := io.backend.toFtq.flushOffset
+  ftq.io.frontendRedirect <> io.backend.toFtq.frontendRedirect
+  ftq.io.exuWriteback <> io.backend.toFtq.exuWriteback
+  io.backend.fromFtq.ftqRead <> ftq.io.ftqRead
+  io.backend.fromFtq.cfiRead <> ftq.io.cfiRead
+  io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
 
   instrUncache.io.req <> ifu.io.mmio_acquire
@@ -111,8 +128,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   // ibuffer to backend
   io.backend.cfVec <> ibuffer.io.out
-  // ifu to backend
-  io.backend.fetchInfo <> ifu.io.toFtq
 
   io.error <> RegNext(RegNext(ifu.io.error))
 

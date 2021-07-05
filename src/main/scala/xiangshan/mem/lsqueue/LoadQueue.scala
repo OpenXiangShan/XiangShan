@@ -26,7 +26,7 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbReques
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.ftq.FtqPtr
+import xiangshan.frontend.FtqPtr
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
