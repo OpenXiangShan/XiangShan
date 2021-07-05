@@ -18,12 +18,15 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include "nemuproxy.h"
+#include "goldenmem.h"
+#include "device.h"
 #include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
+#include <list>
 
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
@@ -40,6 +43,7 @@ static inline void print_help(const char *file) {
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
   printf("      --no-snapshot          disable saving snapshots\n");
   printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("      --no-diff              disable differential testing\n");
   printf("      --diff=PATH            set the path of REF for differential testing\n");
   printf("  -h, --help                 print program help info\n");
   printf("\n");
@@ -55,6 +59,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "no-snapshot",       0, NULL,  0  },
     { "force-dump-result", 0, NULL,  0  },
     { "diff",              1, NULL,  0  },
+    { "no-diff",           0, NULL,  0  },
     { "seed",              1, NULL, 's' },
     { "max-cycles",        1, NULL, 'C' },
     { "max-instr",         1, NULL, 'I' },
@@ -78,6 +83,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
           case 2: args.enable_snapshot = false; continue;
           case 3: args.force_dump_result = true; continue;
           case 4: difftest_ref_so = optarg; continue;
+          case 5: args.enable_diff = false; continue;
         }
         // fall through
       default:
@@ -123,6 +129,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   init_ram(args.image);
 
 #if VM_TRACE == 1
+#ifndef EN_FORKWAIT
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -132,6 +139,11 @@ Emulator::Emulator(int argc, const char *argv[]):
     tfp->open(waveform_filename(now));	// Open the dump file
   }
 #else
+  // VM_TRACE =1 && EN_FORKWAIT
+  enable_waveform = false;
+#endif
+#else
+  // VM_TRACE =0
   enable_waveform = false;
 #endif
 
@@ -211,6 +223,18 @@ inline void Emulator::single_cycle() {
 }
 
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
+
+  difftest_init();
+  init_device();
+  if (args.enable_diff) {
+    init_goldenmem();
+    init_nemuproxy();
+    // recover from verilator based snapshot if necessary
+#ifdef VM_SAVABLE
+    recover_from_file();
+#endif
+  }
+
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   // const int stuck_limit = 5000;
@@ -226,6 +250,34 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     lasttime_poll = t;
   }
 
+#ifdef EN_FORKWAIT
+  printf("[INFO]enable fork wait..\n");
+  pid_t pid =-1;
+  pid_t originPID = getpid();
+  int status = -1;
+  int slotCnt = 1;
+  int waitProcess = 0;
+  uint32_t timer = 0;
+  std::list<pid_t> pidSlot = {};
+  enable_waveform = false;
+
+  //first process as a control process
+  if((pid = fork()) < 0 ){
+    perror("First fork failed..\n");
+    FAIT_EXIT;
+  } else if(pid > 0) {  //parent process
+    printf("[%d] Control process first fork...child: %d\n ",getpid(),pid);
+    prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    forkshm.shwait();
+    printf("[%d] Emulationg finished, Control process exit..",getpid());
+    return cycles;
+  } else {
+    forkshm.info->exitNum++;
+    forkshm.info->flag = true;
+    pidSlot.insert(pidSlot.begin(),  getpid());
+  }
+#endif
+
 #if VM_COVERAGE == 1
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
@@ -240,15 +292,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
     // instruction limitation
     for (int i = 0; i < EMU_CORES; i++) {
-      if (!core_max_instr[i]) {
+      auto trap = difftest[i]->get_trap_event();
+      if (trap->instrCnt >= core_max_instr[i]) {
         trapCode = STATE_LIMIT_EXCEEDED;
         break;
       }
     }
     // assertions
     if (assert_count > 0) {
-      // for (int i = 0;  )
-      // difftest[0]->display();
       eprintf("The simulation stopped. There might be some assertion failed.\n");
       trapCode = STATE_ABORT;
       break;
@@ -281,21 +332,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     dut_ptr->io_perfInfo_clean = 0;
     dut_ptr->io_perfInfo_dump = 0;
 
-    // Naive instr cnt per core
-    for (int i = 0; i < EMU_CORES; i++) {
-      // update instr_cnt
-      uint64_t commit_count = (core_max_instr[i] >= difftest[i]->num_commit) ? difftest[i]->num_commit : core_max_instr[i];
-      core_max_instr[i] -= commit_count;
+    if (args.enable_diff) {
+      trapCode = difftest_state();
+      if (trapCode != STATE_RUNNING) break;
+      if (difftest_step()) {
+        trapCode = STATE_ABORT;
+        break;
+      }
     }
-
-    trapCode = difftest_state();
-    if (trapCode != STATE_RUNNING) break;
-
-    if (difftest_step()) {
-      trapCode = STATE_ABORT;
-      break;
-    }
-    if (trapCode != STATE_RUNNING) break;
 
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
@@ -313,7 +357,41 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 #endif
-  }
+
+#ifdef EN_FORKWAIT  
+    timer = uptime();
+    if (timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess) {   // time out need to fork
+      lasttime_snapshot = timer;
+      if (slotCnt == SLOT_SIZE) {     // kill first wait process
+        pid_t temp = pidSlot.back();
+        pidSlot.pop_back();
+        kill(temp, SIGKILL); 
+        slotCnt--;
+        forkshm.info->exitNum--;
+      }
+      // fork-wait
+      if ((pid = fork()) < 0) {
+        eprintf("[%d]Error: could not fork process!\n",getpid());
+        return -1;
+      } else if (pid != 0) {       // father fork and wait.
+        waitProcess = 1;
+        wait(&status);
+        enable_waveform = forkshm.info->resInfo != STATE_GOODTRAP;
+        if (enable_waveform) {
+          Verilated::traceEverOn(true);	// Verilator must compute traced signals
+          tfp = new VerilatedVcdC;
+          dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+          time_t now = time(NULL);
+          tfp->open(waveform_filename(now));	// Open the dump file
+        }
+      } else {        //child insert its pid
+        slotCnt++;
+        forkshm.info->exitNum++;
+        pidSlot.insert(pidSlot.begin(),  getpid());
+      }
+    } 
+#endif
+}
 
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
@@ -323,9 +401,18 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   save_coverage(coverage_start_time);
 #endif
 
+#ifdef EN_FORKWAIT
+  if(!waitProcess) display_trapinfo();
+  else printf("[%d] checkpoint process: dump wave complete, exit.\n",getpid());
+  forkshm.info->exitNum--;
+  forkshm.info->resInfo = trapCode;
+#endif
+
   display_trapinfo();
+
   return cycles;
 }
+
 
 inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   char buf_time[64];
@@ -344,6 +431,7 @@ inline char* Emulator::snapshot_filename(time_t t) {
   return buf;
 }
 #endif
+
 
 inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
@@ -414,6 +502,47 @@ void Emulator::display_trapinfo() {
     trigger_stat_dump();
   }
 }
+
+#ifdef EN_FORKWAIT
+ForkShareMemory::ForkShareMemory() {
+  if((key_n = ftok(".",'s')<0)) {
+      perror("Fail to ftok\n");
+      FAIT_EXIT
+  }
+  printf("key num:%d\n",key_n);
+
+  if((shm_id = shmget(key_n,1024,0666|IPC_CREAT))==-1) {
+      perror("shmget failed...\n");
+      FAIT_EXIT
+  }
+  printf("share memory id:%d\n",shm_id);
+
+  if((info = (shinfo*)(shmat(shm_id, NULL, 0))) == NULL ) {
+      perror("shmat failed...\n");
+      FAIT_EXIT
+  }
+
+  info->exitNum   = 0;
+  info->flag      = false;
+  info->resInfo   = -1;           //STATE_RUNNING
+}
+
+ForkShareMemory::~ForkShareMemory() {
+  if(shmdt(info) == -1 ){
+    perror("detach error\n");
+  }
+  shmctl(shm_id, IPC_RMID, NULL) ;
+}
+
+void ForkShareMemory::shwait(){
+    while(true){
+        if(info->exitNum == 0 && info->flag){ break;  } 
+        else {  
+            sleep(WAIT_INTERVAL);  
+        }
+    }
+}
+#endif
 
 #ifdef VM_SAVABLE
 void Emulator::snapshot_save(const char *filename) {

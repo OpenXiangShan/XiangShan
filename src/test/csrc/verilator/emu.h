@@ -20,8 +20,40 @@
 #include "snapshot.h"
 #include "VSimTop.h"
 #include <verilated_vcd_c.h>	// Trace file format header
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/prctl.h>
+#include <stdlib.h>
+#include <unistd.h>
 
+#define FORK_INTERVAL 10 // unit: second
+#define SLOT_SIZE 3
+#define FAIT_EXIT    exit(EXIT_FAILURE);
+#define WAIT_INTERVAL 1
 #define SNAPSHOT_INTERVAL 60 // unit: second
+
+typedef struct shinfo{
+  int exitNum;
+  int resInfo;
+  bool flag;
+} shinfo;
+
+class ForkShareMemory{
+    //private
+    key_t  key_n ;
+    int shm_id;
+
+public:
+    shinfo *info;    
+
+    ForkShareMemory();
+    ~ForkShareMemory();
+
+    void shwait();
+};
+
 
 struct EmuArgs {
   uint32_t seed;
@@ -35,6 +67,7 @@ struct EmuArgs {
   bool enable_waveform;
   bool enable_snapshot;
   bool force_dump_result;
+  bool enable_diff;
 
   EmuArgs() {
     seed = 0;
@@ -49,6 +82,7 @@ struct EmuArgs {
     enable_waveform = false;
     enable_snapshot = true;
     force_dump_result = false;
+    enable_diff = true;
   }
 };
 
@@ -61,6 +95,9 @@ private:
   VerilatedSaveMem snapshot_slot[2];
 #endif
   EmuArgs args;
+#ifdef EN_FORKWAIT
+  ForkShareMemory forkshm;
+#endif
 
   enum {
     STATE_GOODTRAP = 0,

@@ -193,11 +193,12 @@ public:
   // Its backend should be cross-platform (NEMU, Spike, ...)
   // Initialize difftest environments
   Difftest(int coreid);
-  DIFF_PROXY *proxy;
+  DIFF_PROXY *proxy = NULL;
   uint32_t num_commit = 0; // # of commits if made progress
   bool has_commit = false; // 1st inst has been commited
   // Trigger a difftest checking procdure
   int step();
+  void update_nemuproxy(int);
   inline bool get_trap_valid() {
     return dut.trap.valid;
   }
@@ -259,9 +260,8 @@ private:
   uint64_t ticks = 0;
   uint64_t last_commit = 0;
 
-
   uint64_t nemu_this_pc;
-  DiffState *state;
+  DiffState *state = NULL;
 
   int check_timeout();
   void do_first_instr_commit();
@@ -281,5 +281,6 @@ extern Difftest **difftest;
 int difftest_init();
 int difftest_step();
 int difftest_state();
+int init_nemuproxy();
 
 #endif

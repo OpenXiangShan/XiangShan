@@ -360,3 +360,5 @@ stack.info*
 *.vpd
 *.bin
 
+!ready-to-run/*
+
