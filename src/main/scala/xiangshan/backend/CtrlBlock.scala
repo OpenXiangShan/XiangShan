@@ -248,7 +248,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
-  VecInit(ftq.io.ftqRead.tail.dropRight(2)) <> redirectGen.io.stage1FtqRead
   io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
   io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
   io.frontend.fromFtq.cfi_reads <> redirectGen.io.stage1CfiRead
