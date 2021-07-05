@@ -1,9 +1,9 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
-	url = https://github.com/RISCVERS/rocket-chip.git
+	url = https://github.com/OpenXiangShan/rocket-chip.git
 [submodule "block-inclusivecache-sifive"]
 	path = block-inclusivecache-sifive
-	url = https://github.com/RISCVERS/block-inclusivecache-sifive.git
+	url = https://github.com/OpenXiangShan/block-inclusivecache-sifive.git
 [submodule "chiseltest"]
 	path = chiseltest
 	url = https://github.com/ucb-bar/chisel-testers2.git
@@ -12,7 +12,8 @@
 	url = https://github.com/chipsalliance/api-config-chipsalliance
 [submodule "berkeley-hardfloat"]
 	path = berkeley-hardfloat
-	url = https://github.com/RISCVERS/berkeley-hardfloat.git
-[submodule "timingScripts"]
-	path = timingScripts
-	url = https://github.com/RISCVERS/timingScripts.git
+	url = https://github.com/OpenXiangShan/berkeley-hardfloat.git
+
+[submodule "ready-to-run"]
+	path = ready-to-run
+	url = https://github.com/OpenXiangShan/ready-to-run

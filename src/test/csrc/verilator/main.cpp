@@ -17,9 +17,6 @@
 #include <locale.h>
 #include <csignal>
 #include "emu.h"
-#include "difftest.h"
-#include "device.h"
-#include "goldenmem.h"
 
 static char mybuf[BUFSIZ];
 
@@ -40,11 +37,6 @@ int main(int argc, const char** argv) {
   }
 
   auto emu = new Emulator(argc, argv);
-  init_goldenmem();
-  difftest_init();
-
-  // init device
-  init_device();
 
   get_sc_time_stamp = [&emu]() -> double {
     return emu->get_cycles();
