@@ -126,5 +126,8 @@ bsp:
 emu: 
 	$(MAKE) -C ./difftest emu
 
+emu-run: 
+	$(MAKE) -C ./difftest emu-run
+
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
