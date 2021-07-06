@@ -21,9 +21,10 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
-SIMTOP = top.SimTop
-IMAGE ?= temp
+SIMTOP  = top.SimTop
+IMAGE  ?= temp
 CONFIG ?= DefaultConfig
+NUM_CORES ?= 1
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -46,7 +47,11 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.runMain $(FPGATOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	mill XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
+		--disable-all --remove-assert --infer-rw                     \
+		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS) \
+		--num-cores $(NUM_CORES)
 	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/sim_sram.v
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
@@ -74,7 +79,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
+		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
+		--num-cores $(NUM_CORES) $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__

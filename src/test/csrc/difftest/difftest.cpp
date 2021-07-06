@@ -37,22 +37,22 @@ static const char *reg_name[DIFFTEST_NR_REG+1] = {
 Difftest **difftest = NULL;
 
 int difftest_init() {
-  difftest = new Difftest*[EMU_CORES];
-  for (int i = 0; i < EMU_CORES; i++) {
+  difftest = new Difftest*[NUM_CORES];
+  for (int i = 0; i < NUM_CORES; i++) {
     difftest[i] = new Difftest(i);
   }
   return 0;
 }
 
 int init_nemuproxy() {
-  for (int i = 0; i < EMU_CORES; i++) {
+  for (int i = 0; i < NUM_CORES; i++) {
     difftest[i]->update_nemuproxy(i);
   }
   return 0;
 }
 
 int difftest_state() {
-  for (int i = 0; i < EMU_CORES; i++) {
+  for (int i = 0; i < NUM_CORES; i++) {
     if (difftest[i]->get_trap_valid()) {
       return difftest[i]->get_trap_code();
     }
@@ -61,7 +61,7 @@ int difftest_state() {
 }
 
 int difftest_step() {
-  for (int i = 0; i < EMU_CORES; i++) {
+  for (int i = 0; i < NUM_CORES; i++) {
     int ret = difftest[i]->step();
     if (ret) {
       return ret;
@@ -263,7 +263,7 @@ void Difftest::do_instr_commit(int i) {
         printf("---  SMP difftest mismatch!\n");
         printf("---  Trying to probe local data of another core\n");
         uint64_t buf;
-        difftest[(EMU_CORES-1) - this->id]->proxy->memcpy_from_ref(&buf, dut.load[i].paddr, len);
+        difftest[(NUM_CORES-1) - this->id]->proxy->memcpy_from_ref(&buf, dut.load[i].paddr, len);
         printf("---    content: %lx\n", buf);
       }
     }

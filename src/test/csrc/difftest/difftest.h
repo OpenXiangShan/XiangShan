@@ -21,7 +21,7 @@
 #include "nemuproxy.h"
 #define DIFF_PROXY NemuProxy
 
-#define DIFFTEST_CORE_NUMBER  EMU_CORES
+#define DIFFTEST_CORE_NUMBER  NUM_CORES
 #define DIFFTEST_COMMIT_WIDTH 6
 #define DIFFTEST_STORE_WIDTH  2
 #define DIFFTEST_LOAD_WIDTH   6
