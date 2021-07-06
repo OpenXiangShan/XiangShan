@@ -576,7 +576,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   // whether we need to write back a block
   // TODO: add support for ProbePerm
   // Now, we only deal with ProbeBlock
-  val miss_writeback = s3_need_replacement && s3_coh === ClientStates.Dirty
+  val miss_writeback = s3_need_replacement && s3_coh =/= ClientStates.Nothing
   val probe_writeback = s3_req.probe
   val need_writeback  = miss_writeback || probe_writeback
 
