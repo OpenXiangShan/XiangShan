@@ -23,8 +23,8 @@
 #include <cassert>
 #include <pthread.h>
 
-#ifndef EMU_CORES
-#define EMU_CORES 1
+#ifndef NUM_CORES
+#define NUM_CORES 1
 #endif
 
 #define ANSI_COLOR_RED     "\x1b[31m"

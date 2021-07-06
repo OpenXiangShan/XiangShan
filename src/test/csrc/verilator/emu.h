@@ -110,10 +110,7 @@ private:
 
   // emu control variable
   uint64_t cycles;
-  // int hascommit[NumCore];
   int trapCode;
-  // uint64_t max_instr[EMU_CORES];
-  // uint64_t max_cycle[EMU_CORES];
 
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
