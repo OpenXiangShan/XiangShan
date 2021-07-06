@@ -95,8 +95,8 @@ DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
 
 SIM_VSRC = $(shell find ./src/test/vsrc/common -name "*.v" -or -name "*.sv")
 
-include verilator.mk
-include vcs.mk
+# include verilator.mk
+# include vcs.mk
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)
@@ -110,39 +110,8 @@ SEED ?= $(shell shuf -i 1-10000 -n 1)
 VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
 VME_MODULES ?=
 
-#-----------------------timing scripts-------------------------
-# run "make vme/tap help=1" to get help info
-
-# extract verilog module from TopMain.v
-# usage: make vme VME_MODULES=Roq
-TIMING_SCRIPT_PATH = ./timingScripts
-vme: $(TOP_V)
-	make -C $(TIMING_SCRIPT_PATH) vme
-
-# get and sort timing analysis with total delay(start+end) and max delay(start or end)
-# and print it out
-tap:
-	make -C $(TIMING_SCRIPT_PATH) tap
-
-# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
-phy_evaluate: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
-phy_evaluate_atc: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-cache:
-	$(MAKE) emu IMAGE=Makefile
-
-release-lock:
-	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
-
-clean: vcs-clean
+clean:
+	$(MAKE) -C ./difftest clean
 	rm -rf ./build
 
 init:
@@ -153,6 +122,9 @@ bump:
 
 bsp:
 	mill -i mill.bsp.BSP/install
+
+emu: 
+	$(MAKE) -C ./difftest emu
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
