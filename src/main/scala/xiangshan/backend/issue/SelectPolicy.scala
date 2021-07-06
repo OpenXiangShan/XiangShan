@@ -31,9 +31,10 @@ class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
     val grant = Vec(config.numDeq, DecoupledIO(UInt(config.numEntries.W))) //TODO: optimize it
   })
 
-  // TODO optimize timing
+  val policy = if (config.numDeq > 2 && config.numEntries > 32) "oddeven" else if (config.numDeq > 2) "circ" else "naive"
+
   val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  val allocate = SelectOne("naive", emptyVec, config.numEnq)
+  val allocate = SelectOne(policy, emptyVec, config.numEnq)
   for (i <- 0 until config.numEnq) {
     val sel = allocate.getNthOH(i + 1)
     io.allocate(i).valid := sel._1
@@ -46,7 +47,6 @@ class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
 
   // a better one: select from both directions
   val request = io.request.asBools
-  val policy = if (config.numDeq > 2 && config.numEntries > 32) "oddeven" else if (config.numDeq > 2) "circ" else "naive"
   val select = SelectOne(policy, request, config.numDeq)
   for (i <- 0 until config.numDeq) {
     val sel = select.getNthOH(i + 1)
