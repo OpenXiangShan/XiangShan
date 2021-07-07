@@ -56,7 +56,7 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
     }
   }
 
-  for((r, i) <- io.readPorts.zipWithIndex){
+  for(r <- io.readPorts){
     r.rdata := spec_table(r.addr)
   }
 

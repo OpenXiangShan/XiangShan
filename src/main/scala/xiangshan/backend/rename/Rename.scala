@@ -82,12 +82,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
 
+  // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RoqCommitInfo: from roq)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
   def needDestRegCommit[T <: RoqCommitInfo](fp: Boolean, x: T): Bool = {
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
+  // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
   fpFreeList.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
   intFreeList.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(false, i)})
   // walk has higher priority than allocation and thus we don't use isWalk here
@@ -95,25 +97,21 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
 
   // speculatively assign the instruction with an roqIdx
-  val validCount = PopCount(io.in.map(_.valid))
+  val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter roq (from decode)
   val roqIdxHead = RegInit(0.U.asTypeOf(new RoqPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
-  val roqIdxHeadNext = Mux(io.flush,
-    0.U.asTypeOf(new RoqPtr),
-    Mux(io.redirect.valid,
-      io.redirect.bits.roqIdx,
-      Mux(lastCycleMisprediction,
-        roqIdxHead + 1.U,
-        Mux(canOut, roqIdxHead + validCount, roqIdxHead))
-    )
-  )
+  val roqIdxHeadNext = Mux(io.flush, 0.U.asTypeOf(new RoqPtr),
+              Mux(io.redirect.valid, io.redirect.bits.roqIdx,
+         Mux(lastCycleMisprediction, roqIdxHead + 1.U,
+                         Mux(canOut, roqIdxHead + validCount, 
+                      /* default */  roqIdxHead))))
   roqIdxHead := roqIdxHeadNext
 
   /**
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new MicroOp))
-
+  // uop initialization
   uops.foreach( uop => {
 //    uop.brMask := DontCare
 //    uop.brTag := DontCare
@@ -130,6 +128,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
   val needIntDest = Wire(Vec(RenameWidth, Bool()))
   val hasValid = Cat(io.in.map(_.valid)).orR
+  // uop calculation
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -240,7 +239,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // CSR control (by srnctl)
       io.csrCtrl.move_elim_enable
   }
-
+  
+  // calculate lsq space requirement
   val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
   val isStore = VecInit(uops.map(uop => FuType.isStoreExu(uop.ctrl.fuType)))
   val isAMO   = VecInit(uops.map(uop => FuType.isAMO(uop.ctrl.fuType)))
@@ -260,9 +260,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
 
     allPhyResource.map{ case (rat, freelist, fp) =>
-      // walk back write
       val commitDestValid = io.roqCommits.valid(i) && needDestRegCommit(fp, io.roqCommits.info(i))
-
+      
+      // walk back write - restore spec state
       when (commitDestValid && io.roqCommits.isWalk) {
         rat.specWritePorts(i).wen := true.B
         rat.specWritePorts(i).addr := io.roqCommits.info(i).ldest
@@ -271,6 +271,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
           p" ldest:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n")
       }
 
+      // normal write - update arch state
       rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits.isWalk
       rat.archWritePorts(i).addr := io.roqCommits.info(i).ldest
       rat.archWritePorts(i).wdata := io.roqCommits.info(i).pdest
@@ -280,6 +281,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
           p" pdest:${rat.archWritePorts(i).wdata}\n"
       )
 
+      // update freelist (label old_pdest as free)
       freelist.deallocReqs(i) := rat.archWritePorts(i).wen
       freelist.deallocPregs(i) := io.roqCommits.info(i).old_pdest
     }
