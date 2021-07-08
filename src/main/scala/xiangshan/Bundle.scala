@@ -24,8 +24,8 @@ import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasTageParameter
-import xiangshan.frontend.HasSCParameter
+// import xiangshan.frontend.HasTageParameter
+// import xiangshan.frontend.HasSCParameter
 import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
@@ -74,23 +74,23 @@ object RSFeedbackType {
   def apply() = UInt(2.W)
 }
 
-class SCMeta(val useSC: Boolean)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-  val tageTaken = if (useSC) Bool() else UInt(0.W)
-  val scUsed = if (useSC) Bool() else UInt(0.W)
-  val scPred = if (useSC) Bool() else UInt(0.W)
-  // Suppose ctrbits of all tables are identical
-  val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-}
+// class SCMeta(val useSC: Boolean)(implicit p: Parameters) extends XSBundle with HasSCParameter {
+//   val tageTaken = if (useSC) Bool() else UInt(0.W)
+//   val scUsed = if (useSC) Bool() else UInt(0.W)
+//   val scPred = if (useSC) Bool() else UInt(0.W)
+//   // Suppose ctrbits of all tables are identical
+//   val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+// }
 
-class TageMeta(implicit p: Parameters) extends XSBundle with HasTageParameter {
-  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-  val altDiffers = Bool()
-  val providerU = UInt(2.W)
-  val providerCtr = UInt(3.W)
-  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-  val taken = Bool()
-  val scMeta = new SCMeta(EnableSC)
-}
+// class TageMeta(implicit p: Parameters) extends XSBundle with HasTageParameter {
+//   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+//   val altDiffers = Bool()
+//   val providerU = UInt(2.W)
+//   val providerCtr = UInt(3.W)
+//   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+//   val taken = Bool()
+//   val scMeta = new SCMeta(EnableSC)
+// }
 
 @chiselName
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasIFUConst {
@@ -139,7 +139,7 @@ class BpuMeta(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   val btbWriteWay = UInt(log2Up(BtbWays).W)
   val btbHit = Bool()
   val bimCtr = UInt(2.W)
-  val tageMeta = new TageMeta
+  // val tageMeta = new TageMeta
   // for global history
 
   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)

@@ -40,8 +40,8 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
   def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
-  def getBank(x: UInt) = getIdx(x)(log2Up(banks) - 1, 0)
-  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
+  def getBank(x: UInt) = if (banks > 1) getIdx(x)(log2Up(banks) - 1, 0) else 0.U
+  def getBankIdx(x: UInt) = if (banks > 1) getIdx(x)(idxBits - 1, log2Up(banks)) else getIdx(x)
 }
 
 class PredictorResponse(implicit p: Parameters) extends XSBundle {
@@ -472,7 +472,7 @@ abstract class BaseBPU(implicit p: Parameters) extends XSModule with BranchPredi
     p.fires <> io.inFire
     p.ctrl <> io.ctrl
   })
-  
+
   io.in_ready := preds.map(p => p.in_ready).reduce(_&&_)
 
   val s1 = Module(new BPUStage1)
@@ -621,7 +621,7 @@ class BPU(implicit p: Parameters) extends BaseBPU {
   s3.s3IO.predecode <> io.predecode
   s3.s3IO.redirect <> io.redirect
   s3.s3IO.ctrl <> io.ctrl
-  
+
 
   if (BPUDebug) {
     if (debug_verbose) {
