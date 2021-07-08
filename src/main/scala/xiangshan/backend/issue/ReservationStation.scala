@@ -20,7 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.{ImmUnion, Imm_U}
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem.{SqPtr, StoreDataBundle}
@@ -218,34 +217,11 @@ class ReservationStation
   // select whether the source is from (whether regfile or imm)
   // for read-after-issue, it's done over the selected uop
   // for read-before-issue, it's done over the enqueue uop (and store the imm in dataArray to save space)
-  def extractImm(uop: MicroOp) : Vec[Valid[UInt]] = {
-    val data = Wire(Vec(config.numSrc, Valid(UInt(config.dataBits.W))))
-    data := DontCare
-    data.map(_.valid := false.B)
-    if (exuCfg == JumpExeUnitCfg) {
-        data(0).valid := SrcType.isPc(uop.ctrl.srcType(0))
-        data(0).bits := SignExt(io.jumpPc, XLEN)
-        data(1).valid := true.B
-        data(1).bits := io.jalr_target
-    }
-    // alu only need U type and I type imm
-    else if (exuCfg == AluExeUnitCfg) {
-      data(1).valid := SrcType.isImm(uop.ctrl.srcType(1))
-      val imm32 = Mux(uop.ctrl.selImm === SelImm.IMM_U,
-        ImmUnion.U.toImm32(uop.ctrl.imm),
-        ImmUnion.I.toImm32(uop.ctrl.imm)
-      )
-      data(1).bits := SignExt(imm32, XLEN)
-    }
-    data
-  }
   // lastAllocateUop: Vec(config.numEnq, new MicroOp)
   val lastAllocateUop = RegNext(VecInit(io.fromDispatch.map(_.bits)))
   val immBypassedData = Wire(Vec(config.numEnq, Vec(config.numSrc, UInt(config.dataBits.W))))
   for (((uop, data), bypass) <- lastAllocateUop.zip(io.srcRegValue).zip(immBypassedData)) {
-    bypass := extractImm(uop).zip(data).map {
-      case (imm, reg_data) => Mux(imm.valid, imm.bits, reg_data)
-    }
+    bypass := ImmExtractor(config, exuCfg, uop, data, io.jumpPc, io.jalr_target)
   }
 
   /**
@@ -293,7 +269,7 @@ class ReservationStation
     // for read-after-issue, we need to bypass the imm here
     // check enq data bypass (another form of broadcast except that we know where it hits) here
     // enqRegSelected: Vec(config.numEnq, Bool())
-    val enqRegSelected = VecInit(select.io.allocate.map(a => RegNext(a.bits) === select.io.grant(i).bits))
+    val enqRegSelected = VecInit(select.io.allocate.map(a => RegNext(a.fire()) && RegNext(a.bits) === select.io.grant(i).bits))
     // enqSrcStateReg: Vec(config.numEnq, Vec(config.numSrc, Bool()))
     // [i][j]: i-th enqueue, j-th source state
     val enqSrcStateReg = RegNext(VecInit(statusArray.io.update.map(_.data.srcState)))
