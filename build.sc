@@ -101,6 +101,13 @@ object XiangShan extends CommonModule with SbtModule {
     def testFrameworks = Seq(
       "org.scalatest.tools.Framework"
     )
+
+    // run `mill XiangShan.test.testOne path.of.class`
+    // ! Note: former "XiangShan" stands for this class in build.sc; 
+    // !       latter "xiangshan" stands for class defined in Scala (lowercase).
+    def testOne(args: String*) = T.command {
+      super.runMain("org.scalatest.run", args: _*)
+    }
   }
 
 }
