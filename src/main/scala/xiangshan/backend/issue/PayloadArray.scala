@@ -49,7 +49,7 @@ class PayloadArray[T <: Data](gen: T, config: RSConfig)(implicit p: Parameters) 
   // read ports
   io.read.map(_.data).zip(io.read.map(_.addr)).map {
     case (data, addr) => data := Mux1H(addr, payload)
-    XSError(PopCount(addr) > 1.U, f"raddr ${Binary(addr)} is not one-hot\n")
+    XSError(PopCount(addr) > 1.U, p"raddr ${Binary(addr)} is not one-hot\n")
   }
 
   // write ports
@@ -60,7 +60,7 @@ class PayloadArray[T <: Data](gen: T, config: RSConfig)(implicit p: Parameters) 
     when (wen) {
       payload(i) := wdata
     }
-    XSError(PopCount(wenVec) > 1.U, f"wenVec ${Binary(wenVec.asUInt)} is not one-hot\n")
+    XSError(PopCount(wenVec) > 1.U, p"wenVec ${Binary(wenVec.asUInt)} is not one-hot\n")
   }
 
   for (w <- io.write) {

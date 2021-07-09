@@ -214,7 +214,7 @@ inline void Emulator::single_cycle() {
     uint64_t cycle = trap->cycleCnt;
     uint64_t begin = dut_ptr->io_logCtrl_log_begin;
     uint64_t end   = dut_ptr->io_logCtrl_log_end;
-    bool in_range = (begin <= cycle) && (cycle <= end);
+    bool in_range  = (begin <= cycle) && (cycle <= end);
     if (in_range) { tfp->dump(cycle); }
   }
 #endif
@@ -236,15 +236,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   init_device();
   if (args.enable_diff) {
     init_goldenmem();
-    init_nemuproxy();
   }
+  init_nemuproxy();
 
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
-  // const int stuck_limit = 5000;
-  // const int firstCommit_limit = 10000;
-  uint64_t core_max_instr[EMU_CORES];
-  for (int i = 0; i < EMU_CORES; i++) {
+  uint64_t core_max_instr[NUM_CORES];
+  for (int i = 0; i < NUM_CORES; i++) {
     core_max_instr[i] = max_instr;
   }
 
@@ -255,7 +253,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
 #ifdef EN_FORKWAIT
-  printf("[INFO]enable fork wait..\n");
+  printf("[INFO] enable fork wait..\n");
   pid_t pid =-1;
   pid_t originPID = getpid();
   int status = -1;
@@ -266,19 +264,19 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   enable_waveform = false;
 
   //first process as a control process
-  if((pid = fork()) < 0 ){
+  if ((pid = fork()) < 0) {
     perror("First fork failed..\n");
     FAIT_EXIT;
-  } else if(pid > 0) {  //parent process
-    printf("[%d] Control process first fork...child: %d\n ",getpid(),pid);
+  } else if (pid > 0) {  //parent process
+    printf("[%d] Control process first fork...child: %d\n ", getpid(), pid);
     prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
     forkshm.shwait();
-    printf("[%d] Emulationg finished, Control process exit..",getpid());
+    printf("[%d] Simulation finished, Control process exit..", getpid());
     return cycles;
   } else {
     forkshm.info->exitNum++;
     forkshm.info->flag = true;
-    pidSlot.insert(pidSlot.begin(),  getpid());
+    pidSlot.insert(pidSlot.begin(), getpid());
   }
 #endif
 
@@ -288,6 +286,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   // we distinguish multiple dat files by emu start time
   time_t coverage_start_time = time(NULL);
 #endif
+
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     // cycle limitation
     if (!max_cycle) {
@@ -295,7 +294,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       break;
     }
     // instruction limitation
-    for (int i = 0; i < EMU_CORES; i++) {
+    for (int i = 0; i < NUM_CORES; i++) {
       auto trap = difftest[i]->get_trap_event();
       if (trap->instrCnt >= core_max_instr[i]) {
         trapCode = STATE_LIMIT_EXCEEDED;
@@ -316,7 +315,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       break;
     }
 
-    for (int i = 0; i < EMU_CORES; i++) {
+    for (int i = 0; i < NUM_CORES; i++) {
       auto trap = difftest[i]->get_trap_event();
       if (trap->instrCnt >= args.warmup_instr) {
         printf("Warmup finished. The performance counters will be dumped and then reset.\n");
@@ -361,14 +360,14 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 #endif
 
-#ifdef EN_FORKWAIT  
+#ifdef EN_FORKWAIT
     timer = uptime();
     if (timer - lasttime_snapshot > 1000 * FORK_INTERVAL && !waitProcess) {   // time out need to fork
       lasttime_snapshot = timer;
       if (slotCnt == SLOT_SIZE) {     // kill first wait process
         pid_t temp = pidSlot.back();
         pidSlot.pop_back();
-        kill(temp, SIGKILL); 
+        kill(temp, SIGKILL);
         slotCnt--;
         forkshm.info->exitNum--;
       }
@@ -390,9 +389,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       } else {        //child insert its pid
         slotCnt++;
         forkshm.info->exitNum++;
-        pidSlot.insert(pidSlot.begin(),  getpid());
+        pidSlot.insert(pidSlot.begin(), getpid());
       }
-    } 
+    }
 #endif
 }
 
@@ -468,7 +467,7 @@ void Emulator::trigger_stat_dump() {
 }
 
 void Emulator::display_trapinfo() {
-  for (int i = 0; i < EMU_CORES; i++) {
+  for (int i = 0; i < NUM_CORES; i++) {
     printf("Core %d: ", i);
     auto trap = difftest[i]->get_trap_event();
     uint64_t pc = trap->pc;
@@ -508,21 +507,21 @@ void Emulator::display_trapinfo() {
 
 #ifdef EN_FORKWAIT
 ForkShareMemory::ForkShareMemory() {
-  if((key_n = ftok(".",'s')<0)) {
-      perror("Fail to ftok\n");
-      FAIT_EXIT
+  if ((key_n = ftok(".", 's') < 0)) {
+    perror("Fail to ftok\n");
+    FAIT_EXIT
   }
-  printf("key num:%d\n",key_n);
+  printf("key num:%d\n", key_n);
 
-  if((shm_id = shmget(key_n,1024,0666|IPC_CREAT))==-1) {
-      perror("shmget failed...\n");
-      FAIT_EXIT
+  if ((shm_id = shmget(key_n, 1024, 0666 | IPC_CREAT))==-1) {
+    perror("shmget failed...\n");
+    FAIT_EXIT
   }
-  printf("share memory id:%d\n",shm_id);
+  printf("share memory id:%d\n", shm_id);
 
-  if((info = (shinfo*)(shmat(shm_id, NULL, 0))) == NULL ) {
-      perror("shmat failed...\n");
-      FAIT_EXIT
+  if ((info = (shinfo*)(shmat(shm_id, NULL, 0))) == NULL ) {
+    perror("shmat failed...\n");
+    FAIT_EXIT
   }
 
   info->exitNum   = 0;
@@ -531,19 +530,21 @@ ForkShareMemory::ForkShareMemory() {
 }
 
 ForkShareMemory::~ForkShareMemory() {
-  if(shmdt(info) == -1 ){
+  if (shmdt(info) == -1) {
     perror("detach error\n");
   }
-  shmctl(shm_id, IPC_RMID, NULL) ;
+  shmctl(shm_id, IPC_RMID, NULL);
 }
 
-void ForkShareMemory::shwait(){
-    while(true){
-        if(info->exitNum == 0 && info->flag){ break;  } 
-        else {  
-            sleep(WAIT_INTERVAL);  
-        }
+void ForkShareMemory::shwait() {
+  while (true) {
+    if (info->exitNum == 0 && info->flag) {
+      break;
     }
+    else {
+      sleep(WAIT_INTERVAL);
+    }
+  }
 }
 #endif
 

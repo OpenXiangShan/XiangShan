@@ -155,3 +155,108 @@ object XORFold {
     ParallelXOR((0 until fold_range).map(i => value(i*resWidth+resWidth-1, i*resWidth)))
   }
 }
+
+object OnesMoreThan {
+  def apply(input: Seq[Bool], thres: Int): Bool = {
+    if (thres == 0) {
+      true.B
+    }
+    else if (input.length < thres) {
+      false.B
+    }
+    else {
+      val tail = input.drop(1)
+      input(0) && OnesMoreThan(tail, thres - 1) || OnesMoreThan(tail, thres)
+    }
+  }
+}
+
+abstract class SelectOne {
+  def getNthOH(n: Int): (Bool, Vec[Bool])
+}
+
+class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  val n_bits = bits.length
+  val n_sel = if (max_sel > 0) max_sel else n_bits
+  require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
+  private val matrix = Wire(Vec(n_bits, Vec(n_sel, Bool())))
+  // matrix[i][j]: first i bits has j one's
+  for (i <- 0 until n_bits) {
+    for (j <- 0 until n_sel) {
+      if (j == 0) {
+        matrix(i)(j) := (if (i == 0) true.B else !Cat(bits.take(i)).orR)
+      }
+      // it's impossible to select j-th one from i elements
+      else if (i < j) {
+        matrix(i)(j) := false.B
+      }
+      else {
+        matrix(i)(j) := bits(i - 1) && matrix(i - 1)(j - 1) || !bits(i - 1) && matrix(i - 1)(j)
+      }
+    }
+  }
+
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+    require(n > 0, s"n should be positive to select the n-th one")
+    require(n <= n_sel, s"n should not be larger than n_sel")
+    // bits(i) is true.B and bits(i - 1, 0) has n - 1
+    val selValid = OnesMoreThan(bits, n)
+    val sel = VecInit(bits.zip(matrix).map{ case (b, m) => b && m(n - 1) })
+    (selValid, sel)
+  }
+}
+
+class CircSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  val n_bits = bits.length
+  val n_sel = if (max_sel > 0) max_sel else n_bits
+  require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
+
+  val sel_forward = new NaiveSelectOne(bits, (n_sel + 1) / 2)
+  val sel_backward = new NaiveSelectOne(bits.reverse, n_sel / 2)
+
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+    val selValid = OnesMoreThan(bits, n)
+    val sel_index = (n + 1) / 2
+    if (n % 2 == 1) {
+      (selValid, sel_forward.getNthOH(sel_index)._2)
+    }
+    else {
+      (selValid, VecInit(sel_backward.getNthOH(sel_index)._2.reverse))
+    }
+  }
+}
+
+class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
+  val n_bits = bits.length
+  val n_sel = if (max_sel > 0) max_sel else n_bits
+  require(n_bits > 0 && n_sel > 0 && n_bits >= n_sel)
+  require(n_sel > 1, "Select only one entry via OddEven causes odd entries to be ignored")
+
+  val n_even = (n_bits + 1) / 2
+  val sel_even = new CircSelectOne((0 until n_even).map(i => bits(2 * i)), n_sel / 2)
+  val n_odd = n_bits / 2
+  val sel_odd = new CircSelectOne((0 until n_odd).map(i => bits(2 * i + 1)), (n_sel + 1) / 2)
+
+  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+    val sel_index = (n + 1) / 2
+    if (n % 2 == 1) {
+      val selected = sel_even.getNthOH(sel_index)
+      val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 0) selected._2(i / 2) else false.B))
+      (selected._1, sel)
+    }
+    else {
+      val selected = sel_odd.getNthOH(sel_index)
+      val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 1) selected._2(i / 2) else false.B))
+      (selected._1, sel)
+    }
+  }
+}
+
+object SelectOne {
+  def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = policy.toLowerCase match {
+    case "naive" => new NaiveSelectOne(bits, max_sel)
+    case "circ" => new CircSelectOne(bits, max_sel)
+    case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+    case _ => throw new IllegalArgumentException(s"unknown select policy")
+  }
+}

@@ -31,24 +31,27 @@ class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
     val grant = Vec(config.numDeq, DecoupledIO(UInt(config.numEntries.W))) //TODO: optimize it
   })
 
-  // TODO optimize timing
-  var maskedEmptyVec = VecInit(io.validVec.asBools.map(v => !v))
+  val policy = if (config.numDeq > 2 && config.numEntries > 32) "oddeven" else if (config.numDeq > 2) "circ" else "naive"
+
+  val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
+  val allocate = SelectOne(policy, emptyVec, config.numEnq)
   for (i <- 0 until config.numEnq) {
-    io.allocate(i).valid := maskedEmptyVec.asUInt.orR
-    io.allocate(i).bits := PriorityEncoderOH(maskedEmptyVec.asUInt)
-    maskedEmptyVec = VecInit(maskedEmptyVec.zip(io.allocate(i).bits.asBools).map{ case (m, s) => m && !s })
+    val sel = allocate.getNthOH(i + 1)
+    io.allocate(i).valid := sel._1
+    io.allocate(i).bits := sel._2.asUInt
 
     XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
       p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
     XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
-  // TODO optimize timing
-  var maskedRequest = VecInit(io.request.asBools)
+  // a better one: select from both directions
+  val request = io.request.asBools
+  val select = SelectOne(policy, request, config.numDeq)
   for (i <- 0 until config.numDeq) {
-    io.grant(i).valid := maskedRequest.asUInt.orR
-    io.grant(i).bits := PriorityEncoderOH(maskedRequest.asUInt)
-    maskedRequest = VecInit(maskedRequest.zip(io.grant(i).bits.asBools).map{ case(m, s) => m && !s })
+    val sel = select.getNthOH(i + 1)
+    io.grant(i).valid := sel._1
+    io.grant(i).bits := sel._2.asUInt
 
     XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")

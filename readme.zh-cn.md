@@ -13,6 +13,9 @@ English Readme is [here](README.md).
 
 未来更多的文档也将更新到相同的仓库。
 
+## 邮件列表
+可以通过[我们的邮件列表](mailto:xiangshan-all@ict.ac.cn)联系我们。列表中的所有邮件会存档到[这里](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/)。
+
 ## 处理器架构
 
 自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。目前版本的香山（即南湖）正在 master 分支上不断开发中。
