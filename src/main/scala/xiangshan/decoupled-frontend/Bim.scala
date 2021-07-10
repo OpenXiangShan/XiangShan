@@ -78,10 +78,10 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   val oldCtrs = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx), wrbypass_ctrs(wrbypass_hit_idx), update.meta)
 
-  val newTaken = update.cfi_idx.valid
+  val newTaken = update.preds.taken
   val newCtrs = satUpdate(oldCtrs, 2, newTaken)
 
-  val need_to_update = u_valid && update.cfi_is_br
+  val need_to_update = u_valid && update.preds.is_br.reduce(_||_)
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := false.B)}
 

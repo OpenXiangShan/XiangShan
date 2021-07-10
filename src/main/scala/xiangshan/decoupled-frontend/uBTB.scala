@@ -29,6 +29,7 @@ trait MicroBTBParams extends HasXSParameter {
   val tag_size = 20
   val lower_bit_size = 20
   val untaggedBits = log2Up(PredictWidth) + instOffsetBits
+  val num_br = 1
 }
 
 @chiselName
@@ -40,7 +41,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   class MicroBTBMeta extends XSBundle
   {
-    val is_Br = Bool()
+    val is_Br = Vec(num_br, Bool())
     val is_RVC = Bool()
     val valid = Bool()
     val pred = UInt(2.W)
@@ -58,7 +59,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val taken = Bool()
     val target = UInt(VAddrBits.W)
     val is_RVC = Bool()
-    val is_Br = Bool()
+    val is_Br = Vec(num_br, Bool())
   }
 
   class UBTBBank(val nWays: Int) extends XSModule with HasIFUConst with BPUUtils {
@@ -108,7 +109,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val ren = io.read_pc.valid
     io.read_resp.valid := ren
     io.read_resp.is_RVC := ren && hit_meta.is_RVC
-    io.read_resp.is_Br := ren && hit_meta.is_Br
+    when(ren) {
+      io.read_resp.is_Br := hit_meta.is_Br
+    }.otherwise {
+      io.read_resp.is_Br := 0.U(num_br.W)
+    }
     io.read_resp.taken := ren && hit_and_taken
     io.read_resp.target := target
     io.read_hit := hit_oh.orR
@@ -185,18 +190,18 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val update = RegNext(io.update.bits)
   val u_valid = RegNext(io.update.valid)
   val u_pc = update.pc
-  val u_taken = update.cfi_idx.valid
+  val u_taken = update.preds.taken
 
   val u_tag = getTag(u_pc)
-  val u_target_lower = update.target(lower_bit_size-1+instOffsetBits, instOffsetBits)
+  val u_target_lower = update.preds.pred_target(lower_bit_size-1+instOffsetBits, instOffsetBits)
 
   val data_write_valid = u_valid && u_taken
-  val meta_write_valid = u_valid && (u_taken || update.cfi_is_br)
+  val meta_write_valid = u_valid && (u_taken || update.preds.is_br.reduce(_||_))
 
   val update_write_datas = new MicroBTBData
   val update_write_metas = new MicroBTBMeta
 
-  update_write_metas.is_Br := update.cfi_is_br
+  update_write_metas.is_Br := update.preds.is_br.reduce(_||_)
   update_write_metas.valid := true.B
   update_write_metas.tag := u_tag
   update_write_metas.pred := DontCare

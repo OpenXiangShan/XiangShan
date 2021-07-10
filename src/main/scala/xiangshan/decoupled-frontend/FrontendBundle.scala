@@ -33,13 +33,27 @@ class FetchToICache(implicit p: Parameters) extends XSBundle {
 
 }
 
-class FetchToMissQueue(implicit p: Parameters) extends XSBudnle {
+class FetchToMissQueue(implicit p: Parameters) extends XSBundle {
 
 }
 
 class MissQueueToFetch(implicit p: Parameters) extends XSBundle{
 
 }
+
+class BPUToFtq(implicit p: Parameters) extends XSBundle {
+ val resp = DecoupledIO(new BranchPredictionBundle)
+}
+
+class FtqTOBPU(implicit p: Parameters) extends XSBundle {
+  val update = Flipped(Valid(new BranchPredictionUpdate))
+  val redirect = Flipped(Valid(new BranchPredictionRedirect))
+}
+
+class FetchTOBPU(implicit p: Parameters) extends XSBundle {
+  val ifu_redirect = Flipped(Valid(UInt(VAddrBits.W)))
+}
+
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))

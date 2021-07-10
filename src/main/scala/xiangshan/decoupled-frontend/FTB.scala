@@ -30,7 +30,6 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val num_entries = 2048
   val num_ways    = 4
   val num_sets    = num_entries/num_ways // 512
-  val num_br      = 1
   val tag_size    = 20
 }
 
@@ -166,8 +165,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val u_meta = update.meta.asTypeOf(new FTBMeta)
   val u_way = u_meta.writeWay
   val u_idx = ftbAddr.getIdx(u_pc)
-  val u_is_br = update.br_mask(update.cfi_idx.bits)
-  val u_taken = update.cfi_idx.valid && (update.jmp_valid || update.br_mask(update.cfi_idx.bits))
+  // val u_is_br = update.br_mask(update.cfi_idx.bits)
+  val u_is_br = update.preds.is_br.reduce(_||_) && update.preds.taken
+  // val u_taken = update.cfi_idx.valid && (update.jmp_valid || update.br_mask(update.cfi_idx.bits))
+  val u_taken = update.preds.taken && (update.preds.is_jal || update.preds.is_br.reduce(_||_))
 
   val ftb_write = Wire(new FTBEntry)
   ftb_write.valid := true.B
