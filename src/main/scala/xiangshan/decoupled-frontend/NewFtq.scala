@@ -61,6 +61,24 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
   val spec_meta = UInt()
 }
 
+class FtqRead(implicit val p: Parameters) extends Bundle {
+  val ptr = Output(new FtqPtr)
+  val entry = Input(new FtqEntry)
+}
+
+class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
+  val redirect = Valid(new BpuRedirectBundle)
+  val update = Valid(new BpuUpdateBundle)
+}
+
+class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
+  val req = Decoupled(new FetchRequestBundle)
+}
+
+class FtqToBackendIO(implicit p: Parameters) extends XSBundle {
+  val ftqRead = Vec(1 + 6 + 1 + 1 + 1, Flipped(new FtqRead))
+}
+
 class NewFtq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
