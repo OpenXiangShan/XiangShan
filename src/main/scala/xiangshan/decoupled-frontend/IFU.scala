@@ -6,12 +6,16 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class FtqInterface(implicit p: Parameters) extends XSBundle {
-  val fromFtq = Flipped(DecoupledIO(new FtqToFetch))
-  val toFtq   = Valid(new FetchToFtq)
+class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
+  val pdWb = Valid(new PredecodeWritebackBundle)
 }
 
-class ICacheInterface（implicit p: Parameters) extends XSBundle {
+class FtqInterface(implicit p: Parameters) extends XSBundle {
+  val fromFtq = Flipped(new FtqToIfuIO)
+  val toFtq   = new IfuToFtqIO
+}
+
+class ICacheInterface (implicit p: Parameters) extends XSBundle {
   val toIMeta       = DecoupledIO(new FetchToICache)
   val toIData       = DecoupledIO(new FetchToICache)
   val toMissQueue   = DecoupledIO(new FetchToMissQueue)
@@ -39,9 +43,9 @@ class IFU(implicit p: Parameters) extends XSModule
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = Seq(toMeta, toData)
   fetch_req.map(channel => 
-    channel.valid        := fromFtq.valid 
-    channel.bits.start   := fromFtq.startAddr
-    channel.bits.endOffset  := fromFtq.bits.endOffset 
+    channel.valid        := fromFtq.req.valid 
+    channel.bits.start   := fromFtq.req.bits.startAddr
+    channel.bits.fallThru  := fromFtq.req.bits.fallThruAddr
   )
 
   //fetch response
@@ -52,10 +56,10 @@ class IFU(implicit p: Parameters) extends XSModule
   (0 until FetchWidth).map(i  => io.toIbuffer.bits.instr(i) := data_resp.bits.instr(i))
 
   val f1_valid  = RegInit(false.B)
-  val f1_ftqIdx = RegEnable(next = fromFtq.bits.ftqIdx, enable=fromFtq.valid)
+  val f1_ftqIdx = RegEnable(next = fromFtq.req.bits.ftqIdx, enable=fromFtq.req.valid)
   val f1_ready  = WireInit(false.B)
   val f1_fire   = f1_valid && f1_ready 
-  when(fromFtq.valid){
+  when(fromFtq.req.valid){
     f1_valid  := true.B
   } .elsewhen(f1_fire) {
     f1_valid  := false.B

@@ -6,13 +6,19 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class FtqToFetch(implicit p:Parameters) extends XSBundle {
+class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr = UInt(VAddrBits.W)
-  val endOffset = UInt(log2Ceil(FETCHBYTE).W)
+  val fallThruAddr = UInt(VAddrBits.W)
   val ftqIdx    = UInt(log2Ceil(FTQSIZE).W)
 }
 
-class FetchToFtq(implicit p: Parameters) extends XSBundle {
+class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
+  val pd = Vec(16, new Predecode) // TODO: redefine Predecode
+  val ftqIdx = UInt(log2Ceil(FTQSIZE).W)
+}
+
+
+class IfuToFtq(implicit p: Parameters) extends XSBundle {
 }
 
 class IMetaToFetch(implicit p: Parameters) extends XSBundle {
