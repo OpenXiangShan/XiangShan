@@ -119,7 +119,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     tagArray.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx)
 
     if(i == 0) tagArray.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
-    else       tagArray.io.w.req.valid := io.write.valid &&  io.write bits.bankIdx
+    else       tagArray.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
     tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.virIdx, waymask=io.write.waymask)
    
     tagArray  
@@ -138,7 +138,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     validArray := validArray.bitSet(validPtr, true.B)
   }
 
-  (io.resp.tags zip tagArray).map    {case (io, sram) => io := sram.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W))}
+  (io.resp.tags zip tagArray).map    {case (io, sram) => io := sram.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))}
   (io.resp.valid zip validMetas).map {case (io, reg)  => io := reg.asTypeOf(Vec(nWays,Bool()))}
 }
 
@@ -170,7 +170,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       way.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx)
 
       if(i == 0) way.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
-      else       way.io.w.req.valid := io.write.valid &&  io.write bits.bankIdx
+      else       way.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
       way.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.virIdx, waymask=io.write.waymask)
      
     }

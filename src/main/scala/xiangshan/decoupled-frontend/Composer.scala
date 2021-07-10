@@ -57,14 +57,31 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
 
   ubtb.io.flush := ftb.io.flush_out.valid
 
-  ubtb.io.f0_valid  := io.f0_valid && ubtb.io.resp.valid
+  ubtb.io.f0_pc.valid  := io.f0_pc.valid && ubtb.io.resp.valid
   ubtb.io.f0_pc     := Mux(ftb.io.flush_out.valid, ubtb.io.resp.bits.f1.preds.pred_target, ftb.io.flush_out.bits)
 
-  bim.io.f0_valid := io.f0_valid && ftb.io.resp.valid
+  bim.io.f0_pc.valid := io.f0_pc.valid && ftb.io.resp.valid
   bim.io.f0_pc := ftb.io.resp.bits.f2.preds.pred_target
 
-  ftb.io.f0_valid := io.f0_valid && ftb.io.resp.valid
+  ftb.io.f0_pc.valid := io.f0_pc.valid && ftb.io.resp.valid
   ftb.io.f0_pc := ftb.io.resp.bits.f2.preds.pred_target
+
+  val f1_resp_valid = bim.io.resp.valid
+  val f1_resp = bim.io.resp.bits.f1
+
+  val f2_resp_valid = ftb.io.resp.valid
+  val f2_resp = ftb.io.resp.bits.f2
+
+  when(f2_resp_valid) {
+    when(f2_resp.preds.taken =/= ftb.io.resp.bits.f1.preds.taken ||
+      f2_resp.preds.pred_target =/= ftb.io.resp.bits.f1.preds.pred_target) {
+      ubtb.io.flush := true.B
+      ubtb.io.f0_pc := f2_resp.preds.pred_target
+
+      bim.io.flush := true.B
+      bim.io.f0_pc := f2_resp.preds.pred_target
+    }
+  }
 
   // ftb.io.f0_pc     := ubtb.io.resp.bits.f2.preds.pred_target
 

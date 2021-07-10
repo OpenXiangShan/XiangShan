@@ -85,13 +85,16 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
 }
 
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val taken = Bool()
+  val taken_mask = Vec(num_br+1, Bool())
   val is_br = Vec(num_br, Bool())
   val is_jal = Bool()
+  val is_jalr = Bool()
   val is_call = Bool()
   val is_ret = Bool()
   val call_is_rvc = Bool()
   val pred_target = UInt(VAddrBits.W)
+
+  def taken = taken_mask.reduce(_||_)
 }
 
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst {
@@ -149,8 +152,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends XSBundle with Has
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
 
-  val f0_valid = Input(Bool())
-  val f0_pc = Input(UInt(VAddrBits.W))
+  val f0_pc = DecoupledIO(UInt(VAddrBits.W))
 
   val ghist = Input(UInt(HistoryLength.W))
 
@@ -187,12 +189,12 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s2_pc       = RegNext(s1_pc)
   // val s3_idx       = RegNext(s2_idx)
 
-  val s0_valid = io.f0_valid
+  val s0_valid = io.f0_pc.valid
   val s1_valid = RegNext(s0_valid)
   val s2_valid = RegNext(s1_valid)
   val s3_valid = RegNext(s2_valid)
 
-  io.resp.valid := io.f0_valid && !io.flush
+  io.resp.valid := io.f0_pc.valid && !io.flush
 
   // val s0_mask = io.f0_mask
   // val s1_mask = RegNext(s0_mask)
@@ -287,7 +289,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       io.bpu_to_ftq.resp.bits.preds.taken)
   }
 
-  predictors.io.f0_valid := !reset.asBool && io.bpu_to_ftq.resp.ready
+  predictors.io.f0_pc.valid := !reset.asBool && io.bpu_to_ftq.resp.ready
   predictors.io.f0_pc := f0_pc
   
   predictors.io.ghist := f0_ghist

@@ -38,15 +38,15 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   when (resetRow === (bim_size-1).U) { doing_reset := false.B }
 
   val f0_pc = io.f0_pc
-  val f0_valid = io.f0_valid
-  val f0_idx = bimAddr.getIdx(f0_pc)
+  val f0_pc.valid = io.f0_pc.valid
+  val f0_idx = bimAddr.getIdx(f0_pc.bits)
 
-  bim.io.r.req.valid := f0_valid
+  bim.io.r.req.valid := f0_pc.valid
   bim.io.r.req.bits.setIdx := f0_idx
 
-  io.resp.valid := io.f0_valid && bim.io.r.req.ready && io.flush
+  io.resp.valid := io.f0_pc.valid && bim.io.r.req.ready && io.flush
 
-  val f1_pc = RegEnable(f0_pc, f0_valid)
+  val f1_pc = RegEnable(f0_pc, f0_pc.valid)
 
   val f1_read = bim.io.r.resp.data
 

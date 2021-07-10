@@ -140,5 +140,3 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f2_ready := io.toIbuffer.ready
   
 }
-
-

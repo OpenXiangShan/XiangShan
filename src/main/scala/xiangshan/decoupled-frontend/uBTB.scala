@@ -181,7 +181,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.read_pc.valid := s1_valid
   banks.read_pc.bits := RegNext(io.f0_pc)
 
-  io.resp.bits.f1.preds.pred_target := Mux(banks.read_hit, read_resps.target, io.f0_pc + (FetchWidth*4).U)
+  io.resp.bits.f1.preds.pred_target := Mux(banks.read_hit, read_resps.target, io.f0_pc.bits + (FetchWidth*4).U)
   io.resp.bits.f1.preds.taken := read_resps.taken
   io.resp.bits.f1.preds.is_br := read_resps.is_Br
   io.resp.bits.f1.hit := banks.read_hit

@@ -74,22 +74,22 @@ object FTBMeta {
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val ftbAddr = new TableAddr(log2Up(num_sets), num_br)
 
-  val f0_valid = io.f0_valid
+  val f0_pc.valid = io.f0_pc.valid
   val f0_pc = io.f0_pc
 
-  val f1_pc = RegEnable(f0_pc, f0_valid)
+  val f1_pc = RegEnable(f0_pc, f0_pc.valid)
 
   val ftb = Module(new SRAMTemplate(new FTBEntry, set = num_sets, way = num_ways, shouldReset = true, holdRead = true, singlePort = true))
 
-  val f0_idx = ftbAddr.getBankIdx(f0_pc)
-  val f1_idx = RegEnable(f0_idx, f0_valid)
+  val f0_idx = ftbAddr.getBankIdx(f0_pc.bits)
+  val f1_idx = RegEnable(f0_idx, f0_pc.valid)
 
-  val f1_tag = ftbAddr.getTag(f1_pc)
+  val f1_tag = ftbAddr.getTag(f1_pc.bits)
 
-  ftb.io.r.req.valid := f0_valid
+  ftb.io.r.req.valid := f0_pc.valid
   ftb.io.r.req.bits.setIdx := f0_idx
 
-  io.resp.valid := io.f0_valid && ftb.io.r.req.ready && io.flush
+  io.resp.valid := io.f0_pc.valid && ftb.io.r.req.ready && io.flush
 
   val f1_read = VecInit((0 until num_ways).map(w =>
     ftb.io.r.resp.data(w)
@@ -131,7 +131,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.resp.bits := io.resp_in(0)
 
-  io.resp.bits.f1.preds.pred_target := Mux(f1_hit, Mux(ftb_entry.jmp_valid, jal_target, br_target), f0_pc + (FetchWidth*4).U)
+  io.resp.bits.f1.preds.pred_target := Mux(f1_hit, Mux(ftb_entry.jmp_valid, jal_target, br_target), f0_pc.bits + (FetchWidth*4).U)
   io.resp.bits.f1.hit               := f1_hit
   io.resp.bits.f1.preds.is_br       := ftb_entry.br_valids.reduce(_||_)
   io.resp.bits.f1.preds.is_jal      := ftb_entry.jmp_valid

@@ -134,14 +134,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.f0_pc + Mux(io.resp_in(0).f3.preds.call_is_rvc && HasCExtension.B, 2.U, 4.U)
+  val spec_new_addr = io.f0_pc.bits + Mux(io.resp_in(0).f3.preds.call_is_rvc && HasCExtension.B, 2.U, 4.U)
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
   spec_ras.spec_new_addr   := spec_new_addr
   val spec_top_addr = spec_ras.top.retAddr
 
-  spec_push := io.f0_valid && io.resp_in(0).f3.preds.is_call // TODO: io.f1_valid need modify
-  spec_pop  := io.f0_valid && io.resp_in(0).f3.preds.is_ret
+  spec_push := io.f0_pc.valid && io.resp_in(0).f3.preds.is_call // TODO: io.f1_valid need modify
+  spec_pop  := io.f0_pc.valid && io.resp_in(0).f3.preds.is_ret
 
   val redirect = RegNext(io.redirect)
   val copy_valid = redirect.valid
