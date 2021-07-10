@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.cache._
 import utils._
 
 case class ICacheParameters(
@@ -28,8 +29,8 @@ trait Temperary {
   val idxBits = log2Ceil(nSets)
   val wayBits = log2Ceil(nWays)
   val offBits = log2Ceil(blockBytes)
-  val tagBits = VAddrBits - idxBits - offBitsi
-  val bbBits  = log2Ceil(BASICBLOCKSIZE.W)
+  val tagBits = VAddrBits - idxBits - offBits
+  val bbBits  = log2Ceil(32.W)
 }
 
 abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
@@ -61,11 +62,13 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
   val virIdx  = UInt(idxBits.W)
   val phyTag  = UInt(tagBits.W)
   val waymask = UInt(nWays.W)
+  val bankIdx   = Bool()
 
-  def apply(tag:UInt, idx:UInt, waymask:UInt){
-    this.virIdx := idx
-    this.phyTag := tag
+  def apply(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+    this.virIdx  := idx
+    this.phyTag  := tag
     this.waymask := waymask
+    this.brIdx   := bankId 
   }
 
 }
@@ -75,16 +78,18 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
   val virIdx  = UInt(idxBits.W)
   val data    = Vec(blockRows,UInt(blockBits.W))
   val waymask = UInt(nWays.W)
+  val bankIdx = Bool()
 
-  def apply(data:Vec[UInt], idx:UInt, waymask:UInt){
-    this.virIdx := idx
-    this.data := data
+  def apply(data:Vec[UInt], idx:UInt, waymask:UInt, bankIdx: Bool){
+    this.virIdx  := idx
+    this.data    := data
     this.waymask := waymask
+    this.bankIdx := bankIdx 
   }
 
 }
 
-class ICacheDataReadBundle(implicit p: Parameters) extends ICacheBundle
+class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas = Vec(2,Vec(nWays,Vec(blockRows,UInt(blockBits.W))))
 }
@@ -143,7 +148,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val io=IO{new Bundle{
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle)))
-    val readResp = Output(new ICacheDataReadBundle)
+    val readResp = Output(new ICacheDataRespBundle)
   }}
 
   //dataEntryBits = 144 
@@ -187,37 +192,11 @@ abstract class ICacheMissQueueBundle(implicit p: Parameters) extends XSBundle
   with HasICacheParameters
   with Temperary 
 
-class ICacheRefill(implicit p: Parameters) extends ICacheMissQueueBundle
-{
-    val refill_idx     = UInt(idxBits.W)
-    val refill_data    = UInt(blockBits.W)
-    val refill_waymask = UInt(nWays.W)
-
-    def apply(data:UInt, vSetIdx:UInt, waymask:UInt) = {
-      this.refill_idx := vSetIdx
-      this.refill_data := data
-      this.refill_waymask := waymask
-    }
-}
-
-class ICacheMetaWrite(implicit p: Parameters) extends ICacheMissQueueBundle
-{
-    val meta_write_idx     = UInt(idxBits.W)
-    val meta_write_tag     = UInt(tagBits.W)
-    val meta_write_waymask = UInt(nWays.W)
-
-    def apply(tag:UInt, vSetIdx:UInt, waymask:UInt) = {
-      this.meta_write_idx := vSetIdx
-      this.meta_write_tag := tag
-      this.meta_write_waymask := waymask
-    }
-}
-
-class IcacheMissReq(implicit p: Parameters) extends ICacheBundle
+class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 {
     val addr      = UInt(PAddrBits.W)
     val vSetIdx   = UInt(idxBits.W)
-    val waymask   = UInt(PredictWidth.W)
+    val waymask   = UInt(16.W)
     val clientID  = UInt(log2Ceil(cacheParams.nMissEntries).W)
     def apply(missAddr:UInt, missIdx:UInt, missWaymask:UInt, source:UInt) = {
       this.addr := missAddr
@@ -230,33 +209,35 @@ class IcacheMissReq(implicit p: Parameters) extends ICacheBundle
     }
 }
 
-class IcacheMissResp(implicit p: Parameters) extends ICacheBundle
+class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
 {
     val data     = UInt(blockBits.W)
     val clientID = UInt(log2Ceil(cacheParams.nMissEntries).W) 
 }
 
-class IcacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
+class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
-        val id          = Input(UInt(log2Up(cacheParams.nMissEntries).W))
+        val id          = Input(UInt(log2Up(cacheParamstries).W))
 
-        val req         = Flipped(DecoupledIO(new IcacheMissReq))
-        val resp        = DecoupledIO(new IcacheMissResp)
+        val req         = Flipped(DecoupledIO(new ICacheMissReq))
+        val resp        = DecoupledIO(new ICacheMissResp)
         
         val mem_acquire = DecoupledIO(new L1plusCacheReq)
         val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
-        val meta_write  = DecoupledIO(new ICacheMetaWrite)
-        val refill      = DecoupledIO(new ICacheRefill)
+        val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
+        val data_write  = DecoupledIO(new ICacheDataRespBundle)
+    
+        val flush = Input(Bool())
     })
 
     val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_resp :: Nil = Enum(5)
     val state = RegInit(s_idle)
 
     //req register
-    val req = Reg(new IcacheMissReq)
+    val req = Reg(new ICacheMissReq)
     val req_idx = req.vSetIdx         //virtual index
     val req_tag = get_tag(req.addr)           //physical tag
     val req_waymask = req.waymask
@@ -306,7 +287,7 @@ class IcacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 
       //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
-        when((io.refill.fire() && io.meta_write.fire()) || needFlush){
+        when((io.data_write.fire() && io.meta_write.fire()) || needFlush){
           state := s_wait_resp
         }
       }
@@ -322,15 +303,15 @@ class IcacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     //refill write and meta write
     //WARNING: Maybe could not finish refill in 1 cycle
     io.meta_write.valid := (state === s_write_back) && !needFlush
-    io.meta_write.bits.apply(tag=req_tag, vSetIdx=req_idx, waymask=req_waymask)
+    io.meta_write.bits.apply(tag=req_tag, virIdx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
-    io.refill.valid := (state === s_write_back) && !needFlush 
-    io.refill.bits.apply(data=respDataReg.asUInt, vSetIdx=req_idx, waymask=req_waymask)
+    io.data_write.valid := (state === s_write_back) && !needFlush 
+    io.data_write.bits.apply(data=respDataReg.asTypeOf(Vec(blockRows, rowBits)), vSetIdx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     //mem request
-    io.mem_acquire.bits.cmd := MemoryOpConstants.M_XRD
+    io.mem_acquire.bits.cmd  := MemoryOpConstants.M_XRD
     io.mem_acquire.bits.addr := req.addr
-    io.mem_acquire.bits.id := io.id
+    io.mem_acquire.bits.id   := io.id
 
     //resp to icache
     io.resp.valid := (state === s_wait_resp) && !needFlush
@@ -346,23 +327,24 @@ class IcacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 
 }
 
-class IcacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
+class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
-    val req         = Flipped(DecoupledIO(new IcacheMissReq))
-    val resp        = DecoupledIO(new IcacheMissResp)
+    val req_1         = Flipped(DecoupledIO(new ICacheMissReq))
+    val req_2         = Flipped(DecoupledIO(new ICacheMissReq))
+    val resp        = DecoupledIO(new ICacheMissResp)
     
     val mem_acquire = DecoupledIO(new L1plusCacheReq)
     val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
-    val meta_write  = DecoupledIO(new ICacheMetaWrite)
-    val data_refill = DecoupledIO(new ICacheRefill)
+    val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
+    val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
   })
 
-  val resp_arb       = Module(new Arbiter(new IcacheMissResp,   cacheParams.nMissEntries))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  cacheParams.nMissEntries))
-  val refill_arb     = Module(new Arbiter(new ICacheRefill,     cacheParams.nMissEntries))
+  val resp_arb       = Module(new Arbiter(new ICacheMissResp,   cacheParams.nMissEntries))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  cacheParams.nMissEntries))
+  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,     cacheParams.nMissEntries))
   val mem_acquire_arb= Module(new Arbiter(new L1plusCacheReq,   cacheParams.nMissEntries))
 
   //initial
@@ -372,7 +354,7 @@ class IcacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
   val req_ready = WireInit(false.B)
 
   val entries = (0 until cacheParams.nMissEntries) map { i =>
-    val entry = Module(new IcacheMissEntry)
+    val entry = Module(new ICacheMissEntry)
 
     entry.io.id := i.U(log2Up(cacheParams.nMissEntries).W)
 
