@@ -235,9 +235,9 @@ class FakePredictor(implicit p: Parameters) extends BasePredictor {
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
-  val bpu_to_ftq = new BPUToFtq()
-  val ftq_to_bpu = new FtqTOBPU()
-  val fetch_to_bpu = new FetchTOBPU()
+  val bpu_to_ftq = new BpuToFtq()
+  val ftq_to_bpu = new FtqToBpu()
+  val fetch_to_bpu = new FetchToBpu()
 }
 
 class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with HasIFUConst {
