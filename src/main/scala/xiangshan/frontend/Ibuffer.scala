@@ -20,7 +20,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.ftq.FtqPtr
 
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
   p => p(XSCoreParamsKey).IBufSize

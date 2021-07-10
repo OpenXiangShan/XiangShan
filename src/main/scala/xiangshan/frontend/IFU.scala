@@ -23,7 +23,6 @@ import utils._
 import xiangshan.cache._
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
-import xiangshan.backend.ftq.FtqPtr
 import system.L1CacheErrorInfo
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{

@@ -30,12 +30,13 @@ import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
+import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.FtqRead
 import utils._
 
 import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.backend.ftq.FtqPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket(implicit p: Parameters) extends XSBundle {
@@ -456,12 +457,27 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
 class FrontendToBackendIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-  val fetchInfo = DecoupledIO(new FtqEntry)
+
+  val fromFtq = new Bundle {
+    val ftqRead = Vec(1 + 6 + 1 + 1, Flipped(new FtqRead))
+    val cfiRead = Flipped(new FtqRead)
+  }
   // from backend
   val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
-  val commit_cfiUpdate = Flipped(ValidIO(new FtqEntry))
-  val ftqEnqPtr = Input(new FtqPtr)
-  val ftqLeftOne = Input(Bool())
+
+  val toFtq = new Bundle {
+    // roq commit, read out fectch packet and deq
+    val roq_commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommitInfo)))
+  
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+    val flushIdx = Input(new FtqPtr)
+    val flushOffset = Input(UInt(log2Up(PredictWidth).W))
+  
+    val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
+    val frontendRedirect = Flipped(ValidIO(new Redirect))
+  }
+  
 }
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
