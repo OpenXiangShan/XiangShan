@@ -368,6 +368,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 //  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
   dispatch.io.csrCtrl <> io.csrCtrl
   dispatch.io.storeIssue <> io.fromLsBlock.stIn
+  dispatch.io.singleStep := RegNext(io.fromIntBlock.singleStep)
 
 
   fpBusyTable.io.flush := flushReg

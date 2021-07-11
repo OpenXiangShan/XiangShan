@@ -285,6 +285,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
+  val singleStep = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)

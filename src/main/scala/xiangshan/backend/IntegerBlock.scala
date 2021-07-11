@@ -42,6 +42,8 @@ class IntBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
   // write back to brq
   val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
   val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
+  // singleStep
+  val singleStep = Output(Bool())
 }
 
 trait HasExeBlockHelper {
@@ -275,6 +277,9 @@ class IntegerBlock
 
   // set busytable and update roq
   io.toCtrlBlock.wbRegs <> intWbArbiter.io.out
+
+  // singleStep
+  io.toCtrlBlock.singleStep := jmpExeUnit.csrio.singleStep
 
   intRf.io.writePorts.zip(intWbArbiter.io.out).foreach {
     case (rf, wb) =>
