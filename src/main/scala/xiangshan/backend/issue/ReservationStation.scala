@@ -27,7 +27,6 @@ import xiangshan.mem.{SqPtr, StoreDataBundle}
 import scala.math.max
 
 case class RSParams(
-  name: String,
   numEntries: Int,
   numEnq: Int,
   numDeq: Int,
@@ -46,7 +45,6 @@ case class RSParams(
 
 class ReservationStation
 (
-  myName : String,
   val exuCfg: ExuConfig,
   iqSize : Int,
   srcLen: Int,
@@ -64,7 +62,6 @@ class ReservationStation
 
   // require(nonBlocked==fastWakeup)
   val params = RSParams(
-    name = myName,
     numEntries = iqSize,
     numEnq = enqNum,
     numDeq = deqNum,
@@ -76,7 +73,7 @@ class ReservationStation
     numWakeup = fastPortsCnt + (4 + slowPortsCnt),
     numValueBroadCast = (4 + slowPortsCnt),
     hasFeedback = feedback,
-    delayedRf = exuCfg == StExeUnitCfg,
+    delayedRf = false,
     fixedLatency = fixedDelay,
     checkWaitBit = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) true else false,
     optBuf = if (exuCfg == AluExeUnitCfg) true else false

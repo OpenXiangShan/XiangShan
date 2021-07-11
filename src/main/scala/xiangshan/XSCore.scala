@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.exu.Wb
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
@@ -30,15 +30,6 @@ import freechips.rocketchip.diplomacy.{Description, LazyModule, LazyModuleImp, R
 import freechips.rocketchip.tile.HasFPUParameters
 import system.{HasSoCParameter, L1CacheErrorInfo}
 import utils._
-
-object hartIdCore extends (() => Int) {
-  var x = 0
-
-  def apply(): Int = {
-    x = x + 1
-    x - 1
-  }
-}
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
   with HasXSParameter
@@ -76,13 +67,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val frontend = LazyModule(new Frontend())
   val l1pluscache = LazyModule(new L1plusCacheWrapper())
   val ptw = LazyModule(new PTWWrapper())
-  val memBlock = LazyModule(new MemBlock(
-    fastWakeUpIn = intExuConfigs.filter(_.hasCertainLatency),
-    slowWakeUpIn = intExuConfigs.filter(_.hasUncertainlatency) ++ fpExuConfigs,
-    fastWakeUpOut = Seq(),
-    slowWakeUpOut = loadExuConfigs,
-    numIntWakeUpFp = intExuConfigs.count(_.writeFpRf)
-  ))
+  val memBlock = LazyModule(new MemBlock)
 
 }
 
@@ -112,24 +97,43 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val intBlockSlowWakeUp = intExuConfigs.filter(_.hasUncertainlatency)
 
   val ctrlBlock = Module(new CtrlBlock)
-  val integerBlock = Module(new IntegerBlock(
-    fastWakeUpIn = Seq(),
-    slowWakeUpIn = fpExuConfigs.filter(_.writeIntRf) ++ loadExuConfigs,
-    memFastWakeUpIn  = loadExuConfigs,
-    fastWakeUpOut = intBlockFastWakeUp,
-    slowWakeUpOut = intBlockSlowWakeUp
-  ))
-  val floatBlock = Module(new FloatBlock(
-    intSlowWakeUpIn = intExuConfigs.filter(_.writeFpRf),
-    memSlowWakeUpIn = loadExuConfigs,
-    fastWakeUpOut = Seq(),
-    slowWakeUpOut = fpExuConfigs
-  ))
+  val scheduler = Module(new Scheduler)
+  val integerBlock = Module(new IntegerBlock)
+  val floatBlock = Module(new FloatBlock)
 
   val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
+
+  val intConfigs = intExuConfigs ++ fpExuConfigs.filter(_.writeIntRf) ++ loadExuConfigs
+  val intArbiter = Module(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+  val intWriteback = integerBlock.io.writeback ++ floatBlock.io.writeback.drop(4) ++ memBlock.io.writeback.take(2)
+  // set default value for ready
+  integerBlock.io.writeback.map(_.ready := true.B)
+  floatBlock.io.writeback.map(_.ready := true.B)
+  memBlock.io.writeback.map(_.ready := true.B)
+  intArbiter.io.in.zip(intWriteback).foreach { case (arb, wb) =>
+    arb.valid := wb.valid && !wb.bits.uop.ctrl.fpWen
+    arb.bits := wb.bits
+    when (arb.valid) {
+      wb.ready := arb.ready
+    }
+  }
+
+  val fpArbiter = Module(new Wb(
+    fpExuConfigs ++ intExuConfigs.take(1) ++ loadExuConfigs,
+    NRFpWritePorts,
+    isFp = true
+  ))
+  val fpWriteback = floatBlock.io.writeback ++ integerBlock.io.writeback.take(1) ++ memBlock.io.writeback.take(2)
+  fpArbiter.io.in.zip(fpWriteback).foreach{ case (arb, wb) =>
+    arb.valid := wb.valid && wb.bits.uop.ctrl.fpWen
+    arb.bits := wb.bits
+    when (arb.valid) {
+      wb.ready := arb.ready
+    }
+  }
 
   io.l1plus_error <> l1pluscache.io.error
   io.icache_error <> frontend.io.error
@@ -145,52 +149,37 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   l1pluscache.io.flush := frontend.io.l1plusFlush
   frontend.io.fencei := integerBlock.io.fenceio.fencei
 
-  ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
-  ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock
-  ctrlBlock.io.fromLsBlock <> memBlock.io.toCtrlBlock
-  ctrlBlock.io.toIntBlock <> integerBlock.io.fromCtrlBlock
-  ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
-  ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
   ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
+  ctrlBlock.io.exuRedirect <> integerBlock.io.exuRedirect
+  ctrlBlock.io.stIn <> memBlock.io.stIn
+  ctrlBlock.io.stOut <> memBlock.io.stOut
+  ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
+  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
+  // TODO
+  ctrlBlock.io.writeback <> VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  val memBlockWakeUpInt = memBlock.io.wakeUpOutInt.slow.map(WireInit(_))
-  val memBlockWakeUpFp = memBlock.io.wakeUpOutFp.slow.map(WireInit(_))
-  memBlock.io.wakeUpOutInt.slow.foreach(_.ready := true.B)
-  memBlock.io.wakeUpOutFp.slow.foreach(_.ready := true.B)
+  scheduler.io.redirect <> ctrlBlock.io.redirect
+  scheduler.io.flush <> ctrlBlock.io.flush
+  scheduler.io.allocate <> ctrlBlock.io.enqIQ
+  scheduler.io.issue <> integerBlock.io.issue ++ floatBlock.io.issue ++ memBlock.io.issue
+  // TODO arbiter
+  scheduler.io.writeback <> VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  fpExuConfigs.zip(floatBlock.io.wakeUpOut.slow).filterNot(_._1.writeIntRf).map(_._2.ready := true.B)
-  val fpBlockWakeUpInt = fpExuConfigs
-    .zip(floatBlock.io.wakeUpOut.slow)
-    .filter(_._1.writeIntRf)
-    .map(_._2)
+  scheduler.io.replay <> memBlock.io.replay
+  scheduler.io.rsIdx <> memBlock.io.rsIdx
+  scheduler.io.isFirstIssue <> memBlock.io.isFirstIssue
+  scheduler.io.stData <> memBlock.io.stData
+  scheduler.io.otherFastWakeup <> memBlock.io.otherFastWakeup
+  scheduler.io.jumpPc <> ctrlBlock.io.jumpPc
+  scheduler.io.jalr_target <> ctrlBlock.io.jalr_target
+  scheduler.io.stIssuePtr <> memBlock.io.stIssuePtr
+  scheduler.io.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
+  scheduler.io.debug_int_rat <> ctrlBlock.io.debug_int_rat
+  scheduler.io.readIntRf <> ctrlBlock.io.readIntRf
+  scheduler.io.readFpRf <> ctrlBlock.io.readFpRf
 
-  intExuConfigs.zip(integerBlock.io.wakeUpOut.slow).filterNot(_._1.writeFpRf).map(_._2.ready := true.B)
-  val intBlockWakeUpFp = intExuConfigs.filter(_.hasUncertainlatency)
-    .zip(integerBlock.io.wakeUpOut.slow)
-    .filter(_._1.writeFpRf)
-    .map(_._2)
-
-  integerBlock.io.wakeUpIn.slow <> fpBlockWakeUpInt ++ memBlockWakeUpInt
-  integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
-  integerBlock.io.memFastWakeUp <> memBlock.io.ldFastWakeUpInt
-
-  floatBlock.io.intWakeUpFp <> intBlockWakeUpFp
-  floatBlock.io.memWakeUpFp <> memBlockWakeUpFp
-  floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
-
-  val wakeUpMem = Seq(
-    integerBlock.io.wakeUpOut,
-    floatBlock.io.wakeUpOut,
-  )
-  memBlock.io.wakeUpIn.fastUops <> wakeUpMem.flatMap(_.fastUops)
-  memBlock.io.wakeUpIn.fast <> wakeUpMem.flatMap(_.fast)
-  // Note: 'WireInit' is used to block 'ready's from memBlock,
-  // we don't need 'ready's from memBlock
-  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(_.slow.map(x => WireInit(x)))
-  memBlock.io.intWakeUpFp <> floatBlock.io.intWakeUpOut
-  memBlock.io.intWbOut := integerBlock.io.intWbOut
-  memBlock.io.fpWbOut := floatBlock.io.fpWbOut
-
+  integerBlock.io.redirect <> ctrlBlock.io.redirect
+  integerBlock.io.flush <> ctrlBlock.io.flush
   integerBlock.io.csrio.hartId <> io.hartId
   integerBlock.io.csrio.perf <> DontCare
   integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
@@ -210,9 +199,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
 
+  floatBlock.io.redirect <> ctrlBlock.io.redirect
+  floatBlock.io.flush <> ctrlBlock.io.flush
+
   integerBlock.io.fenceio.sfence <> memBlock.io.sfence
   integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
+  memBlock.io.redirect <> ctrlBlock.io.redirect
+  memBlock.io.flush <> ctrlBlock.io.flush
   memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
   memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
