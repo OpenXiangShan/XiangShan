@@ -160,6 +160,7 @@ case class XSCoreParameters
   ),
   L2Size: Int = 512 * 1024, // 512KB
   L2NWays: Int = 8,
+  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -292,6 +293,7 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
+  val usePTWRepeater = coreParams.usePTWRepeater
   val useFakeDCache = coreParams.useFakeDCache
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache
