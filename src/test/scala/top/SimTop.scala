@@ -18,7 +18,7 @@ package top
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
-import device.{AXI4RAMWrapper, UARTIO}
+import device.{AXI4RAMWrapper, UARTIO, Debug}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.GTimer
 import xiangshan.{DebugOptions, DebugOptionsKey, PerfInfoIO}
@@ -50,6 +50,9 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.clock := clock.asBool()
   soc.io.reset := reset.asBool()
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
+
+  val success = Wire(Bool())
+  Debug.connectDebug(soc.io.debug, soc.io.resetCtrl, None, clock, reset.asBool, success)
 
   val io = IO(new Bundle(){
     val logCtrl = new LogCtrlIO

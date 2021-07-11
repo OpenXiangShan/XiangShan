@@ -405,6 +405,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val debug = Input(Bool())
 }
 
 class CSRSpecialIO(implicit p: Parameters) extends XSBundle {

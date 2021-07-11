@@ -22,7 +22,7 @@ import utils._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, TLTimer}
+import device.{AXI4Plic, TLTimer, debugModule}
 import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -33,6 +33,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import freechips.rocketchip.devices.debug
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
 
@@ -354,6 +355,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
+  val debugModule = LazyModule(new debugModule(p))
+  val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
+  debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+
   lazy val module = new LazyRawModuleImp(this) {
     ElaborationArtefacts.add("dts", dts)
     val io = IO(new Bundle {
@@ -362,6 +367,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
+      val debug = new DebugIO(p)
+      val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
     childClock := io.clock.asClock()
 
@@ -382,6 +389,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         core_with_l2(i).module.io.externalInterrupt.msip := clintIntSinks(i).module.out(0)
         core_with_l2(i).module.io.externalInterrupt.mtip := clintIntSinks(i).module.out(1)
         core_with_l2(i).module.io.externalInterrupt.meip := plicIntSinks(i).module.out(0)
+        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink.module.out(i)
         beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
         beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
@@ -398,6 +406,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       val tick = cnt === 0.U
       cnt := Mux(tick, freq.U, cnt - 1.U)
       clint.module.io.rtcTick := tick
+
+      io.resetCtrl := debugModule.module.io.resetCtrl
+      io.debug := debugModule.module.io.debugIO
     }
   }
 }

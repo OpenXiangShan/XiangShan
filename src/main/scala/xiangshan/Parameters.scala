@@ -162,6 +162,75 @@ case class DebugOptions
   UseDRAMSim: Boolean = false
 )
 
+// debug module parameters
+case object ExportDebug extends Field[DebugModuleProtocol]
+
+case class DebugModuleProtocol(
+  protocols: Set[DebugExportProtocol] = Set(DMI),
+  externalDisable: Boolean = false,
+  masterWhere: TLBusWrapperLocation = FBUS,
+  slaveWhere: TLBusWrapperLocation = CBUS
+) {
+  def dmi   = false
+  def jtag  = true
+  def cjtag = false
+  def apb   = false
+}
+
+case object DebugModuleKey extends Field[Option[DebugModuleOptions]](Some(DebugModuleOptions()))
+
+case class DebugModuleParams (
+  baseAddress : BigInt = BigInt(0),
+  nDMIAddrSize  : Int = 7,
+  nProgramBufferWords: Int = 16,
+  nAbstractDataWords : Int = 4,
+  nScratch : Int = 1,
+  hasBusMaster : Boolean = true,
+  clockGate : Boolean = true,
+  maxSupportedSBAccess : Int = 32,
+  supportQuickAccess : Boolean = false,
+  supportHartArray   : Boolean = true,
+  nHaltGroups        : Int = 1,
+  nExtTriggers       : Int = 0,
+  hasHartResets      : Boolean = false,
+  hasImplicitEbreak  : Boolean = false,
+  hasAuthentication  : Boolean = false,
+  crossingHasSafeReset : Boolean = true
+) {
+
+  require ((nDMIAddrSize >= 7) && (nDMIAddrSize <= 32), s"Legal DMIAddrSize is 7-32, not ${nDMIAddrSize}")
+
+  require ((nAbstractDataWords  > 0)  && (nAbstractDataWords  <= 16), s"Legal nAbstractDataWords is 0-16, not ${nAbstractDataWords}")
+  require ((nProgramBufferWords >= 0) && (nProgramBufferWords <= 16), s"Legal nProgramBufferWords is 0-16, not ${nProgramBufferWords}")
+
+  require (nHaltGroups < 32, s"Legal nHaltGroups is 0-31, not ${nHaltGroups}")
+  require (nExtTriggers <= 16, s"Legal nExtTriggers is 0-16, not ${nExtTriggers}")
+
+  if (supportQuickAccess) {
+    // TODO: Check that quick access requirements are met.
+  }
+
+  def address = AddressSet(baseAddress, 0xFFF)
+  def atzero = (baseAddress == 0)
+  def nAbstractInstructions = if (atzero) 2 else 5
+  def debugEntry: BigInt = baseAddress + 0x800
+  def debugException: BigInt = baseAddress + 0x808
+  def nDscratch: Int = if (atzero) 1 else 2
+}
+
+case class JtagDTMConfig (
+  idcodeVersion    : Int = 0,      // chosen by manuf.
+  idcodePartNum    : Int = 0,      // Chosen by manuf.
+  idcodeManufId    : Int = 0,      // Assigned by JEDEC
+  // Note: the actual fields are passed in through wires.
+  // Do not forget to wire up io.jtag_mfr_id through your top-level to set the
+  // mfr_id for this core.
+  // If you wish to use this field in the config, you can obtain it along
+  // the lines of p(JtagDTMKey).idcodeManufId.U(11.W).
+  debugIdleCycles  : Int = 5)
+
+case object JtagDTMKey extends Field[JtagDTMConfig](new JtagDTMKeyDefault())
+
 trait HasXSParameter {
 
   implicit val p: Parameters

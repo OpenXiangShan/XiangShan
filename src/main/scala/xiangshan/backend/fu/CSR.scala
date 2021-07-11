@@ -996,10 +996,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
       priviledgeMode := ModeM
       when (tvalWen) { mtval := 0.U }
     }
-
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
-
   }
 
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
