@@ -20,7 +20,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, MemoryOpConstants}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbCmd}
 import difftest._
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{

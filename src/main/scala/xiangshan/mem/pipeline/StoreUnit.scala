@@ -22,6 +22,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
+import xiangshan.cache.mmu.{TlbRequestIO, TlbReq, TlbResp, TlbCmd}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB

@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import xiangshan.backend.exu._
 import xiangshan.cache._
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import xiangshan.backend.issue.ReservationStation
