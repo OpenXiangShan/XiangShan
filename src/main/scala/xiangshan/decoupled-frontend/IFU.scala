@@ -31,6 +31,15 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = new BlockTlbRequestIO  
 }
 
+class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
+  val data          = Vec(17, UInt(16.W))   //34Bytes 
+  val startAddr     = UInt(VAddrBits.W)
+  val fallThruAddr  = UInt(VAddrBits.W)
+  val ftqOffset     = UInt()
+  val target        = UInt(VAddrBits.W)
+  val taken         = Bool()
+}
+
 @chiselName
 class NewIFU(implicit p: Parameters) extends XSModule
 {
@@ -54,10 +63,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val (f0_valid, f1_ready)                 = (fromFtq.valid, WireInit(false.B))
   val f0_fire                              = f0_valid && f1_fire 
-  val f0_ftqIdx                            = fromFtq.bits.ftqIdx 
-  val f0_bb_addr                           = VecInit(fromtFtq.bits.startAddr, fromFtq.bits.fallThruAddr)
-  val f0_isDoubleLine                      = isDoubleLine(fromFtq.bits.startAddr, fromFtq.bits.endOffset)
-  val f0_vSetIdx                           = VecInit(Seq(getIdx(fromFtq.bits.startAddr),getIdx(fromtFtq.bits.startAddr + endOffset)))
+  val f0_ftq_req                           = fromFtq.bits
+  val f0_isDoubleLine                      = isDoubleLine(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr)
+  val f0_vSetIdx                           =
 
 
   //fetch: send addr to Meta/TLB and Data simultaneously
@@ -77,9 +85,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val exception =
   
   val f1_valid      = RegInit(false.B)
-  val f1_ftqIdx     = RegEnable(next = f0_ftqIdx, enable=f0_fire)
-  val f1_bb_addr    = RegEnable(next = f0_bb_addr, enable=f1_fire)
-  val f1_vSetIdx    = RegEnable(next = f0_vSetIdx,enable=f0_fire)
+  val f1_ftq_req    = RegEnable(next = f0_ftq_req, enable=f0_fire)
+  val f1_vSetIdx    = RegEnable(next = f0_vSetIdx, enable=f0_fire)
   val f1_ready      = WireInit(false.B)
   val f1_fire       = f1_valid && tlbHit && f2_ready 
   
@@ -120,8 +127,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   //fetch response
   val f2_valid    = RegInit(false.B)
-  val f2_ftqIdx   = RegEnable(next = f1_ftqIdx, enable = f1_fire)
-  val f2_bb_addr  = RegEnable(next = f1_bb_addr, enable = f1_fire)
+  val f2_ftq_req  = RegEnable(next = f1_ftq_req, enable = f1_fire)
   val f2_fire     = io.toIbuffer.fire()
   when(f1_fire)                   {f2_valid := true.B}
   .elsewhen(io.toIbuffer.fire())  {f2_valid := false.B}
@@ -159,7 +165,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val preDecoder      = Module(new PreDecode)    
   val preDecoderOut   = preDecoder.io.out 
 
-  preDecoder.io.in :=  Cat(f2_datas.map(cacheline => cacheline )).asUInt
+  def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
+    
+  }
+
+  preDecoder.io.in    :=  cut(Cat(f2_datas.map(cacheline => cacheline )).asUInt, f2_ftq_req.startAddr, f2_ftq_req.fallThruAddr)
+  preDecoder.io.info  :=  f2_ftq_req 
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || (wait_state === wait_resp)
   io.toIbuffer.bits.instrs    <> preDecoderOut   
@@ -168,6 +179,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
 
   //redirect gen
+  val pdMissPred         = preDecoderOut.misPred 
+  toFtq.valid           := (f2_valid && f2_hit) || (wait_state === wait_resp)
+  toFtq.bits.pd         := preDecoderOut.pd 
+  toFtq.bits.ftqIdx     := f2_ftq_req.ftqIdx 
+  toFtq.bits.ftqOffset  := f2_ftq_req.ftqOffset 
+  toFtq.bits.misPred    := pdMissPred 
+
 
   
 }

@@ -15,7 +15,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
-  val pd        = Vec(16, new Predecode) // TODO: redefine Predecode
+  val pd        = Vec(16, new PredecodeInfo) // TODO: redefine Predecode
   val ftqIdx    = UInt(log2Ceil(FTQSIZE).W)
   val ftqOffset = UInt(log2Ceil(FETCHWIDTH).W)
   val misPred   = Bool()
