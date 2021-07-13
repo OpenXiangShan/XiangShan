@@ -183,7 +183,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
-    val frontend = Flipped(new FrontendToBackendIO)
+    val frontend = Flipped(new FrontendToCtrlIO)
     val enqIQ = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
@@ -244,7 +244,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   })
   val loadReplay = Wire(Valid(new Redirect))
   loadReplay.valid := RegNext(io.memoryViolation.valid &&
-    !io.memoryViolation.bits.roqIdx.needFlush(backendRedirect, flushReg),
+    !io.memoryViolation.bits.roqIdx.needFlush(stage2Redirect, flushReg),
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
@@ -350,7 +350,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   }
 
   // TODO: is 'backendRedirect' necesscary?
-  io.redirect <> backendRedirect
+  io.redirect <> stage2Redirect
   io.flush <> flushReg
   io.debug_int_rat <> rename.io.debug_int_rat
   io.debug_fp_rat <> rename.io.debug_fp_rat

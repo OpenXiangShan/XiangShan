@@ -30,10 +30,7 @@ import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.FtqRead
-<<<<<<< HEAD
 import xiangshan.frontend.FtqToCtrlIO
-=======
->>>>>>> 18cabc2c (core: move ftq to frontend)
 import utils._
 
 import scala.math.max

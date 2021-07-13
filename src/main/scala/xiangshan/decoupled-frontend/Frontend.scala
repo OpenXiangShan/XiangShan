@@ -118,18 +118,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  ftq.io.enq <> ifu.io.toFtq
-  ftq.io.roq_commits <> io.backend.toFtq.roq_commits
-  ftq.io.redirect <> io.backend.toFtq.redirect
-  ftq.io.flush := io.backend.toFtq.flush
-  ftq.io.flushIdx := io.backend.toFtq.flushIdx
-  ftq.io.flushOffset := io.backend.toFtq.flushOffset
-  ftq.io.frontendRedirect <> io.backend.toFtq.frontendRedirect
-  ftq.io.exuWriteback <> io.backend.toFtq.exuWriteback
-  io.backend.fromFtq.ftqRead <> ftq.io.ftqRead
-  io.backend.fromFtq.cfiRead <> ftq.io.cfiRead
-  io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
-
 
   instrUncache.io.req   <> DontCare
   instrUncache.io.resp  <> DontCare

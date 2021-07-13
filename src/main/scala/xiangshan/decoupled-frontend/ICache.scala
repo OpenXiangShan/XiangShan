@@ -228,7 +228,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   (io.readResp.datas zip dataArrays).map {case (io, sram) => io :=  VecInit(sram.map(way => way.io.r.resp.data.asTypeOf(UInt(blockBits.W)) ))  }
 
-  io.write.ready := DontCare
+  io.write.ready := true.B
 }
 
 

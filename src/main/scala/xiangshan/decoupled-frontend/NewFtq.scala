@@ -174,6 +174,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val backendFlush = stage2Flush || RegNext(stage2Flush)
   val ifuFlush = io.fromIfu.pdWb.valid && io.fromIfu.pdWb.bits.misOffset.valid
 
+  val stage2Flush = io.fromBackend.stage2Redirect.valid || io.fromBackend.roqFlush.valid
+  val flush = stage2Flush || RegNext(stage2Flush)
+  
   val bpuPtr, ifuPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
   val validEntries = distanceBetween(bpuPtr, commPtr)
 
