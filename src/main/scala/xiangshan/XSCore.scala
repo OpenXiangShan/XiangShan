@@ -22,7 +22,7 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
+import xiangshan.cache.{DCacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
 import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters

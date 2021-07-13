@@ -22,9 +22,9 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, MicroBTB}
+import xiangshan.frontend.{BIM, ICacheParameters ,BasePredictor, BranchPredictionResp, FTB, MicroBTB}
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 

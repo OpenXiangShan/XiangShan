@@ -23,8 +23,9 @@ import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
+import xiangshan.frontend.{ICacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {

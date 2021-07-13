@@ -29,7 +29,6 @@ trait MicroBTBParams extends HasXSParameter {
   val tagSize = 20
   val lowerBitSize = 20
   val untaggedBits = log2Up(PredictWidth) + instOffsetBits
-  val numBr = 1
 }
 
 @chiselName
@@ -88,7 +87,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // need more
   }
 
-  class UBTBBank(val nWays: Int) extends XSModule with HasIFUConst with BPUUtils {
+  class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val read_pc = Flipped(Valid(UInt(VAddrBits.W)))
       val read_resp = Output(new ReadResp)

@@ -24,7 +24,6 @@ import chisel3.experimental.chiselName
 trait BimParams extends HasXSParameter {
   val bimSize = 2048
   val bypassEntries = 4
-  val numBr = 1
 }
 
 @chiselName

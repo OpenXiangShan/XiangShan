@@ -7,6 +7,32 @@ import xiangshan._
 import xiangshan.cache._
 import utils._
 
+trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
+  def mmioBusWidth = 64
+  def mmioBusBytes = mmioBusWidth /8
+  def mmioBeats = FetchWidth * 4 * 8 / mmioBusWidth
+  def mmioMask  = VecInit(List.fill(PredictWidth)(true.B)).asUInt
+  def mmioBusAligned(pc :UInt): UInt = align(pc, mmioBusBytes)
+}
+
+trait HasIFUConst extends HasXSParameter {
+  val resetVector = 0x10000000L//TODO: set reset vec
+  def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
+  val groupBytes = 64 // correspond to cache line size
+  val groupOffsetBits = log2Ceil(groupBytes)
+  val groupWidth = groupBytes / instBytes
+  val packetBytes = PredictWidth * instBytes
+  val packetOffsetBits = log2Ceil(packetBytes)
+  def offsetInPacket(pc: UInt) = pc(packetOffsetBits-1, instOffsetBits)
+  def packetIdx(pc: UInt) = pc(VAddrBits-1, log2Ceil(packetBytes))
+  def groupAligned(pc: UInt)  = align(pc, groupBytes)
+  def packetAligned(pc: UInt) = align(pc, packetBytes)
+  def mask(pc: UInt): UInt = ((~(0.U(PredictWidth.W))) << offsetInPacket(pc))(PredictWidth-1,0)
+  def snpc(pc: UInt): UInt = packetAligned(pc) + packetBytes.U
+
+  val enableGhistRepair = true
+  val IFUDebug = true
+}
 class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
 }
@@ -39,7 +65,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val target        = UInt(VAddrBits.W)
 }
 
-class NewIFU(implicit p: Parameters) extends XSModule with Temperary
+class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
 {
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
@@ -72,11 +98,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
 
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
-  fetch_req.foreach(channel =>
-    channel.valid               := f0_valid 
-    channel.bits.isDoubleLine   := f0_doubleLine
-    channel.bits.vSetIdx        := f0_vSetIdx
-  )
+  for(i <- 0 until 2) {
+    fetch_req(i).valid := f0_valid
+    fetch_req(i).bits.isDoubleLine := f0_doubleLine
+    fetch_req(i).bits.vSetIdx := f0_vSetIdx
+  }
 
   fromFtq.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready
 
@@ -91,10 +117,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   //  * Get victim way
   //---------------------------------------------
   val tlbRespValid = io.iTLBInter.resp.valid 
-  val (tlbMiss, tlbHit) = (WireInit(false.B), WireInit(true.B))         //TODO: Temporary assignment
+  val tlbMiss      = WireInit(false.B)
+  val tlbHit       = WireInit(true.B)        //TODO: Temporary assignment
   //TODO: handle fetch exceptions
 
-  val (f1_ready, f2_ready) = (WireInit(false.B), WireInit(false.B))
+  val f2_ready = WireInit(false.B)
 
   val f1_valid      = RegInit(false.B)
   val f1_ftq_req    = RegEnable(next = f0_ftq_req,    enable=f0_fire)
@@ -110,15 +137,15 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   val f1_pAddrs             = VecInit(Seq(f1_ftq_req.startAddr(PAddrBits -1, 0), f1_ftq_req.fallThruAddr(PAddrBits - 1, 0)))   //TODO: Temporary assignment
   val f1_pTags              = VecInit(f1_pAddrs.map{pAddr => getTag(pAddr)})
   val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
-  val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map(case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) ))
-  val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map(case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) ))
+  val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
+  val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
   val (bank0_hit,bank1_hit) = (ParallelAND(bank0_hit_vec), ParallelAND(bank1_hit_vec)) 
   val f1_hit                = bank0_hit && bank1_hit && f1_valid 
   val f1_bank_hit_vec       = VecInit(Seq(bank0_hit_vec, bank1_hit_vec))
   val f1_bank_hit           = VecInit(Seq(bank0_hit, bank1_hit))
   
   val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(Some("random"),nWays,nSets/2))
-  val f1_victim_masks = VecInit(replacers.map{replacer => UIntToOH(replacer.way())})
+  val f1_victim_masks = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(f1_vSetIdx(i)))})
 
   val touch_sets = Seq.fill(2)(Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
@@ -214,7 +241,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   }
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
-  val f2_mq_datas     = Reg(fromMissQueue.datas)    //TODO: Implement miss queue response
+  val f2_mq_datas     = Reg(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
   val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas)
  
   val preDecoder      = Module(new PreDecode)    
@@ -240,8 +267,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
   io.toIbuffer.bits.valid     := preDecoderOut.valid
   io.toIbuffer.bits.pd        := preDecoderOut.pd
-  io.toIbuffer.bits.ftqIdx    := f2_ftq_req.ftqIdx
+  io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
   io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
+  io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
 
   //flush generate and to Ftq

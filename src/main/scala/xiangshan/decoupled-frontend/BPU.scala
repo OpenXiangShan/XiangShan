@@ -22,13 +22,15 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-trait HasBPUConst extends HasXSParameter {
+trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val MaxMetaLength = 120
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   val numBr = 1
   val useBPD = true
   val useLHist = true
+
+  // val resetVector = 0x10000000L//TODO: set reset vec
 }
 
 trait HasBPUParameter extends HasXSParameter {
@@ -85,53 +87,6 @@ trait BPUUtils{
   }
 }
 
-class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  def tagBits = VAddrBits - idxBits - instOffsetBits
-
-  val tag = UInt(tagBits.W)
-  val idx = UInt(idxBits.W)
-  val offset = UInt(instOffsetBits.W)
-
-  def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
-  def getTag(x: UInt) = fromUInt(x).tag
-  def getIdx(x: UInt) = fromUInt(x).idx
-  def getBank(x: UInt) = if (banks > 1) getIdx(x)(log2Up(banks) - 1, 0) else 0.U
-  def getBankIdx(x: UInt) = if (banks > 1) getIdx(x)(idxBits - 1, log2Up(banks)) else getIdx(x)
-}
-
-class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val taken_mask = Vec(numBr+1, Bool())
-  val is_br = Vec(numBr, Bool())
-  val is_jal = Bool()
-  val is_jalr = Bool()
-  val is_call = Bool()
-  val is_ret = Bool()
-  val call_is_rvc = Bool()
-  val target = UInt(VAddrBits.W)
-
-  def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
-}
-
-class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val pc = UInt(VAddrBits.W)
-  val hit = Bool()
-  val preds = new BranchPrediction
-
-  val ghist = new GlobalHistory()
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry
-  val specCnt = Vec(PredictWidth, UInt(10.W))
-  val meta = UInt(MaxMetaLength.W)
-
-  val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
-}
-
-class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val s1 = new BranchPredictionBundle()
-  val s2 = new BranchPredictionBundle()
-  val s3 = new BranchPredictionBundle()
-}
-
 // class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
 //   val pc = UInt(VAddrBits.W)
 //   val br_offset = Vec(num_br, UInt(log2Up(MaxBasicBlockSize).W))
@@ -157,13 +112,6 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 //
 //   def taken = cfi_idx.valid
 // }
-
-class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
-  val mispred_mask = Vec(numBr+1, Bool())
-  // val ghist = new GlobalHistory() This in spec_meta
-}
-
-class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with HasBPUConst {}
 
 class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
@@ -274,12 +222,16 @@ class FakePredictor(implicit p: Parameters) extends BasePredictor {
   io.out.bits.resp.s3.meta  := 0.U
 }
 
-class PredictorIO(implicit p: Parameters) extends XSBundle {
-  val bpu_to_ftq = new BpuToFtq()
-  val ftq_to_bpu = new FtqToBpu()
+class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
+  val resp = DecoupledIO(new BranchPredictionBundle)
 }
 
-class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with HasIFUConst {
+class PredictorIO(implicit p: Parameters) extends XSBundle {
+  val bpu_to_ftq = new BpuToFtqIO()
+  val ftq_to_bpu = new FtqToBpuIO()
+}
+
+class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
   val io = IO(new PredictorIO)
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
@@ -300,7 +252,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with Has
 }
 
 @chiselName
-class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasIFUConst {
+class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val io = IO(new PredictorIO)
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)

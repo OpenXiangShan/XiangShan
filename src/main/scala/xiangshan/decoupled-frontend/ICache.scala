@@ -25,18 +25,56 @@ case class ICacheParameters(
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
 }
 
-trait Temperary {
-  val idxBits = log2Ceil(nSets)
-  val wayBits = log2Ceil(nWays)
-  val offBits = log2Ceil(64)
-  val tagBits = 39 - idxBits - offBits
-  val bbBits  = 5
+trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst with HasInstrMMIOConst {
+  val cacheParams = icacheParameters
+  val groupAlign = log2Up(cacheParams.blockBytes)
+  val packetInstNum = packetBytes/instBytes
+  val packetInstNumBit = log2Up(packetInstNum)
+  val ptrHighBit = log2Up(groupBytes) - 1
+  val ptrLowBit = log2Up(packetBytes)
+  val encUnitBits = 8
+  val bankRows = 2
+  val bankBits = bankRows * rowBits
+  val nBanks = blockRows/bankRows
+  val bankUnitNum = (bankBits / encUnitBits)
+
+  def cacheID = 0
+  def insLen = if (HasCExtension) 16 else 32
+  def RVCInsLen = 16
+  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
   def plruAccessNum = 2  //hit and miss
+  // def encRowBits = cacheParams.dataCode.width(rowBits)
+  // def encTagBits = cacheParams.tagCode.width(tagBits)
 
-  val nSets   = 128           //32 KB
-  val nWays   = 4
+  //
+  def encMetaBits = cacheParams.tagCode.width(tagBits)
+  def metaEntryBits = encMetaBits
+  def encDataBits = cacheParams.dataCode.width(encUnitBits)
+  def dataEntryBits = encDataBits * bankUnitNum
+  // def encDataBits
+  // def encCacheline
 
-  val nMissEntries = 2
+
+  require(isPow2(nSets), s"nSets($nSets) must be pow2")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
+  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+  // this is a VIPT L1 cache
+  require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
+}
+
+trait Temperary {
+  // val idxBits = log2Ceil(nSets)
+  // val wayBits = log2Ceil(nWays)
+  val offBits = log2Ceil(64)
+  // val tagBits = 39 - idxBits - offBits
+  // val bbBits  = 5
+  // def plruAccessNum = 2  //hit and miss
+
+  // val nSets   = 128           //32 KB
+  // val nWays   = 4
+
+  // val nMissEntries = 2
 
 }
 
@@ -98,7 +136,7 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val datas = Vec(2,Vec(nWays,Vec(blockRows,UInt(blockBits.W))))
+  val datas = Vec(2,Vec(nWays,UInt(blockBits.W)))
 }
 
 
@@ -109,6 +147,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
   }}
+
+  io.read.ready := !io.write.valid
 
   val tagArrays = (0 until 2) map { bank =>
     val tagArray = Module(new SRAMTemplate(
@@ -123,7 +163,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     //meta connection
     if(bank == 0) tagArray.io.r.req.valid := io.read.valid
     else tagArray.io.r.req.valid := io.read.valid && io.read.bits.isDoubleLine 
-    tagArray.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx)
+    tagArray.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx(bank))
 
     if(bank == 0) tagArray.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
     else       tagArray.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
@@ -133,7 +173,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   }
 
   val readIdxNext = RegNext(io.read.bits.vSetIdx)
-  val validArray = RegInit(0.U(nSets * nWays).W)
+  val validArray = RegInit(0.U((nSets * nWays).W))
   val validMetas = VecInit((0 until 2).map{ bank =>
     val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
     validMeta
@@ -154,13 +194,13 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 {
   val io=IO{new Bundle{
     val write    = Flipped(DecoupledIO(new ICacheDataWriteBundle))
-    val read     = Flipped(DecoupledIO(new ICacheReadBundle)))
+    val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheDataRespBundle)
   }}
 
   //dataEntryBits = 144 
   val dataArrays = (0 until 2) map { i =>
-    val dataArray = List.fill(nWays){Module(new SRAMTemplate(
+    val dataArray = Seq.fill(nWays){Module(new SRAMTemplate(
       UInt(blockBits.W),
       set=nSets/2,
       way=nWays,
@@ -169,25 +209,24 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       singlePort = true
     ))}
 
-    //port 
+    io.read.ready := !io.write.valid
     dataArray.map{ way =>
       //meta connection
       if(i == 0) way.io.r.req.valid := io.read.valid 
       else way.io.r.req.valid := io.read.valid && io.read.bits.isDoubleLine 
-      way.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx)
+      way.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx(i))
 
       if(i == 0) way.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
       else       way.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
       way.io.w.req.bits.apply(data=io.write.bits.data.asUInt(), setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
-     
     }
 
     dataArray 
   }
 
-  (io.readResp.datas zip dataArrays).map {case (io, sram) => io := Cat(sram.map(way => way.io.r.resp.asTypeOf(Vec(blockRows, UInt(rowBits.W))))).asTypeOf(Vec(nWays, Vec(blockRows, UInt(rowBits.W))))}
+  (io.readResp.datas zip dataArrays).map {case (io, sram) => io :=  VecInit(sram.map(way => way.io.r.resp.data.asTypeOf(UInt(blockBits.W)) ))  }
 
-  io.write.ready := DontCare
+  io.write.ready := true.B
 }
 
 
@@ -313,7 +352,7 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     io.meta_write.bits.apply(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
     io.data_write.valid := (state === s_write_back) && !needFlush
-    io.data_write.bits.apply(data=respDataReg.asTypeOf(Vec(blockRows, rowBits)), idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    io.data_write.bits.apply(data=respDataReg.asTypeOf(Vec(blockRows, UInt(rowBits.W))), idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     //mem request
     io.mem_acquire.bits.cmd  := MemoryOpConstants.M_XRD
@@ -351,14 +390,14 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 
   })
 
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  2))
-  val refill_arb     = Module(new Arbiter(new ICacheRefill,     2))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  2))
+  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  2))
   val mem_acquire_arb= Module(new Arbiter(new L1plusCacheReq,   2))
 
   io.mem_grant.ready := true.B
 
   val entries = (0 until 2) map { i =>
-    val entry = Module(new IcacheMissEntry)
+    val entry = Module(new ICacheMissEntry)
 
     entry.io.id := i.U(1.W)
     entry.io.flush := io.flush
@@ -370,8 +409,8 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 
     // entry resp
     meta_write_arb.io.in(i)     <>  entry.io.meta_write
-    refill_arb.io.in(i)         <>  entry.io.refill
-    mem_acquire_arb.io.in(i)    <>   entry.io.mem_acquire
+    refill_arb.io.in(i)         <>  entry.io.data_write
+    mem_acquire_arb.io.in(i)    <>  entry.io.mem_acquire
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare

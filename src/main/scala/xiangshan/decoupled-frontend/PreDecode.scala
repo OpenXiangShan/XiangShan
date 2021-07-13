@@ -1,5 +1,7 @@
 package xiangshan.frontend
 
+import chipsalliance.rocketchip.config.Parameters
+import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import chisel3.{util, _}
 import chisel3.util._
 import utils._
@@ -7,27 +9,27 @@ import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
 
-trait HasPdconst{ this: XSModule =>
+trait HasPdconst{
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
-    val brType::Nil = ListLookup(instr, List(BrType.notBr), PreDecodeInst.brTable)
+    val brType::Nil = ListLookup(instr, List(BrType.notCFI), PreDecodeInst.brTable)
     val rd = Mux(isRVC(instr), instr(12), instr(11,7))
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
     val isCall = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
     val isRet = brType === BrType.jalr && isLink(rs) && !isCall
     List(brType, isCall, isRet)
   }
-  def jal_offset(inst: UInt, rvc: Bool): SInt = {
+  def jal_offset(inst: UInt, rvc: Bool): UInt = {
     Mux(rvc,
-      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)).asSInt(),
-      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)).asSInt()
+      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)),
+      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
     )
   }
-  def br_offset(inst: UInt, rvc: Bool): SInt = {
+  def br_offset(inst: UInt, rvc: Bool): UInt = {
     Mux(rvc,
-      Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)).asSInt,
-      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()
+      Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)),
+      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
     )
   }
   def MAXINSNUM = 16
@@ -116,13 +118,13 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.instrs(i) := expander.io.out.bits
     io.out.pc(i) := pcStart + (i << 1).U(log2Ceil(MAXINSNUM).W)
 
-    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, SignExt(brOffset, XLEN), SignExt(jalOffset, XLEN))
 
-    takens(i)    := (validStart(i) && (bbTaken || io.out.pd(i).isJal)
+    takens(i)    := (validStart(i) && (bbTaken || io.out.pd(i).isJal))
 
 
     misPred(i)   := (validStart(i)  && i.U === ftqOffet && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
-                    (validStart(i)  && i.U === ftqOffet && io.out.pd(i).notCFI && bbTaken)
+                    (validStart(i)  && i.U === ftqOffet && io.out.pd(i).notCFI && bbTaken) ||
                     (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
   }
   val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()

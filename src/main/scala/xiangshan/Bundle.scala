@@ -18,20 +18,19 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.frontend.PreDecodeInfoForDebug
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.PreDecodeInfo
 // import xiangshan.frontend.HasTageParameter
 // import xiangshan.frontend.HasSCParameter
-import xiangshan.frontend.HasIFUConst
+import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
 import xiangshan.frontend.FtqRead
+import xiangshan.frontend.FtqToCtrlIO
 import utils._
 
 import scala.math.max
@@ -93,88 +92,44 @@ object RSFeedbackType {
 //   val scMeta = new SCMeta(EnableSC)
 // }
 
-@chiselName
-class BranchPrediction(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  // val redirect = Bool()
-  val takens = UInt(PredictWidth.W)
-  // val jmpIdx = UInt(log2Up(PredictWidth).W)
-  val brMask = UInt(PredictWidth.W)
-  val jalMask = UInt(PredictWidth.W)
-  val targets = Vec(PredictWidth, UInt(VAddrBits.W))
-
-  // half RVI could only start at the end of a packet
-  val hasHalfRVI = Bool()
-
-  def brNotTakens = (~takens & brMask)
-
-  def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
-    (if (i == 0) false.B else ParallelORR(brNotTakens(i - 1, 0)))))
-
-  // if not taken before the half RVI inst
-  def saveHalfRVI = hasHalfRVI && !(ParallelORR(takens(PredictWidth - 2, 0)))
-
-  // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = ParallelPriorityEncoder(takens)
-
-  // only used when taken
-  def target = {
-    val generator = new PriorityMuxGenerator[UInt]
-    generator.register(takens.asBools, targets, List.fill(PredictWidth)(None))
-    generator()
-  }
-
-  def taken = ParallelORR(takens)
-
-  def takenOnBr = taken && ParallelPriorityMux(takens, brMask.asBools)
-
-  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(takens, sawNotTakenBr), ParallelORR(brNotTakens))
-}
-
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
   val hit    = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
 }
 
-class BpuMeta(implicit p: Parameters) extends XSBundle with HasBPUParameter {
-  val btbWriteWay = UInt(log2Up(BtbWays).W)
-  val btbHit = Bool()
-  val bimCtr = UInt(2.W)
-  // val tageMeta = new TageMeta
-  // for global history
+// class BpuMeta(implicit p: Parameters) extends XSBundle with HasBPUParameter {
+//   val btbWriteWay = UInt(log2Up(BtbWays).W)
+//   val btbHit = Bool()
+//   val bimCtr = UInt(2.W)
+//   // val tageMeta = new TageMeta
+//   // for global history
 
-  val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-  val debug_btb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-  val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+//   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+//   val debug_btb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+//   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
-  val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
+//   val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
 
-  val ubtbHit = if (BPUDebug) UInt(1.W) else UInt(0.W)
+//   val ubtbHit = if (BPUDebug) UInt(1.W) else UInt(0.W)
 
-  val ubtbAns = new PredictorAnswer
-  val btbAns = new PredictorAnswer
-  val tageAns = new PredictorAnswer
-  val rasAns = new PredictorAnswer
-  val loopAns = new PredictorAnswer
+//   val ubtbAns = new PredictorAnswer
+//   val btbAns = new PredictorAnswer
+//   val tageAns = new PredictorAnswer
+//   val rasAns = new PredictorAnswer
+//   val loopAns = new PredictorAnswer
 
-  // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
-  //   this.histPtr := histPtr
-  //   this.tageMeta := tageMeta
-  //   this.rasSp := rasSp
-  //   this.rasTopCtr := rasTopCtr
-  //   this.asUInt
-  // }
-  def size = 0.U.asTypeOf(this).getWidth
+//   // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
+//   //   this.histPtr := histPtr
+//   //   this.tageMeta := tageMeta
+//   //   this.rasSp := rasSp
+//   //   this.rasTopCtr := rasTopCtr
+//   //   this.asUInt
+//   // }
+//   def size = 0.U.asTypeOf(this).getWidth
 
-  def fromUInt(x: UInt) = x.asTypeOf(this)
-}
-
-class Predecode(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  val hasLastHalfRVI = Bool()
-  val mask = UInt(PredictWidth.W)
-  val lastHalf = Bool()
-  val pd = Vec(PredictWidth, (new PreDecodeInfo))
-}
+//   def fromUInt(x: UInt) = x.asTypeOf(this)
+// }
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
@@ -210,45 +165,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
-
-class FtqEntry(implicit p: Parameters) extends XSBundle {
-  // fetch pc, pc of each inst could be generated by concatenation
-  val ftqPC = UInt(VAddrBits.W)
-  val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
-  // prediction metas
-  val hist = new GlobalHistory // Regfile
-  // val predHist = new GlobalHistory // 1 read
-  val rasSp = UInt(log2Ceil(RasSize).W) // 2 read
-  val rasTop = new RASEntry() // 2 read
-  val specCnt = Vec(PredictWidth, UInt(10.W)) // 2 read
-  val metas = Vec(PredictWidth, new BpuMeta) // 1 read
-
-  val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Bool()
-  val rvc_mask = Vec(PredictWidth, Bool())
-  val br_mask = Vec(PredictWidth, Bool())
-  val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
-  val valids = Vec(PredictWidth, Bool())
-
-  // backend update
-  val mispred = Vec(PredictWidth, Bool())
-  val target = UInt(VAddrBits.W)
-
-  // For perf counters
-  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
-
-  def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
-  def hasLastPrev = lastPacketPC.valid
-
-  override def toPrintable: Printable = {
-    p"ftqPC: ${Hexadecimal(ftqPC)} lastPacketPC: ${Hexadecimal(lastPacketPC.bits)} hasLastPrev:$hasLastPrev " +
-      p"rasSp:$rasSp specCnt:$specCnt brmask:${Binary(Cat(br_mask))} rvcmask:${Binary(Cat(rvc_mask))} " +
-      p"valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
-      p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isJalr:$cfiIsJalr, isRvc:$cfiIsRVC " +
-      p"mispred:${Binary(Cat(mispred))} target:${Hexadecimal(target)}\n"
-  }
-
-}
-
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -454,30 +370,13 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val sourceType = RSFeedbackType()
 }
 
-class FrontendToBackendIO(implicit p: Parameters) extends XSBundle {
+class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-
-  val fromFtq = new Bundle {
-    val ftqRead = Vec(1 + 6 + 1 + 1, Flipped(new FtqRead))
-    val cfiRead = Flipped(new FtqRead)
-  }
+  val fromFtq = new FtqToCtrlIO
   // from backend
   val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
-
-  val toFtq = new Bundle {
-    // roq commit, read out fectch packet and deq
-    val roq_commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommitInfo)))
-  
-    val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
-    val flushIdx = Input(new FtqPtr)
-    val flushOffset = Input(UInt(log2Up(PredictWidth).W))
-  
-    val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Flipped(ValidIO(new ExuOutput)))
-    val frontendRedirect = Flipped(ValidIO(new Redirect))
-  }
-  
+  val toFtq = Flipped(new CtrlToFtqIO)
 }
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
