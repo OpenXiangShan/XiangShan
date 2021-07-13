@@ -20,6 +20,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import system._
+import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
 import device.{AXI4Plic, TLTimer, debugModule}
@@ -33,7 +34,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
-import freechips.rocketchip.devices.debug
+import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
 
@@ -207,7 +208,7 @@ trait HaveAXI4MemPort {
 
 
 trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
-  // on-chip devices: 0x3800_000 - 0x3fff_ffff
+  // on-chip devices: 0x3600_0000 - 0x3fff_ffff
   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
   val uartRange = AddressSet(0x40600000, 0xf)
   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
@@ -355,9 +356,13 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
-  val debugModule = LazyModule(new debugModule(p))
+  val debugModule = LazyModule(new debugModule(NumCores)(p))
+  debugModule.debug.node := peripheralXbar
   val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
   debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+  debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
+    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+  }
 
   lazy val module = new LazyRawModuleImp(this) {
     ElaborationArtefacts.add("dts", dts)
@@ -367,7 +372,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
-      val debug = new DebugIO(p)
+      val debug = new DebugIO()(p)
       val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
     childClock := io.clock.asClock()
@@ -409,6 +414,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
       io.resetCtrl := debugModule.module.io.resetCtrl
       io.debug := debugModule.module.io.debugIO
+      debugModule.module.io.clock := io.clock
+      debugModule.module.io.reset := io.reset
     }
   }
 }

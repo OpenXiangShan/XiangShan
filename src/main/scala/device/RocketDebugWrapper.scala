@@ -29,35 +29,43 @@ import freechips.rocketchip.jtag._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.{ClockSinkParameters, ClockSinkNode}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.debug
+import freechips.rocketchip.devices.debug.{TLDebugModule, DebugCustomXbar, ResetCtrlIO, DebugIO, SystemJTAGIO, DebugTransportModuleJTAG, PSDIO}
+import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
+import freechips.rocketchip.devices.debug._
 
 // this file uses code from rocketchip Periphery.scala
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm, dtm, sba, and pulls out intr lines
-class debugModule (implicit p: Parameters) extends LazyModule {
 
-  val debug = LazyModule(new TLDebugModule(tlbus.beatBytes))
 
-  debug.node := TLFragmenter() := peripheralXbar
+
+class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
+
+  val debug = LazyModule(new TLDebugModule(8)(p))
+
+//  debug.node := TLFragmenter() := peripheralXbar
+  val debugCustomXbarOpt = p(DebugModuleKey).map(params => LazyModule( new DebugCustomXbar(outputRequiresInput = false)))
   debug.dmInner.dmInner.customNode := debugCustomXbarOpt.get.node
 
-  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
-  }
+//  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
+//    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
+//  }
   val fakeTreeNode = new GenericLogicalTreeNode
   LogicalModuleTree.add(fakeTreeNode, debug.logicalTreeNode)
 
   lazy val module = new LazyRawModuleImp(this) {
     val io = IO(new Bundle{
-      val resetCtrl = new ResetCtrlIO(NumCores)(p)
-      val debugIO = new DebugIO(p)
+      val resetCtrl = new ResetCtrlIO(numCores)(p)
+      val debugIO = new DebugIO()(p)
+      val clock = Input(Bool())
+      val reset = Input(Bool())
     })
-    debug.module.io.tl_reset := reset
-    debug.module.io.tl_clock := clock
+    debug.module.io.tl_reset := io.reset
+    debug.module.io.tl_clock := io.clock
     debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
-    resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartIsInReset.foreach { rcdm => rcio := rcdm }}
+    io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartIsInReset.foreach { rcdm => rcio := rcdm }}
 
-    debug.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg }
+    io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg }
     debug.module.io.debug_reset := io.debugIO.reset
     debug.module.io.debug_clock := io.debugIO.clock
     io.debugIO.ndreset := debug.module.io.ctrl.ndreset
@@ -65,14 +73,20 @@ class debugModule (implicit p: Parameters) extends LazyModule {
     debug.module.io.ctrl.dmactiveAck := io.debugIO.dmactiveAck
     io.debugIO.extTrigger.foreach { x => debug.module.io.extTrigger.foreach {y => x <> y}}
 
-    val dtm = debug.flatMap(_.systemjtag.map(instantiateJtagDTM(_)))
+    val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
 
     def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
 
-      val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, p(JtagDTMKey)))
+      class JtagDTMKeyDefault extends JtagDTMConfig(
+        idcodeVersion = 0,
+        idcodePartNum = 0,
+        idcodeManufId = 0,
+        debugIdleCycles = 5) 
+      val dtmConfig = new JtagDTMKeyDefault
+      val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, dtmConfig))
       dtm.io.jtag <> sj.jtag
 
-      io.debugIO.map(_.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x })  // force TMS high when debug is disabled
+      io.debugIO.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x }  // force TMS high when debug is disabled
 
       dtm.io.jtag_clock  := sj.jtag.TCK
       dtm.io.jtag_reset  := sj.reset
@@ -141,9 +155,9 @@ object Debug {
     connectDebugClockAndReset(debugOpt, c)
     resetctrlOpt.map { rcio => rcio.hartIsInReset.map { _ := r }}
     debugOpt.map { debug =>
-      debug.clockeddmi.foreach { d =>
+      /*debug.clockeddmi.foreach { d =>
         val dtm = Module(new SimDTM).connect(c, r, d, out)
-      }
+      }*/
       debug.systemjtag.foreach { sj =>
         val jtag = Module(new SimJTAG(tickDelay=3)).connect(sj.jtag, c, r, ~r, out)
         sj.reset := r.asAsyncReset

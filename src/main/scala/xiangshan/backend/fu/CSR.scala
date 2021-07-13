@@ -855,7 +855,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
     ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
-  val debugIntr = csrio.externalInterrupt.debugInt & debugIntrEnable
+  val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
   // send interrupt information to ROQ
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
@@ -930,7 +930,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     mtval := memExceptionAddr
   }
 
-  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x808.U, 0x800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
+  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38a00808.U, 0x38a00800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
