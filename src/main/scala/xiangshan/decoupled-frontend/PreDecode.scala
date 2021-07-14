@@ -32,7 +32,7 @@ trait HasPdconst{ this: XSModule =>
       Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W)).asSInt()
     )
   }
-
+  def MAXINSNUM = 16
 }
 
 object BrType {
@@ -61,37 +61,29 @@ class PreDecodeInfo extends Bundle {  // 8 bit
   def notCFI = brType === BrType.notBr
 }
 
-class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  val instrs = Vec(MAXINSNUM, UInt(32.W))
-  val mask = UInt(MAXINSNUM.W)
-  // one for the first bank
-  //val lastHalf = Bool()
-  val pd = Vec(MAXINSNUM, (new PreDecodeInfo))
-}
-
-class FromIfu(implicit p: Parameters) extends XSBundle{
-  val in = Flipped(Valid(new IFuToPreDecode))
-}
-
-class ToIfu(implicit p: Parameters) extends XSBundle{
-  val out = Valid()
+class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
+  val pc          = Vec(MAXINSNUM, UInt(VAddrBits.W))
+  val instrs      = Vec(MAXINSNUM, UInt(32.W))
+  val valid       = UInt(MAXINSNUM.W)
+  val pd          = Vec(MAXINSNUM, (new PreDecodeInfo))
+  val brTarget    = UInt(VAddrBits.W)
+  val jalTarget   = UInt(VAddrBits.W)
+  val jumpOffset  = ValidUndirectioned(UInt(log2Ceil(MAXINSNUM).W))
+  val brOffset    = UInt(log2Ceil(MAXINSNUM).W)
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
   val io = IO(new Bundle() {
-    val in = Input(new FromIfu)
-    //val prev = Flipped(ValidIO(UInt(16.W)))
-    //val prev_pc = Input(UInt(VAddrBits.W))
+    val in = Input(new IfuToPreDecode)
     val out = Output(new PreDecodeResp)
   })
 
-  def MAXINSNUM = 16
   val data      = io.in.data
   val pcStart   = io.in.startAddr 
-  val ftqIdx    = io.in.ftqIdx 
 
   val validStart   = Wire(Vec(MAXINSNUM, Bool()))
   val validEnd     = Wire(Vec(MAXINSNUM, Bool()))
+  val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
@@ -105,12 +97,12 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     val lastIsValidEnd =  validEnd(i-1)  || isFirstInBlock || !HasCExtension.B
     
-    validStart(i) := lastIsValidEnd && || !HasCExtension.B
+    validStart(i) := lastIsValidEnd || !HasCExtension.B
     validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
 
     val brType::isCall::isRet::Nil = brInfo(inst)
-    val jalOffset = jal_offset(inst, currentRVC)
-    val brOffset  = br_offset(inst, currentRVC)
+    val jalOffset = jal_offset(inst, currentIsRVC)
+    val brOffset  = br_offset(inst, currentIsRVC)
 
     io.out.pd(i).isRVC := currentIsRVC
     io.out.pd(i).brType := brType
@@ -118,16 +110,29 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.pd(i).isRet := isRet
     //io.out.pd(i).excType := ExcType.notExc
     io.out.instrs(i) := inst
-    io.out.pc(i) := startAddr + (i << 1).U(log2Ceil(MAXINSNUM).W)
+    io.out.pc(i) := pcStart + (i << 1).U(log2Ceil(MAXINSNUM).W)
 
     
   }
-  io.out.mask := validStart
+  val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal || io.out.pd(i).isJalr) && validStart(i)).reverse).asUInt()
+  val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr && validStart(i)).reverse).asUInt()
+
+  val jalOffset = PriorityEncoder(isJumpOH)
+  val brOffset  = PriorityEncoder(isBrOH)
+
+  io.out.valid := validStart
+  io.out.jumpOffset.valid := isJumpOH((MAXINSNUM - 1).U)
+  io.out.jumpOffset.bits  := jalOffset
+  io.out.brOffset         := brOffset
+  io.out.brTarget         := targets(brOffset)   //TODO: support more branch instructions basic-block
+  io.out.jalTarget        := targets(jalOffset)
+
+
   for (i <- 0 until MAXINSNUM) {
     XSDebug(true.B,
       p"instr ${Hexadecimal(io.out.instrs(i))}, " +
-      p"mask ${Binary(instsMask(i))}, " +
-      p"endMask ${Binary(instsEndMask(i))}, " +
+      p"validStart ${Binary(validStart(i))}, " +
+      p"validEnd ${Binary(validEnd(i))}, " +
       p"pc ${Hexadecimal(io.out.pc(i))}, " +
       p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
       p"brType ${Binary(io.out.pd(i).brType)}, " +
