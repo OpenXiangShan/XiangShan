@@ -89,10 +89,10 @@ class IntegerBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHe
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // in
-    val issue = Vec(7, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(exuParameters.IntExuCnt, Flipped(DecoupledIO(new ExuInput)))
     // out
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
-    val writeback = Vec(7, DecoupledIO(new ExuOutput))
+    val writeback = Vec(exuParameters.IntExuCnt, DecoupledIO(new ExuOutput))
     // misc
     val csrio = new CSRFileIO
     val fenceio = new Bundle {
@@ -101,12 +101,11 @@ class IntegerBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHe
       val sbuffer = new FenceToSbuffer // to mem
     }
   })
-
-  val jmpExeUnit = Module(new JumpExeUnit)
-  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
   val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
+  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  val jmpExeUnit = Module(new JumpExeUnit)
 
-  val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
+  val exeUnits = aluExeUnits ++ mduExeUnits :+ jmpExeUnit
   io.writeback <> exeUnits.map(_.io.out)
 
   for ((exe, i) <- exeUnits.zipWithIndex) {
@@ -117,7 +116,7 @@ class IntegerBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHe
 
   // send misprediction to brq
   io.exuRedirect.zip(
-    exeUnits.filter(_.config.hasRedirect).map(_.io.out)
+    (jmpExeUnit +: aluExeUnits).map(_.io.out)
   ).foreach {
     case (x, y) =>
       x.valid := y.fire() && y.bits.redirectValid

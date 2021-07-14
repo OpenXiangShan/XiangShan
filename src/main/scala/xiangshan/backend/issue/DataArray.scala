@@ -53,7 +53,7 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
   val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
-  val multiWrite = Vec(params.numDataCapture, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
 
   override def cloneType: DataArrayIO.this.type =
@@ -112,16 +112,17 @@ class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
 }
 
 object ImmExtractor {
-  def apply(config: RSParams, exuCfg: ExuConfig, uop: MicroOp, data_in: Vec[UInt], pc: UInt, target: UInt)(implicit p: Parameters): Vec[UInt] = {
-    val immExt = exuCfg match {
-      case JumpExeUnitCfg => {
+  def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
+           (implicit p: Parameters): Vec[UInt] = {
+    val immExt = (params.isJump, params.isAlu) match {
+      case (true, false) => {
         val ext = Module(new JumpImmExtractor)
-        ext.jump_pc := pc
-        ext.jalr_target := target
+        ext.jump_pc := pc.get
+        ext.jalr_target := target.get
         ext
       }
-      case AluExeUnitCfg => Module(new AluImmExtractor)
-      case _ => Module(new ImmExtractor(config.numSrc, config.dataBits))
+      case (false, true) => Module(new AluImmExtractor)
+      case _ => Module(new ImmExtractor(params.numSrc, params.dataBits))
     }
     immExt.io.uop := uop
     immExt.io.data_in := data_in

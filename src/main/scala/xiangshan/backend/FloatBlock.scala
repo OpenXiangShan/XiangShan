@@ -31,43 +31,12 @@ class FloatBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHelp
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // in
-    val issue = Vec(6, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(exuParameters.FpExuCnt, Flipped(DecoupledIO(new ExuInput)))
     // out
-    val writeback = Vec(6, DecoupledIO(new ExuOutput))
+    val writeback = Vec(exuParameters.FpExuCnt, DecoupledIO(new ExuOutput))
     // misc from csr
     val frm = Input(UInt(3.W))
   })
-
-//  val intWakeUpFpReg = Wire(Vec(intSlowWakeUpIn.size, Flipped(DecoupledIO(new ExuOutput))))
-//  for((w, r) <- io.intWakeUpFp.zip(intWakeUpFpReg)){
-//    val in = WireInit(w)
-//    w.ready := in.ready
-//    in.valid := w.valid && !w.bits.uop.roqIdx.needFlush(io.redirect, io.flush)
-//    PipelineConnect(in, r, r.fire() || r.bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
-//  }
-//  // to memBlock's store rs
-//  io.intWakeUpOut <> intWakeUpFpReg.map(x => WireInit(x))
-//
-//  val intRecoded = intWakeUpFpReg.map(x => {
-//    val rec = Wire(DecoupledIO(new ExuOutput))
-//    rec.valid := x.valid && x.bits.uop.ctrl.fpWen
-//    rec.bits := x.bits
-//    rec.bits.data := Mux(x.bits.uop.ctrl.fpu.typeTagOut === S,
-//      recode(x.bits.data(31, 0), S),
-//      recode(x.bits.data(63, 0), D)
-//    )
-//    rec.bits.redirectValid := false.B
-//    x.ready := rec.ready || !rec.valid
-//    rec
-//  })
-
-//  val memRecoded = WireInit(io.memWakeUpFp)
-//  for((rec, reg) <- memRecoded.zip(io.memWakeUpFp)){
-//    rec.bits.data := fpRdataHelper(reg.bits.uop, reg.bits.data)
-//    rec.bits.redirectValid := false.B
-//    reg.ready := true.B
-//  }
-//  val wakeUpInRecode = intRecoded ++ memRecoded
 
   val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new FmacExeUnit))
   val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
@@ -83,6 +52,7 @@ class FloatBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHelp
 
     // in
     exeUnits(i).io.fromFp <> io.issue(i)
+    // fp instructions have three operands
     for (j <- 0 until 3) {
       // when one of the higher bits is zero, then it's not a legal single-precision number
       val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR

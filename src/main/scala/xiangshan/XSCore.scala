@@ -21,12 +21,10 @@ import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.exu.Wb
 import xiangshan.frontend._
-import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheWrapper, L1plusCacheParameters, PTWWrapper, PTWRepeater, PTWFilter}
-import xiangshan.cache.prefetch._
+import xiangshan.cache.{L1plusCacheWrapper, PTWWrapper, PTWRepeater, PTWFilter}
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{Description, LazyModule, LazyModuleImp, ResourceAnchors, ResourceBindings, SimpleDevice}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.{HasSoCParameter, L1CacheErrorInfo}
 import utils._
@@ -69,6 +67,45 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val ptw = LazyModule(new PTWWrapper())
   val memBlock = LazyModule(new MemBlock)
 
+  // TODO: better RS organization
+  // generate rs according to number of function units
+  require(exuParameters.JmpCnt == 1)
+  require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
+  require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
+  require(exuParameters.LduCnt == 2 && exuParameters.StuCnt == 2)
+  // one RS every 2 MDUs
+  val schedulePorts = Seq(
+    // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
+    (AluExeUnitCfg, exuParameters.AluCnt, Seq(0, 1, 2, 5, 6, 7, 8), Seq()),
+    (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(0, 1, 2, 5, 6, 7, 8), Seq()),
+    (JumpExeUnitCfg, 1, Seq(), Seq()),
+    (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(3, 4)),
+    (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq(3, 4)),
+    (LdExeUnitCfg, 1, Seq(0, 5, 6), Seq()),
+    (LdExeUnitCfg, 1, Seq(0, 5, 6), Seq()),
+    (StExeUnitCfg, 1, Seq(), Seq()),
+    (StExeUnitCfg, 1, Seq(), Seq())
+  )
+  // allow mdu and fmisc to have 2*numDeq enqueue ports
+  val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
+    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
+    else if (i < 2*exuParameters.MduCnt) Seq((0, i), (1, i))
+    else Seq((0, i))
+  })
+  val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
+    if (i < 2*exuParameters.FmiscCnt) Seq((3, i), (4, i))
+    else Seq((4, i))
+  })
+  val lsDpPorts = Seq(
+    Seq((5, 0)),
+    Seq((6, 0)),
+    Seq((7, 0)),
+    Seq((8, 0))
+  )
+  val dispatchPorts = intDpPorts ++ fpDpPorts ++ lsDpPorts
+
+  val scheduler = LazyModule(new Scheduler(schedulePorts, dispatchPorts))
+
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -97,7 +134,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val intBlockSlowWakeUp = intExuConfigs.filter(_.hasUncertainlatency)
 
   val ctrlBlock = Module(new CtrlBlock)
-  val scheduler = Module(new Scheduler)
+
   val integerBlock = Module(new IntegerBlock)
   val floatBlock = Module(new FloatBlock)
 
@@ -105,10 +142,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
+  val scheduler = outer.scheduler.module
 
-  val intConfigs = intExuConfigs ++ fpExuConfigs.filter(_.writeIntRf) ++ loadExuConfigs
+  val allWriteback = integerBlock.io.writeback ++ floatBlock.io.writeback ++ memBlock.io.writeback
+  val intConfigs = exuConfigs.filter(_.writeIntRf)
   val intArbiter = Module(new Wb(intConfigs, NRIntWritePorts, isFp = false))
-  val intWriteback = integerBlock.io.writeback ++ floatBlock.io.writeback.drop(4) ++ memBlock.io.writeback.take(2)
+  val intWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   // set default value for ready
   integerBlock.io.writeback.map(_.ready := true.B)
   floatBlock.io.writeback.map(_.ready := true.B)
@@ -121,12 +160,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     }
   }
 
-  val fpArbiter = Module(new Wb(
-    fpExuConfigs ++ intExuConfigs.take(1) ++ loadExuConfigs,
-    NRFpWritePorts,
-    isFp = true
-  ))
-  val fpWriteback = floatBlock.io.writeback ++ integerBlock.io.writeback.take(1) ++ memBlock.io.writeback.take(2)
+  val fpArbiter = Module(new Wb(exuConfigs.filter(_.writeFpRf), NRFpWritePorts, isFp = true))
+  val fpWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
   fpArbiter.io.in.zip(fpWriteback).foreach{ case (arb, wb) =>
     arb.valid := wb.valid && wb.bits.uop.ctrl.fpWen
     arb.bits := wb.bits

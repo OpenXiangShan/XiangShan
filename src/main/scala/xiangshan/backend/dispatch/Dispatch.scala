@@ -57,13 +57,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     val readIntState= Vec(NRIntReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(NRFpReadPorts, Flipped(new BusyTableReadIO))
     // to reservation stations
-    val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
+    val enqIQCtrl = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
     // send reg file read port index to reservation stations
-    val readPortIndex = new Bundle {
-      val intIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
-      val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
-      // ls: hardwired to (0, 1, 2, 4)
-    }
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // LFST state sync
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
@@ -114,30 +109,20 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
   intDispatch.io.fromDq <> intDq.io.deq
-  intDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readIntRf(i)})
-  intDispatch.io.readState.zipWithIndex.map({case (r, i) => r <> io.readIntState(i)})
-  intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
-//  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
-  intDispatch.io.readPortIndex <> io.readPortIndex.intIndex
 
   // Fp dispatch queue to Fp reservation stations
   val fpDispatch = Module(new Dispatch2Fp)
   fpDispatch.io.fromDq <> fpDq.io.deq
-  fpDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i)})
-  fpDispatch.io.readState.zipWithIndex.map({case (r, i) => r <> io.readFpState(i)})
-  fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
-//  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
-  fpDispatch.io.readPortIndex <> io.readPortIndex.fpIndex
-  
+
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
-  lsDispatch.io.readIntRf.zipWithIndex.map({case (r, i) => r <> io.readIntRf(i + 8)})
-  lsDispatch.io.readFpRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i + 12)})
-  lsDispatch.io.readIntState.zipWithIndex.map({case (r, i) => r <> io.readIntState(i + 8)})
-  lsDispatch.io.readFpState.zipWithIndex.map({case (r, i) => r <> io.readFpState(i + 12)})
-  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
-//  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+
+  io.enqIQCtrl <> intDispatch.io.enqIQCtrl ++ fpDispatch.io.enqIQCtrl ++ lsDispatch.io.enqIQCtrl
+  io.readIntRf <> intDispatch.io.readRf ++ lsDispatch.io.readIntRf
+  io.readIntState <> intDispatch.io.readState ++ lsDispatch.io.readIntState
+  io.readFpRf <> fpDispatch.io.readRf ++ lsDispatch.io.readFpRf
+  io.readFpState <> fpDispatch.io.readState ++ lsDispatch.io.readFpState
 
   io.ctrlInfo <> DontCare
   io.ctrlInfo.intdqFull := intDq.io.dqFull
