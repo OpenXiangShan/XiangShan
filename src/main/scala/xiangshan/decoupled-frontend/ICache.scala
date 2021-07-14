@@ -28,9 +28,16 @@ case class ICacheParameters(
 trait Temperary {
   val idxBits = log2Ceil(nSets)
   val wayBits = log2Ceil(nWays)
-  val offBits = log2Ceil(blockBytes)
-  val tagBits = VAddrBits - idxBits - offBits
-  val bbBits  = log2Ceil(32.W)
+  val offBits = log2Ceil(64)
+  val tagBits = 39 - idxBits - offBits
+  val bbBits  = 5
+  def plruAccessNum = 2  //hit and miss
+
+  val nSets   = 128           //32 KB
+  val nWays   = 4
+
+  val nMissEntries = 2
+
 }
 
 abstract class ICacheBundle(implicit p: Parameters) extends XSBundle

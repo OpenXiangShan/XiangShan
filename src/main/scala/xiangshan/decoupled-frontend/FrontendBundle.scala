@@ -9,17 +9,21 @@ import utils._
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr    = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
-  val ftqIdx       = UInt(log2Ceil(FTQSIZE).W)
-  val ftqOffset    = Valid(UInt(log2Ceil(FETCHWIDTH).W))
+  val ftqIdx       = UInt(log2Ceil(48).W)
+  val ftqOffset    = Valid(UInt(log2Ceil(32).W))
   val target       = UInt(VAddrBits.W)
 }
 
 class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
-  val pd        = Vec(16, new PredecodeInfo) // TODO: redefine Predecode
-  val ftqIdx    = UInt(log2Ceil(FTQSIZE).W)
-  val ftqOffset = UInt(log2Ceil(FETCHWIDTH).W)
-  val misPred   = Bool()
-  val target    = UInt(VAddrBits.W)
+  val pc          = Vec(16, UInt(VAddrBits.W))
+  val pd           = Vec(16, new PreDecodeInfo) // TODO: redefine Predecode
+  val ftqIdx       = UInt(log2Ceil(FTQSIZE).W)
+  val ftqOffset    = UInt(log2Ceil(FETCHWIDTH).W)
+  val misPred      = Bool()
+  val jalTarget    = UInt(VAddrBits.W)
+  val brTarget     = UInt(VAddrBits.W)
+  val jumpOffset  = ValidUndirectioned(UInt(4.W))
+  val brOffset    = UInt(4.W)
 }
 
 class BpuToFtq(implicit p: Parameters) extends XSBundle {
@@ -40,9 +44,11 @@ class Exception(implicit p: Parameters) extends XSBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs    = Vec(PredictWidth, UInt(32.W))
-  val mask      = UInt(PredictWidth.W)
+  val instrs    = Vec(16, UInt(32.W))
+  val valid     = UInt(16.W)
   val pd        = Vec(PredictWidth, new PreDecodeInfo)
   val exception = new Exception
-  val ftqPtr    = new FtqPtr
+  val ftqIdx       = UInt(log2Ceil(FTQSIZE).W)
+  val ftqOffset    = Valid(UInt(log2Ceil(FETCHWIDTH).W))
+
 }

@@ -36,7 +36,7 @@ trait HasPdconst{ this: XSModule =>
 }
 
 object BrType {
-  def notBr   = "b00".U
+  def notCFI   = "b00".U
   def branch  = "b01".U
   def jal     = "b10".U
   def jalr    = "b11".U
@@ -55,10 +55,10 @@ class PreDecodeInfo extends Bundle {  // 8 bit
   val isCall  = Bool()
   val isRet   = Bool()
   //val excType = UInt(3.W)
-  def isBr = brType === BrType.branch
-  def isJal = brType === BrType.jal
-  def isJalr = brType === BrType.jalr
-  def notCFI = brType === BrType.notBr
+  def isBr    = brType === BrType.branch
+  def isJal   = brType === BrType.jal
+  def isJalr  = brType === BrType.jalr
+  def notCFI  = brType === BrType.notCFI
 }
 
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
@@ -70,6 +70,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
   val jalTarget   = UInt(VAddrBits.W)
   val jumpOffset  = ValidUndirectioned(UInt(log2Ceil(MAXINSNUM).W))
   val brOffset    = UInt(log2Ceil(MAXINSNUM).W)
+  val misPred     = Bool()
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
@@ -79,7 +80,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   })
 
   val data      = io.in.data
-  val pcStart   = io.in.startAddr 
+  val pcStart   = io.in.startAddr
+  val ftqOffet  = io.in.ftqOffset.bits
+  val bbTaken   = io.in.ftqOffset.valid
+  val bbTarget  = io.in.target
 
   val validStart   = Wire(Vec(MAXINSNUM, Bool()))
   val validEnd     = Wire(Vec(MAXINSNUM, Bool()))
@@ -112,10 +116,12 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.instrs(i) := inst
     io.out.pc(i) := pcStart + (i << 1).U(log2Ceil(MAXINSNUM).W)
 
-    
+    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
   }
   val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal || io.out.pd(i).isJalr) && validStart(i)).reverse).asUInt()
   val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr && validStart(i)).reverse).asUInt()
+
+  val hasJump  = isJumpOH.orR()
 
   val jalOffset = PriorityEncoder(isJumpOH)
   val brOffset  = PriorityEncoder(isBrOH)
@@ -126,6 +132,11 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   io.out.brOffset         := brOffset
   io.out.brTarget         := targets(brOffset)   //TODO: support more branch instructions basic-block
   io.out.jalTarget        := targets(jalOffset)
+
+  io.out.misPred          := (io.out.pd(ftqOffet).notCFI && bbTaken) ||
+                             (bbTaken && io.out.pd(ftqOffet).isBr  && bbTarget =/= io.out.brTarget)   ||
+                             (bbTaken && io.out.pd(ftqOffet).isJal && bbTarget =/= io.out.jalTarget)  ||
+                             (!bbTaken && hasJump)
 
 
   for (i <- 0 until MAXINSNUM) {
