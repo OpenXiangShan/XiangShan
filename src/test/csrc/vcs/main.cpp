@@ -31,8 +31,9 @@ extern "C" void simv_init() {
   printf("simv compiled at %s, %s\n", __DATE__, __TIME__);
   setlocale(LC_NUMERIC, "");
 
-  init_goldenmem();
   difftest_init();
+  init_goldenmem();
+  init_nemuproxy();
   init_device();
 
   assert_init();
@@ -57,3 +58,4 @@ extern "C" int simv_step() {
   }
   return difftest_step();
 }
+
