@@ -161,7 +161,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   io.meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
 
-  io.resp.bits.f3.preds.pred_target := spec_top_addr
+  io.resp.bits.f3.preds.target := spec_top_addr
   // TODO: back-up stack for ras
   // use checkpoint to recover RAS
 }

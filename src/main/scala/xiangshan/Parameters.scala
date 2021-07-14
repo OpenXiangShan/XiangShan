@@ -24,6 +24,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, MicroBTB}
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -59,6 +60,33 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
+  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters) => {
+      // val loop = Module(new LoopPredictor)
+      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
+      //                             else          Module(new Tage) }
+      //             else          { Module(new FakeTage) })
+      val ftb = Module(new FTB()(p))
+      val ubtb = Module(new MicroBTB()(p))
+      val bim = Module(new BIM()(p))
+      // val fake = Module(new FakePredictor())
+
+      // val preds = Seq(loop, tage, btb, ubtb, bim)
+      val preds = Seq(ftb, ubtb, bim)
+      preds.map(_.io := DontCare)
+
+      // ubtb.io.resp_in(0)  := resp_in
+      // bim.io.resp_in(0)   := ubtb.io.resp
+      // btb.io.resp_in(0)   := bim.io.resp
+      // tage.io.resp_in(0)  := btb.io.resp
+      // loop.io.resp_in(0)  := tage.io.resp
+      ubtb.io.in.bits.resp_in(0)     := resp_in
+      bim.io.in.bits.resp_in(0)      := ubtb.io.out.bits.resp
+      ftb.io.in.bits.resp_in(0)      := bim.io.out.bits.resp
+
+      (preds, ftb.io.out.bits.resp)
+    }),
+
 
   EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 48,
@@ -204,6 +232,11 @@ trait HasXSParameter {
   val JbtacSize = coreParams.JbtacSize
   val JbtacBanks = coreParams.JbtacBanks
   val RasSize = coreParams.RasSize
+
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
+    coreParams.branchPredictor(resp_in, p)
+  }
+
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64

@@ -25,32 +25,31 @@ import chisel3.experimental.chiselName
 import scala.math.min
 
 trait MicroBTBParams extends HasXSParameter {
-  val num_ways = 16
-  val tag_size = 20
-  val lower_bit_size = 20
+  val numWays = 16
+  val tagSize = 20
+  val lowerBitSize = 20
   val untaggedBits = log2Up(PredictWidth) + instOffsetBits
-  val num_br = 1
+  val numBr = 1
 }
 
 @chiselName
 class MicroBTB(implicit p: Parameters) extends BasePredictor
   with MicroBTBParams
 {
-  def getTag(pc: UInt)  = (pc >> untaggedBits)(tag_size-1, 0)
-  def getBank(pc: UInt) = pc(log2Ceil(PredictWidth), instOffsetBits)
+  def getTag(pc: UInt)  = (pc >> untaggedBits)(tagSize-1, 0)
+  // def getBank(pc: UInt) = pc(log2Ceil(PredictWidth), instOffsetBits)
 
   class MicroBTBMeta extends XSBundle
   {
-    val is_Br = Vec(num_br, Bool())
-    val is_RVC = Bool()
+    val is_Br = Vec(numBr, Bool())
     val valid = Bool()
     val pred = UInt(2.W)
-    val tag = UInt(tag_size.W)
+    val tag = UInt(tagSize.W)
   }
 
   class MicroBTBData extends XSBundle
   {
-    val lower = UInt(lower_bit_size.W)
+    val lower = UInt(lowerBitSize.W)
   }
 
   class ReadResp extends XSBundle
@@ -58,8 +57,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val valid = Bool()
     val taken = Bool()
     val target = UInt(VAddrBits.W)
-    val is_RVC = Bool()
-    val is_Br = Vec(num_br, Bool())
+    val is_Br = Vec(numBr, Bool())
   }
 
   class UBTBBank(val nWays: Int) extends XSModule with HasIFUConst with BPUUtils {
@@ -95,8 +93,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val rmetas = meta.io.rdata.take(nWays)
     val rdatas = data.io.rdata
 
-    val packetAlignedPC = packetAligned(io.read_pc.bits)
-    val read_tag = getTag(io.read_pc.bits)
+    val read_pc = io.read_pc.bits
+    val read_tag = getTag(read_pc)
 
     val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
     val takens = VecInit(rmetas.map(m => m.pred(1)))
@@ -104,15 +102,14 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val hit_and_taken = VecInit((hits zip takens) map {case (h, t) => h && t}).asUInt.orR
     val hit_meta = ParallelMux(hits zip rmetas)
     val hit_data = ParallelMux(hits zip rdatas)
-    val target = Cat(io.read_pc.bits(VAddrBits-1, lower_bit_size+instOffsetBits), hit_data.lower, 0.U(instOffsetBits.W))
+    val target = Cat(io.read_pc.bits(VAddrBits-1, lowerBitSize+instOffsetBits), hit_data.lower, 0.U(instOffsetBits.W))
 
     val ren = io.read_pc.valid
     io.read_resp.valid := ren
-    io.read_resp.is_RVC := ren && hit_meta.is_RVC
     when(ren) {
       io.read_resp.is_Br := hit_meta.is_Br
     }.otherwise {
-      io.read_resp.is_Br := 0.U(num_br.W)
+      io.read_resp.is_Br := 0.U(numBr.W)
     }
     io.read_resp.taken := ren && hit_and_taken
     io.read_resp.target := target
@@ -174,17 +171,20 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     debug_io.update_new_pred := update_new_pred
   }
 
-  val ubtbBanks = Module(new UBTBBank(num_ways))
+  val ubtbBanks = Module(new UBTBBank(numWays))
   val banks = ubtbBanks.io
   val read_resps = banks.read_resp
 
-  banks.read_pc.valid := s1_valid
-  banks.read_pc.bits := RegNext(io.f0_pc)
+  io.in.ready := !io.flush.valid
 
-  io.resp.bits.f1.preds.pred_target := Mux(banks.read_hit, read_resps.target, io.f0_pc.bits + (FetchWidth*4).U)
-  io.resp.bits.f1.preds.taken := read_resps.taken
-  io.resp.bits.f1.preds.is_br := read_resps.is_Br
-  io.resp.bits.f1.hit := banks.read_hit
+  banks.read_pc.valid := io.s1_fire
+  banks.read_pc.bits := s1_pc
+
+  io.out.valid := io.s1_fire
+  io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, io.in.bits.s0_pc + (FetchWidth*4).U)
+  io.out.bits.resp.s1.preds.taken := read_resps.taken
+  io.out.bits.resp.s1.preds.is_br := read_resps.is_Br
+  io.out.bits.resp.s1.hit := banks.read_hit
 
   // Update logic
   val update = RegNext(io.update.bits)
@@ -193,7 +193,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_taken = update.preds.taken
 
   val u_tag = getTag(u_pc)
-  val u_target_lower = update.preds.pred_target(lower_bit_size-1+instOffsetBits, instOffsetBits)
+  val u_target_lower = update.preds.target(lowerBitSize-1+instOffsetBits, instOffsetBits)
 
   val data_write_valid = u_valid && u_taken
   val meta_write_valid = u_valid && (u_taken || update.preds.is_br.reduce(_||_))

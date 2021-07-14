@@ -22,42 +22,43 @@ import utils._
 import chisel3.experimental.chiselName
 
 trait BimParams extends HasXSParameter {
-  val bim_size = 2048
-  val bypass_entries = 4
+  val bimSize = 2048
+  val bypassEntries = 4
+  val numBr = 1
 }
 
 @chiselName
 class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils {
-  val bimAddr = new TableAddr(log2Up(bim_size), 1)
+  val bimAddr = new TableAddr(log2Up(bimSize), numBr)
 
-  val bim = Module(new SRAMTemplate(UInt(2.W), set = bim_size, shouldReset = false, holdRead = true))
+  val bim = Module(new SRAMTemplate(UInt(2.W), set = bimSize, way=numBr, shouldReset = false, holdRead = true))
 
   val doing_reset = RegInit(true.B)
-  val resetRow = RegInit(0.U(log2Ceil(bim_size).W))
+  val resetRow = RegInit(0.U(log2Ceil(bimSize).W))
   resetRow := resetRow + doing_reset
-  when (resetRow === (bim_size-1).U) { doing_reset := false.B }
+  when (resetRow === (bimSize-1).U) { doing_reset := false.B }
 
-  val f0_pc = io.f0_pc
-  val f0_pc.valid = io.f0_pc.valid
-  val f0_idx = bimAddr.getIdx(f0_pc.bits)
+  val s0_idx = bimAddr.getIdx(s0_pc)
 
-  bim.io.r.req.valid := f0_pc.valid
-  bim.io.r.req.bits.setIdx := f0_idx
+  bim.io.r.req.valid := io.s0_fire
+  bim.io.r.req.bits.setIdx := s0_idx
 
-  io.resp.valid := io.f0_pc.valid && bim.io.r.req.ready && io.flush
+  io.in.ready := bim.io.r.req.ready && !io.flush.valid
+  io.out.valid := RegNext(io.s0_fire) && !io.flush.valid
 
-  val f1_pc = RegEnable(f0_pc, f0_pc.valid)
+  // val s1_pc = RegEnable(s0_pc, s0_valid)
 
-  val f1_read = bim.io.r.resp.data
+  val s1_read = bim.io.r.resp.data
 
-  io.resp.bits.f1.preds.taken := f1_read(1)
-  io.resp.bits.f1.meta := f1_read
+  io.out.bits.resp.s1.preds.taken_mask := Cat(s1_read(0)(1), s1_read(1)(1), 0.U(1.W))
+  io.out.bits.resp.s1.meta := s1_read
 
-  io.resp.bits.f2.preds.taken := RegNext(f1_read(1))
-  io.resp.bits.f2.meta := RegNext(f1_read)
+  // TODO: Replace RegNext by RegEnable
+  io.out.bits.resp.s2.preds.taken := RegEnable(io.out.bits.resp.s1.preds.taken, io.s1_fire)
+  io.out.bits.resp.s2.meta := RegEnable(io.out.bits.resp.s1.meta, io.s1_fire)
 
-  io.resp.bits.f3.preds.taken := RegNext(RegNext(f1_read(1)))
-  io.resp.bits.f3.meta := RegNext(RegNext(f1_read))
+  io.out.bits.resp.s3.preds.taken := RegEnable(io.out.bits.resp.s2.preds.taken, io.s2_fire)
+  io.out.bits.resp.s3.meta := RegEnable(io.out.bits.resp.s2.meta, io.s2_fire)
 
   // Update logic
   val u_valid = RegNext(io.update.valid)
@@ -66,20 +67,24 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val u_idx = bimAddr.getIdx(update.pc)
 
   // Bypass logic
-  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypass_entries, UInt(2.W))))
-  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypass_entries, Bool())))
-  val wrbypass_idx       = RegInit(0.U.asTypeOf(Vec(bypass_entries, UInt(log2Up(bim_size).W))))
-  val wrbypass_enq_ptr    = RegInit(0.U(log2Up(bypass_entries).W))
+  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, UInt(2.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, Bool()))))
+  val wrbypass_idx       = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(bimSize).W))))
+  val wrbypass_enq_ptr    = RegInit(0.U(log2Up(bypassEntries).W))
 
-  val wrbypass_hits = VecInit((0 until bypass_entries).map( i =>
+  val wrbypass_hits = VecInit((0 until bypassEntries).map(i =>
     !doing_reset && wrbypass_idx(i) === u_idx))
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtrs = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx), wrbypass_ctrs(wrbypass_hit_idx), update.meta)
+  val oldCtrs = VecInit((0 until numBr).map(i =>
+    Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i),
+    wrbypass_ctrs(wrbypass_hit_idx)(i), update.meta(2*i+1, 2*i))))
 
-  val newTaken = update.preds.taken
-  val newCtrs = satUpdate(oldCtrs, 2, newTaken)
+  val newTakens = update.preds.taken_mask
+  val newCtrs = VecInit((0 until numBr).map(i =>
+    satUpdate(oldCtrs(i), 2, newTakens(i))
+  ))
 
   val need_to_update = u_valid && update.preds.is_br.reduce(_||_)
 
@@ -100,12 +105,12 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   when (need_to_update && !wrbypass_hit) {
     wrbypass_idx(wrbypass_enq_ptr) := u_idx
-    wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypass_entries)-1, 0)
+    wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypassEntries)-1, 0)
   }
 
   bim.io.w.apply(
     valid = need_to_update.asUInt.orR || doing_reset,
-    data = Mux(doing_reset, 2.U(2.W), newCtrs),
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
     waymask = Mux(doing_reset, 1.U(1.W), need_to_update)
   )

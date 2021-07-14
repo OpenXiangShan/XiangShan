@@ -27,38 +27,38 @@ import scala.math.min
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
-  val num_entries = 2048
-  val num_ways    = 4
-  val num_sets    = num_entries/num_ways // 512
-  val tag_size    = 20
+  val numEntries = 2048
+  val numWays    = 4
+  val numSets    = numEntries/numWays // 512
+  val tagSize    = 20
 }
 
 class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   val valid       = Bool()
-  val tag         = UInt(tag_size.W)
+  val tag         = UInt(tagSize.W)
 
-  val br_offset   = Vec(num_br, UInt(log2Up(FetchWidth*2).W))
-  val br_target   = UInt(VAddrBits.W)
-  val br_valids   = Vec(num_br, Bool())
+  val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
+  val brTargets    = Vec(numBr, UInt(VAddrBits.W))
+  val brValids    = Vec(numBr, Bool())
 
-  val jmp_target  = UInt(VAddrBits.W)
-  val jmp_valid   = Bool()
+  val jmpTarget   = UInt(VAddrBits.W)
+  val jmpValid    = Bool()
 
   // Partial Fall-Through Address
-  val pft_addr    = UInt(VAddrBits.W) // TODO: Modify only use lowerbits
+  val pftAddr     = UInt(VAddrBits.W) // TODO: Modify only use lowerbits
   val carry       = Bool()
 
-  val is_call     = Bool()
-  val is_ret      = Bool()
-  val is_jalr     = Bool()
-
-  val call_is_rvc = Bool()
+  val isCall      = Bool()
+  val isRet       = Bool()
+  val isJalr      = Bool()
 
   val oversize    = Bool()
+
+  val last_is_rvc = Bool()
 }
 
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
-  val writeWay = UInt(log2Up(num_ways).W)
+  val writeWay = UInt(log2Up(numWays).W)
   val hit = Bool()
 }
 
@@ -72,90 +72,90 @@ object FTBMeta {
 }
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
-  val ftbAddr = new TableAddr(log2Up(num_sets), num_br)
+  val ftbAddr = new TableAddr(log2Up(numSets), numBr)
 
-  val f0_pc.valid = io.f0_pc.valid
-  val f0_pc = io.f0_pc
+  val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
-  val f1_pc = RegEnable(f0_pc, f0_pc.valid)
+  val s0_idx = ftbAddr.getBankIdx(s0_pc)
 
-  val ftb = Module(new SRAMTemplate(new FTBEntry, set = num_sets, way = num_ways, shouldReset = true, holdRead = true, singlePort = true))
+  val s1_idx = ftbAddr.getBankIdx(s1_pc)
+  val s1_tag = ftbAddr.getTag(s1_pc)
 
-  val f0_idx = ftbAddr.getBankIdx(f0_pc.bits)
-  val f1_idx = RegEnable(f0_idx, f0_pc.valid)
+  ftb.io.r.req.valid := io.s0_fire
+  ftb.io.r.req.bits.setIdx := s0_idx
 
-  val f1_tag = ftbAddr.getTag(f1_pc.bits)
+  io.in.ready := ftb.io.r.req.ready && !io.flush.valid && !io.redirect.valid
+  io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid && !io.redirect.valid
 
-  ftb.io.r.req.valid := f0_pc.valid
-  ftb.io.r.req.bits.setIdx := f0_idx
-
-  io.resp.valid := io.f0_pc.valid && ftb.io.r.req.ready && io.flush
-
-  val f1_read = VecInit((0 until num_ways).map(w =>
+  val s1_read = VecInit((0 until numWays).map(w =>
     ftb.io.r.resp.data(w)
   ))
 
-  val f1_totalHits = VecInit((0 until num_ways).map(b => f1_read(b).tag === f1_tag && f1_read(b).valid))
-  val f1_hit = f1_totalHits.reduce(_||_)
-  val f1_hit_way = PriorityEncoder(f1_totalHits)
+  val s1_totalHits = VecInit((0 until numWays).map(b => s1_read(b).tag === s1_tag && s1_read(b).valid))
+  val s1_hit = s1_totalHits.reduce(_||_)
+  val s1_hit_way = PriorityEncoder(s1_totalHits)
 
   def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
     val randomAlloc = true
-    if (num_ways > 1) {
-      val w = Wire(UInt(log2Up(num_ways).W))
+    if (numWays > 1) {
+      val w = Wire(UInt(log2Up(numWays).W))
       val valid = WireInit(valids.andR)
       val tags = Cat(meta_tags, req_tag)
-      val l = log2Up(num_ways)
+      val l = log2Up(numWays)
       val nChunks = (tags.getWidth + l - 1) / l
       val chunks = (0 until nChunks).map( i =>
         tags(min((i+1)*l, tags.getWidth)-1, i*l)
       )
-      w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(num_ways)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
+      w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(numWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
       w
     } else {
       val w = WireInit(0.U)
       w
     }
   }
-  val allocWays = VecInit((0 until num_ways).map(b =>
-    allocWay(VecInit(f1_read.map(w => w.valid)).asUInt,
-      VecInit(f1_read.map(w => w.tag)).asUInt,
-      f1_tag)))
+  val allocWays = VecInit((0 until numWays).map(b =>
+    allocWay(VecInit(s1_read.map(w => w.valid)).asUInt,
+      VecInit(s1_read.map(w => w.tag)).asUInt,
+      s1_tag)))
 
-  val writeWay = Mux(f1_hit, f1_hit_way, allocWays)
+  val writeWay = Mux(s1_hit, s1_hit_way, allocWays)
 
-  val ftb_entry = f1_read(f1_hit_way)
+  val ftb_entry = s1_read(s1_hit_way)
 
-  val br_target = ftb_entry.br_target
-  val jal_target = ftb_entry.jmp_target
+  val brTargets = ftb_entry.brTargets
+  val jmpTarget = ftb_entry.jmpTarget
 
-  io.resp.bits := io.resp_in(0)
+  io.out.bits.resp:= io.in.bits.resp_in(0)
 
-  io.resp.bits.f1.preds.pred_target := Mux(f1_hit, Mux(ftb_entry.jmp_valid, jal_target, br_target), f0_pc.bits + (FetchWidth*4).U)
-  io.resp.bits.f1.hit               := f1_hit
-  io.resp.bits.f1.preds.is_br       := ftb_entry.br_valids.reduce(_||_)
-  io.resp.bits.f1.preds.is_jal      := ftb_entry.jmp_valid
-  io.resp.bits.f1.preds.is_call     := ftb_entry.is_call
-  io.resp.bits.f1.preds.is_ret      := ftb_entry.is_ret
-  io.resp.bits.f1.preds.call_is_rvc := ftb_entry.call_is_rvc
-  io.resp.bits.f1.meta              := FTBMeta(writeWay.asUInt(), f1_hit).asUInt()
-  io.resp.bits.f1.ftb_entry         := ftb_entry
-
-  when (RegNext(f1_hit)) {
-    io.resp.bits.f2.preds.pred_target := RegNext(io.resp.bits.f1.preds.pred_target)
-    io.resp.bits.f2.hit               := RegNext(io.resp.bits.f1.hit)
-    io.resp.bits.f2.preds.is_br       := RegNext(io.resp.bits.f1.preds.is_br)
-    io.resp.bits.f2.preds.is_jal      := RegNext(io.resp.bits.f1.preds.is_jal)
-    io.resp.bits.f2.preds.is_call     := RegNext(io.resp.bits.f1.preds.is_call)
-    io.resp.bits.f2.preds.is_ret      := RegNext(io.resp.bits.f1.preds.is_ret)
-    io.resp.bits.f2.preds.call_is_rvc := RegNext(io.resp.bits.f1.preds.call_is_rvc)
-    io.resp.bits.f2.meta              := RegNext(io.resp.bits.f1.meta)
-    io.resp.bits.f2.ftb_entry         := RegNext(io.resp.bits.f1.ftb_entry)
+  when(s1_hit) {
+    io.out.bits.resp.s1.preds.target := Mux(ftb_entry.jmpValid, jmpTarget,
+      Mux(io.in.bits.resp_in(0).s1.preds.taken, ParallelMux(io.in.bits.resp_in(0).s1.preds.taken_mask zip brTargets),
+        s0_pc + (FetchWidth*4).U))
   }
 
-  io.flush_out.valid := io.resp_in(0).f1.preds.taken =/= io.resp_in(0).f2.preds.taken ||
-                        io.resp_in(0).f1.preds.pred_target =/= io.resp_in(0).f2.preds.pred_target
-  io.flush_out.bits := io.resp_in(0).f2.preds.pred_target
+  io.out.bits.resp.s1.hit               := s1_hit
+  io.out.bits.resp.s1.preds.is_br       := ftb_entry.brValids.reduce(_||_)
+  io.out.bits.resp.s1.preds.is_jal      := ftb_entry.jmpValid
+  io.out.bits.resp.s1.preds.is_call     := ftb_entry.isCall
+  io.out.bits.resp.s1.preds.is_ret      := ftb_entry.isRet
+  io.out.bits.resp.s1.meta              := FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
+  io.out.bits.resp.s1.ftb_entry         := ftb_entry
+
+  when (RegNext(s1_hit)) {
+    io.out.bits.resp.s2.preds.target      := RegNext(io.out.bits.resp.s1.preds.target)
+    io.out.bits.resp.s2.hit               := RegNext(io.out.bits.resp.s1.hit)
+    io.out.bits.resp.s2.preds.is_br       := RegNext(io.out.bits.resp.s1.preds.is_br)
+    io.out.bits.resp.s2.preds.is_jal      := RegNext(io.out.bits.resp.s1.preds.is_jal)
+    io.out.bits.resp.s2.preds.is_call     := RegNext(io.out.bits.resp.s1.preds.is_call)
+    io.out.bits.resp.s2.preds.is_ret      := RegNext(io.out.bits.resp.s1.preds.is_ret)
+    io.out.bits.resp.s2.meta              := RegNext(io.out.bits.resp.s1.meta)
+    io.out.bits.resp.s2.ftb_entry         := RegNext(io.out.bits.resp.s1.ftb_entry)
+  }
+
+  // override flush logic
+  io.out.bits.flush_out.valid := io.in.bits.resp_in(0).s1.preds.taken =/= io.in.bits.resp_in(0).s2.preds.taken ||
+                        io.in.bits.resp_in(0).s1.preds.target =/= io.in.bits.resp_in(0).s2.preds.target
+  io.out.bits.flush_out.bits := io.in.bits.resp_in(0).s2.preds.target
 
   // Update logic
   val update = io.update.bits

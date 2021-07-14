@@ -11,7 +11,7 @@ trait HasBPUConst extends HasXSParameter {
   val MaxMetaLength = 120
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
-  val num_br = 1
+  val numBr = 1
   val useBPD = true
   val useLHist = true
 }
@@ -85,31 +85,36 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
 }
 
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val taken_mask = Vec(num_br+1, Bool())
-  val is_br = Vec(num_br, Bool())
+  val taken_mask = Vec(numBr+1, Bool())
+  val is_br = Vec(numBr, Bool())
   val is_jal = Bool()
   val is_jalr = Bool()
   val is_call = Bool()
   val is_ret = Bool()
   val call_is_rvc = Bool()
-  val pred_target = UInt(VAddrBits.W)
+  val target = UInt(VAddrBits.W)
 
-  def taken = taken_mask.reduce(_||_)
+  def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
 }
 
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc = UInt(VAddrBits.W)
   val hit = Bool()
   val preds = new BranchPrediction
+
+  val ghist = new GlobalHistory()
+  val rasSp = UInt(log2Ceil(RasSize).W)
+  val rasTop = new RASEntry
+  val specCnt = Vec(PredictWidth, UInt(10.W))
   val meta = UInt(MaxMetaLength.W)
-  val spec_meta = UInt(MaxMetaLength.W)
+
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val f1 = new BranchPredictionBundle()
-  val f2 = new BranchPredictionBundle()
-  val f3 = new BranchPredictionBundle()
+  val s1 = new BranchPredictionBundle()
+  val s2 = new BranchPredictionBundle()
+  val s3 = new BranchPredictionBundle()
 }
 
 // class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
@@ -138,39 +143,55 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 //   def taken = cfi_idx.valid
 // }
 
-class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {}
+class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
+  val mispred_mask = Vec(numBr+1, Bool())
+  // val ghist = new GlobalHistory() This in spec_meta
+}
 
-class BranchPredictionRedirect(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val pc = UInt(VAddrBits.W)
-  val level = RedirectLevel()
-  val interrupt = Bool()
-  val cfi_update = new CfiUpdateInfo()
+class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with HasBPUConst {}
 
-  def flushItself() = RedirectLevel.flushItself(level)
+class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUConst {
+  def nInputs = 1
+
+  val s0_pc = UInt(VAddrBits.W)
+
+  val ghist = UInt(HistoryLength.W)
+
+  val resp_in = Vec(nInputs, new BranchPredictionResp)
+  val toFtq_fire = Bool()
+
+  val s0_all_ready = Bool()
+}
+
+class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val meta = UInt(MaxMetaLength.W) // This is use by composer
+  val resp = new BranchPredictionResp
+  val flush_out = Valid(UInt(VAddrBits.W))
+
+  // These store in meta, extract in composer
+  // val rasSp = UInt(log2Ceil(RasSize).W)
+  // val rasTop = new RASEntry
+  // val specCnt = Vec(PredictWidth, UInt(10.W))
 }
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
-  def nInputs = 1
+  val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
+  val out = DecoupledIO(new BasePredictorOutput)
 
-  val f0_pc = DecoupledIO(UInt(VAddrBits.W))
+  val s0_fire = Input(Bool())
+  val s1_fire = Input(Bool())
+  val s2_fire = Input(Bool())
+  val s3_fire = Input(Bool())
 
-  val ghist = Input(UInt(HistoryLength.W))
+  val s0_ready = Output(Bool())
+  val s1_ready = Output(Bool())
+  val s2_ready = Output(Bool())
+  val s3_ready = Output(Bool())
 
-  val resp_in = Input(Vec(nInputs, new BranchPredictionResp))
-  val resp = Valid(new BranchPredictionResp)
+  val flush = Flipped(Valid(UInt(VAddrBits.W)))
 
-  val meta = Output(UInt(MaxMetaLength.W)) // This is use by composer
-  val spec_meta = Output(UInt(MaxMetaLength.W)) // This is use by composer
-
-  val toFtq_fire = Input(Bool())
-
-  val update = Input(Valid(new BranchPredictionUpdate))
-  val redirect = Input(Valid(new BranchPredictionRedirect))
-
-  val flush = Bool()
-  val flush_out = Valid(UInt(VAddrBits.W))
-
-  val in_ready = Bool()
+  val update = Flipped(Valid(new BranchPredictionUpdate))
+  val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBPUConst {
@@ -179,22 +200,23 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
 
   val io = IO(new BasePredictorIO())
 
-  io.resp := io.resp_in(0)
+  io.out.bits.resp := io.in.bits.resp_in(0)
 
-  io.meta := 0.U
-  io.spec_meta := 0.U
+  io.out.bits.meta := 0.U
 
-  val s0_pc       = io.f0_pc // fetchIdx(io.f0_pc)
-  val s1_pc       = RegNext(s0_pc)
-  val s2_pc       = RegNext(s1_pc)
-  // val s3_idx       = RegNext(s2_idx)
+  io.in.ready := true.B
 
-  val s0_valid = io.f0_pc.valid
-  val s1_valid = RegNext(s0_valid)
-  val s2_valid = RegNext(s1_valid)
-  val s3_valid = RegNext(s2_valid)
+  io.s0_ready := true.B
+  io.s1_ready := true.B
+  io.s2_ready := true.B
+  io.s3_ready := true.B
 
-  io.resp.valid := io.f0_pc.valid && !io.flush
+  val s0_pc       = Mux(io.flush.valid, io.flush.bits, io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
+  val s1_pc       = RegEnable(s0_pc, io.s0_fire)
+  val s2_pc       = RegEnable(s1_pc, io.s1_fire)
+  val s3_pc       = RegEnable(s2_pc, io.s2_fire)
+
+  io.out.valid := io.in.valid && !io.flush.valid
 
   // val s0_mask = io.f0_mask
   // val s1_mask = RegNext(s0_mask)
@@ -213,33 +235,33 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s1_update_valid = RegNext(s0_update_valid)
 
   val s0_redirect     = io.redirect
-  val s0_redirect_pc = io.redirect.bits.pc
+  val s0_redirect_pc = io.redirect.bits.cfiUpdate.target
   val s0_redirect_valid = io.redirect.valid
 
   val s1_redirect     = RegNext(s0_redirect)
   val s1_redirect_idx = RegNext(s0_redirect_pc)
   val s1_redirect_valid = RegNext(s0_redirect_valid)
 
-  io.flush_out.valid := false.B
-  io.flush_out.bits := DontCare
+  io.out.bits.flush_out.valid := false.B
+  io.out.bits.flush_out.bits := DontCare
 }
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
-  io.resp.valid       := true.B
-  io.resp.bits.f3.pc  := RegNext(RegNext(io.f0_pc))
-  io.resp.bits.f3.hit := false.B
-  io.resp.bits.f3.preds.taken   := false.B
-  io.resp.bits.f3.preds.is_br   := 0.U
-  io.resp.bits.f3.preds.is_jal  := false.B
-  io.resp.bits.f3.preds.pred_target:= io.f0_pc + (FetchWidth*4).U
+  io.in.ready        := true.B
+  io.out.valid       := io.in.fire
+  io.out.bits.resp.s3.pc  := Mux(io.flush.valid, io.flush.bits, io.in.bits.s0_pc)
+  io.out.bits.resp.s3.hit := false.B
+  io.out.bits.resp.s3.preds.taken   := false.B
+  io.out.bits.resp.s3.preds.is_br   := 0.U
+  io.out.bits.resp.s3.preds.is_jal  := false.B
+  io.out.bits.resp.s3.preds.target:= io.in.bits.s0_pc + (FetchWidth*4).U
 
-  io.resp.bits.f3.meta  := 0.U
+  io.out.bits.resp.s3.meta  := 0.U
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtq()
   val ftq_to_bpu = new FtqToBpu()
-  val fetch_to_bpu = new FetchToBpu()
 }
 
 class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with HasIFUConst {
@@ -249,9 +271,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with Has
 
   val f0_pc = RegInit(resetVector.U)
 
-  when(io.fetch_to_bpu.ifu_redirect.valid) {
-    f0_pc := io.fetch_to_bpu.ifu_redirect.bits
-  }.elsewhen(toFtq_fire) {
+  when(toFtq_fire) {
     f0_pc := f0_pc + (FetchWidth*4).U
   }
 
@@ -261,7 +281,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst with Has
   io.bpu_to_ftq.resp.bits.pc := f0_pc
 
   io.bpu_to_ftq.resp.bits.preds := 0.U.asTypeOf(new BranchPrediction)
-  io.bpu_to_ftq.resp.bits.preds.pred_target := f0_pc + (PredictWidth*4).U
+  io.bpu_to_ftq.resp.bits.preds.target := f0_pc + (PredictWidth*4).U
 }
 
 @chiselName
@@ -270,41 +290,52 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
-  io.bpu_to_ftq.resp.valid := predictors.io.resp.valid
+  val s3_gh = predictors.io.out.bits.resp.s3.ghist
+  val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
+
+  io.bpu_to_ftq.resp.valid := predictors.io.out.valid
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
-  val f0_pc = RegInit(resetVector.U)
-
-  when(io.fetch_to_bpu.ifu_redirect.valid) {
-    f0_pc := io.fetch_to_bpu.ifu_redirect.bits
-  }.elsewhen(toFtq_fire) {
-    f0_pc := io.bpu_to_ftq.resp.bits.preds.pred_target
-  }
-
-  val f0_ghist = RegInit(0.U.asTypeOf(new GlobalHistory))
+  val s0_pc = RegInit(resetVector.U)
 
   when(toFtq_fire) {
-    f0_ghist.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
+    s0_pc := io.bpu_to_ftq.resp.bits.preds.target
+  }
+
+  when(toFtq_fire) {
+    final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
       io.bpu_to_ftq.resp.bits.preds.taken)
   }
 
-  predictors.io.f0_pc.valid := !reset.asBool && io.bpu_to_ftq.resp.ready
-  predictors.io.f0_pc := f0_pc
-  
-  predictors.io.ghist := f0_ghist
+  predictors.io.in.valid := !reset.asBool && io.bpu_to_ftq.resp.ready
+  predictors.io.in.bits.s0_pc := s0_pc
 
-  predictors.io.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
+  predictors.io.in.bits.ghist := final_gh
 
-  io.bpu_to_ftq.resp.bits.hit := predictors.io.resp.bits.f3.hit
-  io.bpu_to_ftq.resp.bits.preds := predictors.io.resp.bits.f3
-  io.bpu_to_ftq.resp.bits.meta := predictors.io.resp.bits.f3.meta
-  io.bpu_to_ftq.resp.bits.spec_meta := predictors.io.resp.bits.f3.spec_meta
+  predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
 
-  predictors.io.toFtq_fire := toFtq_fire
+  io.bpu_to_ftq.resp.bits.hit   := predictors.io.out.bits.resp.s3.hit
+  io.bpu_to_ftq.resp.bits.preds := predictors.io.out.bits.resp.s3
+  io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.bits.resp.s3.meta
 
-  io.bpu_to_ftq.resp.bits.pc := predictors.io.resp.bits.f3.preds.pred_target
+  predictors.io.in.bits.toFtq_fire := toFtq_fire
+
+  io.bpu_to_ftq.resp.bits.pc := predictors.io.out.bits.resp.s3.preds.target
+
+  predictors.io.out.ready := io.bpu_to_ftq.resp.ready
   
   predictors.io.update := io.ftq_to_bpu.update
   predictors.io.redirect := io.ftq_to_bpu.redirect
+
+  val redirect = io.ftq_to_bpu.redirect.bits
+  when(io.ftq_to_bpu.redirect.valid) {
+    val isMisPred = redirect.level === 0.U
+    val oldGh = redirect.cfiUpdate.hist
+    val sawNTBr = redirect.cfiUpdate.sawNotTakenBranch
+    val isBr = redirect.cfiUpdate.pd.isBr
+    val taken = Mux(isMisPred, redirect.cfiUpdate.taken, redirect.cfiUpdate.predTaken)
+    val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
+    final_gh := updatedGh
+  }
 }

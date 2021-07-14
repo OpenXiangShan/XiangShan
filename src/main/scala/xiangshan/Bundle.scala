@@ -216,12 +216,12 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
   val ftqPC = UInt(VAddrBits.W)
   val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
   // prediction metas
-  val hist = new GlobalHistory
-  val predHist = new GlobalHistory
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry()
-  val specCnt = Vec(PredictWidth, UInt(10.W))
-  val metas = Vec(PredictWidth, new BpuMeta)
+  val hist = new GlobalHistory // Regfile
+  // val predHist = new GlobalHistory // 1 read
+  val rasSp = UInt(log2Ceil(RasSize).W) // 2 read
+  val rasTop = new RASEntry() // 2 read
+  val specCnt = Vec(PredictWidth, UInt(10.W)) // 2 read
+  val metas = Vec(PredictWidth, new BpuMeta) // 1 read
 
   val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Bool()
   val rvc_mask = Vec(PredictWidth, Bool())
