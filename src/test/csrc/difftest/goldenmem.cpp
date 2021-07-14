@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <time.h>
 #include "compress.h"
+#include "nemuproxy.h"
 
 uint8_t *pmem;
 
@@ -31,6 +32,7 @@ void init_goldenmem() {
   void* get_img_start();
   long get_img_size();
   nonzero_large_memcpy(pmem, get_img_start(), get_img_size());
+  ref_misc_put_gmaddr(pmem);
 }
 
 void update_goldenmem(paddr_t addr, void *data, uint64_t mask, int len) {

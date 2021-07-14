@@ -21,9 +21,10 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
-SIMTOP = top.SimTop
-IMAGE ?= temp
+SIMTOP  = top.SimTop
+IMAGE  ?= temp
 CONFIG ?= DefaultConfig
+NUM_CORES ?= 1
 
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
@@ -46,7 +47,11 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.runMain $(FPGATOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	mill XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
+		--disable-all --remove-assert --infer-rw                     \
+		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS) \
+		--num-cores $(NUM_CORES)
 	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/sim_sram.v
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
@@ -74,7 +79,10 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D) --config $(CONFIG) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
+		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
+		--num-cores $(NUM_CORES) $(SIM_ARGS)
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -106,38 +114,6 @@ $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
-
-VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
-VME_MODULES ?=
-
-#-----------------------timing scripts-------------------------
-# run "make vme/tap help=1" to get help info
-
-# extract verilog module from TopMain.v
-# usage: make vme VME_MODULES=Roq
-TIMING_SCRIPT_PATH = ./timingScripts
-vme: $(TOP_V)
-	make -C $(TIMING_SCRIPT_PATH) vme
-
-# get and sort timing analysis with total delay(start+end) and max delay(start or end)
-# and print it out
-tap:
-	make -C $(TIMING_SCRIPT_PATH) tap
-
-# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
-phy_evaluate: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
-phy_evaluate_atc: vme
-	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
-	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
-
-cache:
-	$(MAKE) emu IMAGE=Makefile
 
 release-lock:
 	ssh -tt $(REMOTE) 'rm -f $(LOCK)'

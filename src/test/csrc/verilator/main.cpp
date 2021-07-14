@@ -22,6 +22,7 @@
 #include "goldenmem.h"
 #include "remote_bitbang.h"
 
+
 static char mybuf[BUFSIZ];
 
 extern remote_bitbang_t * jtag;
@@ -45,11 +46,6 @@ int main(int argc, const char** argv) {
   }
 
   auto emu = new Emulator(argc, argv);
-  init_goldenmem();
-  difftest_init();
-
-  // init device
-  init_device();
 
   get_sc_time_stamp = [&emu]() -> double {
     return emu->get_cycles();

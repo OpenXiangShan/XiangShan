@@ -67,6 +67,7 @@ struct EmuArgs {
   bool enable_waveform;
   bool enable_snapshot;
   bool force_dump_result;
+  bool enable_diff;
 
   EmuArgs() {
     seed = 0;
@@ -81,6 +82,7 @@ struct EmuArgs {
     enable_waveform = false;
     enable_snapshot = true;
     force_dump_result = false;
+    enable_diff = true;
   }
 };
 
@@ -108,10 +110,7 @@ private:
 
   // emu control variable
   uint64_t cycles;
-  // int hascommit[NumCore];
   int trapCode;
-  // uint64_t max_instr[EMU_CORES];
-  // uint64_t max_cycle[EMU_CORES];
 
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
