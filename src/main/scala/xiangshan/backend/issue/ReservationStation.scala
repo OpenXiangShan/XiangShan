@@ -35,7 +35,7 @@ case class RSParams(
   dataIdBits: Int,
   numFastWakeup: Int,
   numWakeup: Int,
-  numValueBroadCast: Int,
+  numDataCapture: Int,
   hasFeedback: Boolean = false,
   delayedRf: Boolean = false,
   fixedLatency: Int = -1,
@@ -64,9 +64,10 @@ class ReservationStation
     val jalr_target = if(exuCfg == JumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
 
     val fastUopOut = Vec(params.numDeq, ValidIO(new MicroOp))
+
     val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
     val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
-    val slowPorts = Vec(params.numValueBroadCast - 4, Flipped(ValidIO(new ExuOutput)))
+    val slowPorts = Vec(params.numDataCapture, Flipped(ValidIO(new ExuOutput)))
 
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -118,24 +119,8 @@ class ReservationStation
     statusArray.io.stIssuePtr := io.stIssuePtr
   }
   // wakeup from other RS or function units
-  val fastNotInSlowWakeup = exuCfg match {
-    case LdExeUnitCfg => io.fastUopsIn.drop(2).take(4)
-    case StExeUnitCfg => io.fastUopsIn.drop(2)
-    case JumpExeUnitCfg => io.fastUopsIn.drop(2)
-    case MulDivExeUnitCfg => io.fastUopsIn.drop(2)
-    case AluExeUnitCfg => io.fastUopsIn.drop(2).take(4)
-    case _ => io.fastUopsIn
-  }
-  val fastNotInSlowData = exuCfg match {
-    case LdExeUnitCfg => io.fastDatas.drop(2).take(4)
-    case StExeUnitCfg => io.fastDatas.drop(2)
-    case JumpExeUnitCfg => io.fastDatas.drop(2)
-    case MulDivExeUnitCfg => io.fastDatas.drop(2)
-    case AluExeUnitCfg => io.fastDatas.drop(2).take(4)
-    case _ => io.fastDatas
-  }
-  val wakeupValid = io.fastUopsIn.map(_.valid) ++ RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
-  val wakeupDest = io.fastUopsIn.map(_.bits) ++ RegNext(VecInit(fastNotInSlowWakeup.map(_.bits))) ++ io.slowPorts.map(_.bits.uop)
+  val wakeupValid = io.fastUopsIn.map(_.valid) ++ io.slowPorts.map(_.valid)
+  val wakeupDest = io.fastUopsIn.map(_.bits) ++ io.slowPorts.map(_.bits.uop)
   require(wakeupValid.size == params.numWakeup)
   require(wakeupDest.size == params.numWakeup)
   for (i <- 0 until params.numWakeup) {
@@ -207,11 +192,11 @@ class ReservationStation
     }
   }
   // data broadcast: from function units (only slow wakeup date are needed)
-  val broadcastValid = RegNext(VecInit(fastNotInSlowWakeup.map(_.valid))) ++ io.slowPorts.map(_.valid)
-  val broadcastValue = fastNotInSlowData ++ VecInit(io.slowPorts.map(_.bits.data))
-  require(broadcastValid.size == params.numValueBroadCast)
-  require(broadcastValue.size == params.numValueBroadCast)
-  val slowWakeupMatchVec = Wire(Vec(params.numEntries, Vec(params.numSrc, Vec(params.numValueBroadCast, Bool()))))
+  val broadcastValid = io.slowPorts.map(_.valid)
+  val broadcastValue = VecInit(io.slowPorts.map(_.bits.data))
+  require(broadcastValid.size == params.numDataCapture)
+  require(broadcastValue.size == params.numDataCapture)
+  val slowWakeupMatchVec = Wire(Vec(params.numEntries, Vec(params.numSrc, Vec(params.numDataCapture, Bool()))))
   for (i <- 0 until params.numEntries) {
     for (j <- 0 until params.numSrc) {
       slowWakeupMatchVec(i)(j) := statusArray.io.wakeupMatch(i)(j).asBools.drop(params.numFastWakeup)

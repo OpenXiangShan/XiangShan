@@ -221,17 +221,17 @@ class Scheduler(implicit p: Parameters) extends XSModule {
   store_rs0.io.fastUopsIn := mulFastUop ++ aluFastUop
   store_rs1.io.fastUopsIn := mulFastUop ++ aluFastUop
 
-  jmp_rs.io.slowPorts := io.writeback.slice(4, 8)
-  mul_rs_0.io.slowPorts := io.writeback.slice(4, 8)
-  mul_rs_1.io.slowPorts := io.writeback.slice(4, 8)
-  alu_rs_0.io.slowPorts := io.writeback.slice(4, 8)
-  fmac_rs0.io.slowPorts := io.writeback.drop(12)
-  fmisc_rs0.io.slowPorts := io.writeback.drop(12)
-  fmisc_rs1.io.slowPorts := io.writeback.drop(12)
-  load_rs0.io.slowPorts := io.writeback.slice(4, 8)
-  load_rs1.io.slowPorts := io.writeback.slice(4, 8)
-  store_rs0.io.slowPorts := io.writeback.drop(4)
-  store_rs1.io.slowPorts := io.writeback.drop(4)
+  jmp_rs.io.slowPorts := io.writeback.take(8)
+  mul_rs_0.io.slowPorts := io.writeback.take(8)
+  mul_rs_1.io.slowPorts := io.writeback.take(8)
+  alu_rs_0.io.slowPorts := io.writeback.take(8)
+  fmac_rs0.io.slowPorts := io.writeback.drop(8)
+  fmisc_rs0.io.slowPorts := io.writeback.drop(8)
+  fmisc_rs1.io.slowPorts := io.writeback.drop(8)
+  load_rs0.io.slowPorts := io.writeback.take(8)
+  load_rs1.io.slowPorts := io.writeback.take(8)
+  store_rs0.io.slowPorts := io.writeback
+  store_rs1.io.slowPorts := io.writeback
 
   // load-store specific connections
   load_rs0.io.memfeedback <> io.replay(0)

@@ -53,7 +53,7 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
   val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
-  val multiWrite = Vec(params.numValueBroadCast, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val multiWrite = Vec(params.numDataCapture, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
 
   override def cloneType: DataArrayIO.this.type =
