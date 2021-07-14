@@ -35,6 +35,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data          = Vec(17, UInt(16.W))   //34Bytes 
   val startAddr     = UInt(VAddrBits.W)
+  val ftqOffset     = Valid(UInt(log2Ceil(32).W))
+  val target        = UInt(VAddrBits.W)
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary
@@ -100,8 +102,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   val f1_doubleLine = RegEnable(next = f0_doubleLine, enable=f0_fire)
   val f1_vSetIdx    = RegEnable(next = f0_vSetIdx,    enable=f0_fire)
   val f1_fire       = f1_valid && tlbHit && f2_ready 
-  
-  when(f0_fire)      {f1_valid  := true.B} 
+
+  when(flush)        {f1_valid  := false.B}
+  .elsewhen(f0_fire) {f1_valid  := true.B}
   .elsewhen(f1_fire) {f1_valid  := false.B}
 
   val f1_pAddrs             = VecInit(Seq(f1_ftq_req.startAddr(PAddrBits -1, 0), f1_ftq_req.fallThruAddr(PAddrBits - 1, 0)))   //TODO: Temporary assignment
@@ -143,7 +146,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   val f2_situation  = RegEnable(next = f1_situation, enable=f1_fire)
   val f2_doubleLine = RegEnable(next = f1_doubleLine, enable=f1_fire)
   val f2_fire       = io.toIbuffer.fire()
-  when(f1_fire)                   {f2_valid := true.B}
+
+  when(flush)                     {f2_valid := false.B}
+  .elsewhen(f1_fire)              {f2_valid := true.B }
   .elsewhen(io.toIbuffer.fire())  {f2_valid := false.B}
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
@@ -229,6 +234,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
 
   preDecoderIn.data       :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt )).asUInt, f2_ftq_req.startAddr)
   preDecoderIn.startAddr  :=  f2_ftq_req.startAddr
+  preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset
+  preDecoderIn.target     :=  f2_ftq_req.target
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
@@ -238,15 +245,19 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
 
 
-  //flush generate
-  val pdMissPred              = preDecoderOut.
+  //flush generate and to Ftq
+  val flush = preDecoderOut.misPred
 
   toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
+  toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
   toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset
-  toFtq.pdWb.bits.misPred    := pdMissPred
+  toFtq.pdWb.bits.misPred    := preDecoderOut.misPred
+  toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
+  toFtq.pdWb.bits.brTarget   := preDecoderOut.brTarget
+  toFtq.pdWb.bits.jumpOffset := preDecoderOut.jumpOffset
+  toFtq.pdWb.bits.brOffset   := preDecoderOut.brOffset
 
 
-  
 }
