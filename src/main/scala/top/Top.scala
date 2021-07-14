@@ -412,10 +412,18 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       cnt := Mux(tick, freq.U, cnt - 1.U)
       clint.module.io.rtcTick := tick
 
-      io.resetCtrl := debugModule.module.io.resetCtrl
-      io.debug := debugModule.module.io.debugIO
+      io.resetCtrl.hartResetReq.foreach { rcio => debugModule.module.io.resetCtrl.hartResetReq.foreach { rcdm => rcio := rcdm }}
+      debugModule.module.io.resetCtrl.hartIsInReset := io.resetCtrl.hartIsInReset
       debugModule.module.io.clock := io.clock
       debugModule.module.io.reset := io.reset
+
+      io.debug.clockeddmi.foreach { dbg => debugModule.module.io.debugIO.clockeddmi.get <> dbg }
+      debugModule.module.io.debugIO.reset := io.debug.reset
+      debugModule.module.io.debugIO.clock := io.debug.clock
+      io.debug.ndreset := debugModule.module.io.debugIO.ndreset
+      io.debug.dmactive := debugModule.module.io.debugIO.dmactive
+      debugModule.module.io.debugIO.dmactiveAck := io.debug.dmactiveAck
+      io.debug.extTrigger.foreach { x => debugModule.module.io.debugIO.extTrigger.foreach {y => x <> y}}
     }
   }
 }

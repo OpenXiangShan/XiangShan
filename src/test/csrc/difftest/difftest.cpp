@@ -85,6 +85,9 @@ Difftest::Difftest(int coreid) : id(coreid) {
 }
 
 int Difftest::step() {
+#ifdef DISABLE_DIFFTEST
+  return 0;
+#endif
   progress = false;
   ticks++;
 

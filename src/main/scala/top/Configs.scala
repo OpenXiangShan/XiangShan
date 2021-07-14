@@ -23,6 +23,7 @@ import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.devices.debug._
+import freechips.rocketchip.tile.MaxHartIdBits
 import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
@@ -36,7 +37,8 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
   )
   case ExportDebug => up(ExportDebug, site).copy(protocols = Set(JTAG))
   case DebugModuleKey => up(DebugModuleKey, site).map(_.copy(hasBusMaster = true).copy(baseAddress = BigInt(0x38a00000)))
-  case JtagDTMKey => JtagDTMConfig
+  case JtagDTMKey => JtagDTMKey
+  case MaxHartIdBits => 2
 })
 
 // Synthesizable minimal XiangShan

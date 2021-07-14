@@ -22,6 +22,8 @@ import device.{AXI4RAMWrapper, UARTIO, Debug}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.GTimer
 import xiangshan.{DebugOptions, DebugOptionsKey, PerfInfoIO}
+import chipsalliance.rocketchip.config._
+import freechips.rocketchip.devices.debug._
 
 class LogCtrlIO extends Bundle {
   val log_begin, log_end = Input(UInt(64.W))
@@ -52,7 +54,7 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
 
   val success = Wire(Bool())
-  Debug.connectDebug(soc.io.debug, soc.io.resetCtrl, None, clock, reset.asBool, success)
+  Debug.connectDebug(Some(soc.io.debug), Some(soc.io.resetCtrl),  clock, reset.asBool, success)(p)
 
   val io = IO(new Bundle(){
     val logCtrl = new LogCtrlIO

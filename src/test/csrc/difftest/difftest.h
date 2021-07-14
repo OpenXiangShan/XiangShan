@@ -28,7 +28,7 @@
 
 #define DIFFTEST_STORE_COMMIT
 
-
+#define DISABLE_DIFFTEST
 
 // Difftest structures
 // trap events: self-defined traps

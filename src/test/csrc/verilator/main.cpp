@@ -20,8 +20,11 @@
 #include "difftest.h"
 #include "device.h"
 #include "goldenmem.h"
+#include "remote_bitbang.h"
 
 static char mybuf[BUFSIZ];
+
+extern remote_bitbang_t * jtag;
 
 // junk, link for verilator
 std::function<double()> get_sc_time_stamp = []() -> double { return 0; };
@@ -29,6 +32,8 @@ double sc_time_stamp() { return get_sc_time_stamp(); }
 
 int main(int argc, const char** argv) {
   printf("Emu compiled at %s, %s\n", __DATE__, __TIME__);
+
+  jtag = new remote_bitbang_t(23333);
 
   setbuf(stderr, mybuf);
 

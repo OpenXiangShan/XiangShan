@@ -29,15 +29,13 @@ import freechips.rocketchip.jtag._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci.{ClockSinkParameters, ClockSinkNode}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.debug.{TLDebugModule, DebugCustomXbar, ResetCtrlIO, DebugIO, SystemJTAGIO, DebugTransportModuleJTAG, PSDIO}
+import freechips.rocketchip.devices.debug.{JtagDTMConfig, TLDebugModule, DebugCustomXbar, ResetCtrlIO, DebugIO, SystemJTAGIO, DebugTransportModuleJTAG, PSDIO}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.devices.debug._
 
 // this file uses code from rocketchip Periphery.scala
 // to simplify the code we remove options for apb, cjtag and dmi
-// this module creates wrapped dm, dtm, sba, and pulls out intr lines
-
-
+// this module creates wrapped dm, dtm, sba, and pulls out intr lines 
 
 class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
@@ -61,7 +59,7 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       val reset = Input(Bool())
     })
     debug.module.io.tl_reset := io.reset
-    debug.module.io.tl_clock := io.clock
+    debug.module.io.tl_clock := io.clock.asClock
     debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartIsInReset.foreach { rcdm => rcio := rcdm }}
 
@@ -76,14 +74,8 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
 
     def instantiateJtagDTM(sj: SystemJTAGIO): DebugTransportModuleJTAG = {
-
-      class JtagDTMKeyDefault extends JtagDTMConfig(
-        idcodeVersion = 0,
-        idcodePartNum = 0,
-        idcodeManufId = 0,
-        debugIdleCycles = 5) 
-      val dtmConfig = new JtagDTMKeyDefault
-      val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, dtmConfig))
+      val c = new JtagDTMKeyDefault
+      val dtm = Module(new DebugTransportModuleJTAG(p(DebugModuleKey).get.nDMIAddrSize, c))
       dtm.io.jtag <> sj.jtag
 
       io.debugIO.disableDebug.foreach { x => dtm.io.jtag.TMS := sj.jtag.TMS | x }  // force TMS high when debug is disabled
@@ -100,6 +92,26 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       dtm
     }
   }
+}
+
+class debugIOTop(implicit val p: Parameters) extends Bundle {
+  val clock = Input(Clock())
+  val reset = Input(Bool()) // No reset allowed on top
+  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO()))
+  val systemjtag = p(ExportDebug).jtag.option(new Bundle {
+    val jtag = Flipped(new JTAGIO(hasTRSTn = false))
+    val reset = Input(Bool()) // No reset allowed on top
+    val mfr_id = Input(UInt(11.W))
+    val part_number = Input(UInt(16.W))
+    val version = Input(UInt(4.W))
+  })
+  val apb = p(ExportDebug).apb.option(Flipped(new ClockedAPBBundle(APBBundleParameters(addrBits=12, dataBits=32))))
+  //------------------------------
+  val ndreset    = Output(Bool())
+  val dmactive   = Output(Bool())
+  val dmactiveAck = Input(Bool())
+  val extTrigger = (p(DebugModuleKey).get.nExtTriggers > 0).option(new DebugExtTriggerIO())
+  val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
 }
 
 class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam(tickDelay)))
@@ -134,17 +146,17 @@ class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam
     }
   }
 
-  addResource("/vsrc/SimJTAG.v")
-  addResource("/csrc/SimJTAG.cc")
-  addResource("/csrc/remote_bitbang.h")
-  addResource("/csrc/remote_bitbang.cc")
+//  addResource("/vsrc/SimJTAG.v")
+//  addResource("/csrc/SimJTAG.cc")
+//  addResource("/csrc/remote_bitbang.h")
+//  addResource("/csrc/remote_bitbang.cc")
 }
 
 object Debug {
   def connectDebug(
       debugOpt: Option[DebugIO],
       resetctrlOpt: Option[ResetCtrlIO],
-      psdio: PSDIO,
+      //psdio: PSDIO,
       c: Clock,
       r: Bool,
       out: Bool,
@@ -161,14 +173,14 @@ object Debug {
       debug.systemjtag.foreach { sj =>
         val jtag = Module(new SimJTAG(tickDelay=3)).connect(sj.jtag, c, r, ~r, out)
         sj.reset := r.asAsyncReset
-        sj.mfr_id := p(JtagDTMKey).idcodeManufId.U(11.W)
-        sj.part_number := p(JtagDTMKey).idcodePartNum.U(16.W)
-        sj.version := p(JtagDTMKey).idcodeVersion.U(4.W)
+        sj.mfr_id := 0.U(11.W)
+        sj.part_number := 0.U(16.W)
+        sj.version := 0.U(4.W)
       }
       debug.apb.foreach { apb =>
         require(false, "No support for connectDebug for an APB debug connection.")
       }
-      psdio.psd.foreach { _ <> psd }
+      //psdio.psd.foreach { _ <> psd }
       debug.disableDebug.foreach { x => x := false.B }
     }
   }
