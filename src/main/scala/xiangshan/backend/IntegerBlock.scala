@@ -35,15 +35,6 @@ class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends X
 
 }
 
-class IntBlockToCtrlIO(implicit p: Parameters) extends XSBundle {
-  // write back regfile signals after arbiter
-  // used to update busytable and roq state
-  val wbRegs = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
-  // write back to brq
-  val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
-  val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
-}
-
 trait HasExeBlockHelper {
   def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
     val uop = WireInit(x)
@@ -93,24 +84,16 @@ trait HasExeBlockHelper {
   }
 }
 
-class IntegerBlock
-(
-  fastWakeUpIn: Seq[ExuConfig],
-  slowWakeUpIn: Seq[ExuConfig],
-  memFastWakeUpIn: Seq[ExuConfig],
-  fastWakeUpOut: Seq[ExuConfig],
-  slowWakeUpOut: Seq[ExuConfig]
-)(implicit p: Parameters) extends XSModule with HasExeBlockHelper {
+class IntegerBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHelper {
   val io = IO(new Bundle {
-    val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
-    val toCtrlBlock = new IntBlockToCtrlIO
-    val toMemBlock = new IntBlockToMemBlockIO
-
-    val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
-    val wakeUpOut = Flipped(new WakeUpBundle(fastWakeUpOut.size, slowWakeUpOut.size))
-    val memFastWakeUp = new WakeUpBundle(exuParameters.LduCnt, 0)
-    val intWbOut = Vec(4, ValidIO(new ExuOutput))
-
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flush = Input(Bool())
+    // in
+    val issue = Vec(7, Flipped(DecoupledIO(new ExuInput)))
+    // out
+    val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
+    val writeback = Vec(7, DecoupledIO(new ExuOutput))
+    // misc
     val csrio = new CSRFileIO
     val fenceio = new Bundle {
       val sfence = Output(new SfenceBundle) // to front,mem
@@ -118,132 +101,22 @@ class IntegerBlock
       val sbuffer = new FenceToSbuffer // to mem
     }
   })
-  val redirect = io.fromCtrlBlock.redirect
-  val flush = io.fromCtrlBlock.flush
-
-  val intRf = Module(new Regfile(
-    numReadPorts = NRIntReadPorts,
-    numWirtePorts = NRIntWritePorts,
-    hasZero = true,
-    len = XLEN
-  ))
 
   val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
   val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
   val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
-  val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
-    NRIntWritePorts,
-    isFp = false
-  ))
-  io.intWbOut := VecInit(intWbArbiter.io.out.drop(4))
-  for (exe <- exeUnits) {
-    exe.io.redirect <> redirect
-    exe.io.flush <> flush
+  io.writeback <> exeUnits.map(_.io.out)
+
+  for ((exe, i) <- exeUnits.zipWithIndex) {
+    exe.io.redirect <> io.redirect
+    exe.io.flush <> io.flush
+    io.issue(i) <> exe.io.fromInt
   }
-
-  val jmp_rs = Module(new ReservationStation("rs_jmp", JumpExeUnitCfg, IssQueSize, XLEN, 6, 4, -1, false, false, 1, 1))
-  val mul_rs_0 = Module(new ReservationStation("rs_mul_0", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
-  val mul_rs_1 = Module(new ReservationStation("rs_mul_1", MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
-  val alu_rs_0 = Module(new ReservationStation("rs_alu_0", AluExeUnitCfg, 4*IssQueSize, XLEN,
-    8, 4, 0, true, false, 4, 4
-  ))
-
-  val aluFastData = VecInit(exeUnits.drop(3).map(_.io.out.bits.data))
-  val mulFastData = VecInit(exeUnits.drop(1).take(2).map(_.io.out.bits.data))
-  val memFastData = VecInit(io.memFastWakeUp.fast.map(_.bits.data))
-  val slowPorts = intWbArbiter.io.out.drop(4)
-
-  jmp_rs.io.numExist <> io.toCtrlBlock.numExist(0)
-  jmp_rs.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl.take(1)
-  jmp_rs.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(0).valid && FuType.jmpCanAccept(io.fromCtrlBlock.enqIqCtrl(0).bits.ctrl.fuType)
-  jmp_rs.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
-  jmp_rs.io.jumpPc := io.fromCtrlBlock.jumpPc
-  jmp_rs.io.jalr_target := io.fromCtrlBlock.jalr_target
-  jmp_rs.io.fastDatas <> mulFastData ++ aluFastData
-  jmp_rs.io.deq(0) <> jmpExeUnit.io.fromInt
-
-  mul_rs_0.io.numExist <> io.toCtrlBlock.numExist(1)
-  mul_rs_0.io.fromDispatch <> io.fromCtrlBlock.enqIqCtrl.take(2)
-  mul_rs_0.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(0).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(0).bits.ctrl.fuType)
-  mul_rs_0.io.fromDispatch(1).valid := io.fromCtrlBlock.enqIqCtrl(1).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(1).bits.ctrl.fuType)
-  mul_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
-  mul_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
-  mul_rs_0.io.fastDatas <> mulFastData ++ aluFastData
-  mul_rs_0.io.deq(0) <> mduExeUnits(0).io.fromInt
-
-  mul_rs_1.io.numExist <> io.toCtrlBlock.numExist(2)
-  mul_rs_1.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.drop(2).take(2))
-  mul_rs_1.io.fromDispatch(0).valid := io.fromCtrlBlock.enqIqCtrl(2).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(2).bits.ctrl.fuType)
-  mul_rs_1.io.fromDispatch(1).valid := io.fromCtrlBlock.enqIqCtrl(3).valid && FuType.mduCanAccept(io.fromCtrlBlock.enqIqCtrl(3).bits.ctrl.fuType)
-  mul_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
-  mul_rs_1.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
-  mul_rs_1.io.fastDatas <> mulFastData ++ aluFastData
-  mul_rs_1.io.deq(0) <> mduExeUnits(1).io.fromInt
-
-  io.toCtrlBlock.numExist(3) := alu_rs_0.io.numExist >> 2
-  io.toCtrlBlock.numExist(4) := alu_rs_0.io.numExist >> 2
-  io.toCtrlBlock.numExist(5) := alu_rs_0.io.numExist >> 2
-  io.toCtrlBlock.numExist(6) := alu_rs_0.io.numExist >> 2
-  alu_rs_0.io.fromDispatch <> VecInit(io.fromCtrlBlock.enqIqCtrl.take(4))
-  for (i <- 0 until 4) {
-    alu_rs_0.io.fromDispatch(i).valid := io.fromCtrlBlock.enqIqCtrl(i).valid && FuType.aluCanAccept(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.fuType)
-  }
-  alu_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
-  alu_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.drop(2).take(2).map(_.data))
-  alu_rs_0.io.srcRegValue(2) <> VecInit(intRf.io.readPorts.drop(4).take(2).map(_.data))
-  alu_rs_0.io.srcRegValue(3) <> VecInit(intRf.io.readPorts.drop(6).take(2).map(_.data))
-  alu_rs_0.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
-  alu_rs_0.io.deq(0) <> aluExeUnits(0).io.fromInt
-  alu_rs_0.io.deq(1) <> aluExeUnits(1).io.fromInt
-  alu_rs_0.io.deq(2) <> aluExeUnits(2).io.fromInt
-  alu_rs_0.io.deq(3) <> aluExeUnits(3).io.fromInt
-
-  io.fromCtrlBlock.enqIqCtrl(0).ready := jmp_rs.io.fromDispatch(0).fire() || mul_rs_0.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(0).fire()
-  io.fromCtrlBlock.enqIqCtrl(1).ready := mul_rs_0.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(1).fire()
-  io.fromCtrlBlock.enqIqCtrl(2).ready := mul_rs_1.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(2).fire()
-  io.fromCtrlBlock.enqIqCtrl(3).ready := mul_rs_1.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(3).fire()
-  io.fromCtrlBlock.enqIqCtrl(4).ready := false.B
-  io.fromCtrlBlock.enqIqCtrl(5).ready := false.B
-  io.fromCtrlBlock.enqIqCtrl(6).ready := false.B
-
-  val reservationStations = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0)
-  val aluFastUop = Wire(Vec(4, ValidIO(new MicroOp)))
-  val mulFastUop = Wire(Vec(2, ValidIO(new MicroOp)))
-  val memFastUop = io.memFastWakeUp.fastUops
-  aluFastUop(0) := alu_rs_0.io.fastUopOut(0)
-  aluFastUop(1) := alu_rs_0.io.fastUopOut(1)
-  aluFastUop(2) := alu_rs_0.io.fastUopOut(2)
-  aluFastUop(3) := alu_rs_0.io.fastUopOut(3)
-  mulFastUop(0) := mul_rs_0.io.fastUopOut(0)
-  mulFastUop(1) := mul_rs_1.io.fastUopOut(0)
-
-  for (rs <- reservationStations) {
-    rs.io.redirect <> redirect
-    rs.io.redirect <> redirect
-    rs.io.flush <> flush
-    rs.io.slowPorts := slowPorts
-  }
-  jmp_rs.io.fastUopsIn := mulFastUop ++ aluFastUop
-  mul_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop
-  mul_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop
-  alu_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-  // alu_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-
-  io.wakeUpOut.fastUops := mulFastUop ++ aluFastUop
-
-  io.wakeUpOut.fast <> exeUnits.filter(
-    x => x.config.hasCertainLatency
-  ).map(_.io.out).map(decoupledIOToValidIO)
-
-  io.wakeUpOut.slow <> exeUnits.filter(
-    x => x.config.hasUncertainlatency
-  ).map(x => WireInit(x.io.out))
 
   // send misprediction to brq
-  io.toCtrlBlock.exuRedirect.zip(
+  io.exuRedirect.zip(
     exeUnits.filter(_.config.hasRedirect).map(_.io.out)
   ).foreach {
     case (x, y) =>
@@ -257,56 +130,4 @@ class IntegerBlock
   io.csrio.customCtrl := RegNext(jmpExeUnit.csrio.customCtrl)
   jmpExeUnit.fenceio <> io.fenceio
 
-  // read int rf from ctrl block
-  intRf.io.readPorts.zipWithIndex.map { case (r, i) => r.addr := io.fromCtrlBlock.readRf(i) }
-  (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
-  // write int rf arbiter
-
-  intWbArbiter.io.in <> exeUnits.map(e => {
-    val w = WireInit(e.io.out)
-    if(e.config.writeFpRf){
-      w.valid := e.io.out.valid && !e.io.out.bits.uop.ctrl.fpWen && io.wakeUpOut.slow(0).ready
-    } else {
-      w.valid := e.io.out.valid
-    }
-    w
-  }) ++ io.wakeUpIn.slow.map(x => intOutValid(x, connectReady = true))
-
-  XSPerfAccumulate("competition", intWbArbiter.io.in.map(i => !i.ready && i.valid).foldRight(0.U)(_+_))
-
-  exeUnits.zip(intWbArbiter.io.in).foreach{
-    case (exu, wInt) =>
-      if(exu.config.writeFpRf){
-        val wakeUpOut = io.wakeUpOut.slow(0) // jmpExeUnit
-        val writeFpReady = wakeUpOut.fire() && wakeUpOut.bits.uop.ctrl.fpWen
-        exu.io.out.ready := wInt.fire() || writeFpReady || !exu.io.out.valid
-      } else {
-        exu.io.out.ready := wInt.fire() || !exu.io.out.valid
-      }
-  }
-
-  // set busytable and update roq
-  io.toCtrlBlock.wbRegs <> intWbArbiter.io.out
-
-  intRf.io.writePorts.zip(intWbArbiter.io.out).foreach {
-    case (rf, wb) =>
-      rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
-      rf.addr := wb.bits.uop.pdest
-      rf.data := wb.bits.data
-  }
-  intRf.io.debug_rports := DontCare
-
-  if (!env.FPGAPlatform) {
-    for ((rport, rat) <- intRf.io.debug_rports.zip(io.fromCtrlBlock.debug_rat)) {
-      rport.addr := rat
-    }
-    val difftest = Module(new DifftestArchIntRegState)
-    difftest.io.clock  := clock
-    difftest.io.coreid := hardId.U
-    difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
-  }
-
-  val rsDeqCount = PopCount(reservationStations.map(_.io.deq(0).valid))
-  XSPerfAccumulate("int_rs_deq_count", rsDeqCount)
-  XSPerfHistogram("int_rs_deq_count", rsDeqCount, true.B, 0, 7, 1)
 }

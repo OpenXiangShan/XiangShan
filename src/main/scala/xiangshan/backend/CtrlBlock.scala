@@ -28,36 +28,6 @@ import xiangshan.backend.ftq.{Ftq, FtqRead, HasFtqHelper}
 import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
-class CtrlToIntBlockIO(implicit p: Parameters) extends XSBundle {
-  val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-  val readRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-  val jumpPc = Output(UInt(VAddrBits.W))
-  val jalr_target = Output(UInt(VAddrBits.W))
-  // int block only uses port 0~7
-  val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
-  val redirect = ValidIO(new Redirect)
-  val flush = Output(Bool())
-  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-}
-
-class CtrlToFpBlockIO(implicit p: Parameters) extends XSBundle {
-  val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
-  val readRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-  // fp block uses port 0~11
-  val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
-  val redirect = ValidIO(new Redirect)
-  val flush = Output(Bool())
-  val debug_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-}
-
-class CtrlToLsBlockIO(implicit p: Parameters) extends XSBundle {
-  val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
-  val enqLsq = Flipped(new LsqEnqIO)
-  val memPredUpdate = Vec(StorePipelineWidth, Input(new MemPredUpdateReq))
-  val redirect = ValidIO(new Redirect)
-  val flush = Output(Bool())
-}
-
 class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper with HasFtqHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
@@ -213,12 +183,15 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper with HasFtqHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
-    val fromIntBlock = Flipped(new IntBlockToCtrlIO)
-    val fromFpBlock = Flipped(new FpBlockToCtrlIO)
-    val fromLsBlock = Flipped(new LsBlockToCtrlIO)
-    val toIntBlock = new CtrlToIntBlockIO
-    val toFpBlock = new CtrlToFpBlockIO
-    val toLsBlock = new CtrlToLsBlockIO
+    val enqIQ = Vec(12, DecoupledIO(new MicroOp))
+    // from int block
+    val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
+    val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
+    val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
+    val memoryViolation = Flipped(ValidIO(new Redirect))
+    val enqLsq = Flipped(new LsqEnqIO)
+    val jumpPc = Output(UInt(VAddrBits.W))
+    val jalr_target = Output(UInt(VAddrBits.W))
     val roqio = new Bundle {
       // to int block
       val toCSR = new RoqCSRIO
@@ -239,6 +212,14 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
         val bpWrong = Output(UInt(XLEN.W))
       }
     })
+    val writeback = Vec(16, Flipped(ValidIO(new ExuOutput)))
+    // redirect out
+    val redirect = ValidIO(new Redirect)
+    val flush = Output(Bool())
+    val readIntRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
+    val readFpRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
   val ftq = Module(new Ftq)
@@ -258,7 +239,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val flush = roq.io.flushOut.valid
   val flushReg = RegNext(flush)
 
-  val exuRedirect = io.fromIntBlock.exuRedirect.map(x => {
+  val exuRedirect = io.exuRedirect.map(x => {
     val valid = x.valid && x.bits.redirectValid
     val killedByOlder = x.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
     val delayed = Wire(Valid(new ExuOutput))
@@ -267,11 +248,11 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     delayed
   })
   val loadReplay = Wire(Valid(new Redirect))
-  loadReplay.valid := RegNext(io.fromLsBlock.replay.valid &&
-    !io.fromLsBlock.replay.bits.roqIdx.needFlush(backendRedirect, flushReg),
+  loadReplay.valid := RegNext(io.memoryViolation.valid &&
+    !io.memoryViolation.bits.roqIdx.needFlush(backendRedirect, flushReg),
     init = false.B
   )
-  loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
+  loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
   VecInit(ftq.io.ftqRead.tail.dropRight(2)) <> redirectGen.io.stage1FtqRead
   ftq.io.ftqRead.dropRight(1).last <> redirectGen.io.memPredFtqRead
   ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
@@ -330,12 +311,12 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))
   ftqOffsetReg := jumpInst.cf.ftqOffset
   ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
-  io.toIntBlock.jumpPc := GetPcByFtq(
+  io.jumpPc := GetPcByFtq(
     ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg,
     ftq.io.ftqRead(0).entry.lastPacketPC.valid,
     ftq.io.ftqRead(0).entry.lastPacketPC.bits
   )
-  io.toIntBlock.jalr_target := ftq.io.ftqRead(0).entry.target
+  io.jalr_target := ftq.io.ftqRead(0).entry.target
 
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
@@ -354,29 +335,27 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.redirect <> backendRedirect
   dispatch.io.flush := flushReg
   dispatch.io.enqRoq <> roq.io.enq
-  dispatch.io.enqLsq <> io.toLsBlock.enqLsq
-  dispatch.io.readIntRf <> io.toIntBlock.readRf
-  dispatch.io.readFpRf <> io.toFpBlock.readRf
+  dispatch.io.enqLsq <> io.enqLsq
   dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
     intBusyTable.io.allocPregs(i).valid := preg.isInt
     fpBusyTable.io.allocPregs(i).valid := preg.isFp
     intBusyTable.io.allocPregs(i).bits := preg.preg
     fpBusyTable.io.allocPregs(i).bits := preg.preg
   }
-  dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
-  dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
-//  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
+  dispatch.io.enqIQCtrl := DontCare
+  io.enqIQ <> dispatch.io.enqIQCtrl.take(4) ++ dispatch.io.enqIQCtrl.slice(7, 11) ++ dispatch.io.enqIQCtrl.drop(13)
   dispatch.io.csrCtrl <> io.csrCtrl
-  dispatch.io.storeIssue <> io.fromLsBlock.stIn
-
+  dispatch.io.storeIssue <> io.stIn
+  dispatch.io.readIntRf <> io.readIntRf
+  dispatch.io.readFpRf <> io.readFpRf
 
   fpBusyTable.io.flush := flushReg
   intBusyTable.io.flush := flushReg
-  for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
+  for((wb, setPhyRegRdy) <- io.writeback.take(8).zip(intBusyTable.io.wbPregs)){
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
-  for((wb, setPhyRegRdy) <- io.fromFpBlock.wbRegs.zip(fpBusyTable.io.wbPregs)){
+  for((wb, setPhyRegRdy) <- io.writeback.drop(8).zip(fpBusyTable.io.wbPregs)){
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.fpWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
@@ -384,24 +363,20 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   fpBusyTable.io.read <> dispatch.io.readFpState
 
   roq.io.redirect <> backendRedirect
-  val exeWbResults = VecInit(io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut)
+  val exeWbResults = VecInit(io.writeback ++ io.stOut)
   for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
     roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(backendRedirect, flushReg))
     roq_wb.bits := RegNext(wb.bits)
   }
 
   // TODO: is 'backendRedirect' necesscary?
-  io.toIntBlock.redirect <> backendRedirect
-  io.toIntBlock.flush <> flushReg
-  io.toIntBlock.debug_rat <> rename.io.debug_int_rat
-  io.toFpBlock.redirect <> backendRedirect
-  io.toFpBlock.flush <> flushReg
-  io.toFpBlock.debug_rat <> rename.io.debug_fp_rat
-  io.toLsBlock.redirect <> backendRedirect
-  io.toLsBlock.flush <> flushReg
+  io.redirect <> backendRedirect
+  io.flush <> flushReg
+  io.debug_int_rat <> rename.io.debug_int_rat
+  io.debug_fp_rat <> rename.io.debug_fp_rat
 
-  dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
-  dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
+//  dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
+//  dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
