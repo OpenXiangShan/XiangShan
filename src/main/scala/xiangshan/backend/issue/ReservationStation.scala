@@ -46,45 +46,14 @@ case class RSParams(
 class ReservationStation
 (
   val exuCfg: ExuConfig,
-  iqSize : Int,
-  srcLen: Int,
-  fastPortsCnt: Int,
-  slowPortsCnt: Int,
-  fixedDelay: Int,
-  fastWakeup: Boolean,
-  feedback: Boolean,
-  enqNum: Int,
-  deqNum: Int
+  params: RSParams
 )(implicit p: Parameters) extends XSModule {
-  val iqIdxWidth = log2Up(iqSize+1)
-  val nonBlocked = if (exuCfg == MulDivExeUnitCfg) false else fixedDelay >= 0
-  val srcNum = if (exuCfg == JumpExeUnitCfg) 2 else max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
-
-  // require(nonBlocked==fastWakeup)
-  val params = RSParams(
-    numEntries = iqSize,
-    numEnq = enqNum,
-    numDeq = deqNum,
-    numSrc = srcNum,
-    dataBits = srcLen,
-    dataIdBits = PhyRegIdxWidth,
-    numFastWakeup = fastPortsCnt,
-    // for now alu and fmac are not in slowPorts
-    numWakeup = fastPortsCnt + (4 + slowPortsCnt),
-    numValueBroadCast = (4 + slowPortsCnt),
-    hasFeedback = feedback,
-    delayedRf = false,
-    fixedLatency = fixedDelay,
-    checkWaitBit = if (exuCfg == LdExeUnitCfg || exuCfg == StExeUnitCfg) true else false,
-    optBuf = if (exuCfg == AluExeUnitCfg) true else false
-  )
-
   val io = IO(new Bundle {
-    val numExist = Output(UInt(iqIdxWidth.W))
+    val numExist = Output(UInt(log2Up(params.numEntries + 1).W))
     // enq
     val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
-    val srcRegValue = Vec(params.numEnq, Input(Vec(srcNum, UInt(srcLen.W))))
-    val fpRegValue = if (params.delayedRf) Input(UInt(srcLen.W)) else null
+    val srcRegValue = Vec(params.numEnq, Input(Vec(params.numSrc, UInt(params.dataBits.W))))
+    val fpRegValue = if (params.delayedRf) Input(UInt(params.dataBits.W)) else null
     // deq
     val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
     val stData = if (exuCfg == StExeUnitCfg) ValidIO(new StoreDataBundle) else null
@@ -96,14 +65,14 @@ class ReservationStation
 
     val fastUopOut = Vec(params.numDeq, ValidIO(new MicroOp))
     val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
-    val fastDatas = Vec(params.numFastWakeup, Input(UInt(srcLen.W)))
-    val slowPorts = Vec(slowPortsCnt, Flipped(ValidIO(new ExuOutput)))
+    val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
+    val slowPorts = Vec(params.numValueBroadCast - 4, Flipped(ValidIO(new ExuOutput)))
 
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
 
     val memfeedback = if (params.hasFeedback) Flipped(ValidIO(new RSFeedback)) else null
-    val rsIdx = if (params.hasFeedback) Output(UInt(log2Up(iqSize).W)) else null
+    val rsIdx = if (params.hasFeedback) Output(UInt(log2Up(params.numEntries).W)) else null
     val isFirstIssue = if (params.hasFeedback) Output(Bool()) else null // NOTE: just use for tlb perf cnt
   })
 
@@ -197,8 +166,8 @@ class ReservationStation
       statusArray.io.deqResp(i).bits.success := io.deq(i).ready
     }
     payloadArray.io.read(i).addr := select.io.grant(i).bits
-    if (fixedDelay >= 0) {
-      val wakeupQueue = Module(new WakeupQueue(fixedDelay))
+    if (params.fixedLatency >= 0) {
+      val wakeupQueue = Module(new WakeupQueue(params.fixedLatency))
       val fuCheck = (if (exuCfg == MulDivExeUnitCfg) payloadArray.io.read(i).data.ctrl.fuType === FuType.mul else true.B)
       wakeupQueue.io.in.valid := select.io.grant(i).fire && fuCheck
       wakeupQueue.io.in.bits := payloadArray.io.read(i).data

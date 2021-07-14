@@ -21,7 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
 import xiangshan._
 import utils._
-import xiangshan.backend.issue.ReservationStation
+import xiangshan.backend.issue.{RSParams, ReservationStation}
 import xiangshan.backend.regfile.Regfile
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
@@ -70,28 +70,26 @@ class Scheduler(implicit p: Parameters) extends XSModule {
   io.readIntRf <> intRf.io.readPorts.map(_.addr)
   io.readFpRf <> fpRf.io.readPorts.map(_.addr)
 
-  val jmp_rs = Module(new ReservationStation(JumpExeUnitCfg, IssQueSize, XLEN, 6, 4, -1, false, false, 1, 1))
-  val mul_rs_0 = Module(new ReservationStation(MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
-  val mul_rs_1 = Module(new ReservationStation(MulDivExeUnitCfg, IssQueSize, XLEN, 6, 4, 2, false, false, 2, 1))
-  val alu_rs_0 = Module(new ReservationStation(AluExeUnitCfg, 4*IssQueSize, XLEN,
-    8, 4, 0, true, false, 4, 4
-  ))
+  val jmpParam = RSParams(IssQueSize, 1, 1, 2, 64, PhyRegIdxWidth, 6, 14, 8, false, false, -1, false, false)
+  val jmp_rs = Module(new ReservationStation(JumpExeUnitCfg, jmpParam))
+  val mulParam = RSParams(IssQueSize, 2, 1, 2, 64, PhyRegIdxWidth, 6, 14, 8, false, false, 2, false, false)
+  val mul_rs_0 = Module(new ReservationStation(MulDivExeUnitCfg, mulParam))
+  val mul_rs_1 = Module(new ReservationStation(MulDivExeUnitCfg, mulParam))
+  val aluParam = RSParams(4*IssQueSize, 4, 4, 2, 64, PhyRegIdxWidth, 8, 16, 8, false, false, 0, false, true)
+  val alu_rs_0 = Module(new ReservationStation(AluExeUnitCfg, aluParam))
 
-  val fmac_rs0 = Module(new ReservationStation(FmacExeUnitCfg, 4*IssQueSize, XLEN,
-    4, 4, fixedDelay = 4, fastWakeup = true, feedback = false,4, 4))
-  val fmisc_rs0 = Module(new ReservationStation(FmiscExeUnitCfg, IssQueSize, XLEN,
-    4, 4, fixedDelay = -1, fastWakeup = false, feedback = false,2, 1))
-  val fmisc_rs1 = Module(new ReservationStation(FmiscExeUnitCfg, IssQueSize, XLEN,
-    4, 4, fixedDelay = -1, fastWakeup = false, feedback = false,2, 1))
+  val fmacParam = RSParams(4*IssQueSize, 4, 4, 3, 64, PhyRegIdxWidth, 4, 12, 8, false, false, 4, false, false)
+  val fmac_rs0 = Module(new ReservationStation(FmacExeUnitCfg, fmacParam))
+  val fiscParam = RSParams(IssQueSize, 2, 1, 2, 64, PhyRegIdxWidth, 4, 12, 8, false, false, -1, false, false)
+  val fmisc_rs0 = Module(new ReservationStation(FmiscExeUnitCfg, fiscParam))
+  val fmisc_rs1 = Module(new ReservationStation(FmiscExeUnitCfg, fiscParam))
 
-  val load_rs0 = Module(new ReservationStation(LdExeUnitCfg, IssQueSize, XLEN,
-    8, 4, fixedDelay = -1, fastWakeup = false, feedback = true, 1, 1))
-  val load_rs1 = Module(new ReservationStation(LdExeUnitCfg, IssQueSize, XLEN,
-    8, 4, fixedDelay = -1, fastWakeup = false, feedback = true, 1, 1))
-  val store_rs0 = Module(new ReservationStation(StExeUnitCfg, IssQueSize, XLEN,
-    6, 12, fixedDelay = -1, fastWakeup = false, feedback = true, 1, 1))
-  val store_rs1 = Module(new ReservationStation(StExeUnitCfg, IssQueSize, XLEN,
-    6, 12, fixedDelay = -1, fastWakeup = false, feedback = true, 1, 1))
+  val loadParam = RSParams(IssQueSize, 1, 1, 1, 64, PhyRegIdxWidth, 8, 16, 8, true, false, -1, true, false)
+  val load_rs0 = Module(new ReservationStation(LdExeUnitCfg, loadParam))
+  val load_rs1 = Module(new ReservationStation(LdExeUnitCfg, loadParam))
+  val storeParam = RSParams(IssQueSize, 1, 1, 2, 64, PhyRegIdxWidth, 6, 22, 16, true, false, -1, true, false)
+  val store_rs0 = Module(new ReservationStation(StExeUnitCfg, storeParam))
+  val store_rs1 = Module(new ReservationStation(StExeUnitCfg, storeParam))
 
   val intRs = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0)
   val fpRs = Seq(fmac_rs0, fmisc_rs0, fmisc_rs1)
