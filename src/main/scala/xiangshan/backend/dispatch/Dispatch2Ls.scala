@@ -30,7 +30,6 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
     val readFpRf = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val readIntState = Vec(NRMemReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(exuParameters.StuCnt, Flipped(new BusyTableReadIO))
-    val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   })
 
@@ -39,13 +38,13 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
     */
   val loadIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.LduCnt, true))
   val loadCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.loadCanAccept(deq.bits.ctrl.fuType)))
-  val (loadPriority, _) = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
+  val (loadPriority, _) = PriorityGen((0 until exuParameters.LduCnt).map(i => 0.U))
   loadIndexGen.io.validBits := loadCanAccept
   loadIndexGen.io.priority := loadPriority
 
   val storeIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.StuCnt, true))
   val storeCanAccept = VecInit(io.fromDq.map(deq => deq.valid && FuType.storeCanAccept(deq.bits.ctrl.fuType)))
-  val (storePriority, _) = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
+  val (storePriority, _) = PriorityGen((0 until exuParameters.StuCnt).map(i => 0.U))
   storeIndexGen.io.validBits := storeCanAccept
   storeIndexGen.io.priority := storePriority
 

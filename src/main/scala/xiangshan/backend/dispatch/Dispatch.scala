@@ -57,7 +57,6 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     val readIntState= Vec(NRIntReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(NRFpReadPorts, Flipped(new BusyTableReadIO))
     // to reservation stations
-    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
     // send reg file read port index to reservation stations
     val readPortIndex = new Bundle {
@@ -117,7 +116,6 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   intDispatch.io.fromDq <> intDq.io.deq
   intDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readIntRf(i)})
   intDispatch.io.readState.zipWithIndex.map({case (r, i) => r <> io.readIntState(i)})
-  intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i)})
   intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
 //  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
   intDispatch.io.readPortIndex <> io.readPortIndex.intIndex
@@ -127,7 +125,6 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   fpDispatch.io.fromDq <> fpDq.io.deq
   fpDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i)})
   fpDispatch.io.readState.zipWithIndex.map({case (r, i) => r <> io.readFpState(i)})
-  fpDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i + exuParameters.IntExuCnt)})
   fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
 //  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
   fpDispatch.io.readPortIndex <> io.readPortIndex.fpIndex
@@ -139,7 +136,6 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   lsDispatch.io.readFpRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i + 12)})
   lsDispatch.io.readIntState.zipWithIndex.map({case (r, i) => r <> io.readIntState(i + 8)})
   lsDispatch.io.readFpState.zipWithIndex.map({case (r, i) => r <> io.readFpState(i + 12)})
-  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 //  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 
