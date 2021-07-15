@@ -55,6 +55,17 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   val oversize    = Bool()
 
   val last_is_rvc = Bool()
+
+  // def getTarget(pred: Vec[UInt], pc: UInt): (UInt, UInt) = {
+  //   val taken_mask = Cat(jmpValid, pred(1)(1), pred(0)(1))
+  //   val target = pc + (FetchWidth*4).U
+
+  //   when(taken_mask =/= 0.U) {
+  //     target := PriorityMux(taken_mask, Seq(brTargets(0), brTargets(1), jmpTarget))
+  //   }
+
+  //   (taken_mask, target)
+  // }
 }
 
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
@@ -133,13 +144,19 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
         s0_pc + (FetchWidth*4).U))
   }
 
-  io.out.bits.resp.s1.hit               := s1_hit
-  io.out.bits.resp.s1.preds.is_br       := ftb_entry.brValids.reduce(_||_)
-  io.out.bits.resp.s1.preds.is_jal      := ftb_entry.jmpValid
-  io.out.bits.resp.s1.preds.is_call     := ftb_entry.isCall
-  io.out.bits.resp.s1.preds.is_ret      := ftb_entry.isRet
-  io.out.bits.resp.s1.meta              := FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
-  io.out.bits.resp.s1.ftb_entry         := ftb_entry
+  io.out.bits.resp.s1.preds.taken_mask    := io.in.bits.resp_in(0).s1.preds.taken_mask
+  io.out.bits.resp.s1.preds.taken_mask(0) := ftb_entry.jmpValid
+  io.out.bits.resp.s1.preds.is_br         := ftb_entry.brValids.reduce(_||_)
+  io.out.bits.resp.s1.preds.is_jal        := ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
+  io.out.bits.resp.s1.preds.is_jalr       := ftb_entry.isJalr
+  io.out.bits.resp.s1.preds.is_call       := ftb_entry.isCall
+  io.out.bits.resp.s1.preds.is_ret        := ftb_entry.isRet
+  io.out.bits.resp.s1.preds.call_is_rvc   := DontCare // TODO: modify when add RAS
+
+  io.out.bits.resp.s1.pc                  := s2_pc
+  io.out.bits.resp.s1.hit                 := s1_hit
+  io.out.bits.resp.s1.meta                := FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
+  io.out.bits.resp.s1.ftb_entry           := ftb_entry
 
   when (RegNext(s1_hit)) {
     io.out.bits.resp.s2.preds.target      := RegNext(io.out.bits.resp.s1.preds.target)

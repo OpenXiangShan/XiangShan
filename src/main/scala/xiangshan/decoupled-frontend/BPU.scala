@@ -1,3 +1,18 @@
+/***************************************************************************************
+  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  *
+  * XiangShan is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+  * You may obtain a copy of Mulan PSL v2 at:
+  *          http://license.coscl.org.cn/MulanPSL2
+  *
+  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+  *
+  * See the Mulan PSL v2 for more details.
+  ***************************************************************************************/
+
 package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
@@ -204,7 +219,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
 
   io.out.bits.meta := 0.U
 
-  io.in.ready := true.B
+  io.in.ready := !io.flush.valid
 
   io.s0_ready := true.B
   io.s1_ready := true.B
@@ -299,7 +314,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s0_pc = RegInit(resetVector.U)
 
-  when(toFtq_fire) {
+  when(io.bpu_to_ftq.resp.valid) {
     s0_pc := io.bpu_to_ftq.resp.bits.preds.target
   }
 
@@ -308,7 +323,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       io.bpu_to_ftq.resp.bits.preds.taken)
   }
 
-  predictors.io.in.valid := !reset.asBool && io.bpu_to_ftq.resp.ready
+  predictors.io.in.valid := !reset.asBool && toFtq_fire
   predictors.io.in.bits.s0_pc := s0_pc
 
   predictors.io.in.bits.ghist := final_gh
