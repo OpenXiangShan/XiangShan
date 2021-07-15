@@ -50,7 +50,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   val s1_read = bim.io.r.resp.data
 
-  io.out.bits.resp.s1.preds.taken_mask := Cat(s1_read(0)(1), s1_read(1)(1), 0.U(1.W))
+  io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
   io.out.bits.resp.s1.meta := s1_read
 
   // TODO: Replace RegNext by RegEnable

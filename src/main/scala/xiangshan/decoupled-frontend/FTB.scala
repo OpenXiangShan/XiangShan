@@ -95,8 +95,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   ftb.io.r.req.valid := io.s0_fire
   ftb.io.r.req.bits.setIdx := s0_idx
 
-  io.in.ready := ftb.io.r.req.ready && !io.flush.valid && !io.redirect.valid
-  io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid && !io.redirect.valid
+  io.in.ready := ftb.io.r.req.ready && !io.flush.valid
+  io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
 
   val s1_read = VecInit((0 until numWays).map(w =>
     ftb.io.r.resp.data(w)
@@ -139,9 +139,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.out.bits.resp:= io.in.bits.resp_in(0)
 
   when(s1_hit) {
-    io.out.bits.resp.s1.preds.target := Mux(ftb_entry.jmpValid, jmpTarget,
-      Mux(io.in.bits.resp_in(0).s1.preds.taken, ParallelMux(io.in.bits.resp_in(0).s1.preds.taken_mask zip brTargets),
-        s0_pc + (FetchWidth*4).U))
+    io.out.bits.resp.s1.preds.target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, s0_pc + (FetchWidth*4).U))
   }
 
   io.out.bits.resp.s1.preds.taken_mask    := io.in.bits.resp_in(0).s1.preds.taken_mask
@@ -159,20 +159,20 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.out.bits.resp.s1.ftb_entry           := ftb_entry
 
   when (RegNext(s1_hit)) {
-    io.out.bits.resp.s2.preds.target      := RegNext(io.out.bits.resp.s1.preds.target)
-    io.out.bits.resp.s2.hit               := RegNext(io.out.bits.resp.s1.hit)
-    io.out.bits.resp.s2.preds.is_br       := RegNext(io.out.bits.resp.s1.preds.is_br)
-    io.out.bits.resp.s2.preds.is_jal      := RegNext(io.out.bits.resp.s1.preds.is_jal)
-    io.out.bits.resp.s2.preds.is_call     := RegNext(io.out.bits.resp.s1.preds.is_call)
-    io.out.bits.resp.s2.preds.is_ret      := RegNext(io.out.bits.resp.s1.preds.is_ret)
-    io.out.bits.resp.s2.meta              := RegNext(io.out.bits.resp.s1.meta)
-    io.out.bits.resp.s2.ftb_entry         := RegNext(io.out.bits.resp.s1.ftb_entry)
+    io.out.bits.resp.s2.preds.target      := RegEnable(io.out.bits.resp.s1.preds.target, io.s1_fire)
+    io.out.bits.resp.s2.hit               := RegEnable(io.out.bits.resp.s1.hit, io.s1_fire)
+    io.out.bits.resp.s2.preds.is_br       := RegEnable(io.out.bits.resp.s1.preds.is_br, io.s1_fire)
+    io.out.bits.resp.s2.preds.is_jal      := RegEnable(io.out.bits.resp.s1.preds.is_jal, io.s1_fire)
+    io.out.bits.resp.s2.preds.is_call     := RegEnable(io.out.bits.resp.s1.preds.is_call, io.s1_fire)
+    io.out.bits.resp.s2.preds.is_ret      := RegEnable(io.out.bits.resp.s1.preds.is_ret, io.s1_fire)
+    io.out.bits.resp.s2.meta              := RegEnable(io.out.bits.resp.s1.meta, io.s1_fire)
+    io.out.bits.resp.s2.ftb_entry         := RegEnable(io.out.bits.resp.s1.ftb_entry, io.s1_fire)
   }
 
   // override flush logic
-  io.out.bits.flush_out.valid := io.in.bits.resp_in(0).s1.preds.taken =/= io.in.bits.resp_in(0).s2.preds.taken ||
-                        io.in.bits.resp_in(0).s1.preds.target =/= io.in.bits.resp_in(0).s2.preds.target
-  io.out.bits.flush_out.bits := io.in.bits.resp_in(0).s2.preds.target
+  // io.out.bits.flush_out.valid := io.in.bits.resp_in(0).s1.preds.taken =/= io.in.bits.resp_in(0).s2.preds.taken ||
+  //                       io.in.bits.resp_in(0).s1.preds.target =/= io.in.bits.resp_in(0).s2.preds.target
+  // io.out.bits.flush_out.bits := io.in.bits.resp_in(0).s2.preds.target
 
   // Update logic
   val update = io.update.bits
@@ -182,18 +182,13 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val u_meta = update.meta.asTypeOf(new FTBMeta)
   val u_way = u_meta.writeWay
   val u_idx = ftbAddr.getIdx(u_pc)
-  // val u_is_br = update.br_mask(update.cfi_idx.bits)
-  val u_is_br = update.preds.is_br.reduce(_||_) && update.preds.taken
-  // val u_taken = update.cfi_idx.valid && (update.jmp_valid || update.br_mask(update.cfi_idx.bits))
-  val u_taken = update.preds.taken && (update.preds.is_jal || update.preds.is_br.reduce(_||_))
-
-  val ftb_write = Wire(new FTBEntry)
-  ftb_write.valid := true.B
-  ftb_write.tag := ftbAddr.getTag(u_pc)
-
-  val cfi_hit = update.meta.asTypeOf(new FTBMeta).hit
   val u_valid = RegNext(io.update.valid)
   val u_way_mask = UIntToOH(u_way)
+
+  val ftb_write = update.ftb_entry
+
+  ftb_write.valid := true.B
+  ftb_write.tag   := ftbAddr.getTag(u_pc)
 
   ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
 }
