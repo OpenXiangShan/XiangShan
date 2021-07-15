@@ -1,10 +1,8 @@
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
-import chisel3._
+import chisel3.{util, _}
 import chisel3.util._
 import utils._
-import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
@@ -66,11 +64,9 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
   val instrs      = Vec(MAXINSNUM, UInt(32.W))
   val valid       = UInt(MAXINSNUM.W)
   val pd          = Vec(MAXINSNUM, (new PreDecodeInfo))
-  val brTarget    = UInt(VAddrBits.W)
-  val jalTarget   = UInt(VAddrBits.W)
-  val jumpOffset  = ValidUndirectioned(UInt(log2Ceil(MAXINSNUM).W))
-  val brOffset    = UInt(log2Ceil(MAXINSNUM).W)
-  val misPred     = Bool()
+  val misOffset    = ValidUndirectioned(UInt(4.W))
+  val cfiOffset    = ValidUndirectioned(UInt(4.W))
+  val target       = UInt(VAddrBits.W)
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
@@ -88,12 +84,15 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val validStart   = Wire(Vec(MAXINSNUM, Bool()))
   val validEnd     = Wire(Vec(MAXINSNUM, Bool()))
   val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
+  val misPred      = Wire(Vec(MAXINSNUM, Bool()))
+  val takens       = Wire(Vec(MAXINSNUM, Bool()))
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
 
   for (i <- 0 until MAXINSNUM) {
     val inst        = WireInit(rawInsts(i))
+    val expander    = Module(new RVCExpander)
     
     val isFirstInBlock = i.U === 0.U
     val isLastInBlock  = (i == MAXINSNUM - 1).B
@@ -113,30 +112,34 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.pd(i).isCall := isCall
     io.out.pd(i).isRet := isRet
     //io.out.pd(i).excType := ExcType.notExc
-    io.out.instrs(i) := inst
+    expander.io.in := inst
+    io.out.instrs(i) := expander.io.out.bits
     io.out.pc(i) := pcStart + (i << 1).U(log2Ceil(MAXINSNUM).W)
 
     targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
-  }
-  val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal || io.out.pd(i).isJalr) && validStart(i)).reverse).asUInt()
-  val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr && validStart(i)).reverse).asUInt()
 
-  val hasJump  = isJumpOH.orR()
+    takens(i)    := (validStart(i) && (bbTaken || io.out.pd(i).isJal)
+
+
+    misPred(i)   := (validStart(i)  && i.U === ftqOffet && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
+                    (validStart(i)  && i.U === ftqOffet && io.out.pd(i).notCFI && bbTaken)
+                    (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+  }
+  val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()
+  val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr    && validStart(i)).reverse).asUInt()
+
+  val hasJal  = isJumpOH.orR()
 
   val jalOffset = PriorityEncoder(isJumpOH)
   val brOffset  = PriorityEncoder(isBrOH)
 
   io.out.valid := validStart
-  io.out.jumpOffset.valid := isJumpOH((MAXINSNUM - 1).U)
-  io.out.jumpOffset.bits  := jalOffset
-  io.out.brOffset         := brOffset
-  io.out.brTarget         := targets(brOffset)   //TODO: support more branch instructions basic-block
-  io.out.jalTarget        := targets(jalOffset)
 
-  io.out.misPred          := (io.out.pd(ftqOffet).notCFI && bbTaken) ||
-                             (bbTaken && io.out.pd(ftqOffet).isBr  && bbTarget =/= io.out.brTarget)   ||
-                             (bbTaken && io.out.pd(ftqOffet).isJal && bbTarget =/= io.out.jalTarget)  ||
-                             (!bbTaken && hasJump)
+  io.out.misOffset.valid  := misPred.asUInt().orR()
+  io.out.misOffset.bits   := PriorityEncoder(misPred)
+
+  io.out.cfiOffset.valid  := takens.asUInt().orR()
+  io.out.cfiOffset.bits   := PriorityEncoder(takens)
 
 
   for (i <- 0 until MAXINSNUM) {

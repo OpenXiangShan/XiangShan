@@ -22,7 +22,7 @@ class ICacheInterface(implicit p: Parameters) extends XSBundle {
   val toMissQueue   = Vec(2,Decoupled(new ICacheMissReq))
   val fromIMeta     = Input(new ICacheMetaRespBundle)
   val fromIData     = Input(new ICacheDataRespBundle)
-  val fromMissQueue = Vec(2,Flipped(Decoupled(ICacheMissResp)))
+  val fromMissQueue = Vec(2,Flipped(Decoupled(new ICacheMissResp)))
 }
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
@@ -139,7 +139,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
   //  * if at least one needed cacheline miss, wait for miss queue response (a state machine) THIS IS TOO UGLY!!!
   //  * cut cacheline(s) and send to PreDecode
   //  * check if prediction is right (branch target and type, jump direction and type , jal target )
-  //
   //---------------------------------------------
   val f2_valid      = RegInit(false.B)
   val f2_ftq_req    = RegEnable(next = f1_ftq_req, enable = f1_fire)
@@ -246,18 +245,17 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary
 
 
   //flush generate and to Ftq
-  val flush = preDecoderOut.misPred
+  val flush = preDecoderOut.misOffset.valid
 
   toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
   toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset
-  toFtq.pdWb.bits.misPred    := preDecoderOut.misPred
-  toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
-  toFtq.pdWb.bits.brTarget   := preDecoderOut.brTarget
-  toFtq.pdWb.bits.jumpOffset := preDecoderOut.jumpOffset
-  toFtq.pdWb.bits.brOffset   := preDecoderOut.brOffset
+  toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
+  toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
+  toFtq.pdWb.bits.target     := preDecoderOut.target
+
 
 
 }
