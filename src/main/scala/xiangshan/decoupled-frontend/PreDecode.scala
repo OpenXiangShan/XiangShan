@@ -64,8 +64,8 @@ class PreDecodeInfo extends Bundle {  // 8 bit
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
   val pc          = Vec(MAXINSNUM, UInt(VAddrBits.W))
   val instrs      = Vec(MAXINSNUM, UInt(32.W))
-  val valid       = UInt(MAXINSNUM.W)
   val pd          = Vec(MAXINSNUM, (new PreDecodeInfo))
+  val takens      = Vec(MAXINSNUM, Bool())
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
@@ -79,7 +79,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
   val data      = io.in.data
   val pcStart   = io.in.startAddr
-  val ftqOffet  = io.in.ftqOffset.bits
+  val bbOffset  = io.in.ftqOffset.bits
   val bbTaken   = io.in.ftqOffset.valid
   val bbTarget  = io.in.target
 
@@ -101,13 +101,13 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val currentIsRVC     = isRVC(inst) && HasCExtension.B
 
     // TODO: when i == 0
-    // val lastIsValidEnd =  if(i == 0) true.B else validEnd(i-1))  || isFirstInBlock || !HasCExtension.B
-    val lastIsValidEnd = Wire(Bool())
-    if (i == 0) {
-      lastIsValidEnd := true.B || isFirstInBlock || !HasCExtension.B
-    } else {
-      lastIsValidEnd := validEnd(i-1) || isFirstInBlock || !HasCExtension.B
-    }
+    val lastIsValidEnd =  if(i == 0) {true.B} else {validEnd(i-1)  || isFirstInBlock || !HasCExtension.B}
+    // val lastIsValidEnd = Wire(Bool())
+    // if (i == 0) {
+    //   lastIsValidEnd := true.B || isFirstInBlock || !HasCExtension.B
+    // } else {
+    //   lastIsValidEnd := validEnd(i-1) || isFirstInBlock || !HasCExtension.B
+    // }
     
     validStart(i) := lastIsValidEnd || !HasCExtension.B
     validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
@@ -120,6 +120,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.pd(i).brType := brType
     io.out.pd(i).isCall := isCall
     io.out.pd(i).isRet := isRet
+    io.out.pd(i).valid := validStart(i)
     //io.out.pd(i).excType := ExcType.notExc
     expander.io.in := inst
     io.out.instrs(i) := expander.io.out.bits
@@ -127,11 +128,11 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, SignExt(brOffset, XLEN), SignExt(jalOffset, XLEN))
 
-    takens(i)    := (validStart(i) && (bbTaken || io.out.pd(i).isJal))
+    takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U || io.out.pd(i).isJal))
 
 
-    misPred(i)   := (validStart(i)  && i.U === ftqOffet && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
-                    (validStart(i)  && i.U === ftqOffet && io.out.pd(i).notCFI && bbTaken) ||
+    misPred(i)   := (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
+                    (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) ||
                     (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
   }
   val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()
@@ -142,13 +143,14 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val jalOffset = PriorityEncoder(isJumpOH)
   val brOffset  = PriorityEncoder(isBrOH)
 
-  io.out.valid := validStart.asUInt()
-
   io.out.misOffset.valid  := misPred.asUInt().orR()
   io.out.misOffset.bits   := PriorityEncoder(misPred)
 
   io.out.cfiOffset.valid  := takens.asUInt().orR()
   io.out.cfiOffset.bits   := PriorityEncoder(takens)
+
+  io.out.target           := targets(io.out.cfiOffset.bits)
+  io.out.takens           := takens
 
 
   for (i <- 0 until MAXINSNUM) {

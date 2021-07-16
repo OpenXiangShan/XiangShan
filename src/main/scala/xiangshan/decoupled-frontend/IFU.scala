@@ -108,6 +108,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   //TODO: tlb req
   io.iTLBInter.req <> DontCare
+  io.iTLBInter.resp.ready := true.B
 
   //---------------------------------------------
   //  Fetch Stage 2 :
@@ -134,7 +135,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
 
   //flush generate and to Ftq
-  val flush = preDecoderOut.misOffset.valid
+  val flush = preDecoderOut.misOffset.valid || fromFtq.redirect.valid
 
   when(flush)        {f1_valid  := false.B}
   .elsewhen(f0_fire) {f1_valid  := true.B}
@@ -266,12 +267,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := preDecoderOut.valid
+  io.toIbuffer.bits.valid     := VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
-  // TODO: Fix it
-  // io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
-  io.toIbuffer.bits.ftqOffset.zip(preDecoderOut.pc).map{case(a, b) => a.bits := b; a.valid := true.B}
+  io.toIbuffer.bits.pc        := preDecoderOut.pc
+  io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i)}
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
 
@@ -279,7 +279,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
-  toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits // TODO: fix it
+  toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits 
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target

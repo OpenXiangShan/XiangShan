@@ -86,6 +86,11 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     ifu.io.icacheInter.fromMissQueue(i) <> icacheMissQueue.io.resp(i) 
     icacheMissQueue.io.req(i)           <> ifu.io.icacheInter.toMissQueue(i)
   }
+
+  icacheMissQueue.io.flush := ifu.io.ftqInter.fromFtq.redirect.valid
+
+  ifu.io.iTLBInter.resp <> DontCare
+
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in
 
@@ -105,6 +110,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     icacheMissQueue.io.mem_grant.ready,
     l1plusPrefetcher.io.mem_grant.ready)
   //ifu.io.fencei := RegNext(io.fencei)
+  icacheMissQueue.io.mem_grant.valid  :=  io.icacheMemGrant.valid 
+  icacheMissQueue.io.mem_grant.bits   :=  io.icacheMemGrant.bits
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq <> ftq.io.toBackend
