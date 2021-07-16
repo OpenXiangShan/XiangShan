@@ -90,6 +90,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icacheMissQueue.io.flush := ifu.io.ftqInter.fromFtq.redirect.valid
 
   ifu.io.iTLBInter.resp <> DontCare
+  ifu.io.iTLBInter.req.ready := true.B 
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

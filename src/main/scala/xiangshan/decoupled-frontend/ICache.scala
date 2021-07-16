@@ -187,6 +187,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
 
   (io.readResp.tags zip tagArrays).map    {case (io, sram) => io  := sram.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))}
   (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
+
+    io.write.ready := DontCare
 }
 
 
@@ -226,7 +228,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   (io.readResp.datas zip dataArrays).map {case (io, sram) => io :=  VecInit(sram.map(way => way.io.r.resp.data.asTypeOf(UInt(blockBits.W)) ))  }
 
-  io.write.ready := true.B
+  io.write.ready := DontCare
 }
 
 
