@@ -49,14 +49,15 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   val s1_read = bim.io.r.resp.data
 
-  io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
-  io.out.bits.resp.s1.meta := s1_read
+  // io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
+  io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
+  io.out.bits.resp.s1.meta := s1_read.asUInt()
 
   // TODO: Replace RegNext by RegEnable
-  io.out.bits.resp.s2.preds.taken := RegEnable(io.out.bits.resp.s1.preds.taken, io.s1_fire)
+  io.out.bits.resp.s2.preds.taken_mask := RegEnable(io.out.bits.resp.s1.preds.taken_mask, io.s1_fire)
   io.out.bits.resp.s2.meta := RegEnable(io.out.bits.resp.s1.meta, io.s1_fire)
 
-  io.out.bits.resp.s3.preds.taken := RegEnable(io.out.bits.resp.s2.preds.taken, io.s2_fire)
+  io.out.bits.resp.s3.preds.taken_mask := RegEnable(io.out.bits.resp.s2.preds.taken_mask, io.s2_fire)
   io.out.bits.resp.s3.meta := RegEnable(io.out.bits.resp.s2.meta, io.s2_fire)
 
   // Update logic
@@ -85,24 +86,28 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
 
-  val need_to_update = u_valid && update.preds.is_br.reduce(_||_)
+  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.preds.is_br(i)))
 
-  when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := false.B)}
+  when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}
 
-  when (need_to_update) {
-    when (wrbypass_hit) {
-      wrbypass_ctrs(wrbypass_hit_idx) := newCtrs
-      wrbypass_ctr_valids(wrbypass_hit_idx) := true.B
-    }.otherwise {
-      wrbypass_ctr_valids(wrbypass_enq_ptr) := false.B
-      when (need_to_update) {
-        wrbypass_ctrs(wrbypass_enq_ptr) := newCtrs
-        wrbypass_ctr_valids(wrbypass_enq_ptr) := true.B
+  for (i <- 0 until numBr) {
+    when(need_to_update.reduce(_||_)) {
+      when(wrbypass_hit) {
+        when(need_to_update(i)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(i) := newCtrs(i)
+          wrbypass_ctr_valids(wrbypass_hit_idx)(i) := true.B
+        }
+      }.otherwise {
+        wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := false.B
+        when(need_to_update(i)) {
+          wrbypass_ctrs(wrbypass_enq_ptr)(i) := newCtrs(i)
+          wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := true.B
+        }
       }
     }
   }
 
-  when (need_to_update && !wrbypass_hit) {
+  when (need_to_update.reduce(_||_) && !wrbypass_hit) {
     wrbypass_idx(wrbypass_enq_ptr) := u_idx
     wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypassEntries)-1, 0)
   }
@@ -111,6 +116,6 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     valid = need_to_update.asUInt.orR || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, 1.U(1.W), need_to_update)
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
   )
 }

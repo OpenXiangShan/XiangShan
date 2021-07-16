@@ -129,7 +129,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
       VecInit(s1_read.map(w => w.tag)).asUInt,
       s1_tag)))
 
-  val writeWay = Mux(s1_hit, s1_hit_way, allocWays)
+  val writeWay = Mux(s1_hit, s1_hit_way, allocWays(0)) // TODO: allocWays is Vec
 
   val ftb_entry = s1_read(s1_hit_way)
 
@@ -146,7 +146,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.out.bits.resp.s1.preds.taken_mask    := io.in.bits.resp_in(0).s1.preds.taken_mask
   io.out.bits.resp.s1.preds.taken_mask(0) := ftb_entry.jmpValid
-  io.out.bits.resp.s1.preds.is_br         := ftb_entry.brValids.reduce(_||_)
+  io.out.bits.resp.s1.preds.is_br         := ftb_entry.brValids
   io.out.bits.resp.s1.preds.is_jal        := ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
   io.out.bits.resp.s1.preds.is_jalr       := ftb_entry.isJalr
   io.out.bits.resp.s1.preds.is_call       := ftb_entry.isCall
@@ -185,7 +185,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val u_valid = RegNext(io.update.valid)
   val u_way_mask = UIntToOH(u_way)
 
-  val ftb_write = update.ftb_entry
+  val ftb_write = WireInit(update.ftb_entry)
 
   ftb_write.valid := true.B
   ftb_write.tag   := ftbAddr.getTag(u_pc)

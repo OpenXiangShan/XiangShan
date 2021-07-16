@@ -62,7 +62,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val pred        = Vec(numBr, UInt(2.W))
 
     def taken = pred.map(_(1)).reduce(_ || _)
-    def taken_mask = { Cat(jmpValid, brValids(1) && pred(1)(1), brValids(0) && pred(0)(1)) }
+    // def taken_mask = { Cat(jmpValid, brValids(1) && pred(1)(1), brValids(0) && pred(0)(1)) }
+    def taken_mask = { Cat(jmpValid, brValids(0) && pred(0)(1)) }
   }
 
   class MicroBTBData extends XSBundle
@@ -131,7 +132,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val hit_and_taken_mask = ParallelMux(hits zip taken_masks)
 
     val target = Mux(hit_and_taken_mask =/= 0.U,
-      PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(1), hit_data.brTargets(0))),
+      // PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(1), hit_data.brTargets(0))),
+      PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, 9528.U(VAddrBits.W), hit_data.brTargets(0))),
       read_pc + (FetchWidth*4).U)
 
     val ren = io.read_pc.valid
@@ -141,7 +143,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // }.otherwise {
     //   io.read_resp.brValids := 0.U(numBr.W)
     // }
-    io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, 0.U((numBr+1).W))
+    // io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, 0.U((numBr+1).W))
+    io.read_resp.taken_mask := Mux(ren, VecInit(hit_and_taken_mask.asBools()), VecInit(Seq.fill(numBr+1)(false.B)))
     io.read_resp.target := target
     io.read_resp.pred := hit_meta.pred
     io.read_hit := hit_oh.orR
@@ -190,18 +193,18 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     meta.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBMeta),
       RegNext(io.update_write_meta.bits))
-    meta.io.wdata(0).pred := Mux(do_reset, Vec(numBr, 0.U(2.W)), RegNext(update_new_pred))
+    meta.io.wdata(0).pred := Mux(do_reset, VecInit(Seq.fill(numBr)(0.U(2.W))), RegNext(update_new_pred))
     data.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     data.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
     data.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBData),
       RegNext(io.update_write_data.bits))
 
-    debug_io.update_hit := update_hit
-    debug_io.update_hit_way := update_hit_way
-    debug_io.update_write_way := update_way
-    debug_io.update_old_pred := update_old_pred
-    debug_io.update_new_pred := update_new_pred
+    // debug_io.update_hit := update_hit
+    // debug_io.update_hit_way := update_hit_way
+    // debug_io.update_write_way := update_way
+    // debug_io.update_old_pred := update_old_pred
+    // debug_io.update_new_pred := update_new_pred
   }
 
   val ubtbBanks = Module(new UBTBBank(numWays))
@@ -214,7 +217,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.read_pc.bits := s1_pc
 
   io.out.valid := io.s1_fire && !io.flush.valid
-  io.out.bits.resp.s1.meta := read_resps.pred
+  io.out.bits.resp.s1.meta := read_resps.pred.asUInt() // TODO: What ubtb meta need
   io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, io.in.bits.s0_pc + (FetchWidth*4).U)
   io.out.bits.resp.s1.preds.taken_mask := read_resps.taken_mask
   // io.out.bits.resp.s1.preds.is_br := read_resps.brValids
@@ -238,8 +241,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val data_write_valid = u_valid && u_taken
   val meta_write_valid = u_valid && (u_taken || update.preds.is_br.reduce(_||_))
 
-  val update_write_datas = new MicroBTBData
-  val update_write_metas = new MicroBTBMeta
+  val update_write_datas = Wire(new MicroBTBData)
+  val update_write_metas = Wire(new MicroBTBMeta)
 
   update_write_metas.valid := true.B
   update_write_metas.tag := u_tag
