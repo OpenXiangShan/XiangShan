@@ -114,7 +114,7 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
   val target = UInt(VAddrBits.W)
 }
 
-class FtqRead[T <: Data](gen: T)(implicit p: Parameters) extends XSBundle {
+class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
   val ptr = Output(new FtqPtr)
   val offset = Output(UInt(log2Ceil(16).W))
   val data = Input(gen)
@@ -131,6 +131,7 @@ class FtqRead[T <: Data](gen: T)(implicit p: Parameters) extends XSBundle {
 class CfiInfoToCtrl(implicit p: Parameters) extends Bundle {
   val br_mask = Vec(16, Bool())
   val hist = new GlobalHistory
+  override def cloneType = (new CfiInfoToCtrl).asInstanceOf[this.type]
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
