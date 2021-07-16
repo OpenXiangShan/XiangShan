@@ -177,6 +177,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val tlb = Output(new TlbCsrBundle)
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  // to Fence to disable sfence
+  val disableSfence = Output(Bool())
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
@@ -620,7 +622,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // csr access check, special case
-  val accessPermitted = !(priviledgeMode === ModeS && addr === Satp.U && mstatusStruct.tvm.asBool)
+  val tvmNotPermit = (priviledgeMode === ModeS && mstatusStruct.tvm.asBool)
+  val accessPermitted = !(addr === Satp.U && tvmNotPermit)
+  csrio.disableSfence := tvmNotPermit
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
