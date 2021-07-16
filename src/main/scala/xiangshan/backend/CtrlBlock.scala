@@ -122,6 +122,10 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     (io.stage1PcRead zip redirects).map{ case (r: FtqRead[UInt], redirect: Redirect) => 
       r(redirect.ftqIdx, redirect.ftqOffset)
     }
+  val stage1FtqReadCfis =
+    (io.stage1CfiRead zip redirects).map{ case (r: FtqRead[CfiInfoToCtrl], redirect: Redirect) => 
+      r(redirect.ftqIdx, redirect.ftqOffset)
+    }
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
     val redirect = Wire(Valid(new Redirect))
@@ -152,7 +156,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val s1_isReplay = s1_redirect_onehot(5)
   val s1_isJump = s1_redirect_onehot(0)
-  val cfiRead = Mux1H(s1_redirect_onehot, io.stage1CfiRead)
+  val cfiRead = Mux1H(s1_redirect_onehot, stage1FtqReadCfis)
   val real_pc = Mux1H(s1_redirect_onehot, stage1FtqReadPcs)
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
@@ -179,11 +183,11 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
 
-  val s2_br_mask = RegEnable(cfiRead.data.br_mask, enable = s1_redirect_valid_reg)
+  val s2_br_mask = RegEnable(cfiRead.br_mask, enable = s1_redirect_valid_reg)
   val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
-      if(i == 0) false.B else Cat(cfiRead.data.br_mask.take(i)).orR()
+      if(i == 0) false.B else Cat(cfiRead.br_mask.take(i)).orR()
     })(s1_redirect_bits_reg.ftqOffset), enable = s1_redirect_valid_reg)
-  val s2_hist = RegEnable(cfiRead.data.hist, enable = s1_redirect_valid_reg)
+  val s2_hist = RegEnable(cfiRead.hist, enable = s1_redirect_valid_reg)
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
   val s2_pc = RegEnable(real_pc, enable = s1_redirect_valid_reg)
@@ -266,6 +270,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   loadReplay.bits := RegEnable(io.fromLsBlock.replay.bits, io.fromLsBlock.replay.valid)
   io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
   io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
+  io.frontend.fromFtq.cfi_reads <> redirectGen.io.stage1CfiRead
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushReg
