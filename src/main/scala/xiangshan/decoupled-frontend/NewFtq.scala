@@ -119,10 +119,9 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
   val offset = Output(UInt(log2Ceil(16).W))
   val data = Input(gen)
   def apply(ptr: FtqPtr, offset: UInt) = {
-    val read = Wire(Flipped(this.cloneType))
-    read.ptr := ptr
-    read.offset := offset
-    read.data
+    this.ptr := ptr
+    this.offset := offset
+    this.data
   }
   override def cloneType = (new FtqRead(gen)).asInstanceOf[this.type]
 }
