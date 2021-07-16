@@ -99,16 +99,16 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val update_taken_mask = Input(Vec(numBr+1, Bool()))
     })
 
-    val debug_io = IO(new Bundle {
-      val read_hit = Output(Bool())
-      val read_hit_way = Output(UInt(log2Ceil(nWays).W))
+    // val debug_io = IO(new Bundle {
+    //   val read_hit = Output(Bool())
+    //   val read_hit_way = Output(UInt(log2Ceil(nWays).W))
 
-      val update_hit = Output(Bool())
-      val update_hit_way = Output(UInt(log2Ceil(nWays).W))
-      val update_write_way = Output(UInt(log2Ceil(nWays).W))
-      val update_old_pred = Output(UInt(2.W))
-      val update_new_pred = Output(UInt(2.W))
-    })
+    //   val update_hit = Output(Bool())
+    //   val update_hit_way = Output(UInt(log2Ceil(nWays).W))
+    //   val update_write_way = Output(UInt(log2Ceil(nWays).W))
+    //   val update_old_pred = Output(UInt(2.W))
+    //   val update_new_pred = Output(UInt(2.W))
+    // })
     val meta = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays*2, 1))
     val data = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays,   nWays, 1))
 
@@ -149,8 +149,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     io.read_resp.pred := hit_meta.pred
     io.read_hit := hit_oh.orR
 
-    debug_io.read_hit := hit_oh.orR
-    debug_io.read_hit_way := OHToUInt(hit_oh)
+    // debug_io.read_hit := hit_oh.orR
+    // debug_io.read_hit_way := OHToUInt(hit_oh)
 
     val do_reset = RegInit(true.B)
     val reset_way = RegInit(0.U(log2Ceil(nWays).W))
@@ -243,6 +243,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   val update_write_datas = Wire(new MicroBTBData)
   val update_write_metas = Wire(new MicroBTBMeta)
+
+  update_write_metas := DontCare
 
   update_write_metas.valid := true.B
   update_write_metas.tag := u_tag

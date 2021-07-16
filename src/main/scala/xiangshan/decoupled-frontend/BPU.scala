@@ -257,6 +257,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
+  predictors.io := DontCare
+
   val s3_gh = predictors.io.out.bits.resp.s3.ghist
   val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
 
