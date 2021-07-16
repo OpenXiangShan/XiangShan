@@ -222,7 +222,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     VecInit(Seq.fill(PredictWidth)(s_invalid))
   }))
   
-  val f_to_send :: f_sent :: Nil = Enum(2)
+  val f_to_send :: f_sent :: f_wb :: Nil = Enum(3)
   val entry_fetch_status = RegInit(VecInit(Seq.fill(FtqSize)(f_sent)))
   
   when (enq_fire) {
@@ -264,6 +264,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   when (ifu_wb_valid) {
     val ifuWbIdx = pdWb.bits.ftqIdx.value
     commitStateQueue(ifuWbIdx) := VecInit(pds.map(_.valid))
+    entry_fetch_status(ifuWbIdx) := f_wb
   }
 
   // ****************************************************************
@@ -519,9 +520,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  val canDeq = Cat(commitStateQueue(commPtr.value).map(s => {
-    s === s_invalid || s === s_commited
-  })).andR()
+  val canDeq = entry_fetch_status(commPtr.value) === f_wb &&
+    Cat(commitStateQueue(commPtr.value).map(s => {
+      s === s_invalid || s === s_commited
+    })).andR()
   when(canDeq && commPtr =/= bpuPtr) {
     commPtr := commPtr + 1.U
   }
@@ -534,6 +536,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update := DontCare
   ftq_meta_1r_sram.io.ren(0) := false.B
   ftq_meta_1r_sram.io.raddr(0) := 0.U
+
+
+  // --------------------------- Debug --------------------------------
+  XSDebug(enq_fire, io.fromBpu.resp.bits.toPrintable)
+  XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
+  XSDebug(canDeq, p"deq! [ptr] $commPtr\n")
+  XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [commPtr] $commPtr\n")
+  XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
+    p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
 }
 
 trait HasPerfDebug { this: Ftq =>

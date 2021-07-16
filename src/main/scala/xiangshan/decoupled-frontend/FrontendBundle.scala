@@ -12,6 +12,12 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val ftqIdx       = new FtqPtr
   val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(32).W))
   val target       = UInt(VAddrBits.W)
+
+  override def toPrintable: Printable = {
+    p"[start] ${Hexadecimal(startAddr)} [pft] ${Hexadecimal(fallThruAddr)}" +
+    p"[tgt] ${Hexadecimal(target)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
+    p" offset: ${ftqOffset.bits}\n"
+  }
 }
 
 class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
@@ -99,6 +105,11 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val meta = UInt(MaxMetaLength.W)
 
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
+
+  override def toPrintable: Printable = {
+    p"[pc] ${Hexadecimal(pc)} [pft] ${Hexadecimal(ftb_entry.pftAddr)}" +
+    p"[tgt] ${Hexadecimal(preds.target)} [hit] $hit\n"
+  }
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
