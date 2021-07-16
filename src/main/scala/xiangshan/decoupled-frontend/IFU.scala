@@ -135,7 +135,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
 
   //flush generate and to Ftq
-  val flush = preDecoderOut.misOffset.valid || fromFtq.redirect.valid
+  val predecodeOutValid = WireInit(false.B)
+  val flush = (preDecoderOut.misOffset.valid && predecodeOutValid) || fromFtq.redirect.valid
 
   when(flush)        {f1_valid  := false.B}
   .elsewhen(f0_fire) {f1_valid  := true.B}
@@ -304,6 +305,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.startAddr  :=  f2_ftq_req.startAddr
   preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset
   preDecoderIn.target     :=  f2_ftq_req.target
+
+  predecodeOutValid       := f2_valid
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
