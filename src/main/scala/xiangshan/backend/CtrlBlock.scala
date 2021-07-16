@@ -119,11 +119,11 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
   val redirects = io.exuMispredict.map(_.bits.redirect) :+ io.loadReplay.bits
   val stage1FtqReadPcs = 
-    (io.stage1PcRead zip redirects).map{ case (r: FtqRead[UInt], redirect: Redirect) => 
+    (io.stage1PcRead zip redirects).map{ case (r, redirect) => 
       r(redirect.ftqIdx, redirect.ftqOffset)
     }
   val stage1FtqReadCfis =
-    (io.stage1CfiRead zip redirects).map{ case (r: FtqRead[CfiInfoToCtrl], redirect: Redirect) => 
+    (io.stage1CfiRead zip redirects).map{ case (r, redirect) => 
       r(redirect.ftqIdx, redirect.ftqOffset)
     }
 
