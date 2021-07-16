@@ -33,7 +33,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   // val resetVector = 0x10000000L//TODO: set reset vec
 }
 
-trait HasBPUParameter extends HasXSParameter {
+trait HasBPUParameter extends HasXSParameter with HasBPUConst {
   val BPUDebug = true && !env.FPGAPlatform
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
@@ -228,7 +228,7 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtqIO()
-  val ftq_to_bpu = new FtqToBpuIO()
+  val ftq_to_bpu = Flipped(new FtqToBpuIO())
 }
 
 class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {

@@ -144,7 +144,7 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle {
-  val pc_reads = Vec(1 + 6 + 1 + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val pc_reads = Vec(1 + 6 + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val target_read = Flipped(new FtqRead(UInt(VAddrBits.W)))
   val cfi_reads = Vec(6, Flipped(new FtqRead(new CfiInfoToCtrl)))
   def getJumpPcRead = pc_reads.head
@@ -182,7 +182,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.fromBpu.resp.ready := validEntries < FtqSize.U
   val enq_fire = io.fromBpu.resp.fire() && !flush
 
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 10, 1))
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 11, 1))
   ftq_pc_mem.io.wen(0) := enq_fire
   ftq_pc_mem.io.waddr(0) := bpuPtr.value
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
@@ -192,16 +192,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, 10, 1))
   ftq_hist_mem.io.wen(0) := enq_fire
   ftq_hist_mem.io.waddr(0) := bpuPtr.value
-  ftq_pc_mem.io.wdata(0) := io.fromBpu.resp.bits.ghist
+  ftq_hist_mem.io.wdata(0) := io.fromBpu.resp.bits.ghist
   
   val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 2))
-  ftq_redirect_sram.io.wen(0) := enq_fire
-  ftq_redirect_sram.io.waddr(0) := bpuPtr.value
+  ftq_redirect_sram.io.wen := enq_fire
+  ftq_redirect_sram.io.waddr := bpuPtr.value
   ftq_redirect_sram.io.wdata.rasSp := io.fromBpu.resp.bits.rasSp
   ftq_redirect_sram.io.wdata.rasEntry := io.fromBpu.resp.bits.rasTop
   ftq_redirect_sram.io.wdata.specCnt := io.fromBpu.resp.bits.specCnt
 
-  pred_target_sram.io.raddr(0) := ifuPtr.value
   val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 2))
   pred_target_sram.io.wen := enq_fire
   pred_target_sram.io.waddr := bpuPtr.value
@@ -257,7 +256,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
   val pds = pdWb.bits.pd
   ftq_pd_mem.io.wdata(0).brMask := VecInit(pds.map(pd => pd.isBr && pd.valid))
-  ftq_pd_mem.io.wdata(0).jmpInfo.valid := VecInit(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid))
+  ftq_pd_mem.io.wdata(0).jmpInfo.valid := VecInit(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid)).asUInt.orR
   ftq_pd_mem.io.wdata(0).jmpInfo.bits := ParallelPriorityMux(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid),
                                                           pds.map(pd => VecInit(pd.isJalr, pd.isCall, pd.isRet)))
   ftq_pd_mem.io.wdata(0).jmpOffset := ParallelPriorityEncoder(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid))
@@ -280,11 +279,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ifuPtr := ifuPtr + to_buf_fire
   
   when (flush) {
-    to_buf_valid := false.B
+    ifu_req_buf.valid := false.B
   }.elsewhen (to_buf_fire) {
-    to_buf_valid := true.B
+    ifu_req_buf.valid := true.B
   }.elsewhen (io.toIfu.req.fire()) {
-    to_buf_valid := false.B
+    ifu_req_buf.valid := false.B
   }
   
   // read pc and target
@@ -293,7 +292,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   pred_target_sram.io.ren(0) := to_buf_fire
   
   when (to_buf_fire) {
-    ifu_req_buf.bits.ftqIdx := ifuPtr.value
+    ifu_req_buf.bits.ftqIdx := ifuPtr
     ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
   }
   when (RegNext(to_buf_fire)) {
@@ -305,7 +304,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val last_cycle_to_buf_fire = RegNext(to_buf_fire)
   io.toIfu.req.valid := ifu_req_buf.valid
   io.toIfu.req.bits.ftqIdx := ifu_req_buf.bits.ftqIdx
-  io.toIfu.req.bits.ftqOffset := ifu_req_buf.bits.ftqIdx
+  io.toIfu.req.bits.ftqOffset := ifu_req_buf.bits.ftqOffset
   io.toIfu.req.bits.startAddr := Mux(last_cycle_to_buf_fire,
                                      ftq_pc_mem.io.rdata(10).startAddr,
                                      ifu_req_buf.bits.startAddr)
@@ -336,7 +335,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   // redirect read cfiInfo, couples to redirectGen s2
   ftq_redirect_sram.io.ren(0) := io.fromBackend.stage2Redirect.valid
-  ftq_redirect_sram.io.raddr(0) := io.fromBackend.stage2Redirect.bits.ftqIdx
+  ftq_redirect_sram.io.raddr(0) := io.fromBackend.stage2Redirect.bits.ftqIdx.value
   val stage3CfiInfo = ftq_redirect_sram.io.rdata(0)
   val fromBackendRedirect = WireInit(io.fromBackend.stage3Redirect)
   fromBackendRedirect.bits.cfiUpdate.rasSp := stage3CfiInfo.rasSp
@@ -388,6 +387,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   def getFtqOffset(n: Int): UInt = extractWbInfo(io.fromBackend.exuWriteback(n))._2
   // FtqSize * onehot
   val wbPortSel_vec = Wire(Vec(FtqSize, Vec(nWbPorts + 1, Bool())))
+  val wbFtqOffset_vec = Wire(Vec(nWbPorts+1, UInt(4.W)))
+  for (i <- 0 until nWbPorts) { wbFtqOffset_vec(i) := getFtqOffset(i)}
+  wbFtqOffset_vec(nWbPorts) := fromIfuRedirect.bits.ftqOffset
   // in order to handle situation in which multiple cfi taken writebacks target the same ftqEntry
   for (i <- 0 until FtqSize) {
     val needToUpdateThisEntry =
@@ -413,8 +415,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     // TODO: distinguish exuWb and ifuWb
     for (n <- 0 until nWbPorts+1) {
       val hasFormerWriteBack = VecInit(
-        for (another <- 0 until nWbPorts if another != n) yield {
-          needToUpdateThisEntry(another) && getFtqOffset(another) < getFtqOffset(n)
+        for (another <- 0 until nWbPorts+1 if another != n) yield {
+          needToUpdateThisEntry(another) && wbFtqOffset_vec(another) < wbFtqOffset_vec(n)
         }
       ).asUInt.orR
       wbPortSel_vec(i)(n) := needToUpdateThisEntry(n) && !hasFormerWriteBack || !VecInit(needToUpdateThisEntry).asUInt().orR() && updateCfiValidMask(n)

@@ -24,7 +24,7 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.frontend.{FtqRead, FtqToCtrlIO, FtqPtr}
+import xiangshan.frontend.{FtqRead, FtqToCtrlIO, FtqPtr, CfiInfoToCtrl}
 import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
@@ -79,12 +79,12 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val stage1PcRead = Flipped((new FtqToCtrlIO).getRedirectPcRead)
-    val stage1CfiRead = Flipped((new FtqToCtrlIO).cfi_reads)
+    val stage1PcRead = Vec(numRedirect+1, new FtqRead(UInt(VAddrBits.W)))
+    val stage1CfiRead = Vec(numRedirect+1, new FtqRead(new CfiInfoToCtrl))
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
-    val memPredPcRead = Flipped((new FtqToCtrlIO).getMemPredPcRead) // read req send form stage 2
+    val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1

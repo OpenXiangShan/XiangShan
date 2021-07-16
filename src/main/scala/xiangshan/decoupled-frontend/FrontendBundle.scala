@@ -10,7 +10,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr    = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
   val ftqIdx       = new FtqPtr
-  val ftqOffset    = Valid(UInt(log2Ceil(32).W))
+  val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(32).W))
   val target       = UInt(VAddrBits.W)
 }
 
@@ -95,7 +95,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val ghist = new GlobalHistory()
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
-  val specCnt = Vec(PredictWidth, UInt(10.W))
+  val specCnt = Vec(numBr, UInt(10.W))
   val meta = UInt(MaxMetaLength.W)
 
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq

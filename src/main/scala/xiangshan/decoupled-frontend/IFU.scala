@@ -38,7 +38,7 @@ class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {
-  val fromFtq = Flipped(Decoupled(new FetchRequestBundle))
+  val fromFtq = Flipped(new FtqToIfuIO)
   val toFtq   = new IfuToFtqIO 
 }
 
@@ -89,12 +89,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //  * Send req to ITLB
   //---------------------------------------------
 
-  val (f0_valid, f1_ready)                 = (fromFtq.valid, WireInit(false.B))
-  val f0_ftq_req                           = fromFtq.bits
+  val (f0_valid, f1_ready)                 = (fromFtq.req.valid, WireInit(false.B))
+  val f0_ftq_req                           = fromFtq.req.bits
   val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr), isLastInCacheline(f0_ftq_req.fallThruAddr)))
   val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
   val f0_vSetIdx                           = VecInit(getIdx((f0_ftq_req.startAddr)), getIdx(f0_ftq_req.fallThruAddr))
-  val f0_fire                              = fromFtq.fire()
+  val f0_fire                              = fromFtq.req.fire()
 
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
@@ -104,7 +104,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     fetch_req(i).bits.vSetIdx := f0_vSetIdx
   }
 
-  fromFtq.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready
+  fromFtq.req.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready
 
   //TODO: tlb req
   io.iTLBInter.req <> DontCare
@@ -248,7 +248,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_mq_datas     = RegInit(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
-  val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas)
+  val f2_datas        = Mux(f2_hit, f2_hit_datas(0), f2_mq_datas) // TODO: f1_hit_datas is error
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
@@ -270,7 +270,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   io.toIbuffer.bits.valid     := preDecoderOut.valid
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
-  io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
+  // TODO: Fix it
+  // io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
+  io.toIbuffer.bits.ftqOffset.zip(preDecoderOut.pc).map{case(a, b) => a.bits := b; a.valid := true.B}
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
 
@@ -278,7 +280,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
-  toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset
+  toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits // TODO: fix it
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target
