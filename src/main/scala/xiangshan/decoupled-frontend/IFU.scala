@@ -140,7 +140,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   .elsewhen(f0_fire) {f1_valid  := true.B}
   .elsewhen(f1_fire) {f1_valid  := false.B}
 
-  val f1_pAddrs             = VecInit(Seq(f1_ftq_req.startAddr(PAddrBits -1, 0), f1_ftq_req.fallThruAddr(PAddrBits - 1, 0)))   //TODO: Temporary assignment
+  val f1_pAddrs             = VecInit(Seq(Cat(0.U(1.W), f1_ftq_req.startAddr), Cat(0.U(1.W), f1_ftq_req.fallThruAddr)))   //TODO: Temporary assignment
   val f1_pTags              = VecInit(f1_pAddrs.map{pAddr => getTag(pAddr)})
   val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
@@ -159,9 +159,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
   
   val f1_hit_data      =  VecInit(f1_datas.zipWithIndex.map { case(bank, i) =>
-    val bank0_hit_data = Mux1H(bank0_hit_vec.asUInt, bank)
-    val bank1_hit_data = Mux1H(bank1_hit_vec.asUInt, bank)
-    VecInit(Seq(bank0_hit_data, bank1_hit_data))
+    val bank_hit_data = Mux1H(f1_bank_hit_vec(i).asUInt, bank)
+    bank_hit_data
   })
 
   //---------------------------------------------
@@ -248,7 +247,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_mq_datas     = RegInit(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
-  val f2_datas        = Mux(f2_hit, f2_hit_datas(0), f2_mq_datas) // TODO: f1_hit_datas is error
+  val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas) // TODO: f1_hit_datas is error
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))

@@ -198,7 +198,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     val readResp = Output(new ICacheDataRespBundle)
   }}
 
-  //dataEntryBits = 144 
+  io.read.ready := !io.write.valid
+  
   val dataArrays = (0 until 2) map { i =>
     val dataArray = Seq.fill(nWays){Module(new SRAMTemplate(
       UInt(blockBits.W),
@@ -209,7 +210,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       singlePort = true
     ))}
 
-    io.read.ready := !io.write.valid
     dataArray.map{ way =>
       //meta connection
       if(i == 0) way.io.r.req.valid := io.read.valid 
