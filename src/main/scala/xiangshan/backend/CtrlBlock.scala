@@ -184,7 +184,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
-    val enqIQ = Vec(12, DecoupledIO(new MicroOp))
+    val enqIQ = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -324,7 +324,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     fpBusyTable.io.allocPregs(i).bits := preg.preg
   }
   dispatch.io.enqIQCtrl := DontCare
-  io.enqIQ <> dispatch.io.enqIQCtrl.take(4) ++ dispatch.io.enqIQCtrl.slice(7, 11) ++ dispatch.io.enqIQCtrl.drop(13)
+  io.enqIQ <> dispatch.io.enqIQCtrl
   dispatch.io.csrCtrl <> io.csrCtrl
   dispatch.io.storeIssue <> io.stIn
   dispatch.io.readIntRf <> io.readIntRf

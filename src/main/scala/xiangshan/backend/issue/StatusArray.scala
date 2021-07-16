@@ -67,8 +67,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val canIssue = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
     val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
-    val wakeup = Vec(params.numWakeup, Flipped(ValidIO(new MicroOp)))
-    val wakeupMatch = Vec(params.numEntries, Vec(params.numSrc, Output(UInt(params.numWakeup.W))))
+    val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
+    val wakeupMatch = Vec(params.numEntries, Vec(params.numSrc, Output(UInt(params.allWakeup.W))))
     val issueGranted = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
     val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)

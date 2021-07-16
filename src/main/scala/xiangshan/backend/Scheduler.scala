@@ -19,31 +19,128 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import utils._
-import xiangshan.backend.issue.{RSParams, ReservationStation}
+import xiangshan.backend.exu.ExuConfig
+import xiangshan.backend.issue.ReservationStation
 import xiangshan.backend.regfile.Regfile
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
-// TODO: parameters
-class Scheduler(implicit p: Parameters) extends XSModule {
+import scala.collection.mutable.ArrayBuffer
+
+class DispatchArbiter(func: Seq[MicroOp => Bool])(implicit p: Parameters) extends XSModule {
+  val numTarget = func.length
+
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new MicroOp))
+    val out = Vec(numTarget, DecoupledIO(new MicroOp))
+  })
+
+  io.out.zip(func).foreach{ case (o, f) => {
+    o.valid := io.in.valid && f(io.in.bits)
+    o.bits := io.in.bits
+  }}
+
+  io.in.ready := VecInit(io.out.map(_.fire())).asUInt.orR
+}
+
+object DispatchArbiter {
+  def apply(in: DecoupledIO[MicroOp], func: Seq[MicroOp => Bool])(implicit p: Parameters) = {
+    val arbiter = Module(new DispatchArbiter(func))
+    arbiter.io.in <> in
+    arbiter.io.out
+  }
+}
+
+class Scheduler(
+  val configs: Seq[(ExuConfig, Int, Seq[Int], Seq[Int])],
+  val dpPorts: Seq[Seq[(Int, Int)]]
+)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  val numDpPorts = dpPorts.length
+
+  // instantiate reservation stations and connect the issue ports
+  val reservationStations = configs.map{ case (config, numDeq, _, _) => {
+    val rs = LazyModule(new ReservationStation())
+    rs.addIssuePort(config, numDeq)
+    rs
+  }}
+
+  // generate read and write ports for Regfile
+  // per-rs information
+  val rsIntRfWritePort = configs.indices.map(i => {
+    val priority = reservationStations(i).wbIntPriority
+    val higher = reservationStations.filter(_.wbIntPriority < priority).map(_.numIntWbPort).sum
+    val same = reservationStations.take(i).filter(_.wbIntPriority == priority).map(_.numIntWbPort).sum
+    higher + same
+  })
+  val rsFpRfWritePort = configs.indices.map(i => {
+    val priority = reservationStations(i).wbFpPriority
+    val higher = reservationStations.filter(_.wbFpPriority < priority).map(_.numFpWbPort).sum
+    val same = reservationStations.take(i).filter(_.wbFpPriority == priority).map(_.numFpWbPort).sum
+    higher + same
+  })
+  // overall read and write ports
+  val intRfReadPorts = dpPorts.map(_.map(_._1).map(reservationStations(_).intSrcCnt).max).sum
+  val fpRfReadPorts = dpPorts.map(_.map(_._1).map(reservationStations(_).fpSrcCnt).max).sum
+  val intRfWritePorts = reservationStations.map(_.numIntWbPort).sum
+  val fpRfWritePorts = reservationStations.map(_.numFpWbPort).sum
+  println(s"INT Regfile: ${intRfReadPorts}R${intRfWritePorts}W")
+  println(s"FP  Regfile: ${fpRfReadPorts}R${fpRfWritePorts}W")
+
+  // connect to dispatch
+  val dpFuConfigs = dpPorts.map(_.map(p => reservationStations(p._1).addDispatchPort()).reduce(_ ++ _))
+
+  for (((_, _, fastIntPorts, fastFpPorts), rs) <- configs.zip(reservationStations)) {
+    // connect fast wakeup ports to target rs
+    fastIntPorts.map(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
+    fastFpPorts.map(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
+
+    // connect wakeup ports to itself
+    if (rs.intSrcCnt > 0) {
+      rs.addWakeup(intRfWritePorts)
+    }
+    if (rs.fpSrcCnt > 0) {
+      rs.addWakeup(fpRfWritePorts)
+    }
+  }
+
+  // print rs info
+  for ((rs, i) <- reservationStations.zipWithIndex) {
+    println(s"RS $i: $rs")
+  }
+
+  println("Scheduler: ")
+  val numIssuePorts = configs.map(_._2).sum
+  println(s"  number of issue ports: ${numIssuePorts}")
+  val numReplayPorts = reservationStations.count(_.params.hasFeedback == true)
+  println(s"  number of replay ports: ${numReplayPorts}")
+  val numSTDPorts = reservationStations.count(_.params.isStore == true)
+  println(s"  number of std ports: ${numSTDPorts}")
+  val numOutsideWakeup = reservationStations.map(_.numExtFastWakeupPort).sum
+  println(s"  number of outside fast wakeup ports: ${numOutsideWakeup}")
+
+  lazy val module = new SchedulerImp(this)
+}
+
+class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter {
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // dispatch and issue ports
-    val allocate = Vec(12, Flipped(DecoupledIO(new MicroOp)))
+    val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
     // read regfile
-    val readIntRf = Vec(NRIntReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val issue = Vec(17, DecoupledIO(new ExuInput))
-    val writeback = Vec(16, Flipped(ValidIO(new ExuOutput)))
-    val replay = Vec(4, Flipped(ValidIO(new RSFeedback)))
-    val rsIdx = Vec(4, Output(UInt(log2Up(IssQueSize).W)))
-    val isFirstIssue = Vec(4, Output(Bool()))
-    val stData = Vec(2, ValidIO(new StoreDataBundle))
+    val readIntRf = Vec(outer.intRfReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val readFpRf = Vec(outer.fpRfReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
+    val writeback = Vec(outer.intRfWritePorts + outer.fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val replay = Vec(outer.numReplayPorts, Flipped(ValidIO(new RSFeedback)))
+    val rsIdx = Vec(outer.numReplayPorts, Output(UInt(log2Up(IssQueSize).W)))
+    val isFirstIssue = Vec(outer.numReplayPorts, Output(Bool()))
+    val stData = Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))
     // 2LOAD, data is selected from writeback ports
-    val otherFastWakeup = Vec(2, Flipped(ValidIO(new MicroOp)))
+    val otherFastWakeup = Vec(outer.numOutsideWakeup, Flipped(ValidIO(new MicroOp)))
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -53,214 +150,149 @@ class Scheduler(implicit p: Parameters) extends XSModule {
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
+  val rs_all = outer.reservationStations
+
   // write ports: 0-3 ALU, 4-5 MUL, 6-7 LOAD
   val intRf = Module(new Regfile(
-    numReadPorts = NRIntReadPorts,
-    numWirtePorts = NRIntWritePorts,
+    numReadPorts = outer.intRfReadPorts,
+    numWirtePorts = outer.intRfWritePorts,
     hasZero = true,
     len = XLEN
   ))
   // write ports: 0-3 FMA 4-5 FMISC, 6-7 LOAD
   val fpRf = Module(new Regfile(
-    numReadPorts = NRFpReadPorts,
-    numWirtePorts = NRFpWritePorts,
+    numReadPorts = outer.fpRfReadPorts,
+    numWirtePorts = outer.fpRfWritePorts,
     hasZero = false,
     len = XLEN
   ))
   io.readIntRf <> intRf.io.readPorts.map(_.addr)
   io.readFpRf <> fpRf.io.readPorts.map(_.addr)
 
-  val jmpParam = RSParams(IssQueSize, 1, 1, 2, 64, PhyRegIdxWidth, 6, 14, 8, false, false, -1, false, false)
-  val jmp_rs = Module(new ReservationStation(JumpExeUnitCfg, jmpParam))
-  val mulParam = RSParams(IssQueSize, 2, 1, 2, 64, PhyRegIdxWidth, 6, 14, 8, false, false, 2, false, false)
-  val mul_rs_0 = Module(new ReservationStation(MulDivExeUnitCfg, mulParam))
-  val mul_rs_1 = Module(new ReservationStation(MulDivExeUnitCfg, mulParam))
-  val aluParam = RSParams(4*IssQueSize, 4, 4, 2, 64, PhyRegIdxWidth, 8, 16, 8, false, false, 0, false, true)
-  val alu_rs_0 = Module(new ReservationStation(AluExeUnitCfg, aluParam))
+  var issueIdx = 0
+  var feedbackIdx = 0
+  var stDataIdx = 0
+  var otherFastUopIdx = 0
+  for ((rs, i) <- rs_all.zipWithIndex) {
+    rs.module.io.redirect <> io.redirect
+    rs.module.io.redirect <> io.redirect
+    rs.module.io.flush <> io.flush
 
-  val fmacParam = RSParams(4*IssQueSize, 4, 4, 3, 64, PhyRegIdxWidth, 4, 12, 8, false, false, 4, false, false)
-  val fmac_rs0 = Module(new ReservationStation(FmacExeUnitCfg, fmacParam))
-  val fiscParam = RSParams(IssQueSize, 2, 1, 2, 64, PhyRegIdxWidth, 4, 12, 8, false, false, -1, false, false)
-  val fmisc_rs0 = Module(new ReservationStation(FmiscExeUnitCfg, fiscParam))
-  val fmisc_rs1 = Module(new ReservationStation(FmiscExeUnitCfg, fiscParam))
+    val issueWidth = rs.module.io.deq.length
+    rs.module.io.deq <> io.issue.slice(issueIdx, issueIdx + issueWidth)
+    issueIdx += issueWidth
+    if (rs.module.io_jump.isDefined) {
+      rs.module.io_jump.get.jumpPc := io.jumpPc
+      rs.module.io_jump.get.jalr_target := io.jalr_target
+    }
+    if (rs.module.io_checkwait.isDefined) {
+      rs.module.io_checkwait.get.stIssuePtr <> io.stIssuePtr
+    }
+    if (rs.module.io_feedback.isDefined) {
+      rs.module.io_feedback.get.memfeedback <> io.replay(feedbackIdx)
+      rs.module.io_feedback.get.rsIdx <> io.rsIdx(feedbackIdx)
+      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue(feedbackIdx)
+      feedbackIdx += 1
+    }
+    if (rs.module.io_store.isDefined) {
+      rs.module.io_store.get.stData <> io.stData(stDataIdx)
+      stDataIdx += 1
+    }
 
-  val loadParam = RSParams(IssQueSize, 1, 1, 1, 64, PhyRegIdxWidth, 8, 16, 8, true, false, -1, true, false)
-  val load_rs0 = Module(new ReservationStation(LdExeUnitCfg, loadParam))
-  val load_rs1 = Module(new ReservationStation(LdExeUnitCfg, loadParam))
-  val storeParam = RSParams(IssQueSize, 1, 1, 2, 64, PhyRegIdxWidth, 6, 22, 16, true, false, -1, true, false)
-  val store_rs0 = Module(new ReservationStation(StExeUnitCfg, storeParam))
-  val store_rs1 = Module(new ReservationStation(StExeUnitCfg, storeParam))
+    (rs.intSrcCnt > 0, rs.fpSrcCnt > 0) match {
+      case (true,  false) => rs.module.io.slowPorts := io.writeback.take(8)
+      case (false, true) => rs.module.io.slowPorts := io.writeback.drop(8)
+      case (true,  true) => rs.module.io.slowPorts := io.writeback
+      case _ => throw new RuntimeException("unknown wakeup source")
+    }
 
-  val intRs = Seq(jmp_rs, mul_rs_0, mul_rs_1, alu_rs_0)
-  val fpRs = Seq(fmac_rs0, fmisc_rs0, fmisc_rs1)
-  val lsRs = Seq(load_rs0, load_rs1, store_rs0, store_rs1)
-  val reservationStations = intRs ++ fpRs ++ lsRs
+    if (rs.numAllFastWakeupPort > 0) {
+      // currently only support either fast from RS or fast from pipeline
+      val fromRS = rs.numOutFastWakeupPort != 0
+      val fromOther = rs.numExtFastWakeupPort != 0
+      require(!(fromRS && fromOther))
+      val otherUop = io.otherFastWakeup.drop(otherFastUopIdx).take(rs.numAllFastWakeupPort)
+      val uop = if (fromOther) otherUop else rs.module.io_fastWakeup.get
+      val allData = io.writeback.map(_.bits.data)
+      if (rs.numIntWbPort > 0 && outer.configs(i)._3.nonEmpty) {
+        val dataBegin = outer.rsIntRfWritePort(i)
+        val dataEnd = dataBegin + rs.numAllFastWakeupPort
+        val data = allData.slice(dataBegin, dataEnd)
+        outer.configs(i)._3.foreach(rs_all(_).connectFastWakeup(uop, data))
+        println(s"Fast wakeup: RS ${i} -> ${outer.configs(i)._3}, source: [$dataBegin,$dataEnd)")
+        if (fromOther) {
+          otherFastUopIdx += rs.numIntWbPort
+        }
+      }
+      if (rs.numFpWbPort > 0 && outer.configs(i)._4.nonEmpty) {
+        val dataBegin = outer.intRfWritePorts + outer.rsFpRfWritePort(i)
+        val dataEnd = dataBegin + rs.numAllFastWakeupPort
+        val data = allData.slice(dataBegin, dataEnd)
+        outer.configs(i)._4.foreach(rs_all(_).connectFastWakeup(uop, data))
+        println(s"Fast wakeup: RS ${i} -> ${outer.configs(i)._4}, source [$dataBegin, $dataEnd)")
+        if (fromOther) {
+          otherFastUopIdx += rs.numFpWbPort
+        }
+      }
+    }
+  }
+  require(issueIdx == io.issue.length)
 
-  for (rs <- reservationStations) {
-    rs.io.redirect <> io.redirect
-    rs.io.redirect <> io.redirect
-    rs.io.flush <> io.flush
+  var intReadPort = 0
+  var fpReadPort = 0
+  for ((dp, i) <- outer.dpPorts.zipWithIndex) {
+    // dp connects only one rs: don't use arbiter
+    if (dp.length == 1) {
+      rs_all(dp.head._1).module.io.fromDispatch(dp.head._2) <> io.allocate(i)
+    }
+    // dp connects more than one rs: use arbiter to route uop to the correct rs
+    else {
+      val func = dp.map(rs => (op: MicroOp) => rs_all(rs._1).canAccept(op.ctrl.fuType))
+      val arbiterOut = DispatchArbiter(io.allocate(i), func)
+      val rsIn = VecInit(dp.map(rs => rs_all(rs._1).module.io.fromDispatch(rs._2)))
+      rsIn <> arbiterOut
+    }
+
+    val numIntRfPorts = dp.map(_._1).map(rs_all(_).intSrcCnt).max
+    if (numIntRfPorts > 0) {
+      val intRfPorts = VecInit(intRf.io.readPorts.slice(intReadPort, intReadPort + numIntRfPorts).map(_.data))
+      for ((rs, idx) <- dp) {
+        val target = rs_all(rs).module.io.srcRegValue(idx)
+        target := intRfPorts.take(target.length)
+      }
+      intReadPort += numIntRfPorts
+    }
+    val numFpRfPorts = dp.map(_._1).map(rs_all(_).fpSrcCnt).max
+    if (numFpRfPorts > 0) {
+      val fpRfPorts = VecInit(fpRf.io.readPorts.slice(fpReadPort, fpReadPort + numFpRfPorts).map(_.data))
+      for ((rs, idx) <- dp) {
+        val mod = rs_all(rs).module
+        val target = mod.io.srcRegValue(idx)
+        // dirty code for store
+        if (numIntRfPorts > 0) {
+          require(numFpRfPorts == 1)
+          require(numIntRfPorts == 2)
+          when(RegNext(mod.io.fromDispatch(0).bits.ctrl.srcType(1) === SrcType.fp)) {
+            target(1) := fpRfPorts(0)
+          }
+        }
+        else {
+          target := fpRfPorts.take(target.length)
+        }
+      }
+      fpReadPort += numFpRfPorts
+    }
   }
 
-  val mulFastData = VecInit(io.writeback.slice(6, 8).map(_.bits.data))
-  val aluFastData = VecInit(io.writeback.slice(0, 4).map(_.bits.data))
-  val memFastData = VecInit(io.writeback.slice(4, 6).map(_.bits.data))
-  val fmaFastData = VecInit(io.writeback.slice(8, 12).map(_.bits.data))
-
-  jmp_rs.io.fromDispatch <> io.allocate.take(1)
-  jmp_rs.io.fromDispatch(0).valid := io.allocate(0).valid && FuType.jmpCanAccept(io.allocate(0).bits.ctrl.fuType)
-  jmp_rs.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
-  jmp_rs.io.jumpPc := io.jumpPc
-  jmp_rs.io.jalr_target := io.jalr_target
-  jmp_rs.io.fastDatas <> mulFastData ++ aluFastData
-  jmp_rs.io.deq(0) <> io.issue(0)
-
-  mul_rs_0.io.fromDispatch <> io.allocate.slice(0, 1) ++ io.allocate.slice(2, 3)
-  mul_rs_0.io.fromDispatch(0).valid := io.allocate(0).valid && FuType.mduCanAccept(io.allocate(0).bits.ctrl.fuType)
-  mul_rs_0.io.fromDispatch(1).valid := io.allocate(2).valid && FuType.mduCanAccept(io.allocate(2).bits.ctrl.fuType)
-  mul_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(0, 2).map(_.data))
-  mul_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.slice(4, 6).map(_.data))
-  mul_rs_0.io.fastDatas <> mulFastData ++ aluFastData
-  mul_rs_0.io.deq(0) <> io.issue(1)
-
-  mul_rs_1.io.fromDispatch <> io.allocate.slice(1, 2) ++ io.allocate.slice(3, 4)
-  mul_rs_1.io.fromDispatch(0).valid := io.allocate(1).valid && FuType.mduCanAccept(io.allocate(1).bits.ctrl.fuType)
-  mul_rs_1.io.fromDispatch(1).valid := io.allocate(3).valid && FuType.mduCanAccept(io.allocate(3).bits.ctrl.fuType)
-  mul_rs_1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(2, 4).map(_.data))
-  mul_rs_1.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.slice(6, 8).map(_.data))
-  mul_rs_1.io.fastDatas <> mulFastData ++ aluFastData
-  mul_rs_1.io.deq(0) <> io.issue(2)
-
-  alu_rs_0.io.fromDispatch <> VecInit(io.allocate.take(4))
-  for (i <- 0 until 4) {
-    alu_rs_0.io.fromDispatch(i).valid := io.allocate(i).valid && FuType.aluCanAccept(io.allocate(i).bits.ctrl.fuType)
-  }
-  alu_rs_0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.take(2).map(_.data))
-  alu_rs_0.io.srcRegValue(1) <> VecInit(intRf.io.readPorts.slice(2, 4).map(_.data))
-  alu_rs_0.io.srcRegValue(2) <> VecInit(intRf.io.readPorts.slice(4, 6).map(_.data))
-  alu_rs_0.io.srcRegValue(3) <> VecInit(intRf.io.readPorts.slice(6, 8).map(_.data))
-  alu_rs_0.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
-  alu_rs_0.io.deq <> io.issue.slice(3, 7)
-
-  io.allocate(0).ready := jmp_rs.io.fromDispatch(0).fire() || mul_rs_0.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(0).fire()
-  io.allocate(1).ready := mul_rs_1.io.fromDispatch(0).fire() || alu_rs_0.io.fromDispatch(1).fire()
-  io.allocate(2).ready := mul_rs_0.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(2).fire()
-  io.allocate(3).ready := mul_rs_1.io.fromDispatch(1).fire() || alu_rs_0.io.fromDispatch(3).fire()
-
-  fmac_rs0.io.fromDispatch <> VecInit(io.allocate.slice(4, 8))
-  for (i <- 0 until 4) {
-    fmac_rs0.io.fromDispatch(i).valid := io.allocate(i + 4).valid && FuType.fmacCanAccept(io.allocate(i + 4).bits.ctrl.fuType)
-    fmac_rs0.io.srcRegValue(i) <> VecInit(fpRf.io.readPorts.slice(3*i, 3*i+3).map(_.data))
-  }
-  fmac_rs0.io.fastDatas <> fmaFastData
-  fmac_rs0.io.deq <> io.issue.slice(7, 11)
-
-  fmisc_rs0.io.fromDispatch <> VecInit(io.allocate.slice(4, 5) ++ io.allocate.slice(6, 7))
-  for (i <- 0 until 2) {
-    fmisc_rs0.io.fromDispatch(i).valid := io.allocate(i*2+4).valid && FuType.fmiscCanAccept(io.allocate(i*2+4).bits.ctrl.fuType)
-  }
-  fmisc_rs0.io.srcRegValue(0) <> VecInit(fpRf.io.readPorts.slice(0, 2).map(_.data))
-  fmisc_rs0.io.srcRegValue(1) <> VecInit(fpRf.io.readPorts.slice(6, 8).map(_.data))
-  fmisc_rs0.io.fastDatas <> fmaFastData
-  fmisc_rs0.io.deq <> io.issue.slice(11, 12)
-
-  fmisc_rs1.io.fromDispatch <> VecInit(io.allocate.slice(5, 6) ++ io.allocate.slice(7, 8))
-  for (i <- 0 until 2) {
-    fmisc_rs1.io.fromDispatch(i).valid := io.allocate(i*2+5).valid && FuType.fmiscCanAccept(io.allocate(i*2+5).bits.ctrl.fuType)
-  }
-  fmisc_rs1.io.srcRegValue(0) <> VecInit(fpRf.io.readPorts.slice(3, 5).map(_.data))
-  fmisc_rs1.io.srcRegValue(1) <> VecInit(fpRf.io.readPorts.slice(9, 11).map(_.data))
-  fmisc_rs1.io.fastDatas <> fmaFastData
-  fmisc_rs1.io.deq <> io.issue.slice(12, 13)
-
-  io.allocate(4).ready := fmisc_rs0.io.fromDispatch(0).fire() || fmac_rs0.io.fromDispatch(0).fire()
-  io.allocate(5).ready := fmisc_rs1.io.fromDispatch(0).fire() || fmac_rs0.io.fromDispatch(1).fire()
-  io.allocate(6).ready := fmisc_rs0.io.fromDispatch(1).fire() || fmac_rs0.io.fromDispatch(2).fire()
-  io.allocate(7).ready := fmisc_rs1.io.fromDispatch(1).fire() || fmac_rs0.io.fromDispatch(3).fire()
-
-  load_rs0.io.fromDispatch <> io.allocate.slice(8, 9)
-  load_rs0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(8, 9).map(_.data))
-  load_rs0.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
-  load_rs0.io.deq <> io.issue.slice(13, 14)
-
-  load_rs1.io.fromDispatch <> io.allocate.slice(9, 10)
-  load_rs1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(9, 10).map(_.data))
-  load_rs1.io.fastDatas <> mulFastData ++ aluFastData ++ memFastData
-  load_rs1.io.deq <> io.issue.slice(14, 15)
-
-  store_rs0.io.fromDispatch <> io.allocate.slice(10, 11)
-  store_rs0.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(10, 12).map(_.data))
-  when (RegNext(store_rs0.io.fromDispatch(0).bits.ctrl.srcType(1) === SrcType.fp)) {
-    store_rs0.io.srcRegValue(0)(1) := fpRf.io.readPorts(12).data
-  }
-  store_rs0.io.fastDatas <> mulFastData ++ aluFastData
-  store_rs0.io.deq <> io.issue.slice(15, 16)
-
-  store_rs1.io.fromDispatch <> io.allocate.slice(11, 12)
-  store_rs1.io.srcRegValue(0) <> VecInit(intRf.io.readPorts.slice(12, 14).map(_.data))
-  when (RegNext(store_rs1.io.fromDispatch(0).bits.ctrl.srcType(1) === SrcType.fp)) {
-    store_rs1.io.srcRegValue(0)(1) := fpRf.io.readPorts(13).data
-  }
-  store_rs1.io.fastDatas <> mulFastData ++ aluFastData
-  store_rs1.io.deq <> io.issue.slice(16, 17)
-
-  val aluFastUop = alu_rs_0.io.fastUopOut
-  val mulFastUop = mul_rs_0.io.fastUopOut ++ mul_rs_1.io.fastUopOut
-  val memFastUop = io.otherFastWakeup
-  val fmacFastUop = fmac_rs0.io.fastUopOut
-
-  jmp_rs.io.fastUopsIn := mulFastUop ++ aluFastUop
-  mul_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop
-  mul_rs_1.io.fastUopsIn := mulFastUop ++ aluFastUop
-  alu_rs_0.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-  fmac_rs0.io.fastUopsIn := fmacFastUop
-  fmisc_rs0.io.fastUopsIn := fmacFastUop
-  fmisc_rs1.io.fastUopsIn := fmacFastUop
-  load_rs0.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-  load_rs1.io.fastUopsIn := mulFastUop ++ aluFastUop ++ memFastUop
-  store_rs0.io.fastUopsIn := mulFastUop ++ aluFastUop
-  store_rs1.io.fastUopsIn := mulFastUop ++ aluFastUop
-
-  jmp_rs.io.slowPorts := io.writeback.take(8)
-  mul_rs_0.io.slowPorts := io.writeback.take(8)
-  mul_rs_1.io.slowPorts := io.writeback.take(8)
-  alu_rs_0.io.slowPorts := io.writeback.take(8)
-  fmac_rs0.io.slowPorts := io.writeback.drop(8)
-  fmisc_rs0.io.slowPorts := io.writeback.drop(8)
-  fmisc_rs1.io.slowPorts := io.writeback.drop(8)
-  load_rs0.io.slowPorts := io.writeback.take(8)
-  load_rs1.io.slowPorts := io.writeback.take(8)
-  store_rs0.io.slowPorts := io.writeback
-  store_rs1.io.slowPorts := io.writeback
-
-  // load-store specific connections
-  load_rs0.io.memfeedback <> io.replay(0)
-  load_rs1.io.memfeedback <> io.replay(1)
-  store_rs0.io.memfeedback <> io.replay(2)
-  store_rs1.io.memfeedback <> io.replay(3)
-  load_rs0.io.rsIdx <> io.rsIdx(0)
-  load_rs1.io.rsIdx <> io.rsIdx(1)
-  store_rs0.io.rsIdx <> io.rsIdx(2)
-  store_rs1.io.rsIdx <> io.rsIdx(3)
-  load_rs0.io.isFirstIssue <> io.isFirstIssue(0)
-  load_rs1.io.isFirstIssue <> io.isFirstIssue(1)
-  store_rs0.io.isFirstIssue <> io.isFirstIssue(2)
-  store_rs1.io.isFirstIssue <> io.isFirstIssue(3)
-  store_rs0.io.stData <> io.stData(0)
-  store_rs1.io.stData <> io.stData(1)
-  store_rs0.io.stIssuePtr <> io.stIssuePtr
-  store_rs1.io.stIssuePtr <> io.stIssuePtr
-  load_rs0.io.stIssuePtr <> io.stIssuePtr
-  load_rs1.io.stIssuePtr <> io.stIssuePtr
 
   // regfile write ports
-  intRf.io.writePorts.zip(io.writeback.take(8)).foreach {
+  intRf.io.writePorts.zip(io.writeback.take(outer.intRfWritePorts)).foreach {
     case (rf, wb) =>
       rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
       rf.addr := wb.bits.uop.pdest
       rf.data := wb.bits.data
   }
-  fpRf.io.writePorts.zip(io.writeback.drop(8)).foreach{
+  fpRf.io.writePorts.zip(io.writeback.drop(outer.intRfWritePorts)).foreach {
     case (rf, wb) =>
       rf.wen := wb.valid
       rf.addr := wb.bits.uop.pdest
@@ -269,24 +301,23 @@ class Scheduler(implicit p: Parameters) extends XSModule {
 
   intRf.io.debug_rports := DontCare
   fpRf.io.debug_rports := DontCare
+
   if (!env.FPGAPlatform) {
     for ((rport, rat) <- intRf.io.debug_rports.zip(io.debug_int_rat)) {
       rport.addr := rat
     }
     val difftest = Module(new DifftestArchIntRegState)
-    difftest.io.clock  := clock
+    difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.gpr    := VecInit(intRf.io.debug_rports.map(_.data))
+    difftest.io.gpr := VecInit(intRf.io.debug_rports.map(_.data))
   }
-
   if (!env.FPGAPlatform) {
     for ((rport, rat) <- fpRf.io.debug_rports.zip(io.debug_fp_rat)) {
       rport.addr := rat
     }
     val difftest = Module(new DifftestArchFpRegState)
-    difftest.io.clock  := clock
+    difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.fpr    := VecInit(fpRf.io.debug_rports.map(_.data))
+    difftest.io.fpr := VecInit(fpRf.io.debug_rports.map(_.data))
   }
-
 }
