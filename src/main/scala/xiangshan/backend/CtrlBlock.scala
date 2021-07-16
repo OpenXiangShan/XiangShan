@@ -108,7 +108,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val needFlushVec = VecInit(allRedirect.map(_.bits.roqIdx.needFlush(io.stage2Redirect, io.flush)))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
-  val oldestExuOutput = Mux1H((0 until 5).map(oldestOneHot), io.exuMispredict)
+  val oldestExuOutput = Mux1H(io.exuMispredict.indices.map(oldestOneHot), io.exuMispredict)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
 
   val s1_jumpTarget = RegEnable(jumpOut.bits.redirect.cfiUpdate.target, jumpOut.valid)
@@ -123,8 +123,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.stage2Redirect.bits := s1_redirect_bits_reg
   io.stage2Redirect.bits.cfiUpdate := DontCare
 
-  val s1_isReplay = s1_redirect_onehot(5)
-  val s1_isJump = s1_redirect_onehot(0)
+  val s1_isReplay = s1_redirect_onehot.last
+  val s1_isJump = s1_redirect_onehot.head
   val cfiRead = Mux1H(s1_redirect_onehot, stage1FtqReadCfis)
   val real_pc = Mux1H(s1_redirect_onehot, stage1FtqReadPcs)
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
@@ -209,7 +209,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
         val lsdqFull  = Input(Bool())
       }
     })
-    val writeback = Vec(16, Flipped(ValidIO(new ExuOutput)))
+    val writeback = Vec(NRIntWritePorts + NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
     // redirect out
     val redirect = ValidIO(new Redirect)
     val flush = Output(Bool())
@@ -332,11 +332,11 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   fpBusyTable.io.flush := flushReg
   intBusyTable.io.flush := flushReg
-  for((wb, setPhyRegRdy) <- io.writeback.take(8).zip(intBusyTable.io.wbPregs)){
+  for((wb, setPhyRegRdy) <- io.writeback.take(NRIntWritePorts).zip(intBusyTable.io.wbPregs)){
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
-  for((wb, setPhyRegRdy) <- io.writeback.drop(8).zip(fpBusyTable.io.wbPregs)){
+  for((wb, setPhyRegRdy) <- io.writeback.drop(NRIntWritePorts).zip(fpBusyTable.io.wbPregs)){
     setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.fpWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }

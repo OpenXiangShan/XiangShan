@@ -200,8 +200,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
 
     (rs.intSrcCnt > 0, rs.fpSrcCnt > 0) match {
-      case (true,  false) => rs.module.io.slowPorts := io.writeback.take(8)
-      case (false, true) => rs.module.io.slowPorts := io.writeback.drop(8)
+      case (true,  false) => rs.module.io.slowPorts := io.writeback.take(outer.intRfWritePorts)
+      case (false, true) => rs.module.io.slowPorts := io.writeback.drop(outer.intRfWritePorts)
       case (true,  true) => rs.module.io.slowPorts := io.writeback
       case _ => throw new RuntimeException("unknown wakeup source")
     }
