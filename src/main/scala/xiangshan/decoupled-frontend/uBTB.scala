@@ -133,7 +133,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     val target = Mux(hit_and_taken_mask =/= 0.U,
       // PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(1), hit_data.brTargets(0))),
-      PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, 9528.U(VAddrBits.W), hit_data.brTargets(0))),
+      PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(0))),
       read_pc + (FetchWidth*4).U)
 
     val ren = io.read_pc.valid
