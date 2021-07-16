@@ -167,7 +167,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //---------------------------------------------
   //  Fetch Stage 3 :
   //  * get data from last stage (hit from f1_hit_data/miss from missQueue response)
-  //  * if at least one needed cacheline miss, wait for miss queue response (a state machine) THIS IS TOO UGLY!!!
+  //  * if at least one needed cacheline miss, wait for miss queue response (a wait_state machine) THIS IS TOO UGLY!!!
   //  * cut cacheline(s) and send to PreDecode
   //  * check if prediction is right (branch target and type, jump direction and type , jal target )
   //---------------------------------------------
@@ -200,8 +200,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   f2_ready := io.toIbuffer.ready
   
   //instruction 
-  val wait_idle :: wait_send_req  :: wait_finish :: Nil = Enum(3)
-  val wait_state = VecInit(Seq.fill(2)(RegInit(wait_idle)))
+  val wait_idle :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(7)
+  val wait_state = RegInit(wait_idle)
 
   toMissQueue <> DontCare
   fromMissQueue.map{port => port.ready := true.B}
@@ -209,32 +209,72 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val (miss0_resp, miss1_resp) = (fromMissQueue(0).fire(), fromMissQueue(1).fire())
   val (bank0_fix, bank1_fix)   = (miss0_resp  && !f2_bank_hit(0), miss1_resp && f2_doubleLine && !f2_bank_hit(1))
 
-  wait_state.zipWithIndex.map{ case(state, i) =>
-    switch(state){
-      is(wait_idle){
-        when(f2_valid && !f2_hit){
-          if(i == 1) toMissQueue(i).valid := !f2_bank_hit(i) && f2_doubleLine
-            else     toMissQueue(i).valid := !f2_bank_hit(i)
+  val  only_0 = f2_valid && !f2_hit && !f2_doubleLine 
+  val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine),
+                                                          (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine),
+                                                          (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine),
+                                                       )
+
+  switch(wait_state){
+    is(wait_idle){
+      when(f2_valid && !f2_hit){ 
+        (0 until 2).map { i =>
+          if(i == 1) toMissQueue(i).valid := hit_0_miss_1 || miss_0_miss_1
+            else     toMissQueue(i).valid := only_0 || miss_0_hit_1 || miss_0_miss_1
           toMissQueue(i).bits.addr    := f2_pAddrs(i)
           toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
           toMissQueue(i).bits.waymask := f2_waymask(i)
-          state := Mux(toMissQueue(i).fire(),wait_send_req, wait_idle) //TODO: MSHR is sufficient by default, which may cause bug
-        }
-      }
-
-      is(wait_send_req) {
-        when(fromMissQueue(i).fire()){
-          state := wait_finish
+          wait_state := Mux(toMissQueue(i).fire(),
+                        wait_send_req, 
+                        wait_idle) //TODO: MSHR is sufficient by default, which may cause bug
         }
       }
     }
+
+    is(wait_send_req) {
+      when( only_0 || hit_0_miss_1 || miss_0_hit_1){
+        wait_state :=  wait_one_resp
+      }.elsewhen( miss_0_miss_1 ){
+        wait_state := wait_two_resp
+      }
+    }
+
+    is(wait_one_resp) {
+      when( (only_0 || miss_0_hit_1) && fromMissQueue(0).fire()){
+        wait_state := wait_finish
+      }.elsewhen( hit_0_miss_1 && fromMissQueue(1).fire()){
+        wait_state := wait_finish
+      }
+    }
+
+    is(wait_two_resp) {
+      when(fromMissQueue(0).fire() && fromMissQueue(1).fire()){
+        wait_state := wait_finish
+      }.elsewhen( !fromMissQueue(0).fire() && fromMissQueue(1).fire() ){
+        wait_state := wait_0_resp
+      }.elsewhen(fromMissQueue(0).fire() && !fromMissQueue(1).fire()){
+        wait_state := wait_1_resp
+      }
+    }
+
+    is(wait_0_resp) {
+      when(fromMissQueue(0).fire()){
+        wait_state := wait_finish
+      }
+    }
+
+    is(wait_1_resp) {
+      when(fromMissQueue(1).fire()){
+        wait_state := wait_finish
+      }
+    }
+
+    is(wait_finish) {
+      when(io.toIbuffer.fire()) {wait_state := wait_idle }
+    }
   }
 
-  when(io.toIbuffer.fire()) { wait_state.foreach(state => state := wait_idle)}
-
-  val miss_all_fix = (f2_valid && !f2_hit && !f2_doubleLine && wait_state(0) === wait_finish) || (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine && wait_state(0) === wait_finish) ||
-                     (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine && wait_state(1) === wait_finish) || (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine && wait_state(0) === wait_finish && wait_state(1) === wait_finish)
-
+  val miss_all_fix = wait_state === wait_finish
 
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
