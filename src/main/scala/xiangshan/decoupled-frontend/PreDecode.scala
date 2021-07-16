@@ -100,7 +100,14 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val isLastInBlock  = (i == MAXINSNUM - 1).B
     val currentIsRVC     = isRVC(inst) && HasCExtension.B
 
-    val lastIsValidEnd =  validEnd(i-1)  || isFirstInBlock || !HasCExtension.B
+    // TODO: when i == 0
+    // val lastIsValidEnd =  if(i == 0) true.B else validEnd(i-1))  || isFirstInBlock || !HasCExtension.B
+    val lastIsValidEnd = Wire(Bool())
+    if (i == 0) {
+      lastIsValidEnd := true.B || isFirstInBlock || !HasCExtension.B
+    } else {
+      lastIsValidEnd := validEnd(i-1) || isFirstInBlock || !HasCExtension.B
+    }
     
     validStart(i) := lastIsValidEnd || !HasCExtension.B
     validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
@@ -116,7 +123,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     //io.out.pd(i).excType := ExcType.notExc
     expander.io.in := inst
     io.out.instrs(i) := expander.io.out.bits
-    io.out.pc(i) := pcStart + (i << 1).U(log2Ceil(MAXINSNUM).W)
+    io.out.pc(i) := pcStart + (i << 1).U((log2Ceil(MAXINSNUM)+1).W)
 
     targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, SignExt(brOffset, XLEN), SignExt(jalOffset, XLEN))
 
@@ -135,7 +142,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val jalOffset = PriorityEncoder(isJumpOH)
   val brOffset  = PriorityEncoder(isBrOH)
 
-  io.out.valid := validStart
+  io.out.valid := validStart.asUInt()
 
   io.out.misOffset.valid  := misPred.asUInt().orR()
   io.out.misOffset.bits   := PriorityEncoder(misPred)

@@ -128,7 +128,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f1_situation  = RegEnable(next = f0_situation,  enable=f0_fire)
   val f1_doubleLine = RegEnable(next = f0_doubleLine, enable=f0_fire)
   val f1_vSetIdx    = RegEnable(next = f0_vSetIdx,    enable=f0_fire)
-  val f1_fire       = f1_valid && tlbHit && f2_ready 
+  val f1_fire       = f1_valid && tlbHit && f2_ready
+
+  val preDecoder      = Module(new PreDecode)
+  val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
+
+  //flush generate and to Ftq
+  val flush = preDecoderOut.misOffset.valid
 
   when(flush)        {f1_valid  := false.B}
   .elsewhen(f0_fire) {f1_valid  := true.B}
@@ -152,8 +158,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
    
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
   
-  f1_ready := f2_ready || !f2_valid 
-
   val f1_hit_data      =  VecInit(f1_datas.zipWithIndex.map { case(bank, i) =>
     val bank0_hit_data = Mux1H(bank0_hit_vec.asUInt, bank)
     val bank1_hit_data = Mux1H(bank1_hit_vec.asUInt, bank)
@@ -172,6 +176,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_situation  = RegEnable(next = f1_situation, enable=f1_fire)
   val f2_doubleLine = RegEnable(next = f1_doubleLine, enable=f1_fire)
   val f2_fire       = io.toIbuffer.fire()
+
+  f1_ready := f2_ready || !f2_valid
 
   when(flush)                     {f2_valid := false.B}
   .elsewhen(f1_fire)              {f2_valid := true.B }
@@ -195,7 +201,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   
   //instruction 
   val wait_idle :: wait_send_req  :: wait_finish :: Nil = Enum(3)
-  val wait_state = Vec(2, RegInit(wait_idle))
+  val wait_state = VecInit(Seq.fill(2)(RegInit(wait_idle)))
 
   toMissQueue <> DontCare
   fromMissQueue.map{port => port.ready := true.B}
@@ -241,12 +247,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
-  val f2_mq_datas     = Reg(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
+  val f2_mq_datas     = RegInit(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
   val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas)
- 
-  val preDecoder      = Module(new PreDecode)    
-  val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
-
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
@@ -271,9 +273,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
-
-  //flush generate and to Ftq
-  val flush = preDecoderOut.misOffset.valid
 
   toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
