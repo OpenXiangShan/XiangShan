@@ -87,17 +87,17 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
-  val s0_idx = ftbAddr.getBankIdx(s0_pc)
-
   val s1_idx = ftbAddr.getBankIdx(s1_pc)
   val s1_tag = ftbAddr.getTag(s1_pc)
 
   ftb.io.r.req.valid := io.s0_fire
-  ftb.io.r.req.bits.setIdx := s0_idx
+  ftb.io.r.req.bits.setIdx := s1_idx
 
   io.in.ready := ftb.io.r.req.ready && !io.flush.valid
-  io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
-  io.out.bits.resp.valids(1) := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
+  // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
+  io.out.valid := io.s1_fire && !io.flush.valid
+
+  io.out.bits.resp.valids(1) := io.out.valid
 
   val s1_read = VecInit((0 until numWays).map(w =>
     ftb.io.r.resp.data(w)
@@ -137,38 +137,46 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
 
-  io.out.bits.resp:= io.in.bits.resp_in(0)
+  io.out.bits.resp := io.in.bits.resp_in(0)
 
+  val s1_latch_target = Wire(UInt(VAddrBits.W))
+  s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
   when(s1_hit) {
-    io.out.bits.resp.s1.preds.target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+    s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, s0_pc + (FetchWidth*4).U))
   }
 
-  io.out.bits.resp.s1.preds.taken_mask    := io.in.bits.resp_in(0).s1.preds.taken_mask
-  io.out.bits.resp.s1.preds.taken_mask(0) := ftb_entry.jmpValid
-  io.out.bits.resp.s1.preds.is_br         := ftb_entry.brValids
-  io.out.bits.resp.s1.preds.is_jal        := ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
-  io.out.bits.resp.s1.preds.is_jalr       := ftb_entry.isJalr
-  io.out.bits.resp.s1.preds.is_call       := ftb_entry.isCall
-  io.out.bits.resp.s1.preds.is_ret        := ftb_entry.isRet
-  io.out.bits.resp.s1.preds.call_is_rvc   := DontCare // TODO: modify when add RAS
+  val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
+  s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
+  s1_latch_taken_mask(0)  := ftb_entry.jmpValid
 
-  io.out.bits.resp.s1.pc                  := s2_pc
-  io.out.bits.resp.s1.hit                 := s1_hit
-  io.out.bits.resp.s1.meta                := FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
-  io.out.bits.resp.s1.ftb_entry           := ftb_entry
+  val s1_latch_is_br         = ftb_entry.brValids
+  val s1_latch_is_jal        = ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
+  val s1_latch_is_jalr       = ftb_entry.isJalr
+  val s1_latch_is_call       = ftb_entry.isCall
+  val s1_latch_is_ret        = ftb_entry.isRet
+  val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  when (RegNext(s1_hit)) {
-    io.out.bits.resp.s2.preds.target      := RegEnable(io.out.bits.resp.s1.preds.target, io.s1_fire)
-    io.out.bits.resp.s2.hit               := RegEnable(io.out.bits.resp.s1.hit, io.s1_fire)
-    io.out.bits.resp.s2.preds.is_br       := RegEnable(io.out.bits.resp.s1.preds.is_br, io.s1_fire)
-    io.out.bits.resp.s2.preds.is_jal      := RegEnable(io.out.bits.resp.s1.preds.is_jal, io.s1_fire)
-    io.out.bits.resp.s2.preds.is_call     := RegEnable(io.out.bits.resp.s1.preds.is_call, io.s1_fire)
-    io.out.bits.resp.s2.preds.is_ret      := RegEnable(io.out.bits.resp.s1.preds.is_ret, io.s1_fire)
-    io.out.bits.resp.s2.meta              := RegEnable(io.out.bits.resp.s1.meta, io.s1_fire)
-    io.out.bits.resp.s2.ftb_entry         := RegEnable(io.out.bits.resp.s1.ftb_entry, io.s1_fire)
-  }
+  val s1_latch_pc            = s1_pc
+  val s1_latch_hit           = s1_hit
+  val s1_latch_meta          = FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
+  val s1_latch_ftb_entry     = ftb_entry
+
+  // when (RegNext(s1_hit)) {
+  io.out.bits.resp.s2.preds.taken_mask  := RegEnable(s1_latch_taken_mask, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_br       := RegEnable(s1_latch_is_br, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jal      := RegEnable(s1_latch_is_jal, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jalr     := RegEnable(s1_latch_is_jalr, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_call     := RegEnable(s1_latch_is_call, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_ret      := RegEnable(s1_latch_is_ret, io.s1_fire)
+
+  io.out.bits.resp.s2.preds.target      := RegEnable(s1_latch_target, io.s1_fire)
+  io.out.bits.resp.s2.pc                := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
+  io.out.bits.resp.s2.hit               := RegEnable(s1_latch_hit, io.s1_fire)
+  io.out.bits.resp.s2.meta              := RegEnable(s1_latch_meta, io.s1_fire)
+  io.out.bits.resp.s2.ftb_entry         := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+  // }
 
   // override flush logic
   // io.out.bits.flush_out.valid := io.in.bits.resp_in(0).s1.preds.taken =/= io.in.bits.resp_in(0).s2.preds.taken ||

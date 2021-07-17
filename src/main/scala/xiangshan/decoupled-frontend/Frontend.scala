@@ -59,7 +59,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     }
   })
 
-  val bpu = Module(new FakeBPU)
+  val bpu = Module(new Predictor)
   val ifu = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
   val l1plusPrefetcher = Module(new L1plusPrefetcher)

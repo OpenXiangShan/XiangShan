@@ -72,7 +72,7 @@ case class XSCoreParameters
       // val fake = Module(new FakePredictor())
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(ftb, ubtb, bim)
+      val preds = Seq(ubtb, bim, ftb)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in

@@ -57,9 +57,9 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val s2_all_ready = components.map(_.io.s2_ready).reduce(_ && _) && io.out.ready
   val s2_fire = s2_valid && s2_all_ready
 
-  when(s1_fire)             { s2_valid := true.B }
-  .elsewhen(io.flush.valid) { s2_valid := false.B }
-  .elsewhen(s1_fire)        { s2_valid := false.B }
+  when(io.flush.valid)  { s2_valid := false.B }
+  .elsewhen(s1_fire)    { s2_valid := true.B }
+  .elsewhen(s2_fire)    { s2_valid := false.B }
 
   components.foreach(_.io.s2_fire := s2_fire)
 
@@ -67,9 +67,9 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val s3_all_ready = components.map(_.io.s3_ready).reduce(_ && _)
   val s3_fire = s3_valid && s3_all_ready
 
-  when(s2_fire)             { s3_valid := true.B }
-  .elsewhen(io.flush.valid) { s3_valid := false.B }
-  .elsewhen(s2_fire)        { s3_valid := false.B }
+  when(io.flush.valid)  { s3_valid := false.B }
+  .elsewhen(s2_fire)    { s3_valid := true.B }
+  .elsewhen(s3_fire)    { s3_valid := false.B }
 
   components.foreach(_.io.s3_fire := s3_fire)
 
