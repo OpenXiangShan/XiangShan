@@ -178,7 +178,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_doubleLine = RegEnable(next = f1_doubleLine, enable=f1_fire)
   val f2_fire       = io.toIbuffer.fire()
 
-  f1_ready := f2_ready || !f2_valid
+  f1_ready := f2_ready || !f1_valid
 
   when(flush)                     {f2_valid := false.B}
   .elsewhen(f1_fire)              {f2_valid := true.B }
@@ -191,19 +191,10 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val (f2_vSetIdx, f2_pTags) = (RegEnable(next = f1_vSetIdx, enable = f1_fire), RegEnable(next = f1_pTags, enable = f1_fire))
   val f2_waymask  = RegEnable(next = f1_victim_masks, enable = f1_fire)
 
-  toMissQueue.zipWithIndex.map{  case (p, i) =>
-    p.valid         := f2_valid && !f2_bank_hit(i)
-    p.bits.addr     := f2_pAddrs(i)
-    p.bits.vSetIdx  := f2_vSetIdx(i)
-    p.bits.waymask  := f2_waymask(i)
-  } 
-
-  
   //instruction 
   val wait_idle :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(7)
   val wait_state = RegInit(wait_idle)
 
-  toMissQueue <> DontCare
   fromMissQueue.map{port => port.ready := true.B}
 
   val (miss0_resp, miss1_resp) = (fromMissQueue(0).fire(), fromMissQueue(1).fire())
@@ -215,6 +206,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
                                                           (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine),
                                                        )
 
+  toMissQueue <> DontCare
   switch(wait_state){
     is(wait_idle){
       when(f2_valid && !f2_hit){ 
@@ -224,12 +216,18 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
           toMissQueue(i).bits.addr    := f2_pAddrs(i)
           toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
           toMissQueue(i).bits.waymask := f2_waymask(i)
-          wait_state := Mux(toMissQueue(i).fire(),
-                        wait_send_req, 
-                        wait_idle) //TODO: MSHR is sufficient by default, which may cause bug
+        }
+        when( only_0  || miss_0_hit_1){
+          wait_state :=  Mux(toMissQueue(0).fire(), wait_send_req ,wait_idle )
+        }.elsewhen(hit_0_miss_1){
+          wait_state :=  Mux(toMissQueue(1).fire(), wait_send_req ,wait_idle )
+        }.elsewhen( miss_0_miss_1 ){
+            wait_state := Mux(toMissQueue(0).fire() && toMissQueue(1).fire(), wait_send_req ,wait_idle)
         }
       }
     }
+
+    //TODO: naive logic for wait icache response
 
     is(wait_send_req) {
       when( only_0 || hit_0_miss_1 || miss_0_hit_1){
@@ -275,7 +273,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }
 
   val miss_all_fix = wait_state === wait_finish
-  f2_ready := io.toIbuffer.ready && (f2_hit || miss_all_fix)
+  f2_ready := (io.toIbuffer.ready && (f2_hit || miss_all_fix)) || !f2_valid
 
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
