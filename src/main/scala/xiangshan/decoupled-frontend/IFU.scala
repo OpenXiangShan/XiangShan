@@ -207,6 +207,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
                                                        )
 
   toMissQueue <> DontCare
+  val f2_mq_datas     = Reg(Vec(2, UInt(blockBits.W)))   
+
+  when(fromMissQueue(0).fire) {f2_mq_datas(0) :=  fromMissQueue(0).bits.data}
+  when(fromMissQueue(1).fire) {f2_mq_datas(1) :=  fromMissQueue(1).bits.data}
+
   switch(wait_state){
     is(wait_idle){
       when(f2_valid && !f2_hit){ 
@@ -286,7 +291,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
-  val f2_mq_datas     = RegInit(VecInit(fromMissQueue.map(p => p.bits.data)))    //TODO: Implement miss queue response
   val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas) // TODO: f1_hit_datas is error
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
@@ -299,7 +303,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     result
   }
 
-  preDecoderIn.data       :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt )).asUInt, f2_ftq_req.startAddr)
+  preDecoderIn.data       :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr)
   preDecoderIn.startAddr  :=  f2_ftq_req.startAddr
   preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset
   preDecoderIn.target     :=  f2_ftq_req.target

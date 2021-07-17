@@ -121,11 +121,11 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx  = UInt(idxBits.W)
-  val data    = Vec(blockRows,UInt(blockBits.W))
+  val data    = UInt(blockBits.W)
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def apply(data:Vec[UInt], idx:UInt, waymask:UInt, bankIdx: Bool){
+  def apply(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx
     this.data    := data
     this.waymask := waymask
@@ -220,7 +220,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
       if(i == 0) way.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
       else       way.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
-      way.io.w.req.bits.apply(data=io.write.bits.data.asUInt(), setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      way.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
     }
 
     dataArray 
@@ -335,9 +335,9 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 
       //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
-        when((io.data_write.fire() && io.meta_write.fire()) || needFlush){
+        //when((io.data_write.fire() && io.meta_write.fire()) || needFlush){
           state := s_wait_resp
-        }
+        //}
       }
 
       is(s_wait_resp){
@@ -354,7 +354,7 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     io.meta_write.bits.apply(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
     io.data_write.valid := (state === s_write_back) && !needFlush
-    io.data_write.bits.apply(data=respDataReg.asTypeOf(Vec(blockRows, UInt(rowBits.W))), idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    io.data_write.bits.apply(data=respDataReg, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     //mem request
     io.mem_acquire.bits.cmd  := MemoryOpConstants.M_XRD
