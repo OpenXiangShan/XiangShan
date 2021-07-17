@@ -16,11 +16,7 @@ trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
 }
 
 trait HasIFUConst extends HasXSParameter {
-<<<<<<< HEAD
   val resetVector = 0x80000000L//TODO: set reset vec
-=======
-  val resetVector = 0x10000000L//TODO: set reset vec
->>>>>>> 06cc0051 ([WIP] finish ftq logic and fix syntax errors)
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
   val groupBytes = 64 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
@@ -323,12 +319,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   io.toIbuffer.bits.valid     := f2_real_valids
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
-<<<<<<< HEAD
   io.toIbuffer.bits.pc        := preDecoderOut.pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i)}
-=======
-  io.toIbuffer.bits.ftqOffset := preDecoderOut.pc
->>>>>>> 06cc0051 ([WIP] finish ftq logic and fix syntax errors)
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
 

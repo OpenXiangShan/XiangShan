@@ -95,10 +95,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     (io.stage1CfiRead zip redirects).map{ case (r, redirect) => 
       r(redirect.ftqIdx, redirect.ftqOffset)
     }
-  val stage1FtqReadCfis =
-    (io.stage1CfiRead zip redirects).map{ case (r: FtqRead[CfiInfoToCtrl], redirect: Redirect) => 
-      r(redirect.ftqIdx, redirect.ftqOffset)
-    }
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
     val redirect = Wire(Valid(new Redirect))
