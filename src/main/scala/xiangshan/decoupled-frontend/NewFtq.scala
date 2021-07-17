@@ -208,7 +208,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.wdata.rasEntry := io.fromBpu.resp.bits.rasTop
   ftq_redirect_sram.io.wdata.specCnt := io.fromBpu.resp.bits.specCnt
 
-  val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 2))
+  val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
   pred_target_sram.io.wen := enq_fire
   pred_target_sram.io.waddr := bpuPtr.value
   pred_target_sram.io.wdata := io.fromBpu.resp.bits.preds.target
@@ -331,9 +331,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     req.data := ftq_pc_mem.io.rdata(i).getPc(RegNext(req.offset))
   }
   // target read
-  pred_target_sram.io.raddr(1) := io.toBackend.target_read.ptr.value
-  pred_target_sram.io.ren(1) := true.B
-  io.toBackend.target_read.data := pred_target_sram.io.rdata(1)
+  io.toBackend.target_read.data := RegNext(update_target(io.toBackend.target_read.ptr.value))
   // cfi read
   for ((req, i) <- io.toBackend.cfi_reads.zipWithIndex) {
     ftq_pd_mem.io.raddr(i) := req.ptr.value
