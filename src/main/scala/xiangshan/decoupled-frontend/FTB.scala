@@ -97,6 +97,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.in.ready := ftb.io.r.req.ready && !io.flush.valid
   io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
+  io.out.bits.resp.valids(1) := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
 
   val s1_read = VecInit((0 until numWays).map(w =>
     ftb.io.r.resp.data(w)
