@@ -262,6 +262,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     }
   }
 
+  when(fromFtq.redirect.valid) { wait_state := wait_idle }
+
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_idle
       else     toMissQueue(i).valid := (only_0 || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_idle
