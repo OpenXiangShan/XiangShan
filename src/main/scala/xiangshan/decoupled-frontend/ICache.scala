@@ -358,7 +358,7 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 
     //mem request
     io.mem_acquire.bits.cmd  := MemoryOpConstants.M_XRD
-    io.mem_acquire.bits.addr := req.addr
+    io.mem_acquire.bits.addr := Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W))
     io.mem_acquire.bits.id   := io.id
 
     //resp to icache

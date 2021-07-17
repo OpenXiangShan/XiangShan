@@ -77,11 +77,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(offBits - 1, 1) === 0.U
 
-  def getIdx(vaddr: UInt): UInt = vaddr(tagBits - 1, idxBits)
-
-  def getTag(pAddr: UInt): UInt = pAddr(PAddrBits - 1, tagBits)
-
-
   //---------------------------------------------
   //  Fetch Stage 1 :
   //  * Send req to ICache Meta/Data
@@ -93,7 +88,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f0_ftq_req                           = fromFtq.req.bits
   val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr), isLastInCacheline(f0_ftq_req.fallThruAddr)))
   val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
-  val f0_vSetIdx                           = VecInit(getIdx((f0_ftq_req.startAddr)), getIdx(f0_ftq_req.fallThruAddr))
+  val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.fallThruAddr))
   val f0_fire                              = fromFtq.req.fire()
 
   //fetch: send addr to Meta/TLB and Data simultaneously
@@ -143,7 +138,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   .elsewhen(f1_fire) {f1_valid  := false.B}
 
   val f1_pAddrs             = VecInit(Seq(Cat(0.U(1.W), f1_ftq_req.startAddr), Cat(0.U(1.W), f1_ftq_req.fallThruAddr)))   //TODO: Temporary assignment
-  val f1_pTags              = VecInit(f1_pAddrs.map{pAddr => getTag(pAddr)})
+  val f1_pTags              = VecInit(f1_pAddrs.map{pAddr => get_tag(pAddr)})
   val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
   val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
@@ -206,7 +201,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
                                                           (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine),
                                                        )
 
-  toMissQueue <> DontCare
   val f2_mq_datas     = Reg(Vec(2, UInt(blockBits.W)))   
 
   when(fromMissQueue(0).fire) {f2_mq_datas(0) :=  fromMissQueue(0).bits.data}
@@ -214,21 +208,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   switch(wait_state){
     is(wait_idle){
-      when(f2_valid && !f2_hit){ 
-        (0 until 2).map { i =>
-          if(i == 1) toMissQueue(i).valid := hit_0_miss_1 || miss_0_miss_1
-            else     toMissQueue(i).valid := only_0 || miss_0_hit_1 || miss_0_miss_1
-          toMissQueue(i).bits.addr    := f2_pAddrs(i)
-          toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
-          toMissQueue(i).bits.waymask := f2_waymask(i)
-        }
-        when( only_0  || miss_0_hit_1){
-          wait_state :=  Mux(toMissQueue(0).fire(), wait_send_req ,wait_idle )
-        }.elsewhen(hit_0_miss_1){
-          wait_state :=  Mux(toMissQueue(1).fire(), wait_send_req ,wait_idle )
-        }.elsewhen( miss_0_miss_1 ){
-            wait_state := Mux(toMissQueue(0).fire() && toMissQueue(1).fire(), wait_send_req ,wait_idle)
-        }
+      when( only_0  || miss_0_hit_1){
+        wait_state :=  Mux(toMissQueue(0).fire(), wait_send_req ,wait_idle )
+      }.elsewhen(hit_0_miss_1){
+        wait_state :=  Mux(toMissQueue(1).fire(), wait_send_req ,wait_idle )
+      }.elsewhen( miss_0_miss_1 ){
+          wait_state := Mux(toMissQueue(0).fire() && toMissQueue(1).fire(), wait_send_req ,wait_idle)
       }
     }
 
@@ -277,6 +262,15 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     }
   }
 
+  (0 until 2).map { i =>
+    if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_idle
+      else     toMissQueue(i).valid := (only_0 || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_idle
+    toMissQueue(i).bits.addr    := f2_pAddrs(i)
+    toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
+    toMissQueue(i).bits.waymask := f2_waymask(i)
+    toMissQueue(i).bits.clientID :=0.U
+  }
+
   val miss_all_fix = wait_state === wait_finish
   f2_ready := (io.toIbuffer.ready && (f2_hit || miss_all_fix)) || !f2_valid
 
@@ -293,9 +287,17 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas) // TODO: f1_hit_datas is error
 
+  // val jump_mask = Vec(FetchWidth,Bool())
+  // (0 until FetchWidth).map{ i =>
+  //   when(i.U < preDecoderOut.cfiOffset.bits || i.U === preDecoderOut.cfiOffset.bits)
+  //   {
+  //     jump_mask(i) := true.B
+  //   }
+  // }
+
   val f2_real_valids  = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt &
-     (Fill(FetchWidth, !preDecoderOut.cfiOffset.valid) |
-     (Fill(FetchWidth, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)))
+     (Fill(16, !preDecoderOut.cfiOffset.valid) |
+     (Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)))
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
