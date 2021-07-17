@@ -104,7 +104,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     fetch_req(i).bits.vSetIdx := f0_vSetIdx
   }
 
-  fromFtq.req.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready
+  fromFtq.req.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready && GTimer() > 500.U
 
   //TODO: tlb req
   io.iTLBInter.req <> DontCare
@@ -198,7 +198,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     p.bits.waymask  := f2_waymask(i)
   } 
 
-  f2_ready := io.toIbuffer.ready
   
   //instruction 
   val wait_idle :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(7)
@@ -276,6 +275,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }
 
   val miss_all_fix = wait_state === wait_finish
+  f2_ready := io.toIbuffer.ready && (f2_hit || miss_all_fix)
 
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
@@ -306,7 +306,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset
   preDecoderIn.target     :=  f2_ftq_req.target
 
-  predecodeOutValid       := f2_valid
+  predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
