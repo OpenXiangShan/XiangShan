@@ -143,17 +143,21 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
 }
 
-class FtqToCtrlIO(implicit p: Parameters) extends XSBundle {
-  val pc_reads = Vec(1 + 6 + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
+trait HasBackendRedirectInfo extends HasXSParameter {
+  def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt + 1
+}
+
+class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedirectInfo {
+  val pc_reads = Vec(1 + numRedirect + 1 + 1, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val target_read = Flipped(new FtqRead(UInt(VAddrBits.W)))
-  val cfi_reads = Vec(6, Flipped(new FtqRead(new CfiInfoToCtrl)))
+  val cfi_reads = Vec(numRedirect, Flipped(new FtqRead(new CfiInfoToCtrl)))
   def getJumpPcRead = pc_reads.head
   def getRedirectPcRead = VecInit(pc_reads.tail.dropRight(2))
   def getMemPredPcRead = pc_reads.dropRight(1).last
   def getRoqFlushPcRead = pc_reads.last
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -185,14 +189,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.fromBpu.resp.ready := validEntries < FtqSize.U
   val enq_fire = io.fromBpu.resp.fire() && !backendFlush && !ifuFlush
 
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 10, 1))
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1, 1))
   ftq_pc_mem.io.wen(0) := enq_fire
   ftq_pc_mem.io.waddr(0) := bpuPtr.value
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
   ftq_pc_mem.io.wdata(0).fallThruAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
   ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until 16).map(i => (io.fromBpu.resp.bits.pc(4, 1) +& i.U)(4).asBool()))
 
-  val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, 7, 1))
+  val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, numRedirect+1, 1))
   ftq_hist_mem.io.wen(0) := enq_fire
   ftq_hist_mem.io.waddr(0) := bpuPtr.value
   ftq_hist_mem.io.wdata(0) := io.fromBpu.resp.bits.ghist
@@ -254,7 +258,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val pdWb = io.fromIfu.pdWb
   val ifu_wb_valid = pdWb.valid
   // 0: commit, 1: cfiRead, 2-9: ftqRead, 10: ifuRead
-  val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, 7, 1))
+  val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, numRedirect+1, 1))
   ftq_pd_mem.io.wen(0) := ifu_wb_valid
   ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
   val pds = pdWb.bits.pd
@@ -291,7 +295,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   
   // read pc and target
-  ftq_pc_mem.io.raddr(9) := ifuPtr.value
+  ftq_pc_mem.io.raddr.last := ifuPtr.value
   pred_target_sram.io.raddr(0) := ifuPtr.value
   pred_target_sram.io.ren(0) := to_buf_fire
   
@@ -300,8 +304,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
   }
   when (RegNext(to_buf_fire)) {
-    ifu_req_buf.bits.startAddr := ftq_pc_mem.io.rdata(9).startAddr
-    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata(9).fallThruAddr
+    ifu_req_buf.bits.startAddr := ftq_pc_mem.io.rdata.last.startAddr
+    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.last.fallThruAddr
     ifu_req_buf.bits.target := pred_target_sram.io.rdata(0)
   }
   
@@ -310,10 +314,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toIfu.req.bits.ftqIdx := ifu_req_buf.bits.ftqIdx
   io.toIfu.req.bits.ftqOffset := ifu_req_buf.bits.ftqOffset
   io.toIfu.req.bits.startAddr := Mux(last_cycle_to_buf_fire,
-                                     ftq_pc_mem.io.rdata(9).startAddr,
+                                     ftq_pc_mem.io.rdata.last.startAddr,
                                      ifu_req_buf.bits.startAddr)
   io.toIfu.req.bits.fallThruAddr := Mux(last_cycle_to_buf_fire,
-                                        ftq_pc_mem.io.rdata(9).fallThruAddr,
+                                        ftq_pc_mem.io.rdata.last.fallThruAddr,
                                         ifu_req_buf.bits.fallThruAddr)
   io.toIfu.req.bits.target := Mux(last_cycle_to_buf_fire,
                                   pred_target_sram.io.rdata(0),
@@ -371,8 +375,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   
   // TODO: assign redirect rdata to ifuRedirectToBpu
   
-  ftq_hist_mem.io.raddr(6) := fromIfuRedirect.bits.ftqIdx.value
-  ftq_pd_mem.io.raddr(6) := fromIfuRedirect.bits.ftqIdx.value
+  ftq_hist_mem.io.raddr.last := fromIfuRedirect.bits.ftqIdx.value
+  ftq_pd_mem.io.raddr.last := fromIfuRedirect.bits.ftqIdx.value
 
   // *********************************************************************                                  
   // **************************** wb from exu ****************************
