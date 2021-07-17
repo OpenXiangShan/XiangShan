@@ -326,7 +326,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
-  toFtq.pdWb.bits.pd         := preDecoderOut.pd
+  toFtq.pdWb.bits.pd         := preDecoderOut.pd 
+  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_real_valids(i)}
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
   toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits 
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
