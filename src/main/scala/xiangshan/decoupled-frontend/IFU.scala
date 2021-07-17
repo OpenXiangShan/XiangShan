@@ -293,6 +293,10 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas) // TODO: f1_hit_datas is error
 
+  val f2_real_valids  = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt &
+     (Fill(FetchWidth, !preDecoderOut.cfiOffset.valid) |
+     (Fill(FetchWidth, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)))
+
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
     val dataVec  = cacheline.asTypeOf(Vec(64, UInt(16.W)))
@@ -312,7 +316,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt
+  io.toIbuffer.bits.valid     := f2_real_valids
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
