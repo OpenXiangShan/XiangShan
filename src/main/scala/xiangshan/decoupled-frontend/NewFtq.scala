@@ -181,7 +181,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** enq from bpu ****************************
   // **********************************************************************
   io.fromBpu.resp.ready := validEntries < FtqSize.U
-  val enq_fire = io.fromBpu.resp.fire() && !backendFlush && ifuFlush
+  val enq_fire = io.fromBpu.resp.fire() && !backendFlush && !ifuFlush
 
   val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 10, 1))
   ftq_pc_mem.io.wen(0) := enq_fire
