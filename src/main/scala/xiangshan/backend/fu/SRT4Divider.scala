@@ -17,10 +17,8 @@ package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import utils.SignExt
-import xiangshan.XSModule
 import xiangshan.backend.fu.util.CSA3_2
 
 /** A Radix-4 SRT Integer Divider
@@ -137,8 +135,8 @@ class SRT4DividerDataModule(len: Int) extends Module {
   b_shifted := d(len - 1, 0) << bLeadingZeros
 
   val rem_temp = ws + wc
-  val rem_fixed = Mux(rem_temp(wLen - 1), rem_temp + d, rem_temp)
-  val rem_abs = (ws << recoveryShift) (2 * len, len + 1)
+  val rem_fixed = RegEnable(Mux(rem_temp(wLen - 1), rem_temp + d, rem_temp), state === s_recovery_1)
+  val rem_abs = RegEnable((rem_fixed << recoveryShift) (2 * len, len + 1), state === s_recovery_2)
 
   when(newReq) {
     ws := Cat(0.U(4.W), Mux(divZero, a, aVal))
@@ -150,10 +148,6 @@ class SRT4DividerDataModule(len: Int) extends Module {
   }.elsewhen(state === s_recurrence) {
     ws := Mux(rec_enough, ws_next, ws_next << 2)
     wc := Mux(rec_enough, wc_next, wc_next << 2)
-  }.elsewhen(state === s_recovery_1) {
-    ws := rem_fixed
-  }.elsewhen(state === s_recovery_2) {
-    ws := rem_abs
   }
 
   cnt_next := Mux(state === s_normlize, (quotientBits + 3.U) >> 1, cnt - 1.U)
@@ -176,7 +170,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   ))
 
   val w_truncated = (ws(wLen - 1, wLen - 1 - 6) + wc(wLen - 1, wLen - 1 - 6)).asSInt()
-  val d_truncated = d(len - 1, len - 3)
+  val d_truncated = b_shifted.tail(1).head(3)
 
   val qSelTable = Array(
     Array(12, 4, -4, -13),
@@ -189,22 +183,17 @@ class SRT4DividerDataModule(len: Int) extends Module {
     Array(24, 8, -8, -24)
   )
 
-  // ge(x): w_truncated >= x
-  var ge = Map[Int, Bool]()
-  for (row <- qSelTable) {
-    for (k <- row) {
-      if (!ge.contains(k)) ge = ge + (k -> (w_truncated >= k.S(7.W)))
+  val table = RegEnable(
+    VecInit(qSelTable.map(row =>
+      VecInit(row.map(k => k.S(7.W)))
+    ))(d_truncated),
+    state === s_normlize
+  )
+
+  q_sel := MuxCase(sel_neg_dx2,
+    table.zip(Seq(sel_dx2, sel_d, sel_0, sel_neg_d)).map {
+      case (k, s) => (w_truncated >= k) -> s
     }
-  }
-  q_sel := MuxLookup(d_truncated, sel_0,
-    qSelTable.map(x =>
-      MuxCase(sel_neg_dx2, Seq(
-        ge(x(0)) -> sel_dx2,
-        ge(x(1)) -> sel_d,
-        ge(x(2)) -> sel_0,
-        ge(x(3)) -> sel_neg_d
-      ))
-    ).zipWithIndex.map({ case (v, i) => i.U -> v })
   )
 
   /** Calculate (ws[j+1],wc[j+1]) by a [3-2]carry-save adder
@@ -254,7 +243,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   }
 
 
-  val remainder = Mux(aSignReg, -ws(len - 1, 0), ws(len - 1, 0))
+  val remainder = Mux(aSignReg, -rem_abs(len - 1, 0), rem_abs(len - 1, 0))
   val quotient = Mux(qSignReg, -q, q)
 
   val res = Mux(isHi,

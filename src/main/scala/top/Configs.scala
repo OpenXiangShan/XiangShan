@@ -22,8 +22,9 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
 
@@ -48,33 +49,44 @@ class MinimalConfig(n: Int = 1) extends Config(
         RenameWidth = 2,
         FetchWidth = 4,
         IssQueSize = 8,
-        NRPhyRegs = 80,
+        NRPhyRegs = 64,
         LoadQueueSize = 16,
-        StoreQueueSize = 16,
+        StoreQueueSize = 12,
         RoqSize = 32,
         BrqSize = 8,
-        FtqSize = 16,
+        FtqSize = 8,
         IBufSize = 16,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
         dpParams = DispatchParameters(
-          IntDqSize = 8,
-          FpDqSize = 8,
-          LsDqSize = 8,
+          IntDqSize = 12,
+          FpDqSize = 12,
+          LsDqSize = 12,
           IntDqDeqWidth = 4,
           FpDqDeqWidth = 4,
           LsDqDeqWidth = 4
         ),
+        exuParameters = ExuParameters(
+          JmpCnt = 1,
+          AluCnt = 2,
+          MulCnt = 0,
+          MduCnt = 1,
+          FmacCnt = 1,
+          FmiscCnt = 1,
+          FmiscDivSqrtCnt = 0,
+          LduCnt = 2,
+          StuCnt = 2
+        ),
         icacheParameters = ICacheParameters(
-          nSets = 8, // 4KB ICache
+          nSets = 64, // 16KB ICache
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
           nMissEntries = 2
         ),
         dcacheParameters = DCacheParameters(
-          nSets = 8, // 4KB DCache
-          nWays = 4,
+          nSets = 64, // 32KB DCache
+          nWays = 8,
           tagECC = Some("secded"),
           dataECC = Some("secded"),
           replacer = Some("setplru"),
@@ -83,7 +95,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 4,
           nStoreReplayEntries = 4,
         ),
-        L2Size = 16 * 1024, // 16KB
+        L2Size = 128 * 1024, // 128KB
         L2NWays = 8,
         EnableBPD = false, // disable TAGE
         EnableLoop = false,

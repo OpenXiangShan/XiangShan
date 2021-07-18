@@ -50,29 +50,29 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
     new DataArrayMultiWriteIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
-class DataArrayIO(config: RSConfig)(implicit p: Parameters) extends XSBundle {
-  val read = Vec(config.numDeq, new DataArrayReadIO(config.numEntries, config.numSrc, config.dataBits))
-  val write = Vec(config.numEnq, new DataArrayWriteIO(config.numEntries, config.numSrc, config.dataBits))
-  val multiWrite = Vec(config.numValueBroadCast, new DataArrayMultiWriteIO(config.numEntries, config.numSrc, config.dataBits))
-  val delayedWrite = if (config.delayedRf) Vec(config.numEnq, Flipped(ValidIO(UInt(config.dataBits.W)))) else null
+class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+  val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
+  val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
 
   override def cloneType: DataArrayIO.this.type =
-    new DataArrayIO(config).asInstanceOf[this.type]
+    new DataArrayIO(params).asInstanceOf[this.type]
 }
 
-class DataArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
-  val io = IO(new DataArrayIO(config))
+class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
+  val io = IO(new DataArrayIO(params))
 
-  for (i <- 0 until config.numSrc) {
-    val delayedWen = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.valid) else Seq()
-    val delayedWaddr = if (i == 1 && config.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
-    val delayedWdata = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.bits) else Seq()
+  for (i <- 0 until params.numSrc) {
+    val delayedWen = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
+    val delayedWaddr = if (i == 1 && params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
+    val delayedWdata = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
 
     val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen
     val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr
     val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata
 
-    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(config.dataBits.W), config.numEntries, io.read.length, wen.length))
+    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
     io.read.map(_.data(i)).zip(dataModule.io.rdata).map{ case (d, r) => d := r }
     dataModule.io.wen := wen
@@ -112,16 +112,17 @@ class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
 }
 
 object ImmExtractor {
-  def apply(config: RSConfig, exuCfg: ExuConfig, uop: MicroOp, data_in: Vec[UInt], pc: UInt, target: UInt)(implicit p: Parameters): Vec[UInt] = {
-    val immExt = exuCfg match {
-      case JumpExeUnitCfg => {
+  def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
+           (implicit p: Parameters): Vec[UInt] = {
+    val immExt = (params.isJump, params.isAlu) match {
+      case (true, false) => {
         val ext = Module(new JumpImmExtractor)
-        ext.jump_pc := pc
-        ext.jalr_target := target
+        ext.jump_pc := pc.get
+        ext.jalr_target := target.get
         ext
       }
-      case AluExeUnitCfg => Module(new AluImmExtractor)
-      case _ => Module(new ImmExtractor(config.numSrc, config.dataBits))
+      case (false, true) => Module(new AluImmExtractor)
+      case _ => Module(new ImmExtractor(params.numSrc, params.dataBits))
     }
     immExt.io.uop := uop
     immExt.io.data_in := data_in

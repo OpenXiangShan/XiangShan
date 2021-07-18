@@ -51,6 +51,7 @@ class JumpExeUnit(implicit p: Parameters) extends Exu(JumpExeUnitCfg)
   fenceio.fencei <> fence.fencei
   fenceio.sbuffer <> fence.toSbuffer
   fence.io.out.ready := true.B
+  fence.disableSfence := csr.csrio.disableSfence
 
   val uop = io.fromInt.bits.uop
   val instr_rm = uop.ctrl.fpu.rm
