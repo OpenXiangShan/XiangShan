@@ -258,10 +258,12 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
 
   if (isDtlb) {
     for (i <- 0 until Width) {
-      XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("first_access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable)
     }
     for (i <- 0 until Width) {
-      XSPerfAccumulate("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i))
     }
   } else {
     // NOTE: ITLB is blocked, so every resp will be valid only when hit

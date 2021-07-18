@@ -202,6 +202,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(params.numSrc))
       statusArray.io.update(i).data.roqIdx := io.fromDispatch(i).bits.roqIdx
       statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
+      statusArray.io.update(i).data.isFirstIssue := true.B
       payloadArray.io.write(i).enable := doEnqueue(i)
       payloadArray.io.write(i).addr := select.io.allocate(i).bits
       payloadArray.io.write(i).data := io.fromDispatch(i).bits
@@ -370,7 +371,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       val pipeline_fire = s1_out(i).valid && io.deq(i).ready
       if (params.hasFeedback) {
         io_feedback.get.rsIdx := RegEnable(OHToUInt(select.io.grant(i).bits), pipeline_fire)
-        io_feedback.get.isFirstIssue := false.B
+        io_feedback.get.isFirstIssue := RegEnable(statusArray.io.isFirstIssue.head, pipeline_fire)
       }
 
       for (j <- 0 until params.numSrc) {
