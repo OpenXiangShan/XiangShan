@@ -175,7 +175,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   io.s3_ready := true.B
 
   val s0_pc       = WireInit(Mux(io.flush.valid, io.flush.bits, io.in.bits.s0_pc)) // fetchIdx(io.f0_pc)
-  val s1_pc       = RegEnable(s0_pc, io.s0_fire)
+  val s1_pc       = RegEnable(s0_pc, resetVector.U, io.s0_fire)
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
 
@@ -260,16 +260,16 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
-  val s0_pc = RegInit(resetVector.U)
+  val s0_pc = WireInit(resetVector.U)
 
   val s3_gh = predictors.io.out.bits.resp.s3.ghist
   val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
-  when(io.bpu_to_ftq.resp.valid) {
-    s0_pc := io.bpu_to_ftq.resp.bits.preds.target
-  }
+  // when(io.bpu_to_ftq.resp.valid) {
+  //   s0_pc := io.bpu_to_ftq.resp.bits.preds.target
+  // }
 
   when(toFtq_fire) {
     final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,

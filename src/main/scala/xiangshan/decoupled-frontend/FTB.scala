@@ -95,7 +95,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.in.ready := ftb.io.r.req.ready && !io.flush.valid
   // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
-  io.out.valid := io.s1_fire && !io.flush.valid
+  io.out.valid := io.s2_fire && !io.flush.valid
 
   io.out.bits.resp.valids(1) := io.out.valid
 
@@ -144,7 +144,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   when(s1_hit) {
     s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, s0_pc + (FetchWidth*4).U))
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, s1_pc + (FetchWidth*4).U))
   }
 
   val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
