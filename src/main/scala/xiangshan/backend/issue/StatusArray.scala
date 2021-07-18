@@ -49,6 +49,8 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val srcType = Vec(params.numSrc, SrcType())
   val roqIdx = new RoqPtr
   val sqIdx = new SqPtr
+  // misc
+  val isFirstIssue = Bool()
 
   override def cloneType: StatusEntry.this.type =
     new StatusEntry(params).asInstanceOf[this.type]
@@ -70,6 +72,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
     val wakeupMatch = Vec(params.numEntries, Vec(params.numSrc, Output(UInt(params.allWakeup.W))))
     val issueGranted = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
+    // TODO: if more info is needed, put them in a bundle
+    val isFirstIssue = Vec(params.numDeq, Output(Bool()))
     val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
@@ -123,6 +127,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
       statusNext.sqIdx := updateStatus.sqIdx
+      statusNext.isFirstIssue := true.B
       XSError(status.valid, p"should not update a valid entry\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
@@ -150,6 +155,10 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {
         case (current, wakeup) => current || wakeup
       })
+      // when the entry is not granted to leave the RS, set isFirstIssue to false.B
+      when (deqResp && !deqGrant) {
+        statusNext.isFirstIssue := false.B
+      }
     }
 
     XSDebug(status.valid, p"entry[$i]: $status\n")
@@ -157,4 +166,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.canIssue := VecInit(statusArray.map(_.valid).zip(readyVec).map{ case (v, r) => v && r}).asUInt
+  io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
+
 }
