@@ -79,32 +79,33 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /home/ci-runner/xsenv/DRAMsim3            \
-            --disable-log --with-dramsim3 --threads 16
+            --disable-log --with-dramsim3 --threads 8
       - name: SPEC06 Test - mcf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci mcf 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/mcf.log
       - name: SPEC06 Test - xalancbmk
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
       - name: SPEC06 Test - gcc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci gcc 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gcc.log
       - name: SPEC06 Test - namd
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci namd 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/namd.log
       - name: SPEC06 Test - milc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci milc 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/milc.log
       - name: SPEC06 Test - lbm
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci lbm 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/lbm.log
       - name: SPEC06 Test - gromacs
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --max-instr 5000000 --numa --ci gromacs 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
+
