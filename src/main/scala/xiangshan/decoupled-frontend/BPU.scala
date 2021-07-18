@@ -286,6 +286,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
+  predictors.io.flush.valid := io.ftq_to_bpu.redirect.valid
+  predictors.io.flush.bits := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
+
   // io.bpu_to_ftq.resp.bits.hit   := predictors.io.out.bits.resp.s3.hit
   // io.bpu_to_ftq.resp.bits.preds := predictors.io.out.bits.resp.s3.preds
   // io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.bits.resp.s3.meta
@@ -293,7 +296,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.bits  := predictors.io.out.bits.resp.s2
 
   val resp = predictors.io.out.bits.resp
-  when(resp.valids(2)) {
+
+  when(io.ftq_to_bpu.redirect.valid) {
+    s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
+  }.elsewhen(resp.valids(2)) {
     s0_pc := resp.s3.preds.target
   }.elsewhen(resp.valids(1)) {
     s0_pc := resp.s2.preds.target

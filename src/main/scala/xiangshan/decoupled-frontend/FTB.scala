@@ -176,6 +176,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.out.bits.resp.s2.hit               := RegEnable(s1_latch_hit, io.s1_fire)
   io.out.bits.resp.s2.meta              := RegEnable(s1_latch_meta, io.s1_fire)
   io.out.bits.resp.s2.ftb_entry         := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+
+  when(!s1_hit) {
+    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(s1_latch_pc + (FetchWidth*4).U, io.s1_fire)
+  }
   // }
 
   // override flush logic
