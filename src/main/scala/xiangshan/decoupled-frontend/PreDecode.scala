@@ -9,7 +9,7 @@ import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
 
-trait HasPdconst{
+trait HasPdconst extends HasXSParameter {
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
@@ -21,16 +21,16 @@ trait HasPdconst{
     List(brType, isCall, isRet)
   }
   def jal_offset(inst: UInt, rvc: Bool): UInt = {
-    Mux(rvc,
-      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)),
-      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
-    )
+    val rvc_offset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))
+    val rvi_offset = Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
+    val max_width = rvi_offset.getWidth
+    SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
   def br_offset(inst: UInt, rvc: Bool): UInt = {
-    Mux(rvc,
-      Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W)),
-      Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
-    )
+    val rvc_offset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
+    val rvi_offset = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8), 0.U(1.W))
+    val max_width = rvi_offset.getWidth
+    SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
   def MAXINSNUM = 16
 }
@@ -126,7 +126,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.instrs(i) := expander.io.out.bits
     io.out.pc(i) := currentPC
 
-    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, SignExt(brOffset, XLEN), SignExt(jalOffset, XLEN))
+    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
 
     takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U || io.out.pd(i).isJal))
 
