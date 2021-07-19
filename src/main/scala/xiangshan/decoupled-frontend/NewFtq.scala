@@ -539,7 +539,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
   // --------------------------- Debug --------------------------------
-  XSDebug(enq_fire, io.fromBpu.resp.bits.toPrintable)
+  XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
   XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
   XSDebug(canDeq, p"deq! [ptr] $commPtr\n")
   XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [commPtr] $commPtr\n")
