@@ -128,13 +128,13 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.roqIdx := updateStatus.roqIdx
       statusNext.sqIdx := updateStatus.sqIdx
       statusNext.isFirstIssue := true.B
-      XSError(status.valid, p"should not update a valid entry\n")
+      XSError(status.valid, p"should not update a valid entry $i\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
       val (deqResp, deqGrant) = deqRespSel(i)
-      XSError(deqResp && !status.valid, "should not deq an invalid entry\n")
+      XSError(deqResp && !status.valid, p"should not deq an invalid entry $i\n")
       if (params.hasFeedback) {
-        XSError(deqResp && !status.scheduled, "should not deq an un-scheduled entry\n")
+        XSError(deqResp && !status.scheduled, p"should not deq an un-scheduled entry $i\n")
       }
       val wakeupEnVec = VecInit(status.psrc.zip(status.srcType).map{ case (p, t) => wakeupMatch(p, t) })
       val wakeupEn = wakeupEnVec.map(_.orR)
@@ -142,7 +142,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
-      XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
+      XSError(hasIssued && !status.valid, p"should not issue an invalid entry $i\n")
       if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
       }

@@ -135,7 +135,15 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
 
   override def toString: String = params.toString
 
+  def indexWidth = log2Up(params.numEntries)
+
   lazy val module = new LazyModuleImp(this) {
+    val updatedP = p.alter((site, here, up) => {
+      case XSCoreParamsKey => up(XSCoreParamsKey).copy(
+        IssQueSize = params.numEntries
+      )
+    })
+
     val io = IO(new Bundle {
       val redirect = Flipped(ValidIO(new Redirect))
       val flush = Input(Bool())
@@ -147,7 +155,6 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       // deq
       val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
 
-//      val fastUopOut = Vec(params.numDeq, ValidIO(new MicroOp))
       val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
       val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
       val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
@@ -158,15 +165,15 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       val jalr_target = Input(UInt(VAddrBits.W))
     })) else None
     val io_feedback = if (params.hasFeedback) Some(IO(new Bundle {
-      val memfeedback = Flipped(ValidIO(new RSFeedback))
-      val rsIdx = Output(UInt(log2Up(params.numEntries).W))
-      val isFirstIssue = Output(Bool()) // NOTE: just use for tlb perf cnt
+      val memfeedback = Vec(params.numDeq, Flipped(ValidIO(new RSFeedback()(updatedP))))
+      val rsIdx = Vec(params.numDeq, Output(UInt(indexWidth.W)))
+      val isFirstIssue = Vec(params.numDeq, Output(Bool())) // NOTE: just use for tlb perf cnt
     })) else None
     val io_checkwait = if (params.checkWaitBit) Some(IO(new Bundle {
       val stIssuePtr = Input(new SqPtr())
     })) else None
     val io_store = if (params.isStore) Some(IO(new Bundle {
-      val stData = ValidIO(new StoreDataBundle)
+      val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
     })) else None
 
     val statusArray = Module(new StatusArray(params))
@@ -226,20 +233,15 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     select.io.request := statusArray.io.canIssue
     for (i <- 0 until params.numDeq) {
       select.io.grant(i).ready := io.deq(i).ready
+      statusArray.io.issueGranted(i).valid := select.io.grant(i).fire
+      statusArray.io.issueGranted(i).bits := select.io.grant(i).bits
+      statusArray.io.deqResp(i).valid := select.io.grant(i).fire
+      statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
+      statusArray.io.deqResp(i).bits.success := io.deq(i).ready
       if (io_feedback.isDefined) {
-        require(params.numDeq == 1)
-        statusArray.io.issueGranted(0).valid := select.io.grant(0).fire
-        statusArray.io.issueGranted(0).bits := select.io.grant(0).bits
-        statusArray.io.deqResp(0).valid := io_feedback.get.memfeedback.valid
-        statusArray.io.deqResp(0).bits.rsMask := UIntToOH(io_feedback.get.memfeedback.bits.rsIdx)
-        statusArray.io.deqResp(0).bits.success := io_feedback.get.memfeedback.bits.hit
-      }
-      else {
-        statusArray.io.issueGranted(i).valid := select.io.grant(i).fire
-        statusArray.io.issueGranted(i).bits := select.io.grant(i).bits
-        statusArray.io.deqResp(i).valid := select.io.grant(i).fire
-        statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
-        statusArray.io.deqResp(i).bits.success := io.deq(i).ready
+        statusArray.io.deqResp(i).valid := io_feedback.get.memfeedback(i).valid
+        statusArray.io.deqResp(i).bits.rsMask := UIntToOH(io_feedback.get.memfeedback(i).bits.rsIdx)
+        statusArray.io.deqResp(i).bits.success := io_feedback.get.memfeedback(i).bits.hit
       }
       payloadArray.io.read(i).addr := select.io.grant(i).bits
       if (io_fastWakeup.isDefined) {
@@ -370,8 +372,8 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       PipelineConnect(s1_out(i), io.deq(i), io.deq(i).ready || io.deq(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
       val pipeline_fire = s1_out(i).valid && io.deq(i).ready
       if (params.hasFeedback) {
-        io_feedback.get.rsIdx := RegEnable(OHToUInt(select.io.grant(i).bits), pipeline_fire)
-        io_feedback.get.isFirstIssue := RegEnable(statusArray.io.isFirstIssue.head, pipeline_fire)
+        io_feedback.get.rsIdx(i) := RegEnable(OHToUInt(select.io.grant(i).bits), pipeline_fire)
+        io_feedback.get.isFirstIssue(i) := RegEnable(statusArray.io.isFirstIssue(i), pipeline_fire)
       }
 
       for (j <- 0 until params.numSrc) {
@@ -379,9 +381,9 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       }
 
       if (io_store.isDefined) {
-        io_store.get.stData.valid := io.deq(i).valid
-        io_store.get.stData.bits.data := io.deq(i).bits.src(1)
-        io_store.get.stData.bits.uop := io.deq(i).bits.uop
+        io_store.get.stData(i).valid := io.deq(i).valid
+        io_store.get.stData(i).bits.data := io.deq(i).bits.src(1)
+        io_store.get.stData(i).bits.uop := io.deq(i).bits.uop
       }
     }
 
