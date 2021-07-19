@@ -24,6 +24,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import utils._

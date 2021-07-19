@@ -20,6 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
 
 case object BOPParamsKey extends Field[BOPParameters]
@@ -404,7 +405,7 @@ class BestOffsetPrefetch(implicit p: Parameters) extends PrefetchModule {
 
   val bopEntries = (0 until nEntries).map { i =>
     val bopEntry = Module(new BestOffsetPrefetchEntry)
-    
+
     bopEntry.io.id := i.U
     bopEntry.io.prefetchOffset := scoreTable.io.prefetchOffset
 

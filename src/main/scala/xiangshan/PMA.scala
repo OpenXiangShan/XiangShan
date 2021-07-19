@@ -20,7 +20,8 @@ import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, Uncache}
+import xiangshan.cache.mmu.PTW
 
 object MemMap {
   def apply (base: String, top: String, width: String, description: String, mode: String): ((String, String), Map[String, String]) = {

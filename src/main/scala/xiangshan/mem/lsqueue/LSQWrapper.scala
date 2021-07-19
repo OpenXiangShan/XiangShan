@@ -21,7 +21,8 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
+import xiangshan.cache.mmu.{TlbRequestIO}
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 
