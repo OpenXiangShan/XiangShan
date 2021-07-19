@@ -63,6 +63,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val startAddr     = UInt(VAddrBits.W)
   val ftqOffset     = Valid(UInt(log2Ceil(32).W))
   val target        = UInt(VAddrBits.W)
+  val instValid     = Bool() 
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
@@ -314,6 +315,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     result
   }
 
+  preDecoderIn.instValid  :=  (f2_valid && f2_hit) || miss_all_fix 
   preDecoderIn.data       :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr)
   preDecoderIn.startAddr  :=  f2_ftq_req.startAddr
   preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset

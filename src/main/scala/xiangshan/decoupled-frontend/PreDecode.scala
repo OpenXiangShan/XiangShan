@@ -77,6 +77,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val out = Output(new PreDecodeResp)
   })
 
+  val instValid = io.in.instValid 
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val bbOffset  = io.in.ftqOffset.bits
@@ -88,6 +89,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
   val misPred      = Wire(Vec(MAXINSNUM, Bool()))
   val takens       = Wire(Vec(MAXINSNUM, Bool()))
+  val lastIsHalf   = Reg(Bool())
+  val middlePC     = Reg(UInt(VAddrBits.W)) 
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
@@ -102,14 +105,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     // TODO: when i == 0
     val lastIsValidEnd =  if(i == 0) {true.B} else {validEnd(i-1)  || isFirstInBlock || !HasCExtension.B}
-    // val lastIsValidEnd = Wire(Bool())
-    // if (i == 0) {
-    //   lastIsValidEnd := true.B || isFirstInBlock || !HasCExtension.B
-    // } else {
-    //   lastIsValidEnd := validEnd(i-1) || isFirstInBlock || !HasCExtension.B
-    // }
     
-    validStart(i) := lastIsValidEnd || !HasCExtension.B
+    validStart(i) := !(lastIsHalf && middlePC === pcStart) && lastIsValidEnd || !HasCExtension.B
     validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -134,6 +131,12 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     misPred(i)   := (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
                     (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) ||
                     (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+  
+    when(instValid && isLastInBlock && validStart(i) && !currentIsRVC) { 
+      lastIsHalf := true.B 
+      middlePC   := io.out.pc(i) + 2.U  
+    }
+    when(instValid && lastIsHalf && middlePC === pcStart ) { lastIsHalf := false.B  }
   }
   val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()
   val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr    && validStart(i)).reverse).asUInt()
