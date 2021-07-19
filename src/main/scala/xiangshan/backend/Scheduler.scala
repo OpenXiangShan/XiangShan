@@ -113,9 +113,9 @@ class Scheduler(
   println("Scheduler: ")
   val numIssuePorts = configs.map(_._2).sum
   println(s"  number of issue ports: ${numIssuePorts}")
-  val numReplayPorts = reservationStations.count(_.params.hasFeedback == true)
+  val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
   println(s"  number of replay ports: ${numReplayPorts}")
-  val numSTDPorts = reservationStations.count(_.params.isStore == true)
+  val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
   println(s"  number of std ports: ${numSTDPorts}")
   val numOutsideWakeup = reservationStations.map(_.numExtFastWakeupPort).sum
   println(s"  number of outside fast wakeup ports: ${numOutsideWakeup}")
@@ -189,14 +189,16 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.module.io_checkwait.get.stIssuePtr <> io.stIssuePtr
     }
     if (rs.module.io_feedback.isDefined) {
-      rs.module.io_feedback.get.memfeedback <> io.replay(feedbackIdx)
-      rs.module.io_feedback.get.rsIdx <> io.rsIdx(feedbackIdx)
-      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue(feedbackIdx)
-      feedbackIdx += 1
+      val width = rs.module.io_feedback.get.memfeedback.length
+      rs.module.io_feedback.get.memfeedback <> io.replay.slice(feedbackIdx, feedbackIdx + width)
+      rs.module.io_feedback.get.rsIdx <> io.rsIdx.slice(feedbackIdx, feedbackIdx + width)
+      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue.slice(feedbackIdx, feedbackIdx + width)
+      feedbackIdx += width
     }
     if (rs.module.io_store.isDefined) {
-      rs.module.io_store.get.stData <> io.stData(stDataIdx)
-      stDataIdx += 1
+      val width = rs.module.io_store.get.stData.length
+      rs.module.io_store.get.stData <> io.stData.slice(stDataIdx, stDataIdx + width)
+      stDataIdx += width
     }
 
     (rs.intSrcCnt > 0, rs.fpSrcCnt > 0) match {

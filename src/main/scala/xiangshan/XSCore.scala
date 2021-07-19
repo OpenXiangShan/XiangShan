@@ -77,15 +77,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // one RS every 2 MDUs
   val schedulePorts = Seq(
     // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
-    (AluExeUnitCfg, exuParameters.AluCnt, Seq(0, 1, 2, 5, 6, 7, 8), Seq()),
-    (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(0, 1, 2, 5, 6, 7, 8), Seq()),
+    (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
+    (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
     (JumpExeUnitCfg, 1, Seq(), Seq()),
-    (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(3, 4)),
-    (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq(3, 4)),
-    (LdExeUnitCfg, 1, Seq(0, 5, 6), Seq()),
-    (LdExeUnitCfg, 1, Seq(0, 5, 6), Seq()),
-    (StExeUnitCfg, 1, Seq(), Seq()),
-    (StExeUnitCfg, 1, Seq(), Seq())
+    (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
+    (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
+    (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
+    (StExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
   )
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
@@ -99,13 +97,18 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   })
   val lsDpPorts = Seq(
     Seq((5, 0)),
+    Seq((5, 1)),
     Seq((6, 0)),
-    Seq((7, 0)),
-    Seq((8, 0))
+    Seq((6, 1))
   )
   val dispatchPorts = intDpPorts ++ fpDpPorts ++ lsDpPorts
 
-  val scheduler = LazyModule(new Scheduler(schedulePorts, dispatchPorts))
+  val mappedSchedulePorts = schedulePorts.map(port => {
+    val intWakeup = port._3.flatMap(cfg => schedulePorts.zipWithIndex.filter(_._1._1 == cfg).map(_._2))
+    val fpWakeup = port._4.flatMap(cfg => schedulePorts.zipWithIndex.filter(_._1._1 == cfg).map(_._2))
+    (port._1, port._2, intWakeup, fpWakeup)
+  })
+  val scheduler = LazyModule(new Scheduler(mappedSchedulePorts, dispatchPorts))
 
 }
 
