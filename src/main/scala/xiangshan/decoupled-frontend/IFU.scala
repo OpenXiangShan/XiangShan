@@ -58,12 +58,22 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = new BlockTlbRequestIO  
 }
 
+// record the situation in which fallThruAddr falls into
+// the middle of an RVI inst
+class LastHalfInfo(implicit p: Parameters) extends XSBundle {
+  val valid = Bool()
+  val middlePC = UInt(VAddrBits.W)
+  def matchThisBlock(startAddr: UInt) = valid && middlePC === startAddr
+}
+
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data          = Vec(17, UInt(16.W))   //34Bytes 
   val startAddr     = UInt(VAddrBits.W)
+  val fallThruAddr  = UInt(VAddrBits.W)
   val ftqOffset     = Valid(UInt(log2Ceil(32).W))
   val target        = UInt(VAddrBits.W)
   val instValid     = Bool() 
+  val lastHalfMatch = Bool()
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
@@ -315,13 +325,26 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     result
   }
 
-  preDecoderIn.instValid  :=  (f2_valid && f2_hit) || miss_all_fix 
-  preDecoderIn.data       :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr)
-  preDecoderIn.startAddr  :=  f2_ftq_req.startAddr
-  preDecoderIn.ftqOffset  :=  f2_ftq_req.ftqOffset
-  preDecoderIn.target     :=  f2_ftq_req.target
-
+  val f2_lastHalf = RegInit(0.U.asTypeOf(new LastHalfInfo))
+  val f2_lastHalfMatch = f2_lastHalf.matchThisBlock(f2_ftq_req.startAddr)
+  
+  preDecoderIn.instValid     :=  (f2_valid && f2_hit) || miss_all_fix 
+  preDecoderIn.data          :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr)
+  preDecoderIn.startAddr     :=  f2_ftq_req.startAddr
+  preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
+  preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
+  preDecoderIn.target        :=  f2_ftq_req.target
+  preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
+  
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
+
+  // TODO: What if next packet does not match?
+  when (flush) {
+    f2_lastHalf.valid := false.B
+  }.elsewhen (io.toIbuffer.fire()) {
+    f2_lastHalf.valid := preDecoderOut.hasLastHalf
+    f2_lastHalf.middlePC := f2_ftq_req.fallThruAddr
+  }
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs

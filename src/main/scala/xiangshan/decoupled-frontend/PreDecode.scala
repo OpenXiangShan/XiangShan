@@ -69,6 +69,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
+  val hasLastHalf   = Bool()
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
@@ -80,6 +81,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val instValid = io.in.instValid 
   val data      = io.in.data
   val pcStart   = io.in.startAddr
+  val pcEnd     = io.in.fallThruAddr
   val bbOffset  = io.in.ftqOffset.bits
   val bbTaken   = io.in.ftqOffset.valid
   val bbTarget  = io.in.target
@@ -89,8 +91,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
   val misPred      = Wire(Vec(MAXINSNUM, Bool()))
   val takens       = Wire(Vec(MAXINSNUM, Bool()))
-  val lastIsHalf   = Reg(Bool())
-  val middlePC     = Reg(UInt(VAddrBits.W)) 
+  val hasLastHalf  = Wire(Vec(MAXINSNUM, Bool()))
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
@@ -101,13 +102,15 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     
     val isFirstInBlock = i.U === 0.U
     val isLastInBlock  = (i == MAXINSNUM - 1).B
-    val currentIsRVC     = isRVC(inst) && HasCExtension.B
-
-    // TODO: when i == 0
-    val lastIsValidEnd =  if(i == 0) {true.B} else {validEnd(i-1)  || isFirstInBlock || !HasCExtension.B}
+    val currentPC      = pcStart + (i << 1).U((log2Ceil(MAXINSNUM)+1).W)
+    val currentIsRVC   = isRVC(inst) && HasCExtension.B
     
-    validStart(i) := !(lastIsHalf && middlePC === pcStart) && lastIsValidEnd || !HasCExtension.B
+
+    val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
+    
+    validStart(i) := lastIsValidEnd || !HasCExtension.B
     validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
+    hasLastHalf(i) := instValid && currentPC === (pcEnd - 2.U) && validStart(i) && !currentIsRVC
 
     val brType::isCall::isRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC)
@@ -121,7 +124,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     //io.out.pd(i).excType := ExcType.notExc
     expander.io.in := inst
     io.out.instrs(i) := expander.io.out.bits
-    io.out.pc(i) := pcStart + (i << 1).U((log2Ceil(MAXINSNUM)+1).W)
+    io.out.pc(i) := currentPC
 
     targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, SignExt(brOffset, XLEN), SignExt(jalOffset, XLEN))
 
@@ -131,12 +134,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     misPred(i)   := (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
                     (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) ||
                     (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
-  
-    when(instValid && isLastInBlock && validStart(i) && !currentIsRVC) { 
-      lastIsHalf := true.B 
-      middlePC   := io.out.pc(i) + 2.U  
-    }
-    when(instValid && lastIsHalf && middlePC === pcStart ) { lastIsHalf := false.B  }
   }
   val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()
   val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr    && validStart(i)).reverse).asUInt()
@@ -155,6 +152,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   io.out.target           := targets(io.out.cfiOffset.bits)
   io.out.takens           := takens
 
+  io.out.hasLastHalf := hasLastHalf.reduce(_||_)
 
   for (i <- 0 until MAXINSNUM) {
     XSDebug(true.B,
