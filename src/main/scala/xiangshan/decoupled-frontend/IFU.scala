@@ -105,7 +105,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
   for(i <- 0 until 2) {
-    fetch_req(i).valid := f0_valid
+    fetch_req(i).valid := f0_fire
     fetch_req(i).bits.isDoubleLine := f0_doubleLine
     fetch_req(i).bits.vSetIdx := f0_vSetIdx
   }
