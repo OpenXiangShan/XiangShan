@@ -147,7 +147,6 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       // deq
       val deq = Vec(params.numDeq, DecoupledIO(new ExuInput))
 
-//      val fastUopOut = Vec(params.numDeq, ValidIO(new MicroOp))
       val fastUopsIn = Vec(params.numFastWakeup, Flipped(ValidIO(new MicroOp)))
       val fastDatas = Vec(params.numFastWakeup, Input(UInt(params.dataBits.W)))
       val slowPorts = Vec(params.numWakeup, Flipped(ValidIO(new ExuOutput)))
