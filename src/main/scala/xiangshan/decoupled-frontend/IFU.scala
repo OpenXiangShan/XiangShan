@@ -287,7 +287,10 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }
   
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
-  val f2_datas        = Mux(f2_hit, f2_hit_datas, f2_mq_datas) // TODO: f1_hit_datas is error
+  val f2_datas        = Wire(Vec(2, UInt(blockBits.W)))
+  f2_datas.zipWithIndex.map{case(bank,i) =>  
+    bank := Mux(f2_bank_hit(i), f2_hit_datas(i), f2_mq_datas(i))
+  }
 
   // val jump_mask = Vec(FetchWidth,Bool())
   // (0 until FetchWidth).map{ i =>
