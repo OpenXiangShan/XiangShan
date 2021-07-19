@@ -19,9 +19,12 @@
 #include "device.h"
 #include "goldenmem.h"
 #include "ram.h"
+#include "remote_bitbang.h"
 
 static bool has_reset = false;
 static char bin_file[64] = "ram.bin";
+
+extern remote_bitbang_t * jtag;
 
 extern "C" void set_bin_file(char *s) {
   strcpy(bin_file, s);
@@ -37,6 +40,8 @@ extern "C" void simv_init() {
 
   assert_init();
   init_ram(bin_file);
+
+  jtag = new remote_bitbang_t(23334);
 
 }
 

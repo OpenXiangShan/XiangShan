@@ -28,6 +28,7 @@ import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParamete
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import device.XSDebugModuleParams
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -35,8 +36,8 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case SoCParamsKey => SoCParameters(
     cores = List.tabulate(n){ i => XSCoreParameters(HartId = i) }
   )
-  case ExportDebug => up(ExportDebug, site).copy(protocols = Set(JTAG))
-  case DebugModuleKey => up(DebugModuleKey, site).map(_.copy(hasBusMaster = true).copy(baseAddress = BigInt(0x38a00000)))
+  case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
+  case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
 })

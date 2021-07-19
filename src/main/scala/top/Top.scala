@@ -208,7 +208,7 @@ trait HaveAXI4MemPort {
 
 
 trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
-  // on-chip devices: 0x3600_0000 - 0x3fff_ffff
+  // on-chip devices: 0x3800_0000 - 0x3fff_ffff 0x0000_0000 - 0x0000_0fff
   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
   val uartRange = AddressSet(0x40600000, 0xf)
   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))

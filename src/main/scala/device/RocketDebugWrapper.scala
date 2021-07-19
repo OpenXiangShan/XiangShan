@@ -94,6 +94,18 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
   }
 }
 
+object XSDebugModuleParams {
+
+  def apply(xlen:Int /*TODO , val configStringAddr: Int*/): DebugModuleParams = {
+    new DebugModuleParams().copy(
+      nAbstractDataWords   = (if (xlen == 32) 1 else if (xlen == 64) 2 else 4),
+      maxSupportedSBAccess = xlen,
+      hasBusMaster = true,
+      baseAddress = BigInt(0x38020000)
+    )
+  }
+}
+
 class debugIOTop(implicit val p: Parameters) extends Bundle {
   val clock = Input(Clock())
   val reset = Input(Bool()) // No reset allowed on top

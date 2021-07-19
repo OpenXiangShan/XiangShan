@@ -274,6 +274,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val debugIntrEnable = RegInit(true.B)
   csrio.debugMode := debugMode
 
+  val dpcPrev = RegInit(dpc)
+  XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x.", dpc, dpcPrev)
 
 // dcsr value table
 // | debugver | 0100
@@ -792,8 +794,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     priviledgeMode := dcsrNew.prv
     retTarget := dpc(VAddrBits-1, 0)
     debugModeNew := true.B
-    debugIntrEnable := false.B
+    debugIntrEnable := true.B
     debugMode := debugModeNew
+    XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
   }
 
   when (valid && isMret) {
@@ -857,6 +860,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
   val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
+  XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROQ
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
@@ -931,7 +935,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     mtval := memExceptionAddr
   }
 
-  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38a00808.U, 0x38a00800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
+  val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
@@ -968,7 +972,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
         dcsrNew.cause := 1.U
         dcsrNew.prv := priviledgeMode
         priviledgeMode := ModeM
-        XSDebug(debugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
+        XSDebug(raiseDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
       }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
