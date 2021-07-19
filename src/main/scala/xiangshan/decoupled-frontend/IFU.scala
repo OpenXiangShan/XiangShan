@@ -94,13 +94,19 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //  * Check whether need 2 line fetch
   //  * Send req to ITLB
   //---------------------------------------------
-
+  
   val (f0_valid, f1_ready)                 = (fromFtq.req.valid, WireInit(false.B))
   val f0_ftq_req                           = fromFtq.req.bits
   val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr), isLastInCacheline(f0_ftq_req.fallThruAddr)))
   val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
   val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.fallThruAddr))
   val f0_fire                              = fromFtq.req.fire()
+  
+  val f0_flush, f1_flush, f2_flush = WireInit(false.B)
+  val f2_redirect = WireInit(false.B)
+  f2_flush := fromFtq.redirect.valid
+  f1_flush := f2_flush || f2_redirect
+  f0_flush := f1_flush
 
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
@@ -142,11 +148,10 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   //flush generate and to Ftq
   val predecodeOutValid = WireInit(false.B)
-  val flush = (preDecoderOut.misOffset.valid && predecodeOutValid) || fromFtq.redirect.valid
 
-  when(flush)        {f1_valid  := false.B}
-  .elsewhen(f0_fire) {f1_valid  := true.B}
-  .elsewhen(f1_fire) {f1_valid  := false.B}
+  when(f1_flush)                  {f1_valid  := false.B}
+  .elsewhen(f0_fire && !f0_flush) {f1_valid  := true.B}
+  .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   val f1_pAddrs             = VecInit(Seq(Cat(0.U(1.W), f1_ftq_req.startAddr), Cat(0.U(1.W), f1_ftq_req.fallThruAddr)))   //TODO: Temporary assignment
   val f1_pTags              = VecInit(f1_pAddrs.map{pAddr => get_tag(pAddr)})
@@ -186,8 +191,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   f1_ready := f2_ready || !f1_valid
 
-  when(flush)                     {f2_valid := false.B}
-  .elsewhen(f1_fire)              {f2_valid := true.B }
+  when(f2_flush)                  {f2_valid := false.B}
+  .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
   .elsewhen(io.toIbuffer.fire())  {f2_valid := false.B}
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
@@ -339,7 +344,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
 
   // TODO: What if next packet does not match?
-  when (flush) {
+  when (f2_flush) {
     f2_lastHalf.valid := false.B
   }.elsewhen (io.toIbuffer.fire()) {
     f2_lastHalf.valid := preDecoderOut.hasLastHalf
@@ -365,6 +370,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target
+
+  f2_redirect := preDecoderOut.misOffset.valid && predecodeOutValid
 
 
 
