@@ -153,7 +153,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   val tagArrays = (0 until 2) map { bank =>
     val tagArray = Module(new SRAMTemplate(
       UInt(tagBits.W),
-      set=nSets/2,
+      set=nSets,
       way=nWays,
       shouldReset = true,
       holdRead = true,
@@ -165,14 +165,13 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     else tagArray.io.r.req.valid := io.read.valid && io.read.bits.isDoubleLine 
     tagArray.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx(bank))
 
-    if(bank == 0) tagArray.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
-    else       tagArray.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
+    tagArray.io.w.req.valid := io.write.valid 
     tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
    
     tagArray  
   }
 
-  val readIdxNext = RegNext(io.read.bits.vSetIdx)
+  val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
   val validMetas = VecInit((0 until 2).map{ bank =>
     val validMeta =  Cat((0 until nWays).map{w => validArray( Cat(readIdxNext(bank), w.U(log2Ceil(nWays).W)) )}.reverse).asUInt
@@ -188,7 +187,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   (io.readResp.tags zip tagArrays).map    {case (io, sram) => io  := sram.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))}
   (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
 
-    io.write.ready := DontCare
+  io.write.ready := DontCare
 }
 
 
@@ -205,28 +204,25 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val dataArrays = (0 until 2) map { i =>
     val dataArray = Module(new SRAMTemplate(
       UInt(blockBits.W),
-      set=nSets/2,
+      set=nSets,
       way=nWays,
       shouldReset = true,
       holdRead = true,
       singlePort = true
     ))
 
-    dataArray.map{ way =>
-      //meta connection
-      if(i == 0) way.io.r.req.valid := io.read.valid 
-      else way.io.r.req.valid := io.read.valid && io.read.bits.isDoubleLine 
-      way.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx(i))
+    //meta connection
+    if(i == 0) dataArray.io.r.req.valid := io.read.valid 
+    else dataArray.io.r.req.valid := io.read.valid && io.read.bits.isDoubleLine 
+    dataArray.io.r.req.bits.apply(setIdx=io.read.bits.vSetIdx(i))
 
-      if(i == 0) way.io.w.req.valid := io.write.valid && !io.write.bits.bankIdx
-      else       way.io.w.req.valid := io.write.valid &&  io.write.bits.bankIdx
-      way.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
-    }
+    dataArray.io.w.req.valid := io.write.valid 
+    dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
 
     dataArray 
   }
 
-  (io.readResp.datas zip dataArrays).map {case (io, sram) => io :=  VecInit(sram.map(way => way.io.r.resp.data.asTypeOf(UInt(blockBits.W)) ))  }
+  (io.readResp.datas zip dataArrays).map {case (io, sram) => io :=  sram.io.r.resp.data.asTypeOf(Vec(nWays, UInt(blockBits.W)))  }
 
   io.write.ready := true.B
 }
