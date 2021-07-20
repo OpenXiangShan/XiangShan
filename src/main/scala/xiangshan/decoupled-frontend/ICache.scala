@@ -203,14 +203,14 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   io.read.ready := !io.write.valid
   
   val dataArrays = (0 until 2) map { i =>
-    val dataArray = Seq.fill(nWays){Module(new SRAMTemplate(
+    val dataArray = Module(new SRAMTemplate(
       UInt(blockBits.W),
       set=nSets/2,
       way=nWays,
       shouldReset = true,
       holdRead = true,
       singlePort = true
-    ))}
+    ))
 
     dataArray.map{ way =>
       //meta connection
