@@ -158,7 +158,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
   val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
-  val (bank0_hit,bank1_hit) = (ParallelAND(bank0_hit_vec), ParallelAND(bank1_hit_vec)) 
+  val (bank0_hit,bank1_hit) = (ParallelOR(bank0_hit_vec), ParallelOR(bank1_hit_vec)) 
   val f1_hit                = bank0_hit && bank1_hit && f1_valid 
   val f1_bank_hit_vec       = VecInit(Seq(bank0_hit_vec, bank1_hit_vec))
   val f1_bank_hit           = VecInit(Seq(bank0_hit, bank1_hit))
@@ -342,6 +342,14 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
   
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
+
+  // deal with secondary miss in f1 
+  val bank0_sameline = (f2_valid && !f2_bank_hit(0)) && f1_valid && 
+                       (get_block_addr(f2_ftq_req.startAddr) === get_block_addr(f1_ftq_req.startAddr))
+
+  val bank1_sameline = (f2_valid && !f2_bank_hit(1) && f2_doubleLine) && (f1_valid && f1_doubleLine) &&
+                       (get_block_addr(f2_ftq_req.startAddr + blockBytes.U) === get_block_addr(f2_ftq_req.startAddr + blockBytes.U))
+
 
   // TODO: What if next packet does not match?
   when (f2_flush) {
