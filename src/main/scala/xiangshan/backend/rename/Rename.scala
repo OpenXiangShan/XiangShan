@@ -170,7 +170,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       rat.specWritePorts(i).addr := uops(i).ctrl.ldest
       rat.specWritePorts(i).wdata := freelist.req.pdests(i)
 
-      freelist.deallocReqs(i) := specWen
+//      freelist.deallocReqs(i) := specWen
     }
 
     // read rename table
