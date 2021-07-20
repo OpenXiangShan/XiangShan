@@ -20,6 +20,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.{ImmUnion, Imm_U}
+import xiangshan.backend.exu.ExuConfig
 
 class DataArrayReadIO(numEntries: Int, numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(numEntries.W))
@@ -48,54 +50,82 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
     new DataArrayMultiWriteIO(numEntries, numSrc, dataBits).asInstanceOf[this.type]
 }
 
-class DataArrayIO(config: RSConfig)(implicit p: Parameters) extends XSBundle {
-  val read = Vec(config.numDeq, new DataArrayReadIO(config.numEntries, config.numSrc, config.dataBits))
-  val write = Vec(config.numEnq, new DataArrayWriteIO(config.numEntries, config.numSrc, config.dataBits))
-  val multiWrite = Vec(config.numValueBroadCast, new DataArrayMultiWriteIO(config.numEntries, config.numSrc, config.dataBits))
-  val delayedWrite = if (config.delayedRf) Vec(config.numEnq, Flipped(ValidIO(UInt(config.dataBits.W)))) else null
+class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
+  val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
+  val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
+  val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
 
   override def cloneType: DataArrayIO.this.type =
-    new DataArrayIO(config).asInstanceOf[this.type]
+    new DataArrayIO(params).asInstanceOf[this.type]
 }
 
-class DataArray(config: RSConfig)(implicit p: Parameters) extends XSModule {
-  val io = IO(new DataArrayIO(config))
+class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
+  val io = IO(new DataArrayIO(params))
 
-  // single array for each source
-  def genSingleArray(raddr: Seq[UInt], wen: Seq[Bool], waddr: Seq[UInt], wdata: Seq[UInt]) = {
-    val dataArray = Reg(Vec(config.numEntries, UInt(config.dataBits.W)))
-
-    // write
-    for (((en, addr), wdata) <- wen.zip(waddr).zip(wdata)) {
-      dataArray.zipWithIndex.map { case (entry, i) =>
-        when (en && addr(i)) {
-          entry := wdata
-        }
-      }
-
-      XSDebug(en, p"write ${Hexadecimal(wdata)} to address ${OHToUInt(addr)}\n")
-    }
-
-    // read
-    val rdata = VecInit(raddr.map{ addr =>
-      XSError(PopCount(addr) > 1.U, p"addr ${Binary(addr)} should be one-hot")
-      Mux1H(addr, dataArray)
-    })
-
-    rdata
-  }
-
-  for (i <- 0 until config.numSrc) {
-    val delayedWen = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.valid) else Seq()
-    val delayedWaddr = if (i == 1 && config.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
-    val delayedWdata = if (i == 1 && config.delayedRf) io.delayedWrite.map(_.bits) else Seq()
+  for (i <- 0 until params.numSrc) {
+    val delayedWen = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
+    val delayedWaddr = if (i == 1 && params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
+    val delayedWdata = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
 
     val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen
     val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr
     val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata
 
-    val rdata = genSingleArray(io.read.map(_.addr), wen, waddr, wdata)
-    io.read.zip(rdata).map{ case (rport, data) => rport.data(i) := data }
+    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
+    dataModule.io.rvec := VecInit(io.read.map(_.addr))
+    io.read.map(_.data(i)).zip(dataModule.io.rdata).map{ case (d, r) => d := r }
+    dataModule.io.wen := wen
+    dataModule.io.wvec := waddr
+    dataModule.io.wdata := wdata
   }
 
+}
+
+class ImmExtractor(numSrc: Int, dataBits: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val uop = Input(new MicroOp)
+    val data_in = Vec(numSrc, Input(UInt(dataBits.W)))
+    val data_out = Vec(numSrc, Output(UInt(dataBits.W)))
+  })
+  io.data_out := io.data_in
+}
+
+class JumpImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
+  val jump_pc = IO(Input(UInt(VAddrBits.W)))
+  val jalr_target = IO(Input(UInt(VAddrBits.W)))
+
+  when (SrcType.isPc(io.uop.ctrl.srcType(0))) {
+    io.data_out(0) := SignExt(jump_pc, XLEN)
+  }
+  io.data_out(1) := jalr_target
+}
+
+class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
+  when (SrcType.isImm(io.uop.ctrl.srcType(1))) {
+    val imm32 = Mux(io.uop.ctrl.selImm === SelImm.IMM_U,
+      ImmUnion.U.toImm32(io.uop.ctrl.imm),
+      ImmUnion.I.toImm32(io.uop.ctrl.imm)
+    )
+    io.data_out(1) := SignExt(imm32, XLEN)
+  }
+}
+
+object ImmExtractor {
+  def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
+           (implicit p: Parameters): Vec[UInt] = {
+    val immExt = (params.isJump, params.isAlu) match {
+      case (true, false) => {
+        val ext = Module(new JumpImmExtractor)
+        ext.jump_pc := pc.get
+        ext.jalr_target := target.get
+        ext
+      }
+      case (false, true) => Module(new AluImmExtractor)
+      case _ => Module(new ImmExtractor(params.numSrc, params.dataBits))
+    }
+    immExt.io.uop := uop
+    immExt.io.data_in := data_in
+    immExt.io.data_out
+  }
 }

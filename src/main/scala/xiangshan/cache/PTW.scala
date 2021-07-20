@@ -520,21 +520,27 @@ class PtwMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class PTWRepeater(implicit p: Parameters) extends XSModule with HasPtwConst {
+class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new Bundle {
-    val tlb = Flipped(new TlbPtwIO)
+    val tlb = Flipped(new TlbPtwIO(Width))
     val ptw = new TlbPtwIO
     val sfence = Input(new SfenceBundle)
   })
-
+  val req_in = if (Width == 1) {
+    io.tlb.req(0)
+  } else {
+    val arb = Module(new RRArbiter(io.tlb.req(0).bits.cloneType, Width))
+    arb.io.in <> io.tlb.req
+    arb.io.out
+  }
   val (tlb, ptw, sfence) = (io.tlb, io.ptw, RegNext(io.sfence.valid))
-  val req = RegEnable(tlb.req(0).bits, tlb.req(0).fire())
+  val req = RegEnable(req_in.bits, req_in.fire())
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
-  val haveOne = BoolStopWatch(tlb.req(0).fire(), tlb.resp.fire() || sfence)
-  val sent = BoolStopWatch(ptw.req(0).fire(), tlb.req(0).fire() || sfence)
-  val recv = BoolStopWatch(ptw.resp.fire(), tlb.req(0).fire() || sfence)
+  val haveOne = BoolStopWatch(req_in.fire(), tlb.resp.fire() || sfence)
+  val sent = BoolStopWatch(ptw.req(0).fire(), req_in.fire() || sfence)
+  val recv = BoolStopWatch(ptw.resp.fire(), req_in.fire() || sfence)
 
-  tlb.req(0).ready := !haveOne
+  req_in.ready := !haveOne
   ptw.req(0).valid := haveOne && !sent
   ptw.req(0).bits := req
 
@@ -543,11 +549,11 @@ class PTWRepeater(implicit p: Parameters) extends XSModule with HasPtwConst {
   ptw.resp.ready := !recv
 
   XSPerfAccumulate("req_count", ptw.req(0).fire())
-  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(tlb.req(0).fire(), tlb.resp.fire() || sfence))
+  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(req_in.fire(), tlb.resp.fire() || sfence))
   XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire() || sfence))
 
   XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${sfence} req:${req} resp:${resp}")
-  XSDebug(io.tlb.req(0).valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
 }

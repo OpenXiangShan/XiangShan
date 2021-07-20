@@ -21,34 +21,37 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
+class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // select for enqueue
-    val validVec = Input(UInt(config.numEntries.W))
-    val allocate = Vec(config.numEnq, DecoupledIO(UInt(config.numEntries.W)))
+    val validVec = Input(UInt(params.numEntries.W))
+    val allocate = Vec(params.numEnq, DecoupledIO(UInt(params.numEntries.W)))
     // select for issue
-    val request = Input(UInt(config.numEntries.W))
-    val grant = Vec(config.numDeq, DecoupledIO(UInt(config.numEntries.W))) //TODO: optimize it
+    val request = Input(UInt(params.numEntries.W))
+    val grant = Vec(params.numDeq, DecoupledIO(UInt(params.numEntries.W))) //TODO: optimize it
   })
 
-  // TODO optimize timing
-  var maskedEmptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  for (i <- 0 until config.numEnq) {
-    io.allocate(i).valid := maskedEmptyVec.asUInt.orR
-    io.allocate(i).bits := PriorityEncoderOH(maskedEmptyVec.asUInt)
-    maskedEmptyVec = VecInit(maskedEmptyVec.zip(io.allocate(i).bits.asBools).map{ case (m, s) => m && !s })
+  val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq > 2) "circ" else "naive"
+
+  val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
+  val allocate = SelectOne(policy, emptyVec, params.numEnq)
+  for (i <- 0 until params.numEnq) {
+    val sel = allocate.getNthOH(i + 1)
+    io.allocate(i).valid := sel._1
+    io.allocate(i).bits := sel._2.asUInt
 
     XSError(io.allocate(i).valid && PopCount(io.allocate(i).bits) =/= 1.U,
       p"allocate vec ${Binary(io.allocate(i).bits)} is not onehot")
     XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
-  // TODO optimize timing
-  var maskedRequest = VecInit(io.request.asBools)
-  for (i <- 0 until config.numDeq) {
-    io.grant(i).valid := maskedRequest.asUInt.orR
-    io.grant(i).bits := PriorityEncoderOH(maskedRequest.asUInt)
-    maskedRequest = VecInit(maskedRequest.zip(io.grant(i).bits.asBools).map{ case(m, s) => m && !s })
+  // a better one: select from both directions
+  val request = io.request.asBools
+  val select = SelectOne(policy, request, params.numDeq)
+  for (i <- 0 until params.numDeq) {
+    val sel = select.getNthOH(i + 1)
+    io.grant(i).valid := sel._1
+    io.grant(i).bits := sel._2.asUInt
 
     XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
