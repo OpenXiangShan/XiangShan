@@ -22,14 +22,14 @@ import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
+import refcnt._
 
 class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-  val move_eliminated_src1 = Vec(RenameWidth-1, Bool())
-  val move_eliminated_src2 = Vec(RenameWidth-1, Bool())
+  val move_elim_enable = Vec(RenameWidth, Bool())
 }
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -43,44 +43,36 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
-    val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    // deprecated: use csr bit to enable/disable move elimination
+    val csrCtrl = Flipped(new CustomCSRCtrlIO) // TODO REMOVE THIS
+    // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
-  def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
-    XSInfo(
-      in.valid && in.ready,
-      p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
-        p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
-        p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
-        p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
-        p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-        p"old_pdest:${out.bits.old_pdest} " +
-        p"out v:${out.valid} r:${out.ready}\n"
-    )
+  // create free list and rat
+  val intFreeList = Module(new AlternativeFreeList)
+  val fpFreeList = Module(new FreeList)
+  
+  val intRat = Module(new RenameTable(float = false))
+  val fpRat = Module(new RenameTable(float = true))
+
+  // connect flush and redirect ports for rat
+  Seq(intRat, fpRat) foreach { case rat =>
+    rat.io.redirect := io.redirect.valid
+    rat.io.flush := io.flush
+    rat.io.walkWen := io.roqCommits.isWalk
   }
 
-  for((x,y) <- io.in.zip(io.out)){
-    printRenameInfo(x, y)
-  }
+  // connect flush and redirect ports for free list
+  fpFreeList.io.flush := io.flush
+  fpFreeList.io.redirect := io.redirect.valid
+  fpFreeList.io.walk.valid := io.roqCommits.isWalk
 
-  val intFreeList, fpFreeList = Module(new FreeList).io
-  val intRat = Module(new RenameTable(float = false)).io
-  val fpRat = Module(new RenameTable(float = true)).io
-  val allPhyResource = Seq((intRat, intFreeList, false), (fpRat, fpFreeList, true))
-  intRat.debug_rdata <> io.debug_int_rat
-  fpRat.debug_rdata <> io.debug_fp_rat
+  intFreeList.io.flush := io.flush
 
-  allPhyResource.map{ case (rat, freelist, _) =>
-    rat.redirect := io.redirect.valid
-    rat.flush := io.flush
-    rat.walkWen := io.roqCommits.isWalk
-    freelist.redirect := io.redirect.valid
-    freelist.flush := io.flush
-    freelist.walk.valid := io.roqCommits.isWalk
-  }
-  val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
+  //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
+  val canOut = io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RoqCommitInfo: from roq)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
@@ -89,32 +81,42 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   def needDestRegCommit[T <: RoqCommitInfo](fp: Boolean, x: T): Bool = {
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
-  // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
-  fpFreeList.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
-  intFreeList.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(false, i)})
-  // walk has higher priority than allocation and thus we don't use isWalk here
-  fpFreeList.req.doAlloc := intFreeList.req.canAlloc && io.out(0).ready
-  intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
 
+
+  // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
+  fpFreeList.io.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
+  when (io.roqCommits.hasWalkInstr) {
+    io.roqCommits.valid zip io.roqCommits.info zip intFreeList.io.dec foreach {
+      case ((valid, info), dec) =>
+        dec.valid := valid && needDestRegCommit(false, info)
+        dec.bits := info.pdest
+    }
+  }
+
+  // walk has higher priority than allocation and thus we don't use isWalk here
+  // only when both fp and int free list and dispatch1 has enough space can we do allocation
+  fpFreeList.io.req.doAlloc := intFreeList.io.inc.canInc && io.out(0).ready
+  intFreeList.io.inc.doInc := fpFreeList.io.req.canAlloc && io.out(0).ready
+
+  
+  
   // speculatively assign the instruction with an roqIdx
   val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter roq (from decode)
   val roqIdxHead = RegInit(0.U.asTypeOf(new RoqPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
-  val roqIdxHeadNext = Mux(io.flush, 0.U.asTypeOf(new RoqPtr),
-              Mux(io.redirect.valid, io.redirect.bits.roqIdx,
-         Mux(lastCycleMisprediction, roqIdxHead + 1.U,
-                         Mux(canOut, roqIdxHead + validCount, 
-                      /* default */  roqIdxHead))))
+  val roqIdxHeadNext = Mux(io.flush, 0.U.asTypeOf(new RoqPtr), // flush: clear roq
+              Mux(io.redirect.valid, io.redirect.bits.roqIdx, // redirect: move ptr to given roq index (flush itself)
+         Mux(lastCycleMisprediction, roqIdxHead + 1.U, // mis-predict: not flush roqIdx itself
+                         Mux(canOut, roqIdxHead + validCount, // instructions successfully entered next stage: increase roqIdx
+                      /* default */  roqIdxHead)))) // no instructions passed by this cycle: stick to old value
   roqIdxHead := roqIdxHeadNext
+
 
   /**
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new MicroOp))
-  // uop initialization
   uops.foreach( uop => {
-//    uop.brMask := DontCare
-//    uop.brTag := DontCare
     uop.srcState(0) := DontCare
     uop.srcState(1) := DontCare
     uop.srcState(2) := DontCare
@@ -128,6 +130,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
   val needIntDest = Wire(Vec(RenameWidth, Bool()))
   val hasValid = Cat(io.in.map(_.valid)).orR
+
+  val isMove = io.in.map(_.bits.ctrl.isMove)
+  val isMax = intFreeList.io.maxVec
+  val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val psrc_cmp = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
@@ -138,9 +146,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // alloc a new phy reg
     needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
     needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.req.allocReqs(i) := needFpDest(i)
-    intFreeList.req.allocReqs(i) := needIntDest(i)
+    fpFreeList.io.req.allocReqs(i) := needFpDest(i)
+    intFreeList.io.inc.req(i) := needIntDest(i)
 
+    // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
 
     // do checkpoints when a branch inst come
@@ -149,30 +158,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     //   fl.cpReqs(i).bits := io.in(i).bits.brTag
     // }
 
-    uops(i).pdest := Mux(needIntDest(i),
-      intFreeList.req.pdests(i),
-      Mux(
-        uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
-        0.U, fpFreeList.req.pdests(i)
-      )
-    )
-
+    
     uops(i).roqIdx := roqIdxHead + i.U
-
-    io.out(i).valid := io.in(i).valid && intFreeList.req.canAlloc && fpFreeList.req.canAlloc && !io.roqCommits.isWalk
+    
+    io.out(i).valid := io.in(i).valid && intFreeList.io.inc.canInc && fpFreeList.io.req.canAlloc && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)
-
-    // write speculative rename table
-    allPhyResource.map{ case (rat, freelist, _) =>
-      val specWen = freelist.req.allocReqs(i) && freelist.req.canAlloc && freelist.req.doAlloc && !io.roqCommits.isWalk
-
-      rat.specWritePorts(i).wen := specWen
-      rat.specWritePorts(i).addr := uops(i).ctrl.ldest
-      rat.specWritePorts(i).wdata := freelist.req.pdests(i)
-
-//      freelist.deallocReqs(i) := specWen
-    }
-
+    
+    
     // read rename table
     def readRat(lsrcList: List[UInt], ldest: UInt, fp: Boolean) = {
       val rat = if(fp) fpRat else intRat
@@ -182,11 +174,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       for(k <- 0 until srcCnt+1){
         val rportIdx = i * (srcCnt+1) + k
         if(k != srcCnt){
-          rat.readPorts(rportIdx).addr := lsrcList(k)
-          psrcVec(k) := rat.readPorts(rportIdx).rdata
+          rat.io.readPorts(rportIdx).addr := lsrcList(k)
+          psrcVec(k) := rat.io.readPorts(rportIdx).rdata
         } else {
-          rat.readPorts(rportIdx).addr := ldest
-          old_pdest := rat.readPorts(rportIdx).rdata
+          rat.io.readPorts(rportIdx).addr := ldest
+          old_pdest := rat.io.readPorts(rportIdx).rdata
         }
       }
       (psrcVec, old_pdest)
@@ -199,10 +191,51 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(1) := Mux(uops(i).ctrl.srcType(1) === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
     uops(i).psrc(2) := fpPhySrcVec(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
+
+    if (i == 0) {
+      // calculate meEnable
+      meEnable(i) := isMove(i) && !isMax(i)      
+    } else {
+      // compare psrc0
+      psrc_cmp(i-1) := Cat((0 until i).map(j => {
+        uops(i).psrc(0) === uops(j).psrc(0)
+      }) /* reverse is not necessary here */)
+      
+      // calculate meEnable
+      meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(i))
+    }
+
+    // send psrc of eliminated move instructions to free list and label them as eliminated
+    when (meEnable(i)) {
+      intFreeList.io.inc.psrcOfMove(i).valid := true.B
+      intFreeList.io.inc.psrcOfMove(i).bits := uops(i).psrc(0)
+      io.renameBypass.move_elim_enable(i) := true.B
+    } .otherwise {
+      intFreeList.io.inc.psrcOfMove(i).valid := false.B
+      intFreeList.io.inc.psrcOfMove(i).bits := DontCare
+      io.renameBypass.move_elim_enable(i) := false.B
+    }
+    
+    // update pdest
+    uops(i).pdest := Mux(meEnable(i), uops(i).psrc(0), // move eliminated
+                     Mux(needIntDest(i), intFreeList.io.inc.pdests(i), // normal int inst
+                     Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
+                     /* default */, fpFreeList.io.req.pdests(i)))) // normal fp inst
+    
+    // write speculative rename table
+    val intSpecWen = intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
+    intRat.io.specWritePorts(i).wen := intSpecWen
+    intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
+    intRat.io.specWritePorts(i).wdata := intFreeList.io.inc.pdests(i)
+    
+    val fpSpecWen = fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
+    fpRat.io.specWritePorts(i).wen := fpSpecWen
+    fpRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
+    fpRat.io.specWritePorts(i).wdata := fpFreeList.io.req.pdests(i)
   }
 
   // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
-  // Instead, we determine whether there're some dependences between the valid instructions.
+  // Instead, we determine whether there're some dependencies between the valid instructions.
   for (i <- 1 until RenameWidth) {
     io.renameBypass.lsrc1_bypass(i-1) := Cat((0 until i).map(j => {
       val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(0) === SrcType.fp
@@ -224,20 +257,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val intMatch = needIntDest(j) && needIntDest(i)
       (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
     }).reverse)
-    io.renameBypass.move_eliminated_src1(i-1) :=
-      // the producer move instruction writes to non-zero register
-      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
-      // the consumer instruction uses the move's destination register
-      io.in(i).bits.ctrl.srcType(0) === SrcType.reg && io.in(i).bits.ctrl.lsrc(0) === io.in(i-1).bits.ctrl.ldest &&
-      // CSR control (by srnctl)
-      io.csrCtrl.move_elim_enable
-    io.renameBypass.move_eliminated_src2(i-1) :=
-      // the producer move instruction writes to non-zero register
-      io.in(i-1).bits.ctrl.isMove && io.in(i-1).bits.ctrl.ldest =/= 0.U &&
-      // the consumer instruction uses the move's destination register
-      io.in(i).bits.ctrl.srcType(1) === SrcType.reg && io.in(i).bits.ctrl.lsrc(1) === io.in(i-1).bits.ctrl.ldest &&
-      // CSR control (by srnctl)
-      io.csrCtrl.move_elim_enable
   }
   
   // calculate lsq space requirement
@@ -251,49 +270,87 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Instructions commit: update freelist and rename table
     */
   for (i <- 0 until CommitWidth) {
+    // when RenameWidth <= CommitWidth, there will be more write ports than read ports, which must be initialized
+    // normally, they are initialized in 'normal write' section
     if (i >= RenameWidth) {
-      allPhyResource.map{ case (rat, _, _) =>
-        rat.specWritePorts(i).wen   := false.B
-        rat.specWritePorts(i).addr  := DontCare
-        rat.specWritePorts(i).wdata := DontCare
+      Seq(intRat, fpRat) foreach { case rat =>
+        rat.io.specWritePorts(i).wen   := false.B
+        rat.io.specWritePorts(i).addr  := DontCare
+        rat.io.specWritePorts(i).wdata := DontCare
       }
     }
 
-    allPhyResource.map{ case (rat, freelist, fp) =>
+    Seq((intRat, false), (fpRat, true)) foreach { case (rat, fp) => 
+      // is valid commit req and given instruction has destination register
       val commitDestValid = io.roqCommits.valid(i) && needDestRegCommit(fp, io.roqCommits.info(i))
-      
-      // walk back write - restore spec state
+
+      // walk back write - restore spec state : ldest => old_pdest
       when (commitDestValid && io.roqCommits.isWalk) {
-        rat.specWritePorts(i).wen := true.B
-        rat.specWritePorts(i).addr := io.roqCommits.info(i).ldest
-        rat.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
-        XSInfo({if(fp) p"fp" else p"int "} + p"walk: " +
-          p" ldest:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n")
+        rat.io.specWritePorts(i).wen := true.B
+        rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
+        rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
+
+        XSInfo({if(fp) p"fp " else p"int "} + p"walk: " +
+          p" ldest:${rat.io.specWritePorts(i).addr} old_pdest:${rat.io.specWritePorts(i).wdata}\n")
       }
 
-      // normal write - update arch state
-      rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits.isWalk
-      rat.archWritePorts(i).addr := io.roqCommits.info(i).ldest
-      rat.archWritePorts(i).wdata := io.roqCommits.info(i).pdest
+      // normal write - update arch state (serve as initialization)
+      rat.io.archWritePorts(i).wen := commitDestValid && !io.roqCommits.isWalk
+      rat.io.archWritePorts(i).addr := io.roqCommits.info(i).ldest
+      rat.io.archWritePorts(i).wdata := io.roqCommits.info(i).pdest
 
-      XSInfo(rat.archWritePorts(i).wen,
-        {if(fp) p"fp" else p"int "} + p" rat arch: ldest:${rat.archWritePorts(i).addr}" +
-          p" pdest:${rat.archWritePorts(i).wdata}\n"
+      XSInfo(rat.io.archWritePorts(i).wen,
+        {if(fp) p"fp" else p"int "} + p" rat arch: ldest:${rat.io.archWritePorts(i).addr}" +
+        p" pdest:${rat.io.archWritePorts(i).wdata}\n"
       )
-
-      // update freelist (label old_pdest as free)
-      freelist.deallocReqs(i) := rat.archWritePorts(i).wen
-      freelist.deallocPregs(i) := io.roqCommits.info(i).old_pdest
+      
+      // update free list
+      if (fp) { // Float Point free list
+        fpFreeList.io.deallocReqs(i)  := rat.io.archWritePorts(i).wen
+        fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
+      } else { // Integer free list
+        intFreeList.io.dec(i).valid := false.B
+        intFreeList.io.dec(i).bits  := DontCare
+        when (commitDestValid && !io.roqCommits.isWalk) {
+          intFreeList.io.dec(i).valid := rat.io.archWritePorts(i).wen
+          intFreeList.io.dec(i).bits  := io.roqCommits.info(i).old_pdest
+        }
+      }
     }
   }
+
+
+  /*
+  Debug and performance counter
+   */
+
+  def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
+    XSInfo(
+      in.valid && in.ready,
+      p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
+        p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
+        p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
+        p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
+        p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
+        p"old_pdest:${out.bits.old_pdest} " +
+        p"out v:${out.valid} r:${out.ready}\n"
+    )
+  }
+
+  for((x,y) <- io.in.zip(io.out)){
+    printRenameInfo(x, y)
+  }
+  
+  intRat.io.debug_rdata <> io.debug_int_rat
+  fpRat.io.debug_rdata <> io.debug_fp_rat
 
   XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
-  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && !intFreeList.req.canAlloc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && !intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && io.roqCommits.isWalk)
 
 
 }
