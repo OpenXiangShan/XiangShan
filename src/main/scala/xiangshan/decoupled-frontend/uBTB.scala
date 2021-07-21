@@ -221,6 +221,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.bits.resp.valids(0) := io.out.valid
   io.out.bits.resp.s1.pc := s1_pc
   io.out.bits.resp.s1.meta := read_resps.pred.asUInt() // TODO: What ubtb meta need
+  // io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.bits.resp.s1.preds.taken_mask := read_resps.taken_mask
   // io.out.bits.resp.s1.preds.is_br := read_resps.brValids

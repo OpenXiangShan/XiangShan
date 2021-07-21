@@ -51,15 +51,17 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   io.out.bits.resp := io.in.bits.resp_in(0)
   // io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
-  io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
-  io.out.bits.resp.s1.meta := s1_read.asUInt()
+  // io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
+  // io.out.bits.resp.s1.meta := s1_read.asUInt()
 
-  // TODO: Replace RegNext by RegEnable
-  io.out.bits.resp.s2.preds.taken_mask := RegEnable(io.out.bits.resp.s1.preds.taken_mask, io.s1_fire)
-  io.out.bits.resp.s2.meta := RegEnable(io.out.bits.resp.s1.meta, io.s1_fire)
+  val s1_latch_taken_mask = VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
+  val s1_latch_meta       = s1_read.asUInt()
 
-  io.out.bits.resp.s3.preds.taken_mask := RegEnable(io.out.bits.resp.s2.preds.taken_mask, io.s2_fire)
-  io.out.bits.resp.s3.meta := RegEnable(io.out.bits.resp.s2.meta, io.s2_fire)
+  io.out.bits.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
+  io.out.bits.resp.s2.meta := RegEnable(s1_latch_meta, io.s1_fire)
+
+  io.out.bits.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
+  io.out.bits.resp.s3.meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
 
   // Update logic
   val u_valid = RegNext(io.update.valid)

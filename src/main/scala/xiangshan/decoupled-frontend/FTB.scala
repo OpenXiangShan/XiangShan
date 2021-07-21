@@ -137,10 +137,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
 
-  io.out.bits.resp := io.in.bits.resp_in(0)
+  io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
 
   val s1_latch_target = Wire(UInt(VAddrBits.W))
-  s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
+  // s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
+  s1_latch_target := s1_pc + (FetchWidth*4).U
   when(s1_hit) {
     s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
@@ -148,8 +149,14 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   }
 
   val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
-  s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
-  s1_latch_taken_mask(0)  := ftb_entry.jmpValid
+
+  // TODO: mask must is zero when ftb not hit
+  when(s1_hit) {
+    s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
+    s1_latch_taken_mask(0)  := ftb_entry.jmpValid
+  }.otherwise {
+    s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
+  }
 
   val s1_latch_is_br         = ftb_entry.brValids
   val s1_latch_is_jal        = ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
@@ -164,18 +171,18 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val s1_latch_ftb_entry     = ftb_entry
 
   // when (RegNext(s1_hit)) {
-  io.out.bits.resp.s2.preds.taken_mask  := RegEnable(s1_latch_taken_mask, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_br       := RegEnable(s1_latch_is_br, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jal      := RegEnable(s1_latch_is_jal, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jalr     := RegEnable(s1_latch_is_jalr, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_call     := RegEnable(s1_latch_is_call, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_ret      := RegEnable(s1_latch_is_ret, io.s1_fire)
+  io.out.bits.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_br         := RegEnable(s1_latch_is_br, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jal        := RegEnable(s1_latch_is_jal, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jalr       := RegEnable(s1_latch_is_jalr, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_call       := RegEnable(s1_latch_is_call, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_ret        := RegEnable(s1_latch_is_ret, io.s1_fire)
 
-  io.out.bits.resp.s2.preds.target      := RegEnable(s1_latch_target, io.s1_fire)
-  io.out.bits.resp.s2.pc                := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
-  io.out.bits.resp.s2.hit               := RegEnable(s1_latch_hit, io.s1_fire)
-  io.out.bits.resp.s2.meta              := RegEnable(s1_latch_meta, io.s1_fire)
-  io.out.bits.resp.s2.ftb_entry         := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+  io.out.bits.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
+  io.out.bits.resp.s2.pc                  := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
+  io.out.bits.resp.s2.hit                 := RegEnable(s1_latch_hit, io.s1_fire)
+  io.out.bits.resp.s2.meta                := RegEnable(s1_latch_meta, io.s1_fire)
+  io.out.bits.resp.s2.ftb_entry           := RegEnable(s1_latch_ftb_entry, io.s1_fire)
 
   when(!s1_hit) {
     io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(s1_latch_pc + (FetchWidth*4).U, io.s1_fire)
