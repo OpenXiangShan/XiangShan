@@ -56,6 +56,7 @@ package object xiangshan {
     def mul          = "b0100".U
     def div          = "b0101".U
     def fence        = "b0011".U
+    def bmu          = "b0111".U //
 
     def fmac         = "b1000".U
     def fmisc        = "b1011".U
@@ -65,7 +66,7 @@ package object xiangshan {
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
 
-    def num = 13
+    def num = 14
 
     def apply() = UInt(log2Up(num).W)
 
@@ -329,6 +330,56 @@ package object xiangshan {
     def amomaxu_d = "b101011".U
   }
 
+  object BMUOpType {
+    // zbc
+    def clmul       = "b000000".U
+    def clmulh      = "b000010".U
+    def clmulr      = "b000100".U
+    // zbs
+    def bclr        = "b001000".U
+    def bext        = "b001010".U
+    def binv        = "b001100".U
+    def bset        = "b001110".U
+    // zbaq
+    def sh1add      = "b010000".U
+    def sh1add_uw   = "b010001".U
+    def sh2add      = "b010010".U
+    def sh2add_uw   = "b010011".U
+    def sh3add      = "b010100".U
+    def sh3add_uw   = "b010101".U
+    def add_uw      = "b010111".U
+    def slli_uw     = "b011111".U
+
+    // zbb
+    def andn 	      = "b100000".U
+    def orn         = "b100001".U
+    def xnor        = "b100010".U
+
+    def max         = "b100100".U
+    def maxu        = "b100101".U
+    def min         = "b100110".U
+    def minu        = "b100111".U
+
+    def sext_b      = "b101000".U
+    def sext_h      = "b101001".U
+    def zext_h      = "b101010".U
+
+    def orc_b       = "b101100".U
+    def rev8        = "b101101".U
+
+    def clz         = "b110000".U
+    def clzw        = "b110001".U
+    def ctz         = "b110010".U
+    def ctzw        = "b110011".U
+    def cpop        = "b110100".U
+    def cpopw       = "b110101".U
+
+    def rol         = "b111000".U
+    def rolw        = "b111001".U
+    def ror         = "b111010".U
+    def rorw        = "b111011".U
+  }
+
   object BTBtype {
     def B = "b00".U  // branch
     def J = "b01".U  // jump
@@ -339,21 +390,23 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b111".U
-    def IMM_S  = "b000".U
-    def IMM_SB = "b001".U
-    def IMM_U  = "b010".U
-    def IMM_UJ = "b011".U
-    def IMM_I  = "b100".U
-    def IMM_Z  = "b101".U
-    def INVALID_INSTR = "b110".U
+    def IMM_X  = "b0111".U
+    def IMM_S  = "b0000".U
+    def IMM_SB = "b0001".U
+    def IMM_U  = "b0010".U
+    def IMM_UJ = "b0011".U
+    def IMM_I  = "b0100".U
+    def IMM_Z  = "b0101".U
+    def INVALID_INSTR = "b0110".U
+    def IMM_B6 = "b1000".U
 
-    def apply() = UInt(3.W)
+    def apply() = UInt(4.W)
   }
 
   def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
   def aluGen(p: Parameters) = new Alu()(p)
+  def bmuGen(p: Parameters) = new Bmu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
   def fenceGen(p: Parameters) = new Fence()(p)
   def csrGen(p: Parameters) = new CSR()(p)
@@ -383,8 +436,19 @@ package object xiangshan {
 
   val aluCfg = FuConfig(
     fuGen = aluGen,
-    fuSel = _ => true.B,
+    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.alu,
     fuType = FuType.alu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    hasRedirect = true,
+  )
+
+  val bmuCfg = FuConfig(
+    fuGen = bmuGen,
+    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.bmu,
+    fuType = FuType.bmu,
     numIntSrc = 2,
     numFpSrc = 0,
     writeIntRf = true,
@@ -502,7 +566,7 @@ package object xiangshan {
     UncertainLatency()
   )
 
-  val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
+  val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg, bmuCfg), 0, Int.MaxValue)
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
