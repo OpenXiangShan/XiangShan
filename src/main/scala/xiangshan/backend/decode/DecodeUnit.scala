@@ -282,6 +282,71 @@ object FDecode extends DecodeConstants{
 }
 
 /**
+  * Bit Manipulation Decode
+  */
+object BDecode extends DecodeConstants{
+  val table: Array[(BitPat, List[BitPat])] = Array(
+
+    // Basic bit manipulation
+    CLZ         -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZW        -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZ         -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZW        -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    CPOP        -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOPW       -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    ANDN        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.andn, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    ORN         -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.orn, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    XNOR        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.xnor, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    MIN         -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.min, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    MINU        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.minu, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    MAX         -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.max, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    MAXU        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.maxu, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    SEXT_B      -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.sext_b, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SEXT_H      -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.sext_h, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    ZEXT_H      -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.zext_h, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    ORC_B       -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.orc_b, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    REV8        -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.rev8, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+
+    BSET       -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.bset, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    BSETI      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.bset, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    BCLR       -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.bclr, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    BCLRI      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.bclr, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    BINV       -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.binv, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    BINVI      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.binv, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    BEXT       -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.bext, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    BEXTI      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.bext, Y, N, N, N, N, N, N, SelImm.IMM_I),
+
+    SH1ADD      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh1add, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SH2ADD      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh2add, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SH3ADD      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh3add, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SH1ADDU_W   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh1add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SH2ADDU_W   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh2add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SH3ADDU_W   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.sh3add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    // Bit permutation
+    ROR         -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.ror, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    RORW        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.rorw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    RORI        -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.ror, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    RORIW       -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.rorw, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    ROL         -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.rol, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    ROLW        -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.rolw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    CLMUL       -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmul, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLMULH      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulh, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLMULR      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulr, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    ADDU_W      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SLLIU_W     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bmu, BMUOpType.slli_uw, Y, N, N, N, N, N, N, SelImm.IMM_I)
+  )
+}
+
+/**
  * FP Divide SquareRoot Constants
  */
 object FDivSqrtDecode extends DecodeConstants {
@@ -376,6 +441,14 @@ case class Imm_Z() extends Imm(12 + 5){
   }
 }
 
+case class Imm_B6() extends Imm(6){
+  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(25, 20)
+  }
+}
+
 object ImmUnion {
   val I = Imm_I()
   val S = Imm_S()
@@ -383,7 +456,8 @@ object ImmUnion {
   val U = Imm_U()
   val J = Imm_J()
   val Z = Imm_Z()
-  val imms = Seq(I, S, B, U, J, Z)
+  val B6 = Imm_B6()
+  val imms = Seq(I, S, B, U, J, Z, B6)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -391,7 +465,8 @@ object ImmUnion {
     SelImm.IMM_SB,
     SelImm.IMM_U,
     SelImm.IMM_UJ,
-    SelImm.IMM_Z
+    SelImm.IMM_Z,
+    SelImm.IMM_B6
   ).zip(imms)
   println(s"ImmUnion max len: $maxLen")
 }
@@ -416,7 +491,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
-  var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table
+  var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow
