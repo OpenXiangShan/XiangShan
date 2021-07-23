@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
+import chisel3.experimental.verification
 import utils._
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
@@ -121,6 +122,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //TODO: tlb req
   io.iTLBInter.req <> DontCare
   io.iTLBInter.resp.ready := true.B
+  XSDebug("fromFtq (v:r): (%d:%d) start:%x fallthrough:%x \n", fromFtq.req.valid, fromFtq.req.ready, fromFtq.req.bits.startAddr, fromFtq.req.bits.fallThruAddr)
 
   //---------------------------------------------
   //  Fetch Stage 2 :
@@ -159,10 +161,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
   val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
   val (bank0_hit,bank1_hit) = (ParallelOR(bank0_hit_vec), ParallelOR(bank1_hit_vec)) 
-  val f1_hit                = bank0_hit && bank1_hit && f1_valid 
+  val f1_hit                = (bank0_hit && bank1_hit && f1_valid && f1_doubleLine) || (f1_valid && !f1_doubleLine && bank0_hit)  
   val f1_bank_hit_vec       = VecInit(Seq(bank0_hit_vec, bank1_hit_vec))
   val f1_bank_hit           = VecInit(Seq(bank0_hit, bank1_hit))
-  
+
+  //cover((PopCount(bank0_hit_vec) === 1.U || PopCount(bank0_hit_vec) === 0.U) && f1_valid, "multiple hit in bank 0!")
+  //cover((PopCount(bank1_hit_vec) === 1.U || PopCount(bank1_hit_vec) === 0.U) && f1_valid, "multiple hit in bank 1!")  
+
   val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(Some("random"),nWays,nSets/2))
   val f1_victim_masks = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(f1_vSetIdx(i)))})
 
