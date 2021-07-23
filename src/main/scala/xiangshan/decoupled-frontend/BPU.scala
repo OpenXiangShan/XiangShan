@@ -261,6 +261,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
   val s0_pc = WireInit(resetVector.U)
+  val s0_pc_reg = RegInit(resetVector.U)
 
   val s3_gh = predictors.io.out.bits.resp.s3.ghist
   val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
@@ -305,7 +306,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     s0_pc := resp.s2.preds.target
   }.elsewhen(resp.valids(0)) {
     s0_pc := resp.s1.preds.target
+  }.otherwise {
+    s0_pc := s0_pc_reg
   }
+  
+  s0_pc_reg := s0_pc
 
   predictors.io.update := io.ftq_to_bpu.update
   predictors.io.redirect := io.ftq_to_bpu.redirect
