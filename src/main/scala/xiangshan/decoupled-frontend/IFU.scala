@@ -372,7 +372,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     hasSecMiss := false.B
   }
 
-  when(f2_0_f1_0 && f2_0_f1_1){
+  when(f2_0_f1_0 || f2_0_f1_1){
     reservedRefillData(0) := f2_mq_datas(0)
   }
 
