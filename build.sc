@@ -13,29 +13,14 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-
 import os.Path
 import mill._
-import mill.modules.Util
-import $ivy.`com.lihaoyi::mill-contrib-buildinfo:$MILL_VERSION`
-import $ivy.`com.lihaoyi::mill-contrib-bsp:$MILL_VERSION`
-import mill.contrib.buildinfo.BuildInfo
 import scalalib._
-import coursier.maven.MavenRepository
-
-object CustomZincWorkerModule extends ZincWorkerModule {
-  def repositories() = super.repositories ++ Seq(
-    MavenRepository("https://maven.aliyun.com/repository/public"),
-    MavenRepository("https://maven.aliyun.com/repository/apache-snapshots")
-  )
-}
 
 trait CommonModule extends ScalaModule {
   override def scalaVersion = "2.12.10"
 
   override def scalacOptions = Seq("-Xsource:2.11")
-
-  override def zincWorker = CustomZincWorkerModule
 
   private val macroParadise = ivy"org.scalamacros:::paradise:2.1.0"
 
@@ -96,7 +81,7 @@ object chiseltest extends CommonModule with SbtModule {
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx10G")
+  override def forkArgs = Seq("-Xmx64G")
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -106,6 +91,9 @@ object XiangShan extends CommonModule with SbtModule {
   )
 
   object test extends Tests {
+
+    override def forkArgs = Seq("-Xmx64G")
+
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.0"
     )
@@ -113,10 +101,6 @@ object XiangShan extends CommonModule with SbtModule {
     def testFrameworks = Seq(
       "org.scalatest.tools.Framework"
     )
-
-    def testOnly(args: String*) = T.command {
-      super.runMain("org.scalatest.tools.Runner", args: _*)
-    }
   }
 
 }
