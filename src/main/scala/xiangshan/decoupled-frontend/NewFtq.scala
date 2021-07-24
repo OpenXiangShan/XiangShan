@@ -736,7 +736,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   // only the valid bit is actually needed
-  io.toIfu.redirect := io.fromBackend.stage3Redirect
+  io.toIfu.redirect := DontCare
+  io.toIfu.redirect.valid := stage2Flush
   
   // commit
   for (c <- io.fromBackend.roq_commits) {
@@ -762,7 +763,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     })).andR()
 
   // need one cycle to read mem and srams 
-  do_commit := RegNext(canCommit)
+  do_commit := RegNext(canCommit, init=false.B)
   when (do_commit) { commPtr := commPtr + 1.U }
   val commit_hit = entry_hit_status(commPtr.value)
   val commit_entry_taken = cfiIndex_vec(commPtr.value).valid
@@ -785,7 +786,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_ftb_entry = ftb_entry_mem.io.rdata(1)
 
   io.toBpu.update := DontCare
-  io.toBpu.update.valid := commit_valid
+  io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
   update.false_hit := commit_hit === h_false_hit
   update.pc := commit_pc_bundle.startAddr
