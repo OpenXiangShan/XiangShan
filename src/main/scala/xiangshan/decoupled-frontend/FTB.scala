@@ -163,7 +163,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   }
 
   val s1_latch_is_br         = ftb_entry.brValids
-  val s1_latch_is_jal        = ftb_entry.jmpValid && !(ftb_entry.isJalr || ftb_entry.isCall ||ftb_entry.isRet)
+  val s1_latch_is_jal        = ftb_entry.jmpValid && !ftb_entry.isJalr
   val s1_latch_is_jalr       = ftb_entry.isJalr
   val s1_latch_is_call       = ftb_entry.isCall
   val s1_latch_is_ret        = ftb_entry.isRet
