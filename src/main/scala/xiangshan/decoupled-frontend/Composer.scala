@@ -25,6 +25,8 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out.bits.resp := resp
 
+  val s0_pc_next = RegNext(io.in.bits.s0_pc)
+
   var metas = 0.U(1.W)
   var meta_sz = 0
   for (c <- components) {
@@ -84,9 +86,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val finalPredValid = components(2).io.out.valid
   val finalPredResp = components(2).io.out.bits.resp
   when(finalPredValid) {
-    when(finalPredResp.s1.preds.taken_mask(0) =/= finalPredResp.s2.preds.taken_mask(0) ||
-      finalPredResp.s1.preds.taken_mask(1) =/= finalPredResp.s2.preds.taken_mask(1) ||
-      finalPredResp.s1.preds.target =/= finalPredResp.s2.preds.target) {
+    when(finalPredResp.s2.preds.target =/= s0_pc_next) {
       overrideFlush.valid := true.B
       overrideFlush.bits := finalPredResp.s2.preds.target
     }

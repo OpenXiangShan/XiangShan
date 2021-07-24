@@ -87,11 +87,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
-  val s1_idx = ftbAddr.getBankIdx(s1_pc)
+  val s0_idx = ftbAddr.getBankIdx(s0_pc)
   val s1_tag = ftbAddr.getTag(s1_pc)
 
   ftb.io.r.req.valid := io.s0_fire
-  ftb.io.r.req.bits.setIdx := s1_idx
+  ftb.io.r.req.bits.setIdx := s0_idx
 
   io.in.ready := ftb.io.r.req.ready && !io.flush.valid
   // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
@@ -105,7 +105,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val s1_totalHits = VecInit((0 until numWays).map(b => s1_read(b).tag === s1_tag && s1_read(b).valid))
   val s1_hit = s1_totalHits.reduce(_||_)
-  val s1_hit_way = PriorityEncoder(s1_totalHits)
+  val s1_hit_way = PriorityEncoder(s1_totalHits) // TODO: Replace by Mux1H, and when not hit, clac tag and save it in ftb_entry
 
   def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
     val randomAlloc = true
@@ -137,7 +137,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
 
-  io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
+  // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
+  io.out.bits.resp := io.in.bits.resp_in(0)
 
   val s1_latch_target = Wire(UInt(VAddrBits.W))
   // s1_latch_target := io.in.bits.resp_in(0).s1.preds.target

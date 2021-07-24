@@ -213,7 +213,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   // io.in.ready := !io.flush.valid
 
-  banks.read_pc.valid := io.s0_fire
+  banks.read_pc.valid := io.s1_fire
   banks.read_pc.bits := s1_pc
 
   io.out.valid := io.s1_fire && !io.flush.valid

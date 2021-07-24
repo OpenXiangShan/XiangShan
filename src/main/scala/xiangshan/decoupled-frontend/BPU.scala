@@ -300,10 +300,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   when(io.ftq_to_bpu.redirect.valid) {
     s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
-  }.elsewhen(resp.valids(2)) {
-    s0_pc := resp.s3.preds.target
-  }.elsewhen(resp.valids(1)) {
-    s0_pc := resp.s2.preds.target
   }.elsewhen(resp.valids(0)) {
     s0_pc := resp.s1.preds.target
   }.otherwise {
