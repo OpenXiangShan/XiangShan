@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -121,13 +122,16 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
         case (update, wakeup) => update || wakeup
       })
       statusNext.scheduled := updateStatus.scheduled
-      statusNext.blocked := updateStatus.blocked
+      statusNext.blocked := false.B
       statusNext.credit := updateStatus.credit
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
       statusNext.sqIdx := updateStatus.sqIdx
       statusNext.isFirstIssue := true.B
+      if (params.checkWaitBit) {
+        statusNext.blocked := updateStatus.blocked && isAfter(updateStatus.sqIdx, io.stIssuePtr)
+      }
       XSError(status.valid, p"should not update a valid entry $i\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
@@ -143,11 +147,9 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
       XSError(hasIssued && !status.valid, p"should not issue an invalid entry $i\n")
+      statusNext.blocked := false.B
       if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
-      }
-      else {
-        statusNext.blocked := false.B
       }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
@@ -168,4 +170,17 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   io.canIssue := VecInit(statusArray.map(_.valid).zip(readyVec).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
 
+  val validEntries = PopCount(statusArray.map(_.valid))
+  XSPerfHistogram("valid_entries", validEntries, true.B, 0, params.numEntries, 1)
+  for (i <- 0 until params.numSrc) {
+    val waitSrc = statusArray.map(_.srcState).map(s => Cat(s.zipWithIndex.filter(_._2 != i).map(_._1)).andR && !s(i))
+    val srcBlockIssue = statusArray.zip(waitSrc).map{ case (s, w) => s.valid && !s.scheduled && !s.blocked && w }
+    XSPerfAccumulate(s"wait_for_src_$i", PopCount(srcBlockIssue))
+  }
+  val isBlocked = PopCount(statusArray.map(s => s.valid && s.blocked))
+  XSPerfAccumulate("blocked_entries", isBlocked)
+  val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
+  XSPerfAccumulate("scheduled_entries", isScheduled)
+  val notSelected = PopCount(io.canIssue) - PopCount(io.issueGranted.map(_.valid))
+  XSPerfAccumulate("not_selected_entries", notSelected)
 }
