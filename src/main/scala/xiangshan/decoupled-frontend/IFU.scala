@@ -312,8 +312,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_datas        = Wire(Vec(2, UInt(blockBits.W)))
   f2_datas.zipWithIndex.map{case(bank,i) =>  
-    if(i == 0) bank := Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0),Mux(f2_bank_hit(i), f2_hit_datas(i), f2_mq_datas(i))))
-    else bank := Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0),Mux(f2_bank_hit(i), f2_hit_datas(i), f2_mq_datas(i))))
+    if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
+    else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
 
   // val jump_mask = Vec(FetchWidth,Bool())
@@ -367,7 +367,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   }.elsewhen(isSameLine && !f1_flush && io.toIbuffer.fire()){
     sec_miss_reg.zipWithIndex.map{case(sig, i) => sig := sec_miss_sit(i)}
     hasSecMiss := true.B
-  }.elsewhen(!isSameLine && hasSecMiss && io.toIbuffer.fire()){
+  }.elsewhen((!isSameLine || f1_flush) && hasSecMiss && io.toIbuffer.fire()){
     sec_miss_reg.map(sig => sig := false.B)
     hasSecMiss := false.B
   }
