@@ -1,10 +1,12 @@
 # XiangShan
 
-XiangShan (香山) is an open-source high-performance RISC-V processor project. 
+XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
 中文说明[在此](readme.zh-cn.md)。
 
 Copyright 2020-2021 by Institute of Computing Technology, Chinese Academy of Sciences.
+
+Copyright 2020-2021 by Peng Cheng Laboratory.
 
 ## Docs and slides
 We gave 20+ presentations on RISC-V World Conference China 2021. XiangShan tutorial was held at the same place. Our slides for RVWC2021 have been updated on [our doc repo](https://github.com/OpenXiangShan/XiangShan-doc) (in Chinese).
@@ -69,7 +71,7 @@ Some of the key directories are shown below.
 
 * Install [Verilator](https://verilator.org/guide/latest/), the open-source Verilog simulator.
 * Run `make emu` to build the C++ simulator `./build/emu` with Verilator.
-* Refer to `./build/emu --help` for run-time arguments of the simulator. 
+* Refer to `./build/emu --help` for run-time arguments of the simulator.
 * Refer to `Makefile` and `verilator.mk` for more information.
 
 Example:
