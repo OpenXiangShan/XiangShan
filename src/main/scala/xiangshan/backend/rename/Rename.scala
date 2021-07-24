@@ -86,10 +86,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
   fpFreeList.io.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
   when (io.roqCommits.hasWalkInstr) {
-    io.roqCommits.valid zip io.roqCommits.info zip intFreeList.io.dec foreach {
-      case ((valid, info), dec) =>
-        dec.valid := valid && needDestRegCommit(false, info)
-        dec.bits := info.pdest
+    for (i <- 0 until CommitWidth) {
+      val walkValid = io.roqCommits.valid(i)
+      val walkInfo = io.roqCommits.info(i)
+      
+      intFreeList.io.dec.req(i) := walkValid && needDestRegCommit(false, walkInfo)
+      intFreeList.io.dec.old_pdests(i) := walkInfo.pdest // free pdest when cancelling this inst
+      intFreeList.io.dec.eliminatedMove(i) := walkInfo.eliminatedMove
+      intFreeList.io.dec.pdests(i) := DontCare
     }
   }
 
@@ -134,7 +138,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val isMove = io.in.map(_.bits.ctrl.isMove)
   val isMax = intFreeList.io.maxVec
   val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val psrc_cmp = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val psrc_cmp = Wire(MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W))))
 
   // uop calculation
   for (i <- 0 until RenameWidth) {
@@ -204,6 +208,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // calculate meEnable
       meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(i))
     }
+    uops(i).eliminatedMove := meEnable(i)
 
     // send psrc of eliminated move instructions to free list and label them as eliminated
     when (meEnable(i)) {
@@ -309,11 +314,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         fpFreeList.io.deallocReqs(i)  := rat.io.archWritePorts(i).wen
         fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
       } else { // Integer free list
-        intFreeList.io.dec(i).valid := false.B
-        intFreeList.io.dec(i).bits  := DontCare
+        intFreeList.io.dec.req(i) := false.B
+        intFreeList.io.dec.old_pdests(i)  := DontCare
+        intFreeList.io.dec.eliminatedMove(i) := false.B
+        intFreeList.io.dec.pdests(i) := DontCare
         when (commitDestValid && !io.roqCommits.isWalk) {
-          intFreeList.io.dec(i).valid := rat.io.archWritePorts(i).wen
-          intFreeList.io.dec(i).bits  := io.roqCommits.info(i).old_pdest
+          intFreeList.io.dec.req(i) := rat.io.archWritePorts(i).wen
+          intFreeList.io.dec.old_pdests(i)  := io.roqCommits.info(i).old_pdest
+          intFreeList.io.dec.eliminatedMove(i) := io.roqCommits.info(i).eliminatedMove
+          intFreeList.io.dec.pdests(i) := io.roqCommits.info(i).pdest
         }
       }
     }

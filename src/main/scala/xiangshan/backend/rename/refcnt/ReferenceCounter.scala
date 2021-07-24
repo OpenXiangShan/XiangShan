@@ -4,6 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.XSModule
+import utils.XSDebug
 
 class ReferenceCounter(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -44,4 +45,6 @@ class ReferenceCounter(implicit p: Parameters) extends XSModule {
       counterRegs(idx) := 1.U
     }
   }
+
+  XSDebug(p"RefCnt[${counterRegs.zipWithIndex.map{case (value, idx) => p"(p$idx:$value)"}.mkString}]")
 }
