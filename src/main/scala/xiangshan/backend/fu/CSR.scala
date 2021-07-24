@@ -270,7 +270,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val dcsr = RegInit(UInt(32.W), 0x4000b010.U)
   val dpc = Reg(UInt(64.W))
   val dscratch = Reg(UInt(64.W))
-  val debugMode = Reg(Bool())
+  val debugMode = RegInit(false.B)
   val debugIntrEnable = RegInit(true.B)
   csrio.debugMode := debugMode
 

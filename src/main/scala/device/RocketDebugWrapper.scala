@@ -58,18 +58,19 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       val clock = Input(Bool())
       val reset = Input(Bool())
     })
-    debug.module.io.tl_reset := io.reset
-    debug.module.io.tl_clock := io.clock.asClock
+    debug.module.io.tl_reset := io.reset // this should be TL reset
+    debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
     debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
-    io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartIsInReset.foreach { rcdm => rcio := rcdm }}
+    io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
-    io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg }
+    io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
     debug.module.io.debug_reset := io.debugIO.reset
     debug.module.io.debug_clock := io.debugIO.clock
     io.debugIO.ndreset := debug.module.io.ctrl.ndreset
     io.debugIO.dmactive := debug.module.io.ctrl.dmactive
     debug.module.io.ctrl.dmactiveAck := io.debugIO.dmactiveAck
     io.debugIO.extTrigger.foreach { x => debug.module.io.extTrigger.foreach {y => x <> y}}
+    outerdebug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
 
     val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
 
