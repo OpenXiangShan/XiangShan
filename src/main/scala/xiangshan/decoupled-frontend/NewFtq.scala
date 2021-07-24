@@ -79,6 +79,7 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   val brMask = Vec(16, Bool())
   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
   val jmpOffset = UInt(4.W)
+  val rvcMask = Vec(16, Bool())
 }
 
 class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle {
@@ -145,6 +146,7 @@ class FtqToIfuIO(implicit p: Parameters) extends XSBundle {
 
 trait HasBackendRedirectInfo extends HasXSParameter {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt + 1
+  def isLoadReplay(r: Valid[Redirect]) = r.bits.flushItself()
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedirectInfo {
@@ -153,8 +155,107 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val cfi_reads = Vec(numRedirect, Flipped(new FtqRead(new CfiInfoToCtrl)))
   def getJumpPcRead = pc_reads.head
   def getRedirectPcRead = VecInit(pc_reads.tail.dropRight(2))
-  def getMemPredPcRead = pc_reads.dropRight(1).last
+  def getMemPredPcRead = pc_reads.init.last
   def getRoqFlushPcRead = pc_reads.last
+}
+
+
+class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo with HasBPUParameter {
+  val io = IO(new Bundle {
+    val start_addr = Input(UInt(VAddrBits.W))
+    val old_entry = Input(new FTBEntry)
+    val pd = Input(new Ftq_pd_Entry)
+    val cfiIndex = Flipped(Valid(UInt(log2Ceil(PredictWidth).W)))
+    val target = Input(UInt(VAddrBits.W))
+    val hit = Input(Bool())
+    val mispredict_vec = Input(Vec(PredictWidth, Bool()))
+
+    val new_entry = Output(new FTBEntry)
+    val new_br_insert_pos = Output(Vec(numBr, Bool()))
+    val taken_mask = Output(Vec(numBr+1, Bool()))
+    val mispred_mask = Output(Vec(numBr+1, Bool()))
+  })
+
+  // no mispredictions detected at predecode
+  val hit = io.hit
+  val pd = io.pd
+
+  val init_entry = WireInit(0.U.asTypeOf(new FTBEntry))
+
+
+  val cfi_is_br = pd.brMask(io.cfiIndex.bits) && io.cfiIndex.valid
+  val entry_has_jmp = pd.jmpInfo.valid
+  val new_cfi_is_jal  = entry_has_jmp && !pd.jmpInfo.bits(0) && io.cfiIndex.valid
+  val new_cfi_is_jalr = entry_has_jmp &&  pd.jmpInfo.bits(0) && io.cfiIndex.valid
+  val new_cfi_is_call = entry_has_jmp &&  pd.jmpInfo.bits(1) && io.cfiIndex.valid
+  val new_cfi_is_ret  = entry_has_jmp &&  pd.jmpInfo.bits(2) && io.cfiIndex.valid
+
+  // if not hit, establish a new entry
+  init_entry.valid := true.B
+  // tag is left for ftb to assign
+  init_entry.brValids(0) := cfi_is_br
+  init_entry.brOffset(0) := io.cfiIndex.bits
+  init_entry.brTargets(0) := io.target
+  init_entry.jmpValid := new_cfi_is_jal || new_cfi_is_jalr
+  init_entry.jmpTarget := io.target
+  init_entry.pftAddr := Mux(entry_has_jmp,
+    io.start_addr + (pd.jmpOffset << instOffsetBits) + Mux(pd.rvcMask(pd.jmpOffset), 2.U, 4.U),
+    io.start_addr + (FetchWidth * instBytes).U)
+  // TODO: carry bit is currently ignored
+  init_entry.isJalr := new_cfi_is_jalr
+  init_entry.isCall := new_cfi_is_call
+  init_entry.isRet  := new_cfi_is_ret
+  // TODO: oversize bit is currently ignored
+  init_entry.last_is_rvc := Mux(entry_has_jmp, pd.rvcMask(pd.jmpOffset), pd.rvcMask.last)
+
+  // if hit, check whether a new cfi(only br is possible) is detected
+  val oe = io.old_entry
+  val br_recorded_vec = VecInit((oe.brValids zip oe.brOffset).map {
+    case (v, off) => v && (off === io.cfiIndex.bits)
+  })
+  val br_recorded = br_recorded_vec.asUInt.orR
+  val is_new_br = cfi_is_br && !br_recorded
+  val br_full = oe.brValids.asUInt.andR // all slots have brs
+  val new_br_offset = io.cfiIndex.bits
+  // vec(i) means new br will be inserted BEFORE old br(i)
+  val new_br_insert_onehot = VecInit((0 until numBr).map{
+    i => i match {
+      case 0 => oe.brValids(0) && new_br_offset < oe.brOffset(0)
+      case idx => oe.brValids(idx-1) && new_br_offset > oe.brOffset(idx-1) &&
+        (!oe.brValids(idx) || new_br_offset < oe.brOffset(idx))
+    }
+  })
+
+  val old_entry_modified = WireInit(io.old_entry)
+  for (i <- 0 until numBr) {
+    old_entry_modified.brOffset(i)  :=  Mux(new_br_insert_onehot(i), new_br_offset,
+                                          Mux(oe.brOffset(i) < new_br_offset, oe.brOffset(i),
+                                            (if (i != 0) oe.brOffset(i-1) else oe.brOffset(i))))
+    old_entry_modified.brTargets(i) :=  Mux(new_br_insert_onehot(i), io.target,
+                                          Mux(oe.brOffset(i) < new_br_offset, oe.brTargets(i),
+                                            (if (i != 0) oe.brTargets(i-1) else oe.brTargets(i))))
+    old_entry_modified.brValids(i)  :=  Mux(new_br_insert_onehot(i), true.B,
+                                          Mux(oe.brOffset(i) < new_br_offset, oe.brValids(i),
+                                            (if (i != 0) oe.brValids(i-1) else oe.brValids(i))))
+  }
+
+  // in this case, pft_addr should be the addrs of the last br in packet
+  val pft_need_to_change = is_new_br && br_full
+  // it should either be the given last br or the new br
+  when (pft_need_to_change) {
+    val new_pft_offset = Mux(new_br_insert_onehot.asUInt.orR, oe.brOffset.last, new_br_offset)
+    old_entry_modified.pftAddr := io.start_addr + (new_pft_offset << instOffsetBits)
+    old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U)
+  }
+
+  io.new_entry := Mux(!hit, init_entry, Mux(is_new_br, old_entry_modified, io.old_entry))
+  io.new_br_insert_pos := new_br_insert_onehot
+  val new_offset_vec = VecInit(io.new_entry.brOffset :+ pd.jmpOffset)
+  io.taken_mask := VecInit(new_offset_vec.map(off => io.cfiIndex.bits === off && io.cfiIndex.valid))
+  for (i <- 0 until numBr) {
+    io.mispred_mask(i) := io.new_entry.brValids(i) && io.mispredict_vec(io.new_entry.brOffset(i))
+  }
+  io.mispred_mask.last := io.new_entry.jmpValid && io.mispredict_vec(pd.jmpOffset)
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
@@ -174,34 +275,49 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   io.bpuInfo := DontCare
 
-  val stage2Flush = io.fromBackend.stage2Redirect.valid || io.fromBackend.roqFlush.valid
+  val roqFlush = io.fromBackend.roqFlush
+  val stage2Redirect = io.fromBackend.stage2Redirect
+  val stage3Redirect = io.fromBackend.stage3Redirect
+
+  val stage2Flush = stage2Redirect.valid || roqFlush.valid
   val backendFlush = stage2Flush || RegNext(stage2Flush)
   val ifuFlush = io.fromIfu.pdWb.valid && io.fromIfu.pdWb.bits.misOffset.valid
 
   val flush = stage2Flush || RegNext(stage2Flush)
+
+  val allowBpuIn, allowToIfu = WireInit(false.B)
+  val flushToIfu = !allowToIfu
+  // all redirect except load replay
+  allowBpuIn := !ifuFlush && !roqFlush.valid &&
+                !(stage2Redirect.valid && !isLoadReplay(stage2Redirect)) &&
+                !(stage3Redirect.valid && !isLoadReplay(stage3Redirect))
   
-  val bpuPtr, ifuPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
+  allowToIfu := !ifuFlush && !roqFlush.valid && !stage2Redirect.valid && !stage3Redirect.valid
+  
+  val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
   val validEntries = distanceBetween(bpuPtr, commPtr)
 
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
   io.fromBpu.resp.ready := validEntries < FtqSize.U
-  val enq_fire = io.fromBpu.resp.fire() && !backendFlush && !ifuFlush
+  val enq_fire = io.fromBpu.resp.fire() && allowBpuIn
 
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1, 1))
+  // read ports:                            jumpPc + redirects + loadPred + roqFlush + ifuReq + commitUpdate
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1+1, 1))
   ftq_pc_mem.io.wen(0) := enq_fire
   ftq_pc_mem.io.waddr(0) := bpuPtr.value
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
   ftq_pc_mem.io.wdata(0).fallThruAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
   ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until 16).map(i => (io.fromBpu.resp.bits.pc(4, 1) +& i.U)(4).asBool()))
 
-  val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, numRedirect+1, 1))
+  // read ports:                                                       redirects + ifuRedirect + commit
+  val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, numRedirect+1+1, 1))
   ftq_hist_mem.io.wen(0) := enq_fire
   ftq_hist_mem.io.waddr(0) := bpuPtr.value
   ftq_hist_mem.io.wdata(0) := io.fromBpu.resp.bits.ghist
   
-  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 2))
+  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 3))
   ftq_redirect_sram.io.wen := enq_fire
   ftq_redirect_sram.io.waddr := bpuPtr.value
   ftq_redirect_sram.io.wdata.rasSp := io.fromBpu.resp.bits.rasSp
@@ -218,36 +334,65 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_meta_1r_sram.io.waddr := bpuPtr.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.meta
 
+  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 2, 1))
+  ftb_entry_mem.io.wen(0) := enq_fire
+  ftb_entry_mem.io.waddr(0) := bpuPtr.value
+  ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.ftb_entry
+
   
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
   val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Up(PredictWidth).W))))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
   
-  val s_invalid :: s_valid :: s_commited :: Nil = Enum(3)
+  val c_invalid :: c_valid :: c_commited :: Nil = Enum(3)
   val commitStateQueue = RegInit(VecInit(Seq.fill(FtqSize) {
-    VecInit(Seq.fill(PredictWidth)(s_invalid))
+    VecInit(Seq.fill(PredictWidth)(c_invalid))
   }))
   
-  val f_to_send :: f_sent :: f_wb :: Nil = Enum(3)
+  val f_to_send :: f_sent :: Nil = Enum(2)
   val entry_fetch_status = RegInit(VecInit(Seq.fill(FtqSize)(f_sent)))
-  
+
+  val l_invalid :: l_replaying :: Nil = Enum(2)
+  val entry_replay_status = RegInit(VecInit(Seq.fill(FtqSize)(l_invalid)))
+
+  val h_not_hit :: h_false_hit :: h_hit :: Nil = Enum(3)
+  val entry_hit_status = RegInit(VecInit(Seq.fill(FtqSize)(h_not_hit)))
+
+  // 'from' is older in fetch sequence
+  def set_status_between[T <: Data](status_vec: Vec[T])(from: FtqPtr, to: FtqPtr, status: T) = {
+    require(status_vec.length == FtqSize)
+    XSError(isAfter(from, to), "in set_status_between, \'from\' must be not after \'to\'\n")
+    for (i <- 0 until FtqSize) {
+      val wen = Mux(from.value < to.value,
+                      i.U >= from.value && i.U < to.value,
+                      i.U >= from.value || i.U < to.value) // when from.value === to.value, all entry is set
+      when (wen) {
+        status_vec(i) := status
+      }
+    }
+  }
+  val set_fetch_status_between = set_status_between(entry_fetch_status)(_, _, _)
+  val set_commit_status_between = set_status_between(commitStateQueue)(_, _, _)
+  val set_replay_status_between = set_status_between(entry_fetch_status)(_, _, _)
+
   when (enq_fire) {
     val enqIdx = bpuPtr.value
     val preds = io.fromBpu.resp.bits.preds
     val ftb_entry = io.fromBpu.resp.bits.ftb_entry
     val real_taken_mask = preds.taken_mask.asUInt & Cat(ftb_entry.jmpValid, ftb_entry.brValids.asUInt)
-    val jmp_offset = Cat(1.U(1.W), ftb_entry.pftAddr(4,1)) - Mux(ftb_entry.last_is_rvc, 2.U, 4.U) - io.fromBpu.resp.bits.pc(4,1)
-    val jmp_target = io.fromBpu.resp.bits.ftb_entry.jmpTarget
+    val jmp_offset = ftb_entry.getJmpOffset(io.fromBpu.resp.bits.pc)
     val offset_vec = VecInit(ftb_entry.brOffset :+ jmp_offset)
-    val target_vec = VecInit(ftb_entry.brTargets :+ jmp_target)
     val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(4.W))))
     entry_fetch_status(enqIdx) := f_to_send
+    commitStateQueue(enqIdx) := VecInit(Seq.fill(16)(c_invalid))
+    entry_replay_status(enqIdx) := l_invalid // may be useless
+    entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
     enq_cfiIndex.valid := real_taken_mask.orR
     enq_cfiIndex.bits := ParallelPriorityMux(real_taken_mask, offset_vec)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(16)(false.B)))
-    update_target(enqIdx) := ParallelPriorityMux(real_taken_mask, target_vec)
+    update_target(enqIdx) := preds.target
   }
   
   bpuPtr := bpuPtr + enq_fire
@@ -257,9 +402,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // *********************************************************************
   val pdWb = io.fromIfu.pdWb
   val ifu_wb_valid = pdWb.valid
-  // 0: commit, 1: cfiRead, 2-9: ftqRead, 10: ifuRead
-  val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, numRedirect+1, 1))
-  ftq_pd_mem.io.wen(0) := ifu_wb_valid
+  val ifu_wb_idx = pdWb.bits.ftqIdx.value
+  // read ports:                                          redirects + ifuRedirect + commit update
+  val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, numRedirect+1+1, 1))
+  ftq_pd_mem.io.wen(0) := ifu_wb_valid && entry_replay_status(ifu_wb_idx) =/= l_replaying
   ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
   val pds = pdWb.bits.pd
   ftq_pd_mem.io.wdata(0).brMask := VecInit(pds.map(pd => pd.isBr && pd.valid))
@@ -267,12 +413,52 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pd_mem.io.wdata(0).jmpInfo.bits := ParallelPriorityMux(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid),
                                                           pds.map(pd => VecInit(pd.isJalr, pd.isCall, pd.isRet)))
   ftq_pd_mem.io.wdata(0).jmpOffset := ParallelPriorityEncoder(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid))
-  
+  ftq_pd_mem.io.wdata(0).rvcMask := VecInit(pds.map(pd => pd.isRVC))
+
+  val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit &&
+                     entry_replay_status(ifu_wb_idx) =/= l_replaying &&
+                     ifu_wb_valid
+  val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
+  val hit_pd_mispred_reg = RegNext(hit_pd_mispred, init=false.B)
+  val pd_reg       = RegEnable(pds,             enable = pdWb.valid)
+  val start_pc_reg = RegEnable(pdWb.bits.pc(0), enable = pdWb.valid)
+  val wb_idx_reg   = RegEnable(ifu_wb_idx,      enable = pdWb.valid)
+
   when (ifu_wb_valid) {
-    val ifuWbIdx = pdWb.bits.ftqIdx.value
-    commitStateQueue(ifuWbIdx) := VecInit(pds.map(_.valid))
-    entry_fetch_status(ifuWbIdx) := f_wb
+    val comm_stq_wen = VecInit(pds.map(_.valid))
+    (commitStateQueue(ifu_wb_idx) zip comm_stq_wen).map{
+      case (qe, v) => when (v) { qe := c_valid }
+    }
+    entry_replay_status(ifu_wb_idx) := l_invalid
   }
+
+  ifuWbPtr := ifuWbPtr + ifu_wb_valid
+
+  ftb_entry_mem.io.raddr(0) := ifu_wb_idx
+  when (RegNext(hit_pd_valid)) {
+    // check for false hit
+    val pred_ftb_entry = ftb_entry_mem.io.rdata(0)
+    // we check cfis that bpu predicted
+    val br_false_hit = (pred_ftb_entry.brValids zip pred_ftb_entry.brOffset).map{
+      case (v, offset) => v && !(pd_reg(offset).valid && pd_reg(offset).isBr)
+    }.reduce(_||_)
+    
+    val jmpOffset = pred_ftb_entry.getJmpOffset(start_pc_reg)
+    val jmp_pd = pd_reg(jmpOffset)
+    val jal_false_hit = pred_ftb_entry.jmpValid &&
+      ((pred_ftb_entry.isJal  && !(jmp_pd.valid && jmp_pd.isJal)) ||
+       (pred_ftb_entry.isJalr && !(jmp_pd.valid && jmp_pd.isJalr)) ||
+       (pred_ftb_entry.isCall && !(jmp_pd.valid && jmp_pd.isCall)) ||
+       (pred_ftb_entry.isRet  && !(jmp_pd.valid && jmp_pd.isRet))
+      )
+    
+    when (br_false_hit || jal_false_hit || hit_pd_mispred_reg) {
+      entry_hit_status(wb_idx_reg) := h_false_hit
+    }
+  }
+
+  XSError(pdWb.valid && pdWb.bits.misOffset.valid && entry_replay_status(ifu_wb_idx) === l_replaying,
+    "unexpected misprediction detected by predecode during replay\n")
 
   // ****************************************************************
   // **************************** to ifu ****************************
@@ -280,13 +466,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifu_req_buf = RegInit(0.U.asTypeOf(ValidUndirectioned(new FetchRequestBundle)))
   val to_buf_valid = entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
   // ftqIdx and ftqOffset enq
-  val to_buf_fire = !backendFlush && !ifuFlush && to_buf_valid && (!ifu_req_buf.valid || io.toIfu.req.ready)
+  val to_buf_fire = allowToIfu && to_buf_valid && (!ifu_req_buf.valid || io.toIfu.req.ready)
   when (to_buf_fire) {
     entry_fetch_status(ifuPtr.value) := f_sent
   }
   ifuPtr := ifuPtr + to_buf_fire
   
-  when (backendFlush || ifuFlush) {
+  when (flushToIfu) {
     ifu_req_buf.valid := false.B
   }.elsewhen (to_buf_fire) {
     ifu_req_buf.valid := true.B
@@ -295,35 +481,38 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   
   // read pc and target
-  ftq_pc_mem.io.raddr.last := ifuPtr.value
+  ftq_pc_mem.io.raddr.init.last := ifuPtr.value
   pred_target_sram.io.raddr(0) := ifuPtr.value
   pred_target_sram.io.ren(0) := to_buf_fire
   
+  val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(FtqSize).W))))
   when (to_buf_fire) {
     ifu_req_buf.bits.ftqIdx := ifuPtr
     ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
+    ifu_req_buf.bits.ldReplayOffset := loadReplayOffset
+    when (loadReplayOffset.valid) {
+      loadReplayOffset.valid := false.B
+    }
   }
   when (RegNext(to_buf_fire)) {
-    ifu_req_buf.bits.startAddr := ftq_pc_mem.io.rdata.last.startAddr
-    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.last.fallThruAddr
+    ifu_req_buf.bits.startAddr := ftq_pc_mem.io.rdata.init.last.startAddr
+    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
     ifu_req_buf.bits.target := pred_target_sram.io.rdata(0)
   }
   
   val last_cycle_to_buf_fire = RegNext(to_buf_fire)
   io.toIfu.req.valid := ifu_req_buf.valid
-  io.toIfu.req.bits.ftqIdx := ifu_req_buf.bits.ftqIdx
-  io.toIfu.req.bits.ftqOffset := ifu_req_buf.bits.ftqOffset
-  io.toIfu.req.bits.startAddr := Mux(last_cycle_to_buf_fire,
-                                     ftq_pc_mem.io.rdata.last.startAddr,
-                                     ifu_req_buf.bits.startAddr)
-  io.toIfu.req.bits.fallThruAddr := Mux(last_cycle_to_buf_fire,
-                                        ftq_pc_mem.io.rdata.last.fallThruAddr,
-                                        ifu_req_buf.bits.fallThruAddr)
-  io.toIfu.req.bits.target := Mux(last_cycle_to_buf_fire,
-                                  pred_target_sram.io.rdata(0),
-                                  ifu_req_buf.bits.target)
+  io.toIfu.req.bits  := ifu_req_buf.bits
+  when (last_cycle_to_buf_fire) {
+    io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
+    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
+    io.toIfu.req.bits.target := pred_target_sram.io.rdata(0)
+  }
+        
 
-
+  // **********************************************************************
+  // **************************** backend read ****************************
+  // **********************************************************************
 
   // pc reads
   for ((req, i) <- io.toBackend.pc_reads.zipWithIndex) {
@@ -371,10 +560,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.ren(1) := fromIfuRedirect.valid
   ftq_redirect_sram.io.raddr(1) := fromIfuRedirect.bits.ftqIdx.value
   
-  // TODO: assign redirect rdata to ifuRedirectToBpu
-  
-  ftq_hist_mem.io.raddr.last := fromIfuRedirect.bits.ftqIdx.value
-  ftq_pd_mem.io.raddr.last := fromIfuRedirect.bits.ftqIdx.value
+  ftq_hist_mem.io.raddr.init.last := fromIfuRedirect.bits.ftqIdx.value
+  ftq_pd_mem.io.raddr.init.last := fromIfuRedirect.bits.ftqIdx.value
+
+  val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
+  toBpuCfi.hist := ftq_hist_mem.io.rdata.init.last
+  toBpuCfi.rasSp := ftq_redirect_sram.io.rdata(1).rasSp
+  toBpuCfi.rasEntry := ftq_redirect_sram.io.rdata(1).rasEntry
+  toBpuCfi.specCnt := ftq_redirect_sram.io.rdata(1).specCnt
+  // TODO: sawNotTakenBranch
 
   // *********************************************************************                                  
   // **************************** wb from exu ****************************
@@ -463,18 +657,17 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ***********************************************************************************
   // **************************** flush ptr and state queue ****************************
   // ***********************************************************************************
-  val roqFlush = io.fromBackend.roqFlush
-  val stage2Redirect = io.fromBackend.stage2Redirect
+
   class RedirectInfo extends Bundle {
     val valid = Bool()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(4.W)
-    val notMispredict = Bool()
-    def apply(valid: Bool, idx: FtqPtr, offset: UInt, notMispredict: Bool) = {
+    val flushItSelf = Bool()
+    def apply(valid: Bool, idx: FtqPtr, offset: UInt, flushItSelf: Bool = false.B) = {
       this.valid := valid
       this.ftqIdx := idx
       this.ftqOffset := offset
-      this.notMispredict := notMispredict
+      this.flushItSelf := flushItSelf
       this
     }
   }
@@ -482,66 +675,160 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   redirectVec(0).apply(
     roqFlush.valid,
     roqFlush.bits.ftqIdx,
-    roqFlush.bits.ftqOffset,
-    true.B)
+    roqFlush.bits.ftqOffset
+  )
   redirectVec(1).apply(
     stage2Redirect.valid,
     stage2Redirect.bits.ftqIdx,
     stage2Redirect.bits.ftqOffset,
-    RedirectLevel.flushItself(stage2Redirect.bits.level))
+    RedirectLevel.flushItself(stage2Redirect.bits.level)
+  )
   redirectVec(2).apply(
     fromIfuRedirect.valid,
     fromIfuRedirect.bits.ftqIdx,
-    fromIfuRedirect.bits.ftqOffset,
-    false.B)
+    fromIfuRedirect.bits.ftqOffset
+  )
+  
+  // when redirect, we should reset ptrs and status queues
+
+  // For normal redirects, the inst casusing redirect itself
+  // should not be flushed (called flushAfter), we should reset
+  // both bpuPtr and ifuPtr, and send redirect request to both module.
+
+  // However, for load replays, the load instruction itself should be
+  // re-fetched and re-executed. In this case we only send another
+  // fetch request to ifu, fetching instructions starting from this load,
+  // resetting ifuPtr. We do not trigger a redirect for bpu, and we reuse
+  // previously predicted results to provide the following fetch stream
+
+
   when(redirectVec.map(r => r.valid).reduce(_||_)){
-    val idx = PriorityMux(redirectVec.map(r => (r.valid -> r.ftqIdx)))
+    val r = PriorityMux(redirectVec.map(r => (r.valid -> r)))
+    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, r.flushItSelf)
     val next = idx + 1.U
-    bpuPtr := next
-    ifuPtr := next
-    val offset = PriorityMux(redirectVec.map(r => (r.valid -> r.ftqOffset)))
-    val notMisPredict = PriorityMux(redirectVec.map(r => (r.valid -> r.notMispredict)))
-    commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-      when(i.U > offset || (notMisPredict && i.U === offset)){
-        s := s_invalid
+    when (!flushItSelf) {
+      bpuPtr := next
+      ifuPtr := next
+      ifuWbPtr := next
+      commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
+        when(i.U > offset || (flushItSelf && i.U === offset)){
+          s := c_invalid
+        }
+      })
+      when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
+        commitStateQueue(next.value).foreach(_ := c_invalid)
       }
-    })
-    when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
-      commitStateQueue(next.value).foreach(_ := s_invalid)
+      set_replay_status_between(ifuPtr, ifuPtr, l_invalid) // set all to invalid
+    // load replay
+    }.otherwise {
+      ifuPtr := idx
+      ifuWbPtr := idx
+      // set fetch status of entries between ifuPtr and bpuPtr to f_to_send
+      set_fetch_status_between(idx, ifuPtr, f_to_send)
+      // set commit state of entries between ifuPtr and bpuPtr to c_invalid
+      set_commit_status_between(idx+1.U, ifuPtr, VecInit(Seq.fill(PredictWidth)(c_invalid)))
+      // set replay status
+      set_replay_status_between(idx, ifuPtr, l_replaying)
+      // set load replay offset
+      loadReplayOffset.valid := true.B
+      loadReplayOffset.bits := offset
     }
   }
 
+  // only the valid bit is actually needed
   io.toIfu.redirect := io.fromBackend.stage3Redirect
   
   // commit
   for (c <- io.fromBackend.roq_commits) {
     when(c.valid) {
-      commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := s_commited
+      commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := c_commited
     }
-  }
-
-  val canDeq = entry_fetch_status(commPtr.value) === f_wb &&
-    Cat(commitStateQueue(commPtr.value).map(s => {
-      s === s_invalid || s === s_commited
-    })).andR()
-  when(canDeq && commPtr =/= bpuPtr) {
-    commPtr := commPtr + 1.U
   }
   
   // ****************************************************************
   // **************************** to bpu ****************************
   // ****************************************************************
-  io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
-  val commit_valids = VecInit(commitStateQueue(commPtr.value).map(s => s === s_commited))
+  
+  // do not send redirect to bpu when load replay
+  io.toBpu.redirect <> 
+    Mux(fromBackendRedirect.valid && !fromBackendRedirect.bits.flushItself,
+      fromBackendRedirect,
+      ifuRedirectToBpu)
+  
+  val do_commit = Wire(Bool())
+  val canCommit = commPtr =/= ifuWbPtr && !do_commit &&
+    Cat(commitStateQueue(commPtr.value).map(s => {
+      s === c_invalid || s === c_commited
+    })).andR()
+
+  // need one cycle to read mem and srams 
+  do_commit := RegNext(canCommit)
+  when (do_commit) { commPtr := commPtr + 1.U }
+  val commit_hit = entry_hit_status(commPtr.value)
+  val commit_entry_taken = cfiIndex_vec(commPtr.value).valid
+  val commit_valid = commit_hit === h_hit || commit_entry_taken // hit or taken
+  
+
+  ftq_pc_mem.io.raddr.last := commPtr.value
+  val commit_pc_bundle = ftq_pc_mem.io.rdata.last
+  ftq_hist_mem.io.raddr.last := commPtr.value
+  val commit_ghist = ftq_hist_mem.io.rdata.last
+  ftq_pd_mem.io.raddr.last := commPtr.value
+  val commit_pd = ftq_pd_mem.io.rdata.last
+  ftq_redirect_sram.io.ren(2) := canCommit
+  ftq_redirect_sram.io.raddr(2) := commPtr.value
+  val commit_spec_meta = ftq_redirect_sram.io.rdata(2)
+  ftq_meta_1r_sram.io.ren(0) := canCommit
+  ftq_meta_1r_sram.io.raddr(0) := commPtr.value
+  val commit_meta = ftq_meta_1r_sram.io.rdata(0)
+  ftb_entry_mem.io.raddr(1) := commPtr.value
+  val commit_ftb_entry = ftb_entry_mem.io.rdata(1)
+
   io.toBpu.update := DontCare
-  ftq_meta_1r_sram.io.ren(0) := false.B
-  ftq_meta_1r_sram.io.raddr(0) := 0.U
+  io.toBpu.update.valid := commit_valid
+  val update = io.toBpu.update.bits
+  update.false_hit := commit_hit === h_false_hit
+  update.pc := commit_pc_bundle.startAddr
+  update.hit := commit_hit === h_hit || commit_hit === h_false_hit
+  update.ghist := commit_ghist
+  update.rasSp := commit_spec_meta.rasSp
+  update.rasTop := commit_spec_meta.rasEntry
+  update.specCnt := commit_spec_meta.specCnt
+  update.meta := commit_meta.meta
+  
+  val commit_real_hit = commit_hit === h_hit
+  val update_ftb_entry = update.ftb_entry
+  
+  val ftbEntryGen = Module(new FTBEntryGen).io
+  ftbEntryGen.start_addr := commit_pc_bundle.startAddr
+  ftbEntryGen.old_entry := commit_ftb_entry
+  ftbEntryGen.pd := commit_pd
+  ftbEntryGen.cfiIndex := cfiIndex_vec(commPtr.value)
+  ftbEntryGen.target := update_target(commPtr.value)
+  ftbEntryGen.hit := commit_real_hit
+  ftbEntryGen.mispredict_vec := mispredict_vec(commPtr.value)
+  
+  update_ftb_entry := ftbEntryGen.new_entry
+  update.new_br_insert_pos := ftbEntryGen.new_br_insert_pos
+  update.mispred_mask := ftbEntryGen.mispred_mask
+
+  val preds = update.preds
+  preds.is_br := update_ftb_entry.brValids
+  preds.is_jal := update_ftb_entry.jmpValid && !update_ftb_entry.isJalr
+  preds.is_jalr := update_ftb_entry.jmpValid && update_ftb_entry.isJalr
+  preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
+  preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
+  preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
+  preds.target := update_target(commPtr.value)
+  preds.taken_mask := ftbEntryGen.taken_mask
+
+
 
 
   // --------------------------- Debug --------------------------------
   XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
   XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
-  XSDebug(canDeq, p"deq! [ptr] $commPtr\n")
+  XSDebug(do_commit, p"deq! [ptr] $commPtr\n")
   XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [commPtr] $commPtr\n")
   XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
     p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")

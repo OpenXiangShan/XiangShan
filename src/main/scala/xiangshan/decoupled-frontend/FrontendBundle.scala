@@ -10,6 +10,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr    = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
   val ftqIdx       = new FtqPtr
+  val ldReplayOffset = ValidUndirectioned(UInt(log2Ceil(32).W))
   val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(32).W))
   val target       = UInt(VAddrBits.W)
 
@@ -121,6 +122,8 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
 
 class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
   val mispred_mask = Vec(numBr+1, Bool())
+  val false_hit = Bool()
+  val new_br_insert_pos = Vec(numBr, Bool())
   // val ghist = new GlobalHistory() This in spec_meta
 }
 

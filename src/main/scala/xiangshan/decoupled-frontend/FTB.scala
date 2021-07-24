@@ -66,6 +66,9 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 
   //   (taken_mask, target)
   // }
+
+  def getJmpOffset(pc: UInt) = Cat(1.U(1.W), pftAddr(4,1)) - Mux(last_is_rvc, 2.U, 4.U) - pc(4,1)
+  def isJal = !isJalr
 }
 
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
