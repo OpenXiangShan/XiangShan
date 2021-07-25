@@ -150,7 +150,7 @@ class XiangShan(object):
         self.show()
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
-        return_code = self.__exec_cmd(f'make -C $NOOP_HOME ./build/emu -j200 SIM_ARGS="{sim_args}" {make_args}')
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
     def run_emu(self, workload):
