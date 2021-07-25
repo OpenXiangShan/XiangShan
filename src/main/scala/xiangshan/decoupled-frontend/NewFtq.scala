@@ -261,8 +261,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.mispred_mask.last := io.new_entry.jmpValid && io.mispredict_vec(pd.jmpOffset)
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with HasFtqPerfDebug {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -828,18 +827,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   preds.taken_mask := ftbEntryGen.taken_mask
 
 
-
-
-  // --------------------------- Debug --------------------------------
-  XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
-  XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
-  XSDebug(do_commit, p"deq! [ptr] $commPtr\n")
-  XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [commPtr] $commPtr\n")
-  XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
-    p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
-}
-
-trait HasFtqPerfDebug { this: Ftq =>
   val enq = io.fromBpu.resp
   val perf_redirect = io.fromBackend.stage2Redirect
   XSPerfAccumulate("entry", validEntries)
@@ -973,10 +960,17 @@ trait HasFtqPerfDebug { this: Ftq =>
   // }
 
   // XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
-  XSDebug(enq.fire(), p"ftq enq: ${enq.bits}")
+  XSDebug(enq_fire, p"ftq enq: ${enq.bits}")
 
   // io.bpuInfo.bpRight := PopCount(predRights)
   // io.bpuInfo.bpWrong := PopCount(predWrongs)
 
-}
+  // --------------------------- Debug --------------------------------
+  XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
+  XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
+  XSDebug(do_commit, p"deq! [ptr] $commPtr\n")
+  XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [commPtr] $commPtr\n")
+  XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
+    p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
 
+}
