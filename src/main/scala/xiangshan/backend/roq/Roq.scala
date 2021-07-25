@@ -810,10 +810,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   XSPerfAccumulate("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
   val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
   XSPerfAccumulate("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))
-  // val commitSrc1MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src1MoveElim)
-  // XSPerfAccumulate("commitInstrSrc1MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc1MoveElim).map{ case (v, e) => v && e })))
-  // val commitSrc2MoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.src2MoveElim)
-  // XSPerfAccumulate("commitInstrSrc2MoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitSrc2MoveElim).map{ case (v, e) => v && e })))
+  val commitMoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.eliminatedMove)
+  XSPerfAccumulate("commitInstrMoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid zip commitMoveElim map { case (v, e) => v && e })))
   val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
   val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
   XSPerfAccumulate("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(commitLoadValid)))

@@ -87,9 +87,9 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i + 32).U(PhyRegIdxWidth.W)))) // item after 128 is meaningless
   
   // head and tail pointer
-  val headPtr = RegInit(FreeListPtr(false.B, 0.U))
+  val headPtr = RegInit(IntFreeListPtr(false.B, 0.U))
 
-  val tailPtr = RegInit(FreeListPtr(false.B, 128.U)) // TODO change 128 into parameters
+  val tailPtr = RegInit(IntFreeListPtr(false.B, (NRPhyRegs-32).U)) // TODO change 128 into parameters
 
   
   /*
@@ -117,9 +117,11 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   for (i <- 0 until CommitWidth) {
     val preg = freeRegCandidates(i) // physical register waiting for freeing
     // specRefCounter(i) must >= cmtCounter(i)
-    XSError(specRefCounter(preg) >= cmtCounter(preg), p"Error: Multiple commits of preg${preg}")
+    // XSError(specRefCounter(preg) >= cmtCounter(preg), p"Error: Multiple commits of preg${preg}")
 
     freeVec(i) := ((specRefCounter(preg) === 0.U) || (cmtCounter(preg) === specRefCounter(preg))) && io.dec.req(i)
+    XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
+    XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
 
     // cmt counter after incrementing/ stay not change
     cmtCounterNext(preg) := Mux(io.dec.req(i), cmtCounter(preg) + 1.U, cmtCounter(preg))
@@ -146,6 +148,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   Increments: from rename stage
    */
   val needAllocatingVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  XSDebug(needAllocatingVec.asUInt().orR(), p"needAllocatingVec:${Binary(needAllocatingVec.asUInt)}\n")
   for (i <- 0 until RenameWidth) {
     io.inc.pdests(i) := DontCare
     needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid
@@ -161,15 +164,11 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     val ptr = headPtr + offset
     when (needAllocatingVec(i)) {
       val pdest = freeList(ptr.value)
-      XSDebug(p"[$i] Allocate phy reg $pdest")
+      XSDebug(p"[$i] Allocate phy reg $pdest\n")
       io.inc.pdests(i) := pdest
     }
   }
-  val headPtrNext = headPtr + PopCount(needAllocatingVec)
-  
-  freeRegCnt := distanceBetween(tailPtr, headPtrNext)
-  io.inc.canInc := RegNext(freeRegCnt >= RenameWidth.U)
-  
+    
 
   /*
   Flush: directly flush reference counter according to arch-rat
@@ -183,6 +182,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
       when (io.flush) {
         specRefCounter := archRefCounter
         state := s_flush_1
+        XSDebug("Start Flush Process Next Cycle")
       }
     }
 
@@ -214,7 +214,14 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   // update tail pointer
   tailPtr := Mux(state === s_flush_1, tailPtr + PopCount(flushFreeVec), tailPtr + PopCount(freeVec))
   // update head pointer
-  headPtr := Mux(state === s_idle && io.flush, tailPtr - 128.U, Mux(state === s_flush_2, headPtr - PopCount(archRefCounter.map(_.orR())), headPtrNext))
+  val headPtrNext = Mux(state === s_idle && io.flush, tailPtr - (NRPhyRegs-32).U, 
+                      Mux(state === s_flush_2, headPtr - PopCount(archRefCounter.map(_.orR())), 
+                                               headPtr + PopCount(needAllocatingVec)))
+                                               
+  freeRegCnt := distanceBetween(tailPtr, headPtrNext)
+  io.inc.canInc := RegNext(freeRegCnt >= RenameWidth.U)
+
+  headPtr := headPtrNext
 
   // update reg counter
   for (i <- 0 until NRPhyRegs) {
@@ -233,4 +240,28 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   /*
   Re-direct: restore by walking, causing pdst-- (handled by rename using `dec` port)
    */
+
+
+
+  /*
+  Debug Info
+   */
+  for (i <- 0 until NRPhyRegs) {
+    XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
+      p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
+  }
+
+  XSDebug("Free List: ")
+  for (i <- 0 until FL_SIZE) {
+    XSDebug(p"$i\t")
+  }
+  XSDebug("\n")
+  for (i <- 0 until FL_SIZE) {
+    XSDebug(p"${freeList(i)}\t")
+  }
+  XSDebug("\n")
+  
+  XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext\n")
+  
+  XSDebug(p"io.flush ${io.flush} Flush State [ ${state} ]\n")
 }

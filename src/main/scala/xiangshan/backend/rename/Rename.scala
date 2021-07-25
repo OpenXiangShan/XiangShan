@@ -29,7 +29,6 @@ class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-  val move_elim_enable = Vec(RenameWidth, Bool())
 }
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -43,8 +42,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
-    // deprecated: use csr bit to enable/disable move elimination
-    val csrCtrl = Flipped(new CustomCSRCtrlIO) // TODO REMOVE THIS
     // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
@@ -64,11 +61,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     rat.io.walkWen := io.roqCommits.isWalk
   }
 
-  // connect flush and redirect ports for free list
+  // connect flush and redirect ports for __float point__ free list
   fpFreeList.io.flush := io.flush
   fpFreeList.io.redirect := io.redirect.valid
   fpFreeList.io.walk.valid := io.roqCommits.isWalk
 
+  // connect flush and redirect ports for __integer__ free list *(walk) is handled by dec
   intFreeList.io.flush := io.flush
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
@@ -82,18 +80,29 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
 
+  // initialize dec input of int free list
+  intFreeList.io.dec.req.foreach(_ := false.B)
+  intFreeList.io.dec.old_pdests.foreach(_ := DontCare)
+  intFreeList.io.dec.eliminatedMove.foreach(_ := false.B)
+  intFreeList.io.dec.pdests.foreach(_ := DontCare)
 
   // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
   fpFreeList.io.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
-  when (io.roqCommits.hasWalkInstr) {
+  when (io.roqCommits.isWalk) { // FIXME Should I use hasWalkInstr or isWalk?
     for (i <- 0 until CommitWidth) {
       val walkValid = io.roqCommits.valid(i)
       val walkInfo = io.roqCommits.info(i)
-      
+
+      // during walk process:
+      // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
+      // 2. for ME inst, free pdest(commit counter++) + revert rat
+
+      // conclusion: 
+      // a. rat recovery has nothing to do with ME or not
+      // b. treat walk as normal commit except replace old_pdests with pdests
+      // c. ignore eliminatedMove and pdests port
       intFreeList.io.dec.req(i) := walkValid && needDestRegCommit(false, walkInfo)
       intFreeList.io.dec.old_pdests(i) := walkInfo.pdest // free pdest when cancelling this inst
-      intFreeList.io.dec.eliminatedMove(i) := walkInfo.eliminatedMove
-      intFreeList.io.dec.pdests(i) := DontCare
     }
   }
 
@@ -214,11 +223,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     when (meEnable(i)) {
       intFreeList.io.inc.psrcOfMove(i).valid := true.B
       intFreeList.io.inc.psrcOfMove(i).bits := uops(i).psrc(0)
-      io.renameBypass.move_elim_enable(i) := true.B
+      XSInfo(io.in(i).valid && io.out(i).valid, p"Move Instruction ${Hexadecimal(io.in(i).bits.cf.pc)} Eliminated Successfully! psrc:${uops(i).psrc(0)}\n")
     } .otherwise {
       intFreeList.io.inc.psrcOfMove(i).valid := false.B
       intFreeList.io.inc.psrcOfMove(i).bits := DontCare
-      io.renameBypass.move_elim_enable(i) := false.B
     }
     
     // update pdest
@@ -289,6 +297,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // is valid commit req and given instruction has destination register
       val commitDestValid = io.roqCommits.valid(i) && needDestRegCommit(fp, io.roqCommits.info(i))
 
+      /*
+      I. RAT Update
+       */
+      
       // walk back write - restore spec state : ldest => old_pdest
       when (commitDestValid && io.roqCommits.isWalk) {
         rat.io.specWritePorts(i).wen := true.B
@@ -305,19 +317,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       rat.io.archWritePorts(i).wdata := io.roqCommits.info(i).pdest
 
       XSInfo(rat.io.archWritePorts(i).wen,
-        {if(fp) p"fp" else p"int "} + p" rat arch: ldest:${rat.io.archWritePorts(i).addr}" +
+        {if(fp) p"[fp" else p"[int"} + p" arch rat] update: ldest:${rat.io.archWritePorts(i).addr} ->" +
         p" pdest:${rat.io.archWritePorts(i).wdata}\n"
       )
       
-      // update free list
+      
+      /*
+      II. Free List Update
+       */
+
       if (fp) { // Float Point free list
         fpFreeList.io.deallocReqs(i)  := rat.io.archWritePorts(i).wen
         fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
       } else { // Integer free list
-        intFreeList.io.dec.req(i) := false.B
-        intFreeList.io.dec.old_pdests(i)  := DontCare
-        intFreeList.io.dec.eliminatedMove(i) := false.B
-        intFreeList.io.dec.pdests(i) := DontCare
         when (commitDestValid && !io.roqCommits.isWalk) {
           intFreeList.io.dec.req(i) := rat.io.archWritePorts(i).wen
           intFreeList.io.dec.old_pdests(i)  := io.roqCommits.info(i).old_pdest
@@ -349,6 +361,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   for((x,y) <- io.in.zip(io.out)){
     printRenameInfo(x, y)
   }
+
+  XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
+  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc}\n")
   
   intRat.io.debug_rdata <> io.debug_int_rat
   fpRat.io.debug_rdata <> io.debug_fp_rat
@@ -360,6 +375,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && !intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && io.roqCommits.isWalk)
-
+  // TODO add counter for ME
 
 }
