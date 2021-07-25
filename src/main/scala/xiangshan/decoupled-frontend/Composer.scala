@@ -25,8 +25,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out.bits.resp := resp
 
-  val s0_pc_next = RegNext(io.in.bits.s0_pc)
-
   var metas = 0.U(1.W)
   var meta_sz = 0
   for (c <- components) {
@@ -35,60 +33,73 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.in.bits.ghist      := io.in.bits.ghist
     c.io.in.bits.toFtq_fire := io.in.bits.toFtq_fire
     if (c.meta_size > 0) {
-      metas = (metas << c.meta_size) | c.io.out.bits.meta(c.meta_size-1,0)
+      metas = (metas << c.meta_size) | c.io.out.bits.s3_meta(c.meta_size-1,0)
     }
     meta_sz = meta_sz + c.meta_size
   }
 
-  val overrideFlush = RegInit(0.U.asTypeOf(Valid(UInt(VAddrBits.W))))
-  when(overrideFlush.valid) { overrideFlush := 0.U.asTypeOf(Valid(UInt(VAddrBits.W))) }
+  val s1_flush, s2_flush, s3_flush = Wire(Bool())
+  val s2_redirect, s3_redirect = Wire(Bool())
 
-  // val s0_all_ready = components.map(_.io.s0_ready).reduce(_ && _) && io.out.ready
-  val s1_all_ready = components.map(_.io.s1_ready).reduce(_ && _) && io.out.ready
-  val s0_fire = io.in.valid && s1_all_ready
-  io.in.ready := s1_all_ready
+  s2_redirect := false.B
+  s3_redirect := false.B
+
+  s3_flush := false.B
+  s2_flush := io.redirect.valid
+  s1_flush := s2_flush || s2_redirect
+
+  val s1_fire = Wire(Bool())
+  val s1_valid = RegInit(false.B)
+  val s1_components_ready = components.map(_.io.s1_ready).reduce(_ && _)
+  val s1_ready = s1_fire || !s1_valid
+  val s0_fire = io.in.valid && s1_components_ready && s1_ready
+  io.in.ready := s1_components_ready && s1_ready
   components.foreach(_.io.s0_fire := s0_fire)
 
-  val s1_valid = RegInit(false.B)
-  val s2_all_ready = components.map(_.io.s2_ready).reduce(_ && _) && io.out.ready
-  val s1_fire = s1_valid && s2_all_ready
+  val s2_fire = Wire(Bool())
+  val s2_valid = RegInit(false.B)
+  val s2_components_ready = components.map(_.io.s2_ready).reduce(_ && _)
+  val s2_ready = s2_fire || !s2_valid
+  s1_fire := s1_valid && s2_components_ready && s2_ready
 
-  when(s0_fire)             { s1_valid := true.B }
-  .elsewhen(io.flush.valid || overrideFlush.valid) { s1_valid := false.B }
-  .elsewhen(s1_fire)        { s1_valid := false.B }
+  when(s0_fire)       { s1_valid := true.B  }
+  .elsewhen(s1_flush) { s1_valid := false.B }
+  .elsewhen(s1_fire)  { s1_valid := false.B }
 
   components.foreach(_.io.s1_fire := s1_fire)
 
-  val s2_valid = RegInit(false.B)
-  val s3_all_ready = components.map(_.io.s3_ready).reduce(_ && _)
-  val s2_fire = s2_valid && s3_all_ready
+  val s3_fire = Wire(Bool())
+  val s3_valid = RegInit(false.B)
+  val s3_components_ready = components.map(_.io.s3_ready).reduce(_ && _)
+  val s3_ready = s3_fire || !s3_valid
+  s2_fire := s2_valid && s3_components_ready && s3_ready
 
-  when(io.flush.valid || overrideFlush.valid)  { s2_valid := false.B }
-  .elsewhen(s1_fire)    { s2_valid := true.B }
-  .elsewhen(s2_fire)    { s2_valid := false.B }
+  when(s2_flush)                  { s2_valid := false.B }
+  .elsewhen(s1_fire && !s1_flush) { s2_valid := true.B  }
+  .elsewhen(s2_fire)              { s2_valid := false.B }
 
   components.foreach(_.io.s2_fire := s2_fire)
 
-  val s3_valid = RegInit(false.B)
-  val s3_fire = s3_valid && io.out.ready
+  s3_fire := s3_valid && io.out.ready
 
-  when(io.flush.valid || overrideFlush.valid)  { s3_valid := false.B }
-  .elsewhen(s2_fire)    { s3_valid := true.B }
-  .elsewhen(s3_fire)    { s3_valid := false.B }
+  when(s3_flush)                  { s3_valid := false.B }
+  .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B  }
+  .elsewhen(s3_fire)              { s3_valid := false.B }
 
   components.foreach(_.io.s3_fire := s3_fire)
 
-  io.out.valid := components(2).io.out.valid
-
-  components.map(_.io.flush := Mux(io.flush.valid, io.flush, overrideFlush))
+  io.out.valid := s3_fire && !io.redirect.valid
 
   // predictor override redirect
   val finalPredValid = components(2).io.out.valid
   val finalPredResp = components(2).io.out.bits.resp
   when(finalPredValid) {
-    when(finalPredResp.s2.preds.target =/= s0_pc_next) {
-      overrideFlush.valid := true.B
-      overrideFlush.bits := finalPredResp.s2.preds.target
+    when(finalPredResp.s2.preds.target =/= RegEnable(s0_pc, s0_fire)) {
+      s2_redirect := true.B
+    }
+
+    when(finalPredResp.s3.preds.target =/= s2_pc) {
+      s3_redirect := true.B
     }
   }
 
@@ -98,7 +109,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
 
 
   require(meta_sz < MaxMetaLength)
-  io.out.bits.meta := metas
+  io.out.bits.s3_meta := metas
 
 
   var update_meta = io.update.bits.meta

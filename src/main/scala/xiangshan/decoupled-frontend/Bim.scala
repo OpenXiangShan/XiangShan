@@ -42,8 +42,8 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   bim.io.r.req.valid := io.s0_fire
   bim.io.r.req.bits.setIdx := s1_idx
 
-  io.in.ready := bim.io.r.req.ready && !io.flush.valid
-  io.out.valid := io.s2_fire && !io.flush.valid
+  io.in.ready := bim.io.r.req.ready && !io.redirect.valid
+  io.out.valid := io.s2_fire && !io.redirect.valid
 
   // val s1_pc = RegEnable(s0_pc, s0_valid)
 
@@ -58,10 +58,9 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val s1_latch_meta       = s1_read.asUInt()
 
   io.out.bits.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
-  io.out.bits.resp.s2.meta := RegEnable(s1_latch_meta, io.s1_fire)
 
   io.out.bits.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
-  io.out.bits.resp.s3.meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
+  io.out.bits.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
 
   // Update logic
   val u_valid = RegNext(io.update.valid)

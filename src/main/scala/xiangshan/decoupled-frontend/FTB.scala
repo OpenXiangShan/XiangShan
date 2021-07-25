@@ -96,9 +96,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   ftb.io.r.req.valid := io.s0_fire
   ftb.io.r.req.bits.setIdx := s0_idx
 
-  io.in.ready := ftb.io.r.req.ready && !io.flush.valid
+  io.in.ready := ftb.io.r.req.ready && !io.redirect.valid
   // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
-  io.out.valid := io.s2_fire && !io.flush.valid
+  io.out.valid := io.s2_fire && !io.redirect.valid
 
   io.out.bits.resp.valids(1) := io.out.valid
 
@@ -183,13 +183,15 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.out.bits.resp.s2.preds.is_ret        := RegEnable(s1_latch_is_ret, io.s1_fire)
 
   io.out.bits.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
-  io.out.bits.resp.s2.pc                  := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
-  io.out.bits.resp.s2.hit                 := RegEnable(s1_latch_hit, io.s1_fire)
-  io.out.bits.resp.s2.meta                := RegEnable(s1_latch_meta, io.s1_fire)
-  io.out.bits.resp.s2.ftb_entry           := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+  io.out.bits.resp.s2.pc         := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
+  io.out.bits.resp.s2.hit           := RegEnable(s1_latch_hit, io.s1_fire)
+  io.out.bits.s3_meta               := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
+  io.out.bits.resp.ftb_entry        := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+
+  io.out.bits.resp.s3 := RegEnable(io.out.bits.resp.s2, io.s2_fire)
 
   when(!s1_hit) {
-    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(s1_latch_pc + (FetchWidth*4).U, io.s1_fire)
+    io.out.bits.resp.ftb_entry.pftAddr := RegEnable(s1_latch_pc + (FetchWidth*4).U, io.s1_fire)
   }
   // }
 

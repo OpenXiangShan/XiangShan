@@ -134,7 +134,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.in.bits.resp_in(0).s3.ftb_entry.pftAddr
+  val spec_new_addr = io.in.bits.resp_in(0).ftb_entry.pftAddr
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
   spec_ras.spec_new_addr   := spec_new_addr
@@ -159,7 +159,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_ras.recover_top := recover_cfi.rasEntry
   spec_ras.recover_new_addr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  io.out.bits.meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
+  io.out.bits.s3_meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
 
   io.out.bits.resp.s3.preds.target := spec_top_addr
   // TODO: back-up stack for ras

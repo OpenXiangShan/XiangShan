@@ -90,6 +90,7 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   val is_ret = Bool()
   val call_is_rvc = Bool()
   val target = UInt(VAddrBits.W)
+  val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
 }
@@ -118,6 +119,7 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s1 = new BranchPredictionBundle()
   val s2 = new BranchPredictionBundle()
   val s3 = new BranchPredictionBundle()
+  val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
 }
 
 class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
