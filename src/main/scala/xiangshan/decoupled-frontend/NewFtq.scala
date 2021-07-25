@@ -714,7 +714,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       ifuPtr := next
       ifuWbPtr := next
       commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-        when(i.U > offset || (flushItSelf && i.U === offset)){
+        when(i.U > offset){
           s := c_invalid
         }
       })
