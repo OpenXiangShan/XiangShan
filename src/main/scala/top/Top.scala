@@ -32,11 +32,13 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.stage.phases.GenerateArtefacts
+import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
+
 
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
@@ -372,15 +374,21 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
-      val debug = new DebugIO()(p)
-      val resetCtrl = new ResetCtrlIO(NumCores)(p)
+      val systemjtag = new Bundle {
+        val jtag = Flipped(new JTAGIO(hasTRSTn = false))
+        val reset = Input(Bool()) // No reset allowed on top
+        val mfr_id = Input(UInt(11.W))
+        val part_number = Input(UInt(16.W))
+        val version = Input(UInt(4.W))
+      }
+      // val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {
       val resetGen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
       resetGen.suggestName("top_reset_gen")
-      childReset := resetGen.io.out
+      childReset := resetGen.io.out | debugModule.module.io.debugIO.ndreset
     }
 
     withClockAndReset(childClock, childReset) {
@@ -412,18 +420,21 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       cnt := Mux(tick, freq.U, cnt - 1.U)
       clint.module.io.rtcTick := tick
 
-      io.resetCtrl.hartResetReq.foreach { rcio => debugModule.module.io.resetCtrl.hartResetReq.foreach { rcdm => rcio := rcdm }}
-      debugModule.module.io.resetCtrl.hartIsInReset := io.resetCtrl.hartIsInReset
+      debugModule.module.io.resetCtrl.hartIsInReset.foreach {x => x := childReset.asBool() }
       debugModule.module.io.clock := io.clock
       debugModule.module.io.reset := io.reset
 
-      io.debug.clockeddmi.foreach { dbg => debugModule.module.io.debugIO.clockeddmi.get <> dbg }
-      debugModule.module.io.debugIO.reset := io.debug.reset
-      debugModule.module.io.debugIO.clock := io.debug.clock
-      io.debug.ndreset := debugModule.module.io.debugIO.ndreset
-      io.debug.dmactive := debugModule.module.io.debugIO.dmactive
-      debugModule.module.io.debugIO.dmactiveAck := io.debug.dmactiveAck
-      io.debug.extTrigger.foreach { x => debugModule.module.io.debugIO.extTrigger.foreach {y => x <> y}}
+      debugModule.module.io.debugIO.reset := io.systemjtag.reset // TODO: use synchronizer?
+      debugModule.module.io.debugIO.clock := childClock
+      debugModule.module.io.debugIO.dmactiveAck  := debugModule.module.io.debugIO.dmactive // TODO: delay 3 cycles?
+      // jtag connector
+      debugModule.module.io.debugIO.systemjtag.foreach { x =>
+        x.jtag <> io.systemjtag.jtag
+        x.reset  := io.systemjtag.reset
+        x.mfr_id := io.systemjtag.mfr_id
+        x.part_number := io.systemjtag.part_number
+        x.version := io.systemjtag.version
+      }
     }
   }
 }

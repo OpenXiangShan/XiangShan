@@ -70,7 +70,7 @@ class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     io.debugIO.dmactive := debug.module.io.ctrl.dmactive
     debug.module.io.ctrl.dmactiveAck := io.debugIO.dmactiveAck
     io.debugIO.extTrigger.foreach { x => debug.module.io.extTrigger.foreach {y => x <> y}}
-    outerdebug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
+    debug.module.io.ctrl.debugUnavail.foreach { _ := false.B }
 
     val dtm = io.debugIO.systemjtag.map(instantiateJtagDTM(_))
 
@@ -107,22 +107,23 @@ object XSDebugModuleParams {
   }
 }
 
+// debug module related IO in Top
 class debugIOTop(implicit val p: Parameters) extends Bundle {
-  val clock = Input(Clock())
-  val reset = Input(Bool()) // No reset allowed on top
-  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO()))
-  val systemjtag = p(ExportDebug).jtag.option(new Bundle {
+//  val clock = Input(Bool()) 
+//  val reset = Input(Bool())
+  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO())) // TODO: remove unecessary options
+  val systemjtag = new Bundle {
     val jtag = Flipped(new JTAGIO(hasTRSTn = false))
     val reset = Input(Bool()) // No reset allowed on top
     val mfr_id = Input(UInt(11.W))
     val part_number = Input(UInt(16.W))
     val version = Input(UInt(4.W))
-  })
+  }
   val apb = p(ExportDebug).apb.option(Flipped(new ClockedAPBBundle(APBBundleParameters(addrBits=12, dataBits=32))))
   //------------------------------
-  val ndreset    = Output(Bool())
-  val dmactive   = Output(Bool())
-  val dmactiveAck = Input(Bool())
+  // val ndreset    = Output(Bool())
+  // val dmactive   = Output(Bool())
+  // val dmactiveAck = Input(Bool())
   val extTrigger = (p(DebugModuleKey).get.nExtTriggers > 0).option(new DebugExtTriggerIO())
   val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
 }
@@ -163,111 +164,4 @@ class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam
 //  addResource("/csrc/SimJTAG.cc")
 //  addResource("/csrc/remote_bitbang.h")
 //  addResource("/csrc/remote_bitbang.cc")
-}
-
-object Debug {
-  def connectDebug(
-      debugOpt: Option[DebugIO],
-      resetctrlOpt: Option[ResetCtrlIO],
-      //psdio: PSDIO,
-      c: Clock,
-      r: Bool,
-      out: Bool,
-      tckHalfPeriod: Int = 2,
-      cmdDelay: Int = 2,
-      psd: PSDTestMode = 0.U.asTypeOf(new PSDTestMode()))
-      (implicit p: Parameters): Unit =  {
-    connectDebugClockAndReset(debugOpt, c)
-    resetctrlOpt.map { rcio => rcio.hartIsInReset.map { _ := r }}
-    debugOpt.map { debug =>
-      /*debug.clockeddmi.foreach { d =>
-        val dtm = Module(new SimDTM).connect(c, r, d, out)
-      }*/
-      debug.systemjtag.foreach { sj =>
-        val jtag = Module(new SimJTAG(tickDelay=3)).connect(sj.jtag, c, r, ~r, out)
-        sj.reset := r.asAsyncReset
-        sj.mfr_id := 0.U(11.W)
-        sj.part_number := 0.U(16.W)
-        sj.version := 0.U(4.W)
-      }
-      debug.apb.foreach { apb =>
-        require(false, "No support for connectDebug for an APB debug connection.")
-      }
-      //psdio.psd.foreach { _ <> psd }
-      debug.disableDebug.foreach { x => x := false.B }
-    }
-  }
-
-  def connectDebugClockAndReset(debugOpt: Option[DebugIO], c: Clock, sync: Boolean = true)(implicit p: Parameters): Unit = {
-    debugOpt.foreach { debug =>
-      val dmi_reset = debug.clockeddmi.map(_.dmiReset.asBool).getOrElse(false.B) |
-        debug.systemjtag.map(_.reset.asBool).getOrElse(false.B) |
-        debug.apb.map(_.reset.asBool).getOrElse(false.B)
-      connectDebugClockHelper(debug, dmi_reset, c, sync)
-    }
-  }
-
-  def connectDebugClockHelper(debug: DebugIO, dmi_reset: Reset, c: Clock, sync: Boolean = true)(implicit p: Parameters): Unit = {
-    val debug_reset = Wire(Bool())
-    withClockAndReset(c, dmi_reset) {
-      val debug_reset_syncd = if(sync) ~AsyncResetSynchronizerShiftReg(in=true.B, sync=3, name=Some("debug_reset_sync")) else dmi_reset
-      debug_reset := debug_reset_syncd
-    }
-    // Need to clock DM during debug_reset because of synchronous reset, so keep
-    // the clock alive for one cycle after debug_reset asserts to action this behavior.
-    // The unit should also be clocked when dmactive is high.
-    withClockAndReset(c, debug_reset.asAsyncReset) {
-      val dmactiveAck = if (sync) ResetSynchronizerShiftReg(in=debug.dmactive, sync=3, name=Some("dmactiveAck")) else debug.dmactive
-      val clock_en = RegNext(next=dmactiveAck, init=true.B)
-      val gated_clock =
-        if (!p(DebugModuleKey).get.clockGate) c
-        else ClockGate(c, clock_en, "debug_clock_gate")
-      debug.clock := gated_clock
-      debug.reset := (if (p(SubsystemResetSchemeKey)==ResetSynchronous) debug_reset else debug_reset.asAsyncReset)
-      debug.dmactiveAck := dmactiveAck
-    }
-  }
-
-  def tieoffDebug(debugOpt: Option[DebugIO], resetctrlOpt: Option[ResetCtrlIO] = None, psdio: Option[PSDIO] = None)(implicit p: Parameters): Bool = {
-
-    psdio.foreach(_.psd.foreach { _ <> 0.U.asTypeOf(new PSDTestMode()) } )
-    resetctrlOpt.map { rcio => rcio.hartIsInReset.map { _ := false.B }}
-    debugOpt.map { debug =>
-      debug.clock := true.B.asClock
-      debug.reset := (if (p(SubsystemResetSchemeKey)==ResetSynchronous) true.B else true.B.asAsyncReset)
-
-      debug.systemjtag.foreach { sj =>
-        sj.jtag.TCK := true.B.asClock
-        sj.jtag.TMS := true.B
-        sj.jtag.TDI := true.B
-        sj.jtag.TRSTn.foreach { r => r := true.B }
-        sj.reset := true.B.asAsyncReset
-        sj.mfr_id := 0.U
-        sj.part_number := 0.U
-        sj.version := 0.U
-      }
-
-      debug.clockeddmi.foreach { d =>
-        d.dmi.req.valid := false.B
-        d.dmi.resp.ready := true.B
-        d.dmiClock := false.B.asClock
-        d.dmiReset := true.B.asAsyncReset
-      }
-
-      debug.apb.foreach { apb =>
-        apb.tieoff()
-        apb.clock := false.B.asClock
-        apb.reset := true.B.asAsyncReset
-        apb.psel := false.B
-        apb.penable := false.B
-      }
-
-      debug.extTrigger.foreach { t =>
-        t.in.req := false.B
-        t.out.ack := t.out.req
-      }
-      debug.disableDebug.foreach { x => x := false.B }
-      debug.ndreset
-    }.getOrElse(false.B)
-  }
 }
