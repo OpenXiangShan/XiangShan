@@ -146,7 +146,6 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val s2_fire = Input(Bool())
   val s3_fire = Input(Bool())
 
-  val s0_ready = Output(Bool())
   val s1_ready = Output(Bool())
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
@@ -169,7 +168,6 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
 
   io.in.ready := !io.flush.valid
 
-  io.s0_ready := true.B
   io.s1_ready := true.B
   io.s2_ready := true.B
   io.s3_ready := true.B

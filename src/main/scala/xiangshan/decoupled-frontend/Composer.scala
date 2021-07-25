@@ -43,14 +43,15 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val overrideFlush = RegInit(0.U.asTypeOf(Valid(UInt(VAddrBits.W))))
   when(overrideFlush.valid) { overrideFlush := 0.U.asTypeOf(Valid(UInt(VAddrBits.W))) }
 
-  val s0_all_ready = components.map(_.io.s0_ready).reduce(_ && _) && io.out.ready
-  val s0_fire = io.in.valid && s0_all_ready
-  io.in.ready := s0_all_ready
+  // val s0_all_ready = components.map(_.io.s0_ready).reduce(_ && _) && io.out.ready
+  val s1_all_ready = components.map(_.io.s1_ready).reduce(_ && _) && io.out.ready
+  val s0_fire = io.in.valid && s1_all_ready
+  io.in.ready := s1_all_ready
   components.foreach(_.io.s0_fire := s0_fire)
 
   val s1_valid = RegInit(false.B)
-  val s1_all_ready = components.map(_.io.s1_ready).reduce(_ && _) && io.out.ready
-  val s1_fire = s1_valid && s1_all_ready
+  val s2_all_ready = components.map(_.io.s2_ready).reduce(_ && _) && io.out.ready
+  val s1_fire = s1_valid && s2_all_ready
 
   when(s0_fire)             { s1_valid := true.B }
   .elsewhen(io.flush.valid || overrideFlush.valid) { s1_valid := false.B }
@@ -59,8 +60,8 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   components.foreach(_.io.s1_fire := s1_fire)
 
   val s2_valid = RegInit(false.B)
-  val s2_all_ready = components.map(_.io.s2_ready).reduce(_ && _) && io.out.ready
-  val s2_fire = s2_valid && s2_all_ready
+  val s3_all_ready = components.map(_.io.s3_ready).reduce(_ && _)
+  val s2_fire = s2_valid && s3_all_ready
 
   when(io.flush.valid || overrideFlush.valid)  { s2_valid := false.B }
   .elsewhen(s1_fire)    { s2_valid := true.B }
@@ -69,8 +70,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   components.foreach(_.io.s2_fire := s2_fire)
 
   val s3_valid = RegInit(false.B)
-  val s3_all_ready = components.map(_.io.s3_ready).reduce(_ && _)
-  val s3_fire = s3_valid && s3_all_ready
+  val s3_fire = s3_valid && io.out.ready
 
   when(io.flush.valid || overrideFlush.valid)  { s3_valid := false.B }
   .elsewhen(s2_fire)    { s3_valid := true.B }
