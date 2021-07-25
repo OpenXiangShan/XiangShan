@@ -200,7 +200,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.jmpTarget := io.target
   init_entry.pftAddr := Mux(entry_has_jmp,
     io.start_addr + (pd.jmpOffset << instOffsetBits) + Mux(pd.rvcMask(pd.jmpOffset), 2.U, 4.U),
-    io.start_addr + (FetchWidth * instBytes).U)
+    io.start_addr + (FetchWidth * 4).U)
   // TODO: carry bit is currently ignored
   init_entry.isJalr := new_cfi_is_jalr
   init_entry.isCall := new_cfi_is_call
@@ -251,14 +251,18 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.new_entry := Mux(!hit, init_entry, Mux(is_new_br, old_entry_modified, io.old_entry))
   io.new_br_insert_pos := new_br_insert_onehot
   val new_offset_vec = VecInit(io.new_entry.brOffset :+ pd.jmpOffset)
-  io.taken_mask := VecInit(new_offset_vec.map(off => io.cfiIndex.bits === off && io.cfiIndex.valid))
+  val br_jal_valid_vec = VecInit(io.new_entry.brValids :+ io.new_entry.jmpValid)
+  io.taken_mask := VecInit((new_offset_vec zip br_jal_valid_vec).map{
+    case (off, v) => io.cfiIndex.bits === off && io.cfiIndex.valid && v
+  })
   for (i <- 0 until numBr) {
     io.mispred_mask(i) := io.new_entry.brValids(i) && io.mispredict_vec(io.new_entry.brOffset(i))
   }
   io.mispred_mask.last := io.new_entry.jmpValid && io.mispredict_vec(pd.jmpOffset)
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+  with HasBackendRedirectInfo with HasFtqPerfDebug {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -835,7 +839,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
 }
 
-trait HasPerfDebug { this: Ftq =>
+trait HasFtqPerfDebug { this: Ftq =>
   val enq = io.fromBpu.resp
   val perf_redirect = io.fromBackend.stage2Redirect
   XSPerfAccumulate("entry", validEntries)
