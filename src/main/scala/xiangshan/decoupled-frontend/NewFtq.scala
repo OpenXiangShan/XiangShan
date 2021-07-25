@@ -284,7 +284,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val stage2Flush = stage2Redirect.valid || roqFlush.valid
   val backendFlush = stage2Flush || RegNext(stage2Flush)
-  val ifuFlush = io.fromIfu.pdWb.valid && io.fromIfu.pdWb.bits.misOffset.valid
+  val ifuFlush = Wire(Bool())
 
   val flush = stage2Flush || RegNext(stage2Flush)
 
@@ -559,6 +559,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val ifuRedirectReg = RegNext(fromIfuRedirect, init=0.U.asTypeOf(Valid(new Redirect)))
   val ifuRedirectToBpu = WireInit(ifuRedirectReg)
+  ifuFlush := fromIfuRedirect.valid || ifuRedirectToBpu.valid
 
   ftq_redirect_sram.io.ren(1) := fromIfuRedirect.valid
   ftq_redirect_sram.io.raddr(1) := fromIfuRedirect.bits.ftqIdx.value
