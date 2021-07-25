@@ -91,7 +91,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
   val s0_idx = ftbAddr.getBankIdx(s0_pc)
-  val s1_tag = ftbAddr.getTag(s1_pc)
+  val s1_tag = ftbAddr.getTag(s1_pc)(tagSize-1, 0)
 
   ftb.io.r.req.valid := io.s0_fire
   ftb.io.r.req.bits.setIdx := s0_idx
@@ -199,7 +199,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   // io.out.bits.flush_out.bits := io.in.bits.resp_in(0).s2.preds.target
 
   // Update logic
-  val update = io.update.bits
+  val update = RegNext(io.update.bits)
 
   val u_pc = update.pc
 
@@ -212,7 +212,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val ftb_write = WireInit(update.ftb_entry)
 
   ftb_write.valid := true.B
-  ftb_write.tag   := ftbAddr.getTag(u_pc)
+  ftb_write.tag   := ftbAddr.getTag(u_pc)(tagSize-1, 0)
 
   ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
 }
