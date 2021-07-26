@@ -165,7 +165,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  // when (RegNext(s1_hit)) {
   io.out.bits.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
   io.out.bits.resp.s2.preds.is_br         := RegEnable(ftb_entry.brValids, io.s1_fire)
   io.out.bits.resp.s2.preds.is_jal        := RegEnable(ftb_entry.jmpValid && !ftb_entry.isJalr, io.s1_fire)
@@ -187,13 +186,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   }.otherwise {
     io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
   }
-
-  // }
-
-  // override flush logic
-  // io.out.bits.flush_out.valid := io.in.bits.resp_in(0).s1.preds.taken =/= io.in.bits.resp_in(0).s2.preds.taken ||
-  //                       io.in.bits.resp_in(0).s1.preds.target =/= io.in.bits.resp_in(0).s2.preds.target
-  // io.out.bits.flush_out.bits := io.in.bits.resp_in(0).s2.preds.target
 
   // Update logic
   val update = RegNext(io.update.bits)

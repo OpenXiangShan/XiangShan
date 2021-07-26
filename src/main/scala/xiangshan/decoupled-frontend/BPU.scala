@@ -129,7 +129,6 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
 class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val s3_meta = UInt(MaxMetaLength.W) // This is use by composer
   val resp = new BranchPredictionResp
-  val flush_out = Valid(UInt(VAddrBits.W))
 
   // These store in meta, extract in composer
   // val rasSp = UInt(log2Ceil(RasSize).W)
@@ -140,6 +139,7 @@ class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUC
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   val out = DecoupledIO(new BasePredictorOutput)
+  val flush_out = Valid(UInt(VAddrBits.W))
 
   val s0_fire = Input(Bool())
   val s1_fire = Input(Bool())
@@ -287,8 +287,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   when(io.ftq_to_bpu.redirect.valid) {
     s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
-  }.elsewhen(predictors.io.out.bits.flush_out.valid) {
-    s0_pc := predictors.io.out.bits.flush_out.bits
+  }.elsewhen(predictors.io.flush_out.valid) {
+    s0_pc := predictors.io.flush_out.bits
   }.elsewhen(resp.valids(0)) {
     s0_pc := resp.s1.preds.target
   }.otherwise {
