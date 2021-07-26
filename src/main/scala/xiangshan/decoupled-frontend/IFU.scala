@@ -91,7 +91,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
     val byteOffset = pc - start 
-    byteOffset(4,1)
+    byteOffset(4,1) - 1.U
   } 
 
   //---------------------------------------------
