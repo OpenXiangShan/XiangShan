@@ -101,6 +101,9 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
     val flush = Input(Bool())
     val out = DecoupledIO(new ExuOutput)
   })
+  val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
+  val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
+  val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
 
   for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
 

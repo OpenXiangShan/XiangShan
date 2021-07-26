@@ -67,14 +67,14 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     params.numSrc = max(params.numSrc, max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt))
     params.exuCfg = Some(exuCfg)
     exuCfg match {
-      case JumpExeUnitCfg => params.isJump = true
+      case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
       case StExeUnitCfg => params.isStore = true
       case MulDivExeUnitCfg => params.isMul = true
       case _ =>
     }
     // TODO: why jump needs two sources?
-    if (exuCfg == JumpExeUnitCfg) {
+    if (exuCfg == JumpCSRExeUnitCfg) {
       params.numSrc = 2
     }
     if (exuCfg == StExeUnitCfg || exuCfg == LdExeUnitCfg) {

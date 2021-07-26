@@ -75,12 +75,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.MduCnt <= exuParameters.AluCnt && exuParameters.MduCnt > 0)
   require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
   require(exuParameters.LduCnt == 2 && exuParameters.StuCnt == 2)
+
   // one RS every 2 MDUs
   val schedulePorts = Seq(
     // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
-    (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
-    (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
-    (JumpExeUnitCfg, 1, Seq(), Seq()),
+    (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpCSRExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
+    (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpCSRExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
+    (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
     (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
     (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
     (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
@@ -146,8 +147,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val ctrlBlock = Module(new CtrlBlock)
 
-  val integerBlock = Module(new IntegerBlock)
-  val floatBlock = Module(new FloatBlock)
+  val intExuCfgs = Seq(
+    (AluExeUnitCfg, exuParameters.AluCnt),
+    (MulDivExeUnitCfg, exuParameters.MduCnt),
+    (JumpCSRExeUnitCfg, exuParameters.JmpCnt)
+  )
+  val integerBlock = Module(new ExuBlock(intExuCfgs))
+  val fpExuCfgs = Seq(
+    (FmacExeUnitCfg, exuParameters.FmacCnt),
+    (FmiscExeUnitCfg, exuParameters.FmiscCnt)
+  )
+  val floatBlock = Module(new ExuBlock(fpExuCfgs))
 
   val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
@@ -186,16 +196,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.dcache_error <> memBlock.io.error
 
   frontend.io.backend <> ctrlBlock.io.frontend
-  frontend.io.sfence <> integerBlock.io.fenceio.sfence
-  frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
-  frontend.io.csrCtrl <> integerBlock.io.csrio.customCtrl
+  frontend.io.sfence <> integerBlock.io.fenceio.get.sfence
+  frontend.io.tlbCsr <> integerBlock.io.csrio.get.tlb
+  frontend.io.csrCtrl <> integerBlock.io.csrio.get.customCtrl
 
   frontend.io.icacheMemAcq <> l1pluscache.io.req
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
   l1pluscache.io.flush := frontend.io.l1plusFlush
-  frontend.io.fencei := integerBlock.io.fenceio.fencei
+  frontend.io.fencei := integerBlock.io.fenceio.get.fencei
 
-  ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
+  ctrlBlock.io.csrCtrl <> integerBlock.io.csrio.get.customCtrl
   ctrlBlock.io.exuRedirect <> integerBlock.io.exuRedirect
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.stOut <> memBlock.io.stOut
@@ -226,35 +236,35 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   integerBlock.io.redirect <> ctrlBlock.io.redirect
   integerBlock.io.flush <> ctrlBlock.io.flush
-  integerBlock.io.csrio.hartId <> io.hartId
-  integerBlock.io.csrio.perf <> DontCare
-  integerBlock.io.csrio.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
-  integerBlock.io.csrio.perf.bpuInfo <> ctrlBlock.io.perfInfo.bpuInfo
-  integerBlock.io.csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
-  integerBlock.io.csrio.perf.memInfo <> memBlock.io.memInfo
-  integerBlock.io.csrio.perf.frontendInfo <> frontend.io.frontendInfo
+  integerBlock.io.csrio.get.hartId <> io.hartId
+  integerBlock.io.csrio.get.perf <> DontCare
+  integerBlock.io.csrio.get.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  integerBlock.io.csrio.get.perf.bpuInfo <> ctrlBlock.io.perfInfo.bpuInfo
+  integerBlock.io.csrio.get.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
+  integerBlock.io.csrio.get.perf.memInfo <> memBlock.io.memInfo
+  integerBlock.io.csrio.get.perf.frontendInfo <> frontend.io.frontendInfo
 
-  integerBlock.io.csrio.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
-  integerBlock.io.csrio.fpu.isIllegal := false.B
-  integerBlock.io.csrio.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
-  integerBlock.io.csrio.fpu.frm <> floatBlock.io.frm
-  integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
-  integerBlock.io.csrio.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
-  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
-  integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
-  integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
-  integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
+  integerBlock.io.csrio.get.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  integerBlock.io.csrio.get.fpu.isIllegal := false.B
+  integerBlock.io.csrio.get.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.get.fpu.frm <> floatBlock.io.frm.get
+  integerBlock.io.csrio.get.exception <> ctrlBlock.io.roqio.exception
+  integerBlock.io.csrio.get.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
+  integerBlock.io.csrio.get.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
+  integerBlock.io.csrio.get.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
+  integerBlock.io.csrio.get.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
+  integerBlock.io.csrio.get.externalInterrupt <> io.externalInterrupt
 
   floatBlock.io.redirect <> ctrlBlock.io.redirect
   floatBlock.io.flush <> ctrlBlock.io.flush
 
-  integerBlock.io.fenceio.sfence <> memBlock.io.sfence
-  integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
+  integerBlock.io.fenceio.get.sfence <> memBlock.io.sfence
+  integerBlock.io.fenceio.get.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.flush <> ctrlBlock.io.flush
-  memBlock.io.csrCtrl <> integerBlock.io.csrio.customCtrl
-  memBlock.io.tlbCsr <> integerBlock.io.csrio.tlb
+  memBlock.io.csrCtrl <> integerBlock.io.csrio.get.customCtrl
+  memBlock.io.tlbCsr <> integerBlock.io.csrio.get.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
@@ -268,16 +278,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
-  itlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
-  dtlbRepeater.io.sfence <> integerBlock.io.fenceio.sfence
+  itlbRepeater.io.sfence <> integerBlock.io.fenceio.get.sfence
+  dtlbRepeater.io.sfence <> integerBlock.io.fenceio.get.sfence
   ptw.io.tlb(0) <> itlbRepeater.io.ptw
   ptw.io.tlb(1) <> dtlbRepeater.io.ptw
-  ptw.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.csr <> integerBlock.io.csrio.tlb
+  ptw.io.sfence <> integerBlock.io.fenceio.get.sfence
+  ptw.io.csr <> integerBlock.io.csrio.get.tlb
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
-  io.l2_pf_enable := integerBlock.io.csrio.customCtrl.l2_pf_enable
+  io.l2_pf_enable := integerBlock.io.csrio.get.customCtrl.l2_pf_enable
 
   val l1plus_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
   l1pluscache.reset := l1plus_reset_gen.io.out
