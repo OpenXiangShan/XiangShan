@@ -88,7 +88,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
 
   components.foreach(_.io.s3_fire := s3_fire)
 
-  io.out.valid := s3_fire && !io.redirect.valid
+  io.out.valid := s3_fire && !io.redirect.valid // TODO: Delete it
 
   // predictor override redirect
   val finalPredValid = components(2).io.out.valid

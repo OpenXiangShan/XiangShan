@@ -108,6 +108,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val s1_totalHits = VecInit((0 until numWays).map(b => s1_read(b).tag === s1_tag && s1_read(b).valid))
   val s1_hit = s1_totalHits.reduce(_||_)
+  val s2_hit = RegEnable(s1_hit, io.s1_fire)
   val s1_hit_way = PriorityEncoder(s1_totalHits) // TODO: Replace by Mux1H, and when not hit, clac tag and save it in ftb_entry
 
   def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
@@ -135,7 +136,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val writeWay = Mux(s1_hit, s1_hit_way, allocWays(0)) // TODO: allocWays is Vec
 
-  val ftb_entry = s1_read(s1_hit_way)
+  val ftb_entry = Mux1H(s1_totalHits, s1_read)
 
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
@@ -162,37 +163,31 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
     s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
   }
 
-  val s1_latch_is_br         = ftb_entry.brValids
-  val s1_latch_is_jal        = ftb_entry.jmpValid && !ftb_entry.isJalr
-  val s1_latch_is_jalr       = ftb_entry.isJalr
-  val s1_latch_is_call       = ftb_entry.isCall
-  val s1_latch_is_ret        = ftb_entry.isRet
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
-
-  val s1_latch_pc            = s1_pc
-  val s1_latch_hit           = s1_hit
-  val s1_latch_meta          = FTBMeta(writeWay.asUInt(), s1_hit).asUInt()
-  val s1_latch_ftb_entry     = ftb_entry
 
   // when (RegNext(s1_hit)) {
   io.out.bits.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_br         := RegEnable(s1_latch_is_br, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jal        := RegEnable(s1_latch_is_jal, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jalr       := RegEnable(s1_latch_is_jalr, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_call       := RegEnable(s1_latch_is_call, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_ret        := RegEnable(s1_latch_is_ret, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_br         := RegEnable(ftb_entry.brValids, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jal        := RegEnable(ftb_entry.jmpValid && !ftb_entry.isJalr, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_jalr       := RegEnable(ftb_entry.isJalr, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_call       := RegEnable(ftb_entry.isCall, io.s1_fire)
+  io.out.bits.resp.s2.preds.is_ret        := RegEnable(ftb_entry.isRet, io.s1_fire)
 
   io.out.bits.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
-  io.out.bits.resp.s2.pc         := RegEnable(s1_latch_pc, io.s1_fire) //s2_pc
-  io.out.bits.resp.s2.hit           := RegEnable(s1_latch_hit, io.s1_fire)
-  io.out.bits.s3_meta               := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
-  io.out.bits.resp.ftb_entry        := RegEnable(s1_latch_ftb_entry, io.s1_fire)
+  io.out.bits.resp.s2.pc                  := RegEnable(s1_pc, io.s1_fire) //s2_pc
+  io.out.bits.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
+  io.out.bits.resp.s2.ftb_entry           := RegEnable(ftb_entry, io.s1_fire)
+
+  io.out.bits.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit).asUInt(), io.s1_fire), io.s2_fire)
 
   io.out.bits.resp.s3 := RegEnable(io.out.bits.resp.s2, io.s2_fire)
 
-  when(!s1_hit) {
-    io.out.bits.resp.ftb_entry.pftAddr := RegEnable(s1_latch_pc + (FetchWidth*4).U, io.s1_fire)
+  when(!s2_hit) {
+    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
+  }.otherwise {
+    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
   }
+
   // }
 
   // override flush logic
