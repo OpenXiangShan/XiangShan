@@ -43,6 +43,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   bim.io.r.req.bits.setIdx := s1_idx
 
   io.in.ready := bim.io.r.req.ready && !io.redirect.valid
+  io.s1_ready := bim.io.r.req.ready && !io.redirect.valid
   io.out.valid := io.s2_fire && !io.redirect.valid
 
   // val s1_pc = RegEnable(s0_pc, s0_valid)

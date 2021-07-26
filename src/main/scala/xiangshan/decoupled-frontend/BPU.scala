@@ -201,8 +201,8 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s1_redirect_idx = RegNext(s0_redirect_pc)
   val s1_redirect_valid = RegNext(s0_redirect_valid)
 
-  io.out.bits.flush_out.valid := false.B
-  io.out.bits.flush_out.bits := DontCare
+  io.flush_out.valid := false.B
+  io.flush_out.bits := DontCare
 }
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {

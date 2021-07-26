@@ -96,7 +96,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   ftb.io.r.req.valid := io.s0_fire
   ftb.io.r.req.bits.setIdx := s0_idx
 
-  io.in.ready := ftb.io.r.req.ready && !io.redirect.valid
+  io.in.ready := ftb.io.r.req.ready && !io.redirect.valid // TODO: remove
+  io.s1_ready := ftb.io.r.req.ready && !io.redirect.valid
   // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
   io.out.valid := io.s2_fire && !io.redirect.valid
 

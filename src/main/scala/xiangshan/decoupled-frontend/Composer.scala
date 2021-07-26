@@ -94,13 +94,13 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val finalPredValid = components(2).io.out.valid
   val finalPredResp = components(2).io.out.bits.resp
   when(finalPredValid) {
-    when(finalPredResp.s2.preds.target =/= RegEnable(s0_pc, s0_fire)) {
+    when(finalPredResp.s2.preds.target =/= RegNext(s0_pc)) {
       s2_redirect := true.B
       io.flush_out.valid := true.B
       io.flush_out.bits  := finalPredResp.s2.preds.target
     }
 
-    // when(finalPredResp.s3.preds.target =/= s2_pc) {
+    // when(finalPredResp.s3.preds.target =/= RegNext(s1_pc)) {
     //   s3_redirect := true.B
     //   io.out.valid := true.B
     //   io.out.bits  := finalPredResp.s3.preds.target
