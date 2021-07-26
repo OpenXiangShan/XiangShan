@@ -89,6 +89,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(offBits - 1, 1) === 0.U
 
+  def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
+    val byteOffset = pc - start 
+    byteOffset(4,1)
+  } 
+
   //---------------------------------------------
   //  Fetch Stage 1 :
   //  * Send req to ICache Meta/Data
@@ -188,11 +193,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   //  * cut cacheline(s) and send to PreDecode
   //  * check if prediction is right (branch target and type, jump direction and type , jal target )
   //---------------------------------------------
-  val f2_valid      = RegInit(false.B)
-  val f2_ftq_req    = RegEnable(next = f1_ftq_req, enable = f1_fire)
-  val f2_situation  = RegEnable(next = f1_situation, enable=f1_fire)
-  val f2_doubleLine = RegEnable(next = f1_doubleLine, enable=f1_fire)
-  val f2_fire       = io.toIbuffer.fire()
+  val f2_valid        = RegInit(false.B)
+  val f2_ftq_req      = RegEnable(next = f1_ftq_req, enable = f1_fire)
+  val f2_situation    = RegEnable(next = f1_situation, enable=f1_fire)
+  val f2_doubleLine   = RegEnable(next = f1_doubleLine, enable=f1_fire)
+  val f2_isLoadReplay = f2_ftq_req.ldReplayOffset.valid
+  val f2_ldReplayIdx  = f2_ftq_req.ldReplayOffset.bits
+  val f2_fire         = io.toIbuffer.fire()
 
   f1_ready := f2_ready || !f1_valid
 
@@ -316,22 +323,16 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
 
-  // val jump_mask = Vec(FetchWidth,Bool())
-  // (0 until FetchWidth).map{ i =>
-  //   when(i.U < preDecoderOut.cfiOffset.bits || i.U === preDecoderOut.cfiOffset.bits)
-  //   {
-  //     jump_mask(i) := true.B
-  //   }
-  // }
+  val f2_predecode_valids = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt
+  val f2_bb_valids        = Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))
+  val f2_jump_valids      = Fill(16, !preDecoderOut.cfiOffset.valid)   | Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
+  val f2_ldreplay_valids  = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
+  val f2_real_valids      = f2_predecode_valids & f2_bb_valids & f2_jump_valids & f2_ldreplay_valids
 
-  val f2_real_valids  = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt &
-     (Fill(16, !preDecoderOut.cfiOffset.valid) |
-     (Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)))
-
-  def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
+  def cut(cacheline: UInt, start: UInt, replay: Boolean) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
     val dataVec  = cacheline.asTypeOf(Vec(64, UInt(16.W)))
-    val startPtr = Cat(0.U(1.W), start(offBits-1, 1))
+    val startPtr = if(replay) start else Cat(0.U(1.W), start(offBits-1, 1))
     (0 until 17).foreach( i =>
       result(i) := dataVec(startPtr + i.U)
     )
@@ -342,7 +343,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_lastHalfMatch = f2_lastHalf.matchThisBlock(f2_ftq_req.startAddr)
   
   preDecoderIn.instValid     :=  (f2_valid && f2_hit) || miss_all_fix 
-  preDecoderIn.data          :=  cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr)
+  preDecoderIn.data          :=  Mux(f2_isLoadReplay,cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr, true )
+                                                    ,cut(Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr, false))
   preDecoderIn.startAddr     :=  f2_ftq_req.startAddr
   preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
   preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
