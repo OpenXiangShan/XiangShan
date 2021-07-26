@@ -189,6 +189,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val new_cfi_is_jalr = entry_has_jmp &&  pd.jmpInfo.bits(0) && io.cfiIndex.valid
   val new_cfi_is_call = entry_has_jmp &&  pd.jmpInfo.bits(1) && io.cfiIndex.valid
   val new_cfi_is_ret  = entry_has_jmp &&  pd.jmpInfo.bits(2) && io.cfiIndex.valid
+  val last_jmp_rvi = entry_has_jmp && pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask.last
+  val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
 
   // if not hit, establish a new entry
   init_entry.valid := true.B
@@ -200,15 +202,15 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.jmpTarget := io.target
   init_entry.pftAddr := Mux(entry_has_jmp,
     io.start_addr + (pd.jmpOffset << instOffsetBits) + Mux(pd.rvcMask(pd.jmpOffset), 2.U, 4.U),
-    io.start_addr + (FetchWidth * 4).U)
+    io.start_addr + Mux(last_br_rvi, (FetchWidth*4+2).U, (FetchWidth * 4).U)
+  )
   // TODO: carry bit is currently ignored
   init_entry.isJalr := new_cfi_is_jalr
   init_entry.isCall := new_cfi_is_call
   init_entry.isRet  := new_cfi_is_ret
   // TODO: oversize bit is currently ignored
   init_entry.last_is_rvc := Mux(entry_has_jmp, pd.rvcMask(pd.jmpOffset), pd.rvcMask.last)
-  val last_jmp_rvi = entry_has_jmp && pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask.last
-  val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
+
   init_entry.oversize := last_br_rvi || last_jmp_rvi
 
   // if hit, check whether a new cfi(only br is possible) is detected
