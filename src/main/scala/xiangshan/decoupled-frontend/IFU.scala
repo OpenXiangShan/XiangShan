@@ -75,6 +75,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val target        = UInt(VAddrBits.W)
   val instValid     = Bool() 
   val lastHalfMatch = Bool()
+  val instRange     = Vec(16, Bool())
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
@@ -322,12 +323,14 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
+  val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, !f2_ftq_req.oversize))
+  val f2_ldreplay_valids      = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
+  val f2_instruction_range    = Wire(UInt(16.W))
+  f2_instruction_range        := f2_bb_valids & f2_ldreplay_valids
 
-  val f2_predecode_valids = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt
-  val f2_bb_valids        = Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))
-  val f2_jump_valids      = Fill(16, !preDecoderOut.cfiOffset.valid)   | Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
-  val f2_ldreplay_valids  = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
-  val f2_real_valids      = f2_predecode_valids & f2_bb_valids & f2_jump_valids & f2_ldreplay_valids
+  val f2_jump_valids          = Fill(16, !preDecoderOut.cfiOffset.valid)   | Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
+  val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
+
 
   def cut(cacheline: UInt, start: UInt, replay: Boolean) : Vec[UInt] ={
     val result   = Wire(Vec(17, UInt(16.W)))
@@ -350,6 +353,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
+  preDecoderIn.instRange     :=  f2_instruction_range.asTypeOf(Vec(16, Bool()))
   
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
 
@@ -393,7 +397,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := f2_real_valids
+  io.toIbuffer.bits.valid     := f2_predecode_valids
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
@@ -404,7 +408,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd 
-  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_real_valids(i)}
+  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_predecode_valids(i)}
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
   toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits 
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset

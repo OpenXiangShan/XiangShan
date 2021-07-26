@@ -79,6 +79,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   })
 
   val instValid = io.in.instValid 
+  val instRange = io.in.instRange
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val pcEnd     = io.in.fallThruAddr
@@ -108,9 +109,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
     
-    validStart(i) := lastIsValidEnd || !HasCExtension.B
-    validEnd(i)   := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
-    hasLastHalf(i) := instValid && currentPC === (pcEnd - 2.U) && validStart(i) && !currentIsRVC
+    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && instRange(i)
+    validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
+    hasLastHalf(i)  := instValid && currentPC === (pcEnd - 2.U) && validStart(i) && !currentIsRVC
 
     val brType::isCall::isRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC)

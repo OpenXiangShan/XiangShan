@@ -13,6 +13,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val ldReplayOffset = ValidUndirectioned(UInt(log2Ceil(32).W))
   val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(32).W))
   val target       = UInt(VAddrBits.W)
+  val oversize     = Bool()
 
   override def toPrintable: Printable = {
     p"[start] ${Hexadecimal(startAddr)} [pft] ${Hexadecimal(fallThruAddr)}" +

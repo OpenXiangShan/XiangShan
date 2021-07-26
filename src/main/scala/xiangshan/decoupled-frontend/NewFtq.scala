@@ -66,6 +66,7 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
   val startAddr = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
   val isNextMask = Vec(16, Bool())
+  val oversize = Bool()
   def getPc(offset: UInt) = {
     def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(16)+instOffsetBits)
     def getOffset(pc: UInt) = pc(log2Ceil(16)+instOffsetBits-1, instOffsetBits)
@@ -206,6 +207,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.isRet  := new_cfi_is_ret
   // TODO: oversize bit is currently ignored
   init_entry.last_is_rvc := Mux(entry_has_jmp, pd.rvcMask(pd.jmpOffset), pd.rvcMask.last)
+  val last_jmp_rvi = entry_has_jmp && pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask.last
+  val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
+  init_entry.oversize := last_br_rvi || last_jmp_rvi
 
   // if hit, check whether a new cfi(only br is possible) is detected
   val oe = io.old_entry
@@ -245,6 +249,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     val new_pft_offset = Mux(new_br_insert_onehot.asUInt.orR, oe.brOffset.last, new_br_offset)
     old_entry_modified.pftAddr := io.start_addr + (new_pft_offset << instOffsetBits)
     old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U)
+    old_entry_modified.oversize := false.B
   }
 
   io.new_entry := Mux(!hit, init_entry, Mux(is_new_br, old_entry_modified, io.old_entry))
@@ -312,6 +317,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
   ftq_pc_mem.io.wdata(0).fallThruAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
   ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until 16).map(i => (io.fromBpu.resp.bits.pc(4, 1) +& i.U)(4).asBool()))
+  ftq_pc_mem.io.wdata(0).oversize := io.fromBpu.resp.bits.ftb_entry.oversize
 
   // read ports:                                                       redirects + ifuRedirect + commit
   val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, numRedirect+1+1, 1))
@@ -497,8 +503,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
   when (RegNext(to_buf_fire)) {
-    ifu_req_buf.bits.startAddr := ftq_pc_mem.io.rdata.init.last.startAddr
+    ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
+    ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
     ifu_req_buf.bits.target := pred_target_sram.io.rdata(0)
   }
   
@@ -508,6 +515,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   when (last_cycle_to_buf_fire) {
     io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
+    io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
     io.toIfu.req.bits.target := pred_target_sram.io.rdata(0)
   }
         
