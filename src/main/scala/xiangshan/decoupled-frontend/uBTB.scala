@@ -255,11 +255,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   update_write_metas.tag := u_tag
   // brOffset
   update_write_metas.brValids := update.preds.is_br
-  update_write_metas.jmpValid := update.preds.is_jal || update.preds.is_jalr || update.preds.is_call || update.preds.is_ret
+  update_write_metas.jmpValid := update.preds.is_jal || update.preds.is_jalr // || update.preds.is_call || update.preds.is_ret
   // isJalr
   // isCall
   // isRet
-  update_write_metas.pred := DontCare
+  update_write_metas.pred := DontCare // TODO: ???
 
   // update_write_datas.lower := u_target_lower
   update_write_datas.jmpTarget := update.ftb_entry.jmpTarget
@@ -271,4 +271,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_write_data.bits := update_write_datas
   banks.update_taken_mask := u_taken_mask
 
+  if (!env.FPGAPlatform) {
+      XSPerfAccumulate("ubtb_commit_hits", update.hit)
+      XSPerfAccumulate("ubtb_commit_misses", !update.hit)
+  }
 }
