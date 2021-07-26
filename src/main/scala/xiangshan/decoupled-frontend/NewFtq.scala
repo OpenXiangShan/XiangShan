@@ -70,8 +70,7 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
     def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(16)+instOffsetBits)
     def getOffset(pc: UInt) = pc(log2Ceil(16)+instOffsetBits-1, instOffsetBits)
     Cat(getHigher(Mux(isNextMask(offset), fallThruAddr, startAddr)),
-        getOffset(Mux(isNextMask(offset), fallThruAddr, startAddr))+offset,
-        0.U(instOffsetBits.W))
+        getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
 }
 
