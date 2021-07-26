@@ -159,7 +159,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   // TODO: mask must is zero when ftb not hit
   when(s1_hit) {
     s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
-    s1_latch_taken_mask(0)  := ftb_entry.jmpValid
+    s1_latch_taken_mask(numBr)  := ftb_entry.jmpValid
   }.otherwise {
     s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
   }
