@@ -126,9 +126,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     io.out.instrs(i) := expander.io.out.bits
     io.out.pc(i) := currentPC
 
-    targets(i)   := io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U && !io.out.pd(i).notCFI || io.out.pd(i).isJal))
 
-    takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U || io.out.pd(i).isJal))
+    val jumpTarget      = io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    targets(i) := Mux(takens(i), jumpTarget, pcEnd)
 
 
     misPred(i)   := (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
