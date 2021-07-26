@@ -323,7 +323,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
-  val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, !f2_ftq_req.oversize))
+  val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, f2_ftq_req.oversize))
   val f2_ldreplay_valids      = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
   val f2_instruction_range    = Wire(UInt(16.W))
   f2_instruction_range        := f2_bb_valids & f2_ldreplay_valids
