@@ -151,7 +151,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   when(s1_hit) {
     s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, s1_pc + (FetchWidth*4).U))
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, ftb_entry.pftAddr))
   }
 
   val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
