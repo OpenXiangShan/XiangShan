@@ -1,5 +1,6 @@
 /***************************************************************************************
   * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
   *
   * XiangShan is licensed under Mulan PSL v2.
   * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -113,9 +114,12 @@ class Scheduler(
   println("Scheduler: ")
   val numIssuePorts = configs.map(_._2).sum
   println(s"  number of issue ports: ${numIssuePorts}")
-  val numReplayPorts = reservationStations.count(_.params.hasFeedback == true)
+  val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
   println(s"  number of replay ports: ${numReplayPorts}")
-  val numSTDPorts = reservationStations.count(_.params.isStore == true)
+  val memRsEntries = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
+  require(memRsEntries.max == memRsEntries.min, "different indexes not supported")
+  println(s"  size of load and store RSes: ${memRsEntries.max}")
+  val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
   println(s"  number of std ports: ${numSTDPorts}")
   val numOutsideWakeup = reservationStations.map(_.numExtFastWakeupPort).sum
   println(s"  number of outside fast wakeup ports: ${numOutsideWakeup}")
@@ -124,6 +128,13 @@ class Scheduler(
 }
 
 class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter {
+  val memRsEntries = outer.memRsEntries.max
+  val updatedP = p.alter((site, here, up) => {
+    case XSCoreParamsKey => up(XSCoreParamsKey).copy(
+      IssQueSize = memRsEntries
+    )
+  })
+
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
@@ -135,8 +146,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val readFpRf = Vec(outer.fpRfReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
     val writeback = Vec(outer.intRfWritePorts + outer.fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val replay = Vec(outer.numReplayPorts, Flipped(ValidIO(new RSFeedback)))
-    val rsIdx = Vec(outer.numReplayPorts, Output(UInt(log2Up(IssQueSize).W)))
+    val replay = Vec(outer.numReplayPorts, Flipped(ValidIO(new RSFeedback()(updatedP))))
+    val rsIdx = Vec(outer.numReplayPorts, Output(UInt(log2Up(memRsEntries).W)))
     val isFirstIssue = Vec(outer.numReplayPorts, Output(Bool()))
     val stData = Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))
     // 2LOAD, data is selected from writeback ports
@@ -189,14 +200,17 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.module.io_checkwait.get.stIssuePtr <> io.stIssuePtr
     }
     if (rs.module.io_feedback.isDefined) {
-      rs.module.io_feedback.get.memfeedback <> io.replay(feedbackIdx)
-      rs.module.io_feedback.get.rsIdx <> io.rsIdx(feedbackIdx)
-      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue(feedbackIdx)
-      feedbackIdx += 1
+      require(io.rsIdx(0).getWidth == rs.module.io_feedback.get.rsIdx(0).getWidth)
+      val width = rs.module.io_feedback.get.memfeedback.length
+      rs.module.io_feedback.get.memfeedback <> io.replay.slice(feedbackIdx, feedbackIdx + width)
+      rs.module.io_feedback.get.rsIdx <> io.rsIdx.slice(feedbackIdx, feedbackIdx + width)
+      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue.slice(feedbackIdx, feedbackIdx + width)
+      feedbackIdx += width
     }
     if (rs.module.io_store.isDefined) {
-      rs.module.io_store.get.stData <> io.stData(stDataIdx)
-      stDataIdx += 1
+      val width = rs.module.io_store.get.stData.length
+      rs.module.io_store.get.stData <> io.stData.slice(stDataIdx, stDataIdx + width)
+      stDataIdx += width
     }
 
     (rs.intSrcCnt > 0, rs.fpSrcCnt > 0) match {
@@ -262,6 +276,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       }
       intReadPort += numIntRfPorts
     }
+
     val numFpRfPorts = dp.map(_._1).map(rs_all(_).fpSrcCnt).max
     if (numFpRfPorts > 0) {
       val fpRfPorts = VecInit(fpRf.io.readPorts.slice(fpReadPort, fpReadPort + numFpRfPorts).map(_.data))
@@ -272,7 +287,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         if (numIntRfPorts > 0) {
           require(numFpRfPorts == 1)
           require(numIntRfPorts == 2)
-          when(RegNext(mod.io.fromDispatch(0).bits.ctrl.srcType(1) === SrcType.fp)) {
+          when(RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(1) === SrcType.fp)) {
             target(1) := fpRfPorts(0)
           }
         }

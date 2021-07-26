@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -21,6 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.cache._
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import chisel3.experimental.chiselName
 import freechips.rocketchip.tile.HasLazyRoCC
 import xiangshan.backend.ftq.FtqPtr
@@ -572,7 +574,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
   XSPerfAccumulate("if3_redirect_fired", if3_fire && if3_redirect && !if3_flush)
   XSPerfAccumulate("if4_redirect", if4_valid && if4_redirect && !if4_flush)
   XSPerfAccumulate("if4_redirect_fired", if4_fire && if4_redirect && !if4_flush)
-  
+
   XSPerfAccumulate("if1_total_stall", !if2_allReady && if1_valid)
   XSPerfAccumulate("if1_stall_from_icache_req", !icache.io.req.ready && if1_valid)
   XSPerfAccumulate("if1_stall_from_if2", !if2_ready && if1_valid)
@@ -585,7 +587,7 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
 
   XSPerfAccumulate("if3_prevHalfConsumed", if3_prevHalfConsumed)
   XSPerfAccumulate("if4_prevHalfConsumed", if4_prevHalfConsumed)
-  
+
 
   // debug info
   if (IFUDebug) {
