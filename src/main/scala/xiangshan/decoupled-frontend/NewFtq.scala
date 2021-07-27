@@ -362,14 +362,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.wdata.rasEntry := io.fromBpu.resp.bits.rasTop
   ftq_redirect_sram.io.wdata.specCnt := io.fromBpu.resp.bits.specCnt
 
-  val pred_info_sram = Module(new FtqNRSRAM(new Ftq_Pred_Info, 1))
-  pred_info_sram.io.wen := enq_fire
-  pred_info_sram.io.waddr := bpuPtr.value
-  pred_info_sram.io.wdata.target := io.fromBpu.resp.bits.preds.target
-  pred_info_sram.io.wdata.cfiIndex.valid := io.fromBpu.resp.bits.preds.taken_mask.asUInt.orR
-  pred_info_sram.io.wdata.cfiIndex.bits := ParallelPriorityMux(io.fromBpu.resp.bits.preds.taken_mask, io.fromBpu.resp.bits.ftb_entry.getOffsetVec)
-
-
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   ftq_meta_1r_sram.io.wen := enq_fire
   ftq_meta_1r_sram.io.waddr := bpuPtr.value
@@ -497,6 +489,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
+  XSError(ifu_wb_valid && pdWb.bits.misOffset.valid && entry_replay_status(ifu_wb_idx) === l_replaying,
+    p"unexpected predecode mispredict detected at idx: ${ifu_wb_idx} startAddr: ${Hexadecimal(pdWb.bits.pc(0))} " +
+    p"misOffset: ${pdWb.bits.misOffset.bits}\n")
+
 
   // ****************************************************************
   // **************************** to ifu ****************************
@@ -520,13 +516,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   
   // read pc and target
   ftq_pc_mem.io.raddr.init.last := ifuPtr.value
-  pred_info_sram.io.raddr(0) := ifuPtr.value
-  pred_info_sram.io.ren(0) := to_buf_fire
-  
+
   val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(PredictWidth).W))))
   when (to_buf_fire) {
     ifu_req_buf.bits.ftqIdx := ifuPtr
     ifu_req_buf.bits.ldReplayOffset := loadReplayOffset
+    ifu_req_buf.bits.target := update_target(ifuPtr.value)
+    ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
     when (loadReplayOffset.valid) {
       loadReplayOffset.valid := false.B
     }
@@ -535,8 +531,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
     ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
-    ifu_req_buf.bits.target    := pred_info_sram.io.rdata(0).target
-    ifu_req_buf.bits.ftqOffset := pred_info_sram.io.rdata(0).cfiIndex
   }
   
   val last_cycle_to_buf_fire = RegNext(to_buf_fire)
@@ -546,8 +540,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
     io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
-    io.toIfu.req.bits.target    := pred_info_sram.io.rdata(0).target
-    io.toIfu.req.bits.ftqOffset := pred_info_sram.io.rdata(0).cfiIndex
   }
         
 
@@ -582,8 +574,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** redirect from ifu ****************************
   // ***************************************************************************
   val fromIfuRedirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
-  fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush &&
-                           !entry_replay_status(pdWb.bits.ftqIdx.value) === l_replaying
+  fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush
   fromIfuRedirect.bits.ftqIdx := pdWb.bits.ftqIdx
   fromIfuRedirect.bits.ftqOffset := pdWb.bits.misOffset.bits
   fromIfuRedirect.bits.level := RedirectLevel.flushAfter // TODO: is this right?
