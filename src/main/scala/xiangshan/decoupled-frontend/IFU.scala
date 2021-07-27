@@ -404,8 +404,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i)}
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
 
+  val finishFetchMaskReg = RegNext(((f2_valid && f2_hit) || miss_all_fix) && !f1_fire)
 
-  toFtq.pdWb.valid           := (f2_valid && f2_hit) || miss_all_fix
+  toFtq.pdWb.valid           := !finishFetchMaskReg & ((f2_valid && f2_hit) || miss_all_fix)
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd 
   toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_predecode_valids(i)}

@@ -384,7 +384,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   val set_fetch_status_between = set_status_between(entry_fetch_status)(_, _, _)
   val set_commit_status_between = set_status_between(commitStateQueue)(_, _, _)
-  val set_replay_status_between = set_status_between(entry_fetch_status)(_, _, _)
+  val set_replay_status_between = set_status_between(entry_replay_status)(_, _, _)
 
   when (enq_fire) {
     val enqIdx = bpuPtr.value
