@@ -64,13 +64,14 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
 
 class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
   val startAddr = UInt(VAddrBits.W)
-  val fallThruAddr = UInt(VAddrBits.W)
+  val nextRangeAddr = UInt(VAddrBits.W)
+  val pftAddr = UInt(VAddrBits.W)
   val isNextMask = Vec(16, Bool())
   val oversize = Bool()
   def getPc(offset: UInt) = {
     def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(16)+instOffsetBits)
     def getOffset(pc: UInt) = pc(log2Ceil(16)+instOffsetBits-1, instOffsetBits)
-    Cat(getHigher(Mux(isNextMask(offset), fallThruAddr, startAddr)),
+    Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
 }
@@ -328,7 +329,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wen(0) := enq_fire
   ftq_pc_mem.io.waddr(0) := bpuPtr.value
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
-  ftq_pc_mem.io.wdata(0).fallThruAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
+  ftq_pc_mem.io.wdata(0).nextRangeAddr := io.fromBpu.resp.bits.pc + (FetchWidth * 4).U
+  ftq_pc_mem.io.wdata(0).pftAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
   ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until 16).map(i => (io.fromBpu.resp.bits.pc(4, 1) +& i.U)(4).asBool()))
   ftq_pc_mem.io.wdata(0).oversize := io.fromBpu.resp.bits.ftb_entry.oversize
 
@@ -515,7 +517,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   when (RegNext(to_buf_fire)) {
     ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
+    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
     ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
     ifu_req_buf.bits.target    := pred_info_sram.io.rdata(0).target
     ifu_req_buf.bits.ftqOffset := pred_info_sram.io.rdata(0).cfiIndex
@@ -526,7 +528,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toIfu.req.bits  := ifu_req_buf.bits
   when (last_cycle_to_buf_fire) {
     io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
+    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
     io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
     io.toIfu.req.bits.target    := pred_info_sram.io.rdata(0).target
     io.toIfu.req.bits.ftqOffset := pred_info_sram.io.rdata(0).cfiIndex
