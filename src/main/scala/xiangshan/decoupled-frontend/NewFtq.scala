@@ -66,36 +66,36 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
   val startAddr = UInt(VAddrBits.W)
   val nextRangeAddr = UInt(VAddrBits.W)
   val pftAddr = UInt(VAddrBits.W)
-  val isNextMask = Vec(16, Bool())
+  val isNextMask = Vec(PredictWidth, Bool())
   val oversize = Bool()
   def getPc(offset: UInt) = {
-    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(16)+instOffsetBits)
-    def getOffset(pc: UInt) = pc(log2Ceil(16)+instOffsetBits-1, instOffsetBits)
+    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits)
+    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits)
     Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
 }
 
 class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
-  val brMask = Vec(16, Bool())
+  val brMask = Vec(PredictWidth, Bool())
   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
-  val jmpOffset = UInt(4.W)
+  val jmpOffset = UInt(log2Ceil(PredictWidth).W)
   val jalTarget = UInt(VAddrBits.W)
-  val rvcMask = Vec(16, Bool())
+  val rvcMask = Vec(PredictWidth, Bool())
   def hasJal  = jmpInfo.valid && !jmpInfo.bits(0)
   def hasJalr = jmpInfo.valid && jmpInfo.bits(0)
   def hasCall = jmpInfo.valid && jmpInfo.bits(1)
   def hasRet  = jmpInfo.valid && jmpInfo.bits(2)
 }
 
-class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle {
+class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
-  val specCnt = Vec(1, UInt(10.W))
+  val specCnt = Vec(numBr, UInt(10.W))
 }
 
-class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle {
-  val meta = UInt(120.W)
+class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
+  val meta = UInt(MaxMetaLength.W)
 }
 
 class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
@@ -103,32 +103,32 @@ class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 }
 
-class FtqEntry(implicit p: Parameters) extends XSBundle {
+class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val startAddr = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
-  val isNextMask = Vec(16, Bool())
+  val isNextMask = Vec(PredictWidth, Bool())
 
-  val meta = UInt()
+  val meta = UInt(MaxMetaLength.W)
 
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
-  val specCnt = Vec(1, UInt(10.W))
+  val specCnt = Vec(numBr, UInt(10.W))
   
-  val valids = Vec(16, Bool())
-  val brMask = Vec(16, Bool())
+  val valids = Vec(PredictWidth, Bool())
+  val brMask = Vec(PredictWidth, Bool())
   // isJalr, isCall, isRet
   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
-  val jmpOffset = UInt(4.W)
+  val jmpOffset = UInt(log2Ceil(PredictWidth).W)
   
-  val mispredVec = Vec(16, Bool())
-  val cfiIndex = ValidUndirectioned(UInt(4.W))
+  val mispredVec = Vec(PredictWidth, Bool())
+  val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val target = UInt(VAddrBits.W)
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
   val ptr = Output(new FtqPtr)
-  val offset = Output(UInt(log2Ceil(16).W))
+  val offset = Output(UInt(log2Ceil(PredictWidth).W))
   val data = Input(gen)
   def apply(ptr: FtqPtr, offset: UInt) = {
     this.ptr := ptr
@@ -139,8 +139,8 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
 }
 
 
-class CfiInfoToCtrl(implicit p: Parameters) extends Bundle {
-  val br_mask = Vec(16, Bool())
+class CfiInfoToCtrl(implicit p: Parameters) extends XSBundle {
+  val br_mask = Vec(PredictWidth, Bool())
   val hist = new GlobalHistory
   override def cloneType = (new CfiInfoToCtrl).asInstanceOf[this.type]
 }
@@ -334,7 +334,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
   ftq_pc_mem.io.wdata(0).nextRangeAddr := io.fromBpu.resp.bits.pc + (FetchWidth * 4).U
   ftq_pc_mem.io.wdata(0).pftAddr := io.fromBpu.resp.bits.ftb_entry.pftAddr
-  ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until 16).map(i => (io.fromBpu.resp.bits.pc(4, 1) +& i.U)(4).asBool()))
+  ftq_pc_mem.io.wdata(0).isNextMask := VecInit((0 until PredictWidth).map(i =>
+    (io.fromBpu.resp.bits.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
+  ))
   ftq_pc_mem.io.wdata(0).oversize := io.fromBpu.resp.bits.ftb_entry.oversize
 
   // read ports:                                                       redirects + ifuRedirect + commit
@@ -354,6 +356,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   pred_info_sram.io.wen := enq_fire
   pred_info_sram.io.waddr := bpuPtr.value
   pred_info_sram.io.wdata.target := io.fromBpu.resp.bits.preds.target
+  pred_info_sram.io.wdata.cfiIndex.valid := io.fromBpu.resp.bits.preds.taken_mask.asUInt.orR
+  pred_info_sram.io.wdata.cfiIndex.bits := ParallelPriorityMux(io.fromBpu.resp.bits.preds.taken_mask, io.fromBpu.resp.bits.ftb_entry.getOffsetVec)
 
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
@@ -369,7 +373,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W)))
-  val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Up(PredictWidth).W))))
+  val cfiIndex_vec = Reg(Vec(FtqSize, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
   val mispredict_vec = Reg(Vec(FtqSize, Vec(PredictWidth, Bool())))
   
   val c_invalid :: c_valid :: c_commited :: Nil = Enum(3)
@@ -407,18 +411,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val enqIdx = bpuPtr.value
     val preds = io.fromBpu.resp.bits.preds
     val ftb_entry = io.fromBpu.resp.bits.ftb_entry
-    val real_taken_mask = preds.taken_mask.asUInt & Cat(ftb_entry.jmpValid, ftb_entry.brValids.asUInt)
-    val offset_vec = VecInit(ftb_entry.brOffset :+ ftb_entry.jmpOffset)
-    val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(4.W))))
+    val real_taken_mask = preds.taken_mask.asUInt
+    val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
     entry_fetch_status(enqIdx) := f_to_send
-    commitStateQueue(enqIdx) := VecInit(Seq.fill(16)(c_invalid))
+    commitStateQueue(enqIdx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     entry_replay_status(enqIdx) := l_invalid // may be useless
     entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
-    enq_cfiIndex.valid := real_taken_mask.orR
-    enq_cfiIndex.bits := ParallelPriorityMux(real_taken_mask, offset_vec)
+    enq_cfiIndex.valid := preds.taken_mask.asUInt.orR
+    enq_cfiIndex.bits := ParallelPriorityMux(preds.taken_mask, ftb_entry.getOffsetVec)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
-    pred_info_sram.io.wdata.cfiIndex := enq_cfiIndex
-    mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(16)(false.B)))
+    mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := preds.target
   }
   
@@ -580,7 +582,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ifuRedirectCfiUpdate.pc := pdWb.bits.pc(pdWb.bits.misOffset.bits)
   ifuRedirectCfiUpdate.pd := pdWb.bits.pd(pdWb.bits.misOffset.bits)
   ifuRedirectCfiUpdate.predTaken := cfiIndex_vec(pdWb.bits.ftqIdx.value).valid
-  ifuRedirectCfiUpdate.target := Mux(pdWb.bits.cfiOffset.valid, pdWb.bits.target, pdWb.bits.pc(0)+32.U)
+  ifuRedirectCfiUpdate.target := Mux(pdWb.bits.cfiOffset.valid, pdWb.bits.target, pdWb.bits.pc(0)+(FetchWidth*4).U)
   ifuRedirectCfiUpdate.taken := pdWb.bits.cfiOffset.valid
   ifuRedirectCfiUpdate.isMisPred := pdWb.bits.misOffset.valid
 

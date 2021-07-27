@@ -68,6 +68,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   //   (taken_mask, target)
   // }
 
+  def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
 }
 
