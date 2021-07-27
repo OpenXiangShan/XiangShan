@@ -38,9 +38,6 @@ endif
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -a -o $(TIMELOG)
 
-# remote machine with more cores to speedup c++ build
-REMOTE ?= localhost
-
 .DEFAULT_GOAL = verilog
 
 help:
@@ -96,26 +93,6 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 
 sim-verilog: $(SIM_TOP_V)
 
-SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
-SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
-
-DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
-DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
-
-SIM_VSRC = $(shell find ./src/test/vsrc/common -name "*.v" -or -name "*.sv")
-
-# include verilator.mk
-# include vcs.mk
-
-ifndef NEMU_HOME
-$(error NEMU_HOME is not set)
-endif
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-$(REF_SO):
-	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
-
-SEED ?= $(shell shuf -i 1-10000 -n 1)
-
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf ./build
@@ -129,11 +106,16 @@ bump:
 bsp:
 	mill -i mill.bsp.BSP/install
 
-emu: 
-	$(MAKE) -C ./difftest emu
+# verilator simulation
+emu:
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
-emu-run: 
-	$(MAKE) -C ./difftest emu-run
+emu-run:
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+# vcs simulation
+simv:
+	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
