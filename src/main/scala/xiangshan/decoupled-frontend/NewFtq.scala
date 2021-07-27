@@ -563,7 +563,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** redirect from ifu ****************************
   // ***************************************************************************
   val fromIfuRedirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
-  fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush
+  fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush &&
+                           !entry_replay_status(pdWb.bits.ftqIdx.value) === l_replaying
   fromIfuRedirect.bits.ftqIdx := pdWb.bits.ftqIdx
   fromIfuRedirect.bits.ftqOffset := pdWb.bits.misOffset.bits
   fromIfuRedirect.bits.level := RedirectLevel.flushAfter // TODO: is this right?
