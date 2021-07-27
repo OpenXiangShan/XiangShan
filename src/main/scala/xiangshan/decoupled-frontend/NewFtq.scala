@@ -253,10 +253,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     old_entry_modified.brTargets(i) :=  Mux(new_br_insert_onehot(i), io.target,
                                           Mux(oe.brOffset(i) < new_br_offset, oe.brTargets(i),
                                             (if (i != 0) oe.brTargets(i-1) else oe.brTargets(i))))
-    old_entry_modified.brValids(i)  :=  Mux(new_br_insert_onehot(i), true.B,
-                                          Mux(oe.brOffset(i) < new_br_offset, oe.brValids(i),
-                                            (if (i != 0) oe.brValids(i-1) else oe.brValids(i))))
   }
+  old_entry_modified.brValids := VecInit((oe.brValids zip new_br_insert_onehot).map{case (v1, v2) => v1 || v2})
 
   // in this case, pft_addr should be the addrs of the last br in packet
   val pft_need_to_change = is_new_br && br_full
