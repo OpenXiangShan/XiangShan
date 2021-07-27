@@ -80,6 +80,10 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
   val jmpOffset = UInt(4.W)
   val rvcMask = Vec(16, Bool())
+  def hasJal  = jmpInfo.valid && !jmpInfo.bits(0)
+  def hasJalr = jmpInfo.valid && jmpInfo.bits(0)
+  def hasCall = jmpInfo.valid && jmpInfo.bits(1)
+  def hasRet  = jmpInfo.valid && jmpInfo.bits(2)
 }
 
 class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle {
@@ -836,6 +840,70 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
   XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
 
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    val commit_inst_mask    = VecInit(commitStateQueue(commPtr.value).map(c => c === c_commited && do_commit)).asUInt
+    val commit_mispred_mask = mispredict_vec(commPtr.value).asUInt
+    val commit_not_mispred_mask = ~commit_mispred_mask
+
+    val commit_br_mask = commit_pd.brMask.asUInt
+    val commit_jmp_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.jmpInfo.valid.asTypeOf(UInt(1.W)))
+    val commit_cfi_mask = (commit_br_mask | commit_jmp_mask)
+
+    val commit_jal_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJal.asTypeOf(UInt(1.W)))
+    val commit_jalr_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJalr.asTypeOf(UInt(1.W)))
+    val commit_call_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasCall.asTypeOf(UInt(1.W)))
+    val commit_ret_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasRet.asTypeOf(UInt(1.W)))
+    
+    val mbpInstrs = commit_inst_mask & commit_cfi_mask
+
+    val mbpRights = commit_inst_mask & commit_not_mispred_mask
+    val mbpBRights = mbpRights & commit_br_mask
+    val mbpJRights = mbpRights & commit_jal_mask
+    val mbpIRights = mbpRights & commit_jalr_mask
+    val mbpCRights = mbpRights & commit_call_mask
+    val mbpRRights = mbpRights & commit_ret_mask
+
+    val mbpWrongs = commit_inst_mask & commit_mispred_mask
+    val mbpBWrongs = mbpWrongs & commit_br_mask
+    val mbpJWrongs = mbpWrongs & commit_jal_mask
+    val mbpIWrongs = mbpWrongs & commit_jalr_mask
+    val mbpCWrongs = mbpWrongs & commit_call_mask
+    val mbpRWrongs = mbpWrongs & commit_ret_mask
+
+    val perfCountsMap = Map(
+      "BpInstr" -> PopCount(mbpInstrs),
+      "BpBInstr" -> PopCount(mbpBRights | mbpBWrongs),
+      "BpRight"  -> PopCount(mbpRights),
+      "BpWrong"  -> PopCount(mbpWrongs),
+      "BpBRight" -> PopCount(mbpBRights),
+      "BpBWrong" -> PopCount(mbpBWrongs),
+      "BpJRight" -> PopCount(mbpJRights),
+      "BpJWrong" -> PopCount(mbpJWrongs),
+      "BpIRight" -> PopCount(mbpIRights),
+      "BpIWrong" -> PopCount(mbpIWrongs),
+      "BpCRight" -> PopCount(mbpCRights),
+      "BpCWrong" -> PopCount(mbpCWrongs),
+      "BpRRight" -> PopCount(mbpRRights),
+      "BpRWrong" -> PopCount(mbpRWrongs),
+
+      // "ubtbRight" -> PopCount(ubtbRights),
+      // "ubtbWrong" -> PopCount(ubtbWrongs),
+      // "btbRight" -> PopCount(btbRights),
+      // "btbWrong" -> PopCount(btbWrongs),
+      // "tageRight" -> PopCount(tageRights),
+      // "tageWrong" -> PopCount(tageWrongs),
+
+      // "rasRight"  -> PopCount(rasRights),
+      // "rasWrong"  -> PopCount(rasWrongs),
+      // "loopRight" -> PopCount(loopRights),
+      // "loopWrong" -> PopCount(loopWrongs),
+    )
+
+    for((key, value) <- perfCountsMap) {
+      XSPerfAccumulate(key, value)
+    }
+
+  }
   // val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
   // val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
 
