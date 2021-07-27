@@ -513,7 +513,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   pred_info_sram.io.raddr(0) := ifuPtr.value
   pred_info_sram.io.ren(0) := to_buf_fire
   
-  val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(FtqSize).W))))
+  val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(PredictWidth).W))))
   when (to_buf_fire) {
     ifu_req_buf.bits.ftqIdx := ifuPtr
     ifu_req_buf.bits.ldReplayOffset := loadReplayOffset
