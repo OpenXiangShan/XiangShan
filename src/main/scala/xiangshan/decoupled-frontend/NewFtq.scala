@@ -753,6 +753,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         commitStateQueue(next.value).foreach(_ := c_invalid)
       }
       set_replay_status_between(ifuPtr, ifuPtr, l_invalid) // set all to invalid
+      loadReplayOffset.valid := false.B
     // load replay
     }.otherwise {
       ifuPtr := idx
