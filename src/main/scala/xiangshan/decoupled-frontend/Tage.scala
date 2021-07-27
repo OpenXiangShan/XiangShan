@@ -381,7 +381,7 @@ abstract class BaseTage(implicit p: Parameters) extends BasePredictor with TageP
 class FakeTage(implicit p: Parameters) extends BaseTage {
   io.out <> 0.U.asTypeOf(DecoupledIO(new BasePredictorOutput))
 
-  io.s0_ready := true.B
+  // io.s0_ready := true.B
   io.s1_ready := true.B
   io.s2_ready := true.B
   io.s3_ready := true.B
@@ -572,7 +572,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.pc := RegNext(packetAligned(u.pc) + (w << instOffsetBits).U)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.hist := RegNext(updateHist)
+    tables(i).io.update.hist := RegNext(updateHist.predHist)
   }
 
 

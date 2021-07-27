@@ -24,7 +24,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, Tage}
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -69,6 +69,7 @@ case class XSCoreParameters
       val ftb = Module(new FTB()(p))
       val ubtb = Module(new MicroBTB()(p))
       val bim = Module(new BIM()(p))
+      // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
@@ -80,10 +81,12 @@ case class XSCoreParameters
       // btb.io.resp_in(0)   := bim.io.resp
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
-      ubtb.io.in.bits.resp_in(0)     := resp_in
-      bim.io.in.bits.resp_in(0)      := ubtb.io.out.bits.resp
-      ftb.io.in.bits.resp_in(0)      := bim.io.out.bits.resp
+      ubtb.io.in.bits.resp_in(0)  := resp_in
+      bim.io.in.bits.resp_in(0)   := ubtb.io.out.bits.resp
+      ftb.io.in.bits.resp_in(0)   := bim.io.out.bits.resp
+      // tage.io.in.bits.resp_in(0)  := ftb.io.out.bits.resp
 
+      // (preds, tage.io.out.bits.resp)
       (preds, ftb.io.out.bits.resp)
     }),
 

@@ -254,41 +254,115 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s0_pc_reg = RegInit(resetVector.U)
 
   // val s3_gh = predictors.io.out.bits.resp.s3.ghist
-  val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
+  // val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
+  val s0_ghist = WireInit(0.U.asTypeOf(new GlobalHistory))
+  val s1_ghist = RegNext(s0_ghist)
+  val s2_ghist = Reg(new GlobalHistory)
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
-  // when(io.bpu_to_ftq.resp.valid) {
-  //   s0_pc := io.bpu_to_ftq.resp.bits.preds.target
-  // }
+  when(RegNext(reset.asBool) && !reset.asBool) {
+    s0_ghist := 0.U.asTypeOf(new GlobalHistory)
+    // s0_pc := resetVector.U
+  }
 
   when(toFtq_fire) {
     // final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
     //   io.bpu_to_ftq.resp.bits.preds.taken)
   }
 
+  val s1_flush, s2_flush, s3_flush = Wire(Bool())
+  val s2_redirect, s3_redirect = Wire(Bool())
+
+  val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
+  val s1_valid, s2_valid, s3_valid = RegInit(false.B)
+  val s1_ready, s2_ready, s3_ready = Wire(Bool())
+  val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
+
+  val s1_bp_resp = predictors.io.out.bits.resp.s1
+  val s2_bp_resp = predictors.io.out.bits.resp.s2
+  val s3_bp_resp = predictors.io.out.bits.resp.s3
+
   predictors.io := DontCare
-  predictors.io.in.valid := !reset.asBool
+  predictors.io.in.valid := s0_fire
   predictors.io.in.bits.s0_pc := s0_pc
-  predictors.io.in.bits.ghist := final_gh.predHist
+  predictors.io.in.bits.ghist := s0_ghist.predHist
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   predictors.io.in.bits.toFtq_fire := toFtq_fire
 
   predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
+  // Pipeline logic
+  s2_redirect := false.B
+  s3_redirect := false.B
+
+  s3_flush := false.B
+  s2_flush := io.ftq_to_bpu.redirect.valid
+  s1_flush := s2_flush || s2_redirect
+
+  s1_components_ready := predictors.io.s1_ready
+  s1_ready := s1_fire || !s1_valid
+  s0_fire := !reset.asBool && s1_components_ready && s1_ready
+  predictors.io.s0_fire := s0_fire
+
+  s2_components_ready := predictors.io.s2_ready
+  s2_ready := s2_fire || !s2_valid
+  s1_fire := s1_valid && s2_components_ready && s2_ready
+
+  when(s0_fire)         { s1_valid := true.B  }
+    .elsewhen(s1_flush) { s1_valid := false.B }
+    .elsewhen(s1_fire)  { s1_valid := false.B }
+
+  predictors.io.s1_fire := s1_fire
+
+  s3_components_ready := predictors.io.s3_ready
+  s3_ready := s3_fire || !s3_valid
+  s2_fire := s2_valid && s3_components_ready && s3_ready
+
+  when(s2_flush)                    { s2_valid := false.B }
+    .elsewhen(s1_fire && !s1_flush) { s2_valid := true.B  }
+    .elsewhen(s2_fire)              { s2_valid := false.B }
+
+  predictors.io.s2_fire := s2_fire
+
+  s3_fire := s3_valid && io.bpu_to_ftq.resp.ready
+
+  when(s3_flush)                    { s3_valid := false.B }
+    .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B  }
+    .elsewhen(s3_fire)              { s3_valid := false.B }
+
+  predictors.io.s3_fire := s3_fire
+
+
+  // predictor override redirect
+  val resp_valid = predictors.io.out.bits.resp.valids
+  val finalPredValid = resp_valid(2)
+  val finalPredResp = predictors.io.out.bits.resp
+  when(finalPredValid) {
+    when(finalPredResp.s2.preds.target =/= RegNext(s0_pc)) {
+      s2_redirect := true.B
+    }
+
+    // when(finalPredResp.s3.preds.target =/= RegNext(s1_pc)) {
+    //   s3_redirect := true.B
+    //   io.out.valid := true.B
+    //   io.out.bits  := finalPredResp.s3.preds.target
+    // }
+  }
+
   // io.bpu_to_ftq.resp.bits.hit   := predictors.io.out.bits.resp.s3.hit
   // io.bpu_to_ftq.resp.bits.preds := predictors.io.out.bits.resp.s3.preds
   // io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.bits.resp.s3.meta
-  io.bpu_to_ftq.resp.valid := predictors.io.out.valid
+  io.bpu_to_ftq.resp.valid := s3_fire && !io.ftq_to_bpu.redirect.valid
   io.bpu_to_ftq.resp.bits  := predictors.io.out.bits.resp.s3
 
   val resp = predictors.io.out.bits.resp
 
   when(io.ftq_to_bpu.redirect.valid) {
     s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
-  }.elsewhen(predictors.io.flush_out.valid) {
-    s0_pc := predictors.io.flush_out.bits
+  }.elsewhen(s2_redirect) {
+    s0_pc := finalPredResp.s2.preds.target
   }.elsewhen(resp.valids(0)) {
     s0_pc := resp.s1.preds.target
   }.otherwise {
@@ -308,6 +382,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val isBr = redirect.cfiUpdate.pd.isBr
     val taken = Mux(isMisPred, redirect.cfiUpdate.taken, redirect.cfiUpdate.predTaken)
     val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
-    final_gh := updatedGh
+    // final_gh := updatedGh
   }
 }
