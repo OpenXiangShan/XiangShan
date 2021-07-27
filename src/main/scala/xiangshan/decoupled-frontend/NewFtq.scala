@@ -207,6 +207,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.brValids(0) := cfi_is_br
   init_entry.brOffset(0) := io.cfiIndex.bits
   init_entry.brTargets(0) := io.target
+  init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_cfi_is_jal || new_cfi_is_jalr
   init_entry.jmpTarget := io.target
   init_entry.pftAddr := Mux(entry_has_jmp,
@@ -261,6 +262,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     old_entry_modified.pftAddr := io.start_addr + (new_pft_offset << instOffsetBits)
     old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U)
     old_entry_modified.oversize := false.B
+    old_entry_modified.jmpValid := false.B
   }
 
   io.new_entry := Mux(!hit, init_entry, Mux(is_new_br, old_entry_modified, io.old_entry))
@@ -401,8 +403,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val preds = io.fromBpu.resp.bits.preds
     val ftb_entry = io.fromBpu.resp.bits.ftb_entry
     val real_taken_mask = preds.taken_mask.asUInt & Cat(ftb_entry.jmpValid, ftb_entry.brValids.asUInt)
-    val jmp_offset = ftb_entry.getJmpOffset(io.fromBpu.resp.bits.pc)
-    val offset_vec = VecInit(ftb_entry.brOffset :+ jmp_offset)
+    val offset_vec = VecInit(ftb_entry.brOffset :+ ftb_entry.jmpOffset)
     val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(4.W))))
     entry_fetch_status(enqIdx) := f_to_send
     commitStateQueue(enqIdx) := VecInit(Seq.fill(16)(c_invalid))
@@ -464,7 +465,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       case (v, offset) => v && !(pd_reg(offset).valid && pd_reg(offset).isBr)
     }.reduce(_||_)
     
-    val jmpOffset = pred_ftb_entry.getJmpOffset(start_pc_reg)
+    val jmpOffset = pred_ftb_entry.jmpOffset
     val jmp_pd = pd_reg(jmpOffset)
     val jal_false_hit = pred_ftb_entry.jmpValid &&
       ((pred_ftb_entry.isJal  && !(jmp_pd.valid && jmp_pd.isJal)) ||

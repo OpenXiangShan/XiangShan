@@ -41,6 +41,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   val brTargets    = Vec(numBr, UInt(VAddrBits.W))
   val brValids    = Vec(numBr, Bool())
 
+  val jmpOffset = UInt(log2Ceil(PredictWidth).W)
   val jmpTarget   = UInt(VAddrBits.W)
   val jmpValid    = Bool()
 
@@ -67,7 +68,6 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   //   (taken_mask, target)
   // }
 
-  def getJmpOffset(pc: UInt) = Cat(1.U(1.W), pftAddr(4,1)) - Mux(last_is_rvc, 1.U, 2.U) - pc(4,1)
   def isJal = !isJalr
 }
 
