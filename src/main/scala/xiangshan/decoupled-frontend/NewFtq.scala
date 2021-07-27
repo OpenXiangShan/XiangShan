@@ -334,11 +334,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_sram.io.wdata.rasEntry := io.fromBpu.resp.bits.rasTop
   ftq_redirect_sram.io.wdata.specCnt := io.fromBpu.resp.bits.specCnt
 
-  val pred_target_sram = Module(new FtqNRSRAM(UInt(VAddrBits.W), 1))
-  pred_target_sram.io.wen := enq_fire
-  pred_target_sram.io.waddr := bpuPtr.value
-  pred_target_sram.io.wdata := io.fromBpu.resp.bits.preds.target
-
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   ftq_meta_1r_sram.io.wen := enq_fire
   ftq_meta_1r_sram.io.waddr := bpuPtr.value
@@ -492,14 +487,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   
   // read pc and target
   ftq_pc_mem.io.raddr.init.last := ifuPtr.value
-  pred_target_sram.io.raddr(0) := ifuPtr.value
-  pred_target_sram.io.ren(0) := to_buf_fire
   
   val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(FtqSize).W))))
   when (to_buf_fire) {
     ifu_req_buf.bits.ftqIdx := ifuPtr
     ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
     ifu_req_buf.bits.ldReplayOffset := loadReplayOffset
+    ifu_req_buf.bits.target := update_target(ifuPtr.value)
     when (loadReplayOffset.valid) {
       loadReplayOffset.valid := false.B
     }
@@ -508,7 +502,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
     ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
-    ifu_req_buf.bits.target := pred_target_sram.io.rdata(0)
   }
   
   val last_cycle_to_buf_fire = RegNext(to_buf_fire)
@@ -518,7 +511,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
     io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.fallThruAddr
     io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
-    io.toIfu.req.bits.target := pred_target_sram.io.rdata(0)
   }
         
 
