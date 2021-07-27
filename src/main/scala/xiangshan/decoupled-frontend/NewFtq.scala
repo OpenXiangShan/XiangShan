@@ -185,6 +185,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     val new_br_insert_pos = Output(Vec(numBr, Bool()))
     val taken_mask = Output(Vec(numBr+1, Bool()))
     val mispred_mask = Output(Vec(numBr+1, Bool()))
+
+    // for perf counters
+    val is_init_entry = Output(Bool())
+    val is_old_entry = Output(Bool())
+    val is_old_entry_modified = Output(Bool())
+    val is_br_full = Output(Bool())
   })
 
   // no mispredictions detected at predecode
@@ -278,6 +284,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     io.mispred_mask(i) := io.new_entry.brValids(i) && io.mispredict_vec(io.new_entry.brOffset(i))
   }
   io.mispred_mask.last := io.new_entry.jmpValid && io.mispredict_vec(pd.jmpOffset)
+
+  // for perf counters
+  io.is_init_entry := !hit
+  io.is_old_entry := hit && !is_new_br
+  io.is_old_entry_modified := hit && is_new_br
+  io.is_br_full := hit && is_new_br && br_full 
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
@@ -892,6 +904,30 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val mbpCWrongs = mbpWrongs & commit_call_mask
     val mbpRWrongs = mbpWrongs & commit_ret_mask
 
+    val update_valid = io.toBpu.update.valid
+    def u(cond: Bool) = update_valid && cond
+    val ftb_false_hit = u(update.false_hit)
+    val ftb_hit = u(commit_hit === h_hit)
+
+    val ftb_new_entry = u(ftbEntryGen.is_init_entry)
+    val ftb_new_entry_only_br = ftb_new_entry && !update.ftb_entry.jmpValid
+    val ftb_new_entry_only_jmp = ftb_new_entry && !update.ftb_entry.brValids(0)
+    val ftb_new_entry_has_br_and_jmp = ftb_new_entry && update.ftb_entry.brValids(0) && update.ftb_entry.jmpValid
+
+    val ftb_old_entry = u(ftbEntryGen.is_old_entry)
+    
+    val ftb_modified_entry = u(ftbEntryGen.is_old_entry_modified)
+    val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
+
+    val ftb_entry_len = (ftbEntryGen.new_entry.pftAddr - update.pc) >> instOffsetBits
+    val ftb_entry_len_recording_vec = (0 until PredictWidth).map(i => ftb_entry_len === i.U)
+    val ftb_init_entry_len_map = (0 until PredictWidth).map(i =>
+      f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i) && ftb_new_entry)
+    ).foldLeft(Map[String, UInt]())(_+_)
+    val ftb_modified_entry_len_map = (0 until PredictWidth).map(i =>
+      f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i) && ftb_modified_entry)
+    ).foldLeft(Map[String, UInt]())(_+_)
+
     val perfCountsMap = Map(
       "BpInstr" -> PopCount(mbpInstrs),
       "BpBInstr" -> PopCount(mbpBRights | mbpBWrongs),
@@ -919,7 +955,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       // "rasWrong"  -> PopCount(rasWrongs),
       // "loopRight" -> PopCount(loopRights),
       // "loopWrong" -> PopCount(loopWrongs),
-    )
+      "ftb_false_hit"                -> PopCount(ftb_false_hit),
+      "ftb_hit"                      -> PopCount(ftb_hit),
+      "ftb_new_entry"                -> PopCount(ftb_new_entry),
+      "ftb_new_entry_only_br"        -> PopCount(ftb_new_entry_only_br),
+      "ftb_new_entry_only_jmp"       -> PopCount(ftb_new_entry_only_jmp),
+      "ftb_new_entry_has_br_and_jmp" -> PopCount(ftb_new_entry_has_br_and_jmp),
+      "ftb_old_entry"                -> PopCount(ftb_old_entry),
+      "ftb_modified_entry"           -> PopCount(ftb_modified_entry),
+      "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full)
+    ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map
 
     for((key, value) <- perfCountsMap) {
       XSPerfAccumulate(key, value)
