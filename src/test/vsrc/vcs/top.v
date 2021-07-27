@@ -25,7 +25,7 @@ reg  [63:0] io_logCtrl_log_begin;
 reg  [63:0] io_logCtrl_log_end;
 wire [63:0] io_logCtrl_log_level;
 wire        io_perfInfo_clean;
-wire        io_perfInfo_dump;
+reg         io_perfInfo_dump;
 wire        io_uart_out_valid;
 wire [ 7:0] io_uart_out_ch;
 wire        io_uart_in_valid;
@@ -80,7 +80,7 @@ SimTop sim(
 
 assign io_logCtrl_log_level = 0;
 assign io_perfInfo_clean = 0;
-assign io_perfInfo_dump = 0;
+// assign io_perfInfo_dump = 0;
 assign io_uart_in_ch = 8'hff;
 
 always @(posedge clock) begin
@@ -103,8 +103,12 @@ always @(posedge clock) begin
   // check errors
   if (!reset && has_init) begin
     if (simv_step()) begin
-      $finish();
+      io_perfInfo_dump = 1;
+      #2 $finish();
     end
+    else
+      io_perfInfo_dump = 0;
+    
   end
 
 end
