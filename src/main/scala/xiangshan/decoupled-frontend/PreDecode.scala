@@ -84,7 +84,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   })
 
   val instValid = io.in.instValid 
-  val startValid = io.in.startValid
+  val startRange = io.in.startRange
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val pcEnd     = io.in.fallThruAddr
@@ -98,8 +98,13 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
   val misPred      = Wire(Vec(MAXINSNUM, Bool()))
   val takens       = Wire(Vec(MAXINSNUM, Bool()))
-  val hasLastHalf  = Wire(Vec(MAXINSNUM, Bool()))
   val falseHit     = Wire(Vec(MAXINSNUM, Bool()))
+  val instRange    = Wire(Vec(MAXINSNUM, Bool()))
+  //"real" means signals that are genrated by repaired end pc of this basic block using predecode information
+  val realEndPC    = Wire(UInt(VAddrBits.W))
+  val realHasLastHalf  = Wire(Vec(MAXINSNUM, Bool()))
+  val realMissPred      = Wire(Vec(MAXINSNUM, Bool()))
+  val realTakens        = Wire(Vec(MAXINSNUM, Bool()))
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
@@ -116,9 +121,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
     
-    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && startValid(i)
+    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && startRange(i)
     validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
-    hasLastHalf(i)  := instValid && currentPC === (pcEnd - 2.U) && validStart(i) && !currentIsRVC
 
     val brType::isCall::isRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC)
@@ -126,7 +130,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     io.out.pd(i).isRVC  := currentIsRVC
     io.out.pd(i).brType := brType
-    io.out.pd(i).isCall := isCall
+    io.out.pd(i).isCall := isCall 
     io.out.pd(i).isRet  := isRet
     io.out.pc(i)        := currentPC
     //io.out.pd(i).valid := validStart(i)
@@ -145,36 +149,42 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
                        //A jal instruction is predicted not taken
     val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) 
                        //An invalid instruction is predicted taken
-    val falseHitFault  = (!validStart(i) && i.U === bbOffset && bbTaken)
+    val invalidInsFault  = (!validStart(i) && i.U === bbOffset && bbTaken)
 
-    misPred(i)   := targetFault || notCFIFault || jalFault || falseHitFault
-    falseHit(i)  := falseHitFault
-              
+    misPred(i)   := targetFault  || notCFIFault || jalFault || invalidInsFault
+    falseHit(i)  := invalidInsFault || notCFIFault
+
+    realMissPred(i)     := misPred(i) && instRange(i)
+    realHasLastHalf(i)  := instValid && currentPC === (realEndPC - 2.U) && validStart(i) && instRange(i) && !currentIsRVC
+    realTakens(i)       := takens(i) && instRange(i)  
   }
 
-  val jalOH                   =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal && validStart(i) })
-  val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => (inst.isJal || inst.isJalr) && validStart(i) })
+  val jalOH                   =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) })
+  val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
   val jumpPC                  =  Mux1H(jumpOH, io.out.pc)
   val jumpIsRVC               =  Mux1H(jumpOH, VecInit(io.out.pd.map(inst => inst.isRVC)))
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
-  val (hasFalseHit, hasJump)  = (falseHit.asUInt().orR(), jumpOH.asUInt().orR())
-  val realEnd                 =  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + 32.U), pcEnd)
-  val endValid                =  ((Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(realEnd, pcStart))) | (Fill(16, oversize))) 
-  val instRange               =  (endValid & startValid.asUInt)
-  
-  io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := instRange(i) && validStart(i)}
-  io.out.misOffset.valid  := misPred.asUInt().orR()
-  io.out.misOffset.bits   := PriorityEncoder(misPred)
+  val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
+  val endRange                =  ((Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(16, oversize))) 
+  val takeRange               =  Fill(16, !ParallelOR(takens))   | Fill(16, 1.U(1.W)) >> (~PriorityEncoder(takens))
 
-  io.out.cfiOffset.valid  := takens.asUInt().orR()
-  io.out.cfiOffset.bits   := PriorityEncoder(takens)
+  instRange               :=  VecInit((0 until MAXINSNUM).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
+  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + 32.U), pcEnd)
+
+
+  io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := instRange(i) && validStart(i)}
+  io.out.misOffset.valid  := ParallelOR(realMissPred)
+  io.out.misOffset.bits   := PriorityEncoder(realMissPred)
+
+  io.out.cfiOffset.valid  := ParallelOR(realTakens)
+  io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
 
   io.out.target           := targets(io.out.cfiOffset.bits)
-  io.out.takens           := takens
+  io.out.takens           := realTakens
 
   io.out.jalTarget        :=  Mux1H(jalOH, targets)
 
-  io.out.hasLastHalf      := hasLastHalf.reduce(_||_)
+  io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
 
   for (i <- 0 until MAXINSNUM) {
     XSDebug(true.B,

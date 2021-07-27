@@ -76,7 +76,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val instValid     = Bool() 
   val lastHalfMatch = Bool()
   val oversize      = Bool()
-  val startValid     = Vec(16, Bool())
+  val startRange     = Vec(16, Bool())
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
@@ -348,7 +348,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.oversize      :=  f2_ftq_req.oversize
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-  preDecoderIn.startValid    :=  f2_ldreplay_valids.asTypeOf(Vec(16, Bool()))
+  preDecoderIn.startRange    :=  f2_ldreplay_valids.asTypeOf(Vec(16, Bool()))
 
 
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
@@ -415,8 +415,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.bits.target     := preDecoderOut.target
   toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
 
-  f2_redirect := preDecoderOut.misOffset.valid && predecodeOutValid
+  val predecodeFlush     = preDecoderOut.misOffset.valid && predecodeOutValid
+  val predecodeFlushReg  = RegNext(predecodeFlush)
 
-
-
+  f2_redirect := !predecodeFlushReg && predecodeFlush
 }
