@@ -84,7 +84,10 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val freeRegCnt = Wire(UInt())
   
   // free list as circular buffer
-  val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i + 32).U(PhyRegIdxWidth.W)))) // item after 128 is meaningless
+  val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE){
+    case n if (n >= 0 && n < NRPhyRegs - 32) => (n + 32).U
+    case _ => DontCare
+  }))
   
   // head and tail pointer
   val headPtr = RegInit(IntFreeListPtr(false.B, 0.U))

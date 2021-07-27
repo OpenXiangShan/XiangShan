@@ -307,8 +307,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
         rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
 
-        XSInfo({if(fp) p"fp " else p"int "} + p"walk: " +
-          p" ldest:${rat.io.specWritePorts(i).addr} old_pdest:${rat.io.specWritePorts(i).wdata}\n")
+        XSInfo({if(fp) p"[fp" else p"[int"} + p" walk] " +
+          p"ldest:${rat.io.specWritePorts(i).addr} -> old_pdest:${rat.io.specWritePorts(i).wdata}\n")
       }
 
       // normal write - update arch state (serve as initialization)
@@ -317,7 +317,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       rat.io.archWritePorts(i).wdata := io.roqCommits.info(i).pdest
 
       XSInfo(rat.io.archWritePorts(i).wen,
-        {if(fp) p"[fp" else p"[int"} + p" arch rat] update: ldest:${rat.io.archWritePorts(i).addr} ->" +
+        {if(fp) p"[fp" else p"[int"} + p" arch rat update] ldest:${rat.io.archWritePorts(i).addr} ->" +
         p" pdest:${rat.io.archWritePorts(i).wdata}\n"
       )
       
@@ -362,8 +362,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     printRenameInfo(x, y)
   }
 
+  XSDebug(io.roqCommits.isWalk, p"Walk Recovery Enabled\n")
+  XSDebug(io.roqCommits.isWalk, p"validVec:${Binary(io.roqCommits.valid.asUInt)}\n")
+  for (i <- 0 until CommitWidth) {
+    val info = io.roqCommits.info(i)
+    XSDebug(io.roqCommits.isWalk && io.roqCommits.valid(i), p"[#$i walk info] pc:${info.pc} " +
+      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} eliminatedMove:${info.eliminatedMove} " +
+      p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
+  }
+
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
   XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc}\n")
+  XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
   
   intRat.io.debug_rdata <> io.debug_int_rat
   fpRat.io.debug_rdata <> io.debug_fp_rat
