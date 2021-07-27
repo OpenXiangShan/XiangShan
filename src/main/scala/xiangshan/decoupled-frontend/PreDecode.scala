@@ -32,6 +32,10 @@ trait HasPdconst extends HasXSParameter {
     val max_width = rvi_offset.getWidth
     SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
+  def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
+    val byteOffset = pc - start 
+    byteOffset(4,1) - 1.U
+  } 
   def MAXINSNUM = 16
 }
 
@@ -69,6 +73,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
+  val jalTarget    = UInt(VAddrBits.W)
   val hasLastHalf   = Bool()
 }
 
@@ -79,13 +84,14 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   })
 
   val instValid = io.in.instValid 
-  val instRange = io.in.instRange
+  val startValid = io.in.startValid
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val pcEnd     = io.in.fallThruAddr
   val bbOffset  = io.in.ftqOffset.bits
   val bbTaken   = io.in.ftqOffset.valid
   val bbTarget  = io.in.target
+  val oversize  = io.in.oversize
 
   val validStart   = Wire(Vec(MAXINSNUM, Bool()))
   val validEnd     = Wire(Vec(MAXINSNUM, Bool()))
@@ -93,6 +99,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val misPred      = Wire(Vec(MAXINSNUM, Bool()))
   val takens       = Wire(Vec(MAXINSNUM, Bool()))
   val hasLastHalf  = Wire(Vec(MAXINSNUM, Bool()))
+  val falseHit     = Wire(Vec(MAXINSNUM, Bool()))
 
   val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
@@ -109,7 +116,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
     val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
     
-    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && instRange(i)
+    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && startValid(i)
     validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
     hasLastHalf(i)  := instValid && currentPC === (pcEnd - 2.U) && validStart(i) && !currentIsRVC
 
@@ -117,34 +124,45 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.out.pd(i).isRVC := currentIsRVC
+    io.out.pd(i).isRVC  := currentIsRVC
     io.out.pd(i).brType := brType
     io.out.pd(i).isCall := isCall
-    io.out.pd(i).isRet := isRet
-    io.out.pd(i).valid := validStart(i)
+    io.out.pd(i).isRet  := isRet
+    io.out.pc(i)        := currentPC
+    //io.out.pd(i).valid := validStart(i)
     //io.out.pd(i).excType := ExcType.notExc
     expander.io.in := inst
     io.out.instrs(i) := expander.io.out.bits
-    io.out.pc(i) := currentPC
 
     takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U && !io.out.pd(i).notCFI || io.out.pd(i).isJal))
 
     val jumpTarget      = io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
     targets(i) := Mux(takens(i), jumpTarget, pcEnd)
+                       //Banch and jal have wrong targets
+    val targetFault    = (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  
+                       //An not-CFI instruction is predicted taken
+    val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) 
+                       //A jal instruction is predicted not taken
+    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) 
+                       //An invalid instruction is predicted taken
+    val falseHitFault  = (!validStart(i) && i.U === bbOffset && bbTaken)
 
-
-    misPred(i)   := (validStart(i)  && i.U === bbOffset && bbTaken && (io.out.pd(i).isBr || io.out.pd(i).isJal) && bbTarget =/= targets(i))  ||
-                    (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) ||
-                    (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+    misPred(i)   := targetFault || notCFIFault || jalFault || falseHitFault
+    falseHit(i)  := falseHitFault
+              
   }
-  val isJumpOH = VecInit((0 until MAXINSNUM).map(i => (io.out.pd(i).isJal) && validStart(i)).reverse).asUInt()
-  val isBrOH   = VecInit((0 until MAXINSNUM).map(i => io.out.pd(i).isBr    && validStart(i)).reverse).asUInt()
 
-  val hasJal  = isJumpOH.orR()
-
-  val jalOffset = PriorityEncoder(isJumpOH)
-  val brOffset  = PriorityEncoder(isBrOH)
-
+  val jalOH                   =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal && validStart(i) })
+  val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => (inst.isJal || inst.isJalr) && validStart(i) })
+  val jumpPC                  =  Mux1H(jumpOH, io.out.pc)
+  val jumpIsRVC               =  Mux1H(jumpOH, VecInit(io.out.pd.map(inst => inst.isRVC)))
+  val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
+  val (hasFalseHit, hasJump)  = (falseHit.asUInt().orR(), jumpOH.asUInt().orR())
+  val realEnd                 =  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + 32.U), pcEnd)
+  val endValid                =  ((Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(realEnd, pcStart))) | (Fill(16, oversize))) 
+  val instRange               =  (endValid & startValid.asUInt)
+  
+  io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := instRange(i) && validStart(i)}
   io.out.misOffset.valid  := misPred.asUInt().orR()
   io.out.misOffset.bits   := PriorityEncoder(misPred)
 
@@ -154,7 +172,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   io.out.target           := targets(io.out.cfiOffset.bits)
   io.out.takens           := takens
 
-  io.out.hasLastHalf := hasLastHalf.reduce(_||_)
+  io.out.jalTarget        :=  Mux1H(jalOH, targets)
+
+  io.out.hasLastHalf      := hasLastHalf.reduce(_||_)
 
   for (i <- 0 until MAXINSNUM) {
     XSDebug(true.B,

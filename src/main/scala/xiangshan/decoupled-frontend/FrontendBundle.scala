@@ -30,6 +30,8 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
+  val jalTarget    = UInt(VAddrBits.W)
+
 }
 
 class Exception(implicit p: Parameters) extends XSBundle {

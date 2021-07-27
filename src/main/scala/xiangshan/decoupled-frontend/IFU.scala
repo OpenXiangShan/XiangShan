@@ -75,7 +75,8 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val target        = UInt(VAddrBits.W)
   val instValid     = Bool() 
   val lastHalfMatch = Bool()
-  val instRange     = Vec(16, Bool())
+  val oversize      = Bool()
+  val startValid     = Vec(16, Bool())
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
@@ -90,10 +91,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(offBits - 1, 1) === 0.U
 
-  def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
-    val byteOffset = pc - start 
-    byteOffset(4,1) - 1.U
-  } 
 
   //---------------------------------------------
   //  Fetch Stage 1 :
@@ -323,10 +320,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
-  val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, f2_ftq_req.oversize))
+  //val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, f2_ftq_req.oversize))
   val f2_ldreplay_valids      = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
-  val f2_instruction_range    = Wire(UInt(16.W))
-  f2_instruction_range        := f2_bb_valids & f2_ldreplay_valids
 
   val f2_jump_valids          = Fill(16, !preDecoderOut.cfiOffset.valid)   | Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
   val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
@@ -351,9 +346,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
   preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
   preDecoderIn.target        :=  f2_ftq_req.target
+  preDecoderIn.oversize      :=  f2_ftq_req.oversize
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-  preDecoderIn.instRange     :=  f2_instruction_range.asTypeOf(Vec(16, Bool()))
-  
+  preDecoderIn.startValid    :=  f2_ldreplay_valids.asTypeOf(Vec(16, Bool()))
+
+
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
 
   // deal with secondary miss in f1 
@@ -394,9 +391,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     f2_lastHalf.middlePC := f2_ftq_req.fallThruAddr
   }
 
+  val f2_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
+
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := f2_predecode_valids
+  io.toIbuffer.bits.valid     := f2_predecode_range
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
@@ -408,12 +407,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.valid           := !finishFetchMaskReg & ((f2_valid && f2_hit) || miss_all_fix)
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd 
-  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_predecode_valids(i)}
+  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_predecode_range(i)}
   toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
   toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits 
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target
+  toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
 
   f2_redirect := preDecoderOut.misOffset.valid && predecodeOutValid
 
