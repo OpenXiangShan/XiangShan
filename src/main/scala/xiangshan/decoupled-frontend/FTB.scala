@@ -190,6 +190,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   }
 
   // Update logic
+  val has_update = RegInit(VecInit(Seq.fill(64)(0.U(VAddrBits.W))))
+  val has_update_ptr = RegInit(0.U(log2Up(64)))
+
   val update = RegNext(io.update.bits)
 
   val u_pc = update.pc
@@ -206,4 +209,25 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   ftb_write.tag   := ftbAddr.getTag(u_pc)(tagSize-1, 0)
 
   ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
+
+  val r_updated = (0 until 64).map(i => has_update(i) === s1_pc).reduce(_||_)
+  val u_updated = (0 until 64).map(i => has_update(i) === update.pc).reduce(_||_)
+
+  when(u_valid) {
+    when(!u_updated) { has_update(has_update_ptr) := update.pc }
+
+    has_update_ptr := has_update_ptr + !u_updated
+  }
+
+  XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.hit)
+  XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.hit)
+
+  XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
+  XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
+
+  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
+  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+
+  XSPerfAccumulate("ftb_commit_hits", u_valid && update.hit)
+  XSPerfAccumulate("ftb_commit_misses", u_valid && !update.hit)
 }

@@ -62,8 +62,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val pred        = Vec(numBr, UInt(2.W))
 
     def taken = pred.map(_(1)).reduce(_ || _)
-    // def taken_mask = { Cat(jmpValid, brValids(1) && pred(1)(1), brValids(0) && pred(0)(1)) }
-    def taken_mask = { Cat(jmpValid, brValids(0) && pred(0)(1)) }
+    def taken_mask = { Cat(jmpValid, Cat((0 until numBr reverse).map(i => brValids(i) && pred(i)(1)))) }
   }
 
   class MicroBTBData extends XSBundle
@@ -271,8 +270,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_write_data.bits := update_write_datas
   banks.update_taken_mask := u_taken_mask
 
-  if (!env.FPGAPlatform) {
-      XSPerfAccumulate("ubtb_commit_hits", update.hit)
-      XSPerfAccumulate("ubtb_commit_misses", !update.hit)
-  }
+  XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && banks.read_hit)
+  XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !banks.read_hit)
 }

@@ -55,7 +55,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   // io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
   // io.out.bits.resp.s1.meta := s1_read.asUInt()
 
-  val s1_latch_taken_mask = VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
+  val s1_latch_taken_mask = VecInit(Cat(0.U(1.W), Cat((0 until numBr reverse).map(i => s1_read(i)(1)))).asBools())
   val s1_latch_meta       = s1_read.asUInt()
 
   io.out.bits.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
