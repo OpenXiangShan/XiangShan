@@ -213,7 +213,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val f2_waymask  = RegEnable(next = f1_victim_masks, enable = f1_fire)
 
   //instruction 
-  val wait_idle :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(7)
+  val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(8)
   val wait_state = RegInit(wait_idle)
 
   fromMissQueue.map{port => port.ready := true.B}
@@ -235,15 +235,21 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   switch(wait_state){
     is(wait_idle){
       when( only_0  || miss_0_hit_1){
-        wait_state :=  Mux(toMissQueue(0).fire(), wait_send_req ,wait_idle )
+        //wait_state :=  Mux(toMissQueue(0).fire(), wait_send_req ,wait_idle )
+        wait_state :=  Mux(toMissQueue(0).ready, wait_queue_ready ,wait_idle )
       }.elsewhen(hit_0_miss_1){
-        wait_state :=  Mux(toMissQueue(1).fire(), wait_send_req ,wait_idle )
+        //wait_state :=  Mux(toMissQueue(1).fire(), wait_send_req ,wait_idle )
+        wait_state :=  Mux(toMissQueue(1).ready, wait_queue_ready ,wait_idle )
       }.elsewhen( miss_0_miss_1 ){
-          wait_state := Mux(toMissQueue(0).fire() && toMissQueue(1).fire(), wait_send_req ,wait_idle)
+        //wait_state := Mux(toMissQueue(0).fire() && toMissQueue(1).fire(), wait_send_req ,wait_idle)
+        wait_state := Mux(toMissQueue(0).ready && toMissQueue(1).ready, wait_queue_ready ,wait_idle)
       }
     }
 
     //TODO: naive logic for wait icache response
+    is(wait_queue_ready){
+      wait_state := wait_send_req
+    }
 
     is(wait_send_req) {
       when( only_0 || hit_0_miss_1 || miss_0_hit_1){
@@ -291,8 +297,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   when(fromFtq.redirect.valid) { wait_state := wait_idle }
 
   (0 until 2).map { i =>
-    if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_idle
-      else     toMissQueue(i).valid := (only_0 || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_idle
+    if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
+      else     toMissQueue(i).valid := (only_0 || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_queue_ready
     toMissQueue(i).bits.addr    := f2_pAddrs(i)
     toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
     toMissQueue(i).bits.waymask := f2_waymask(i)
