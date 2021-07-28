@@ -30,6 +30,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val useBPD = true
   val useLHist = true
 
+  val debug = true
   // val resetVector = 0x10000000L//TODO: set reset vec
 }
 
@@ -250,8 +251,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val predictors = Module(if (useBPD) new Composer else new FakePredictor)
 
+  val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
+  val s1_valid, s2_valid, s3_valid = RegInit(false.B)
+  val s1_ready, s2_ready, s3_ready = Wire(Bool())
+  val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
+
   val s0_pc = WireInit(resetVector.U)
   val s0_pc_reg = RegInit(resetVector.U)
+  val s1_pc = RegEnable(s0_pc, s0_fire)
 
   // val s3_gh = predictors.io.out.bits.resp.s3.ghist
   // val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
@@ -273,11 +280,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val s1_flush, s2_flush, s3_flush = Wire(Bool())
   val s2_redirect, s3_redirect = Wire(Bool())
-
-  val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
-  val s1_valid, s2_valid, s3_valid = RegInit(false.B)
-  val s1_ready, s2_ready, s3_ready = Wire(Bool())
-  val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
 
   val s1_bp_resp = predictors.io.out.resp.s1
   val s2_bp_resp = predictors.io.out.resp.s2
@@ -341,7 +343,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val finalPredValid = s2_fire
   val finalPredResp = predictors.io.out.resp
   when(finalPredValid) {
-    when(finalPredResp.s2.preds.target =/= RegNext(s0_pc)) {
+    when(s1_valid && finalPredResp.s2.preds.target =/= s1_pc || !s1_valid) {
       s2_redirect := true.B
     }
 
@@ -364,7 +366,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
   }.elsewhen(s2_redirect) {
     s0_pc := finalPredResp.s2.preds.target
-  }.elsewhen(s1_fire) {
+  }.elsewhen(s1_valid) {
     s0_pc := resp.s1.preds.target
   }.otherwise {
     s0_pc := s0_pc_reg
@@ -384,5 +386,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val taken = Mux(isMisPred, redirect.cfiUpdate.taken, redirect.cfiUpdate.predTaken)
     val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
     // final_gh := updatedGh
+  }
+
+  if(debug) {
+    XSDebug(true.B, )
   }
 }

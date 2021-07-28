@@ -111,7 +111,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val s1_totalHits = VecInit((0 until numWays).map(b => s1_read(b).tag === s1_tag && s1_read(b).valid))
   val s1_hit = s1_totalHits.reduce(_||_)
   val s2_hit = RegEnable(s1_hit, io.s1_fire)
-  val s1_hit_way = PriorityEncoder(s1_totalHits) // TODO: Replace by Mux1H, and when not hit, clac tag and save it in ftb_entry
+  val s1_hit_way = PriorityEncoder(s1_totalHits) // TODO: Replace by Mux1H, and when not hit, calc tag and save it in ftb_entry
 
   def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
     val randomAlloc = true
