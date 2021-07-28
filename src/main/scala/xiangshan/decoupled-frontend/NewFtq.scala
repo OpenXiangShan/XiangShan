@@ -420,7 +420,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_replay_status(enqIdx) := l_invalid // may be useless
     entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
     enq_cfiIndex.valid := preds.taken_mask.asUInt.orR
-    enq_cfiIndex.bits := ParallelPriorityMux(preds.taken_mask, ftb_entry.getOffsetVec)
+    // when no takens, set cfiIndex to PredictWidth-1
+    enq_cfiIndex.bits := ParallelPriorityMux(preds.taken_mask, ftb_entry.getOffsetVec) |
+                         Fill(log2Ceil(PredictWidth), (!preds.taken_mask.asUInt.orR).asUInt)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := preds.target
