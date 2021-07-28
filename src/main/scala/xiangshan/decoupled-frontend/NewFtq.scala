@@ -771,10 +771,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       ifuWbPtr := idx
       // set fetch status of entries between ifuPtr and bpuPtr to f_to_send
       set_fetch_status_between(idx, ifuPtr, f_to_send)
-      // set commit state of entries between ifuPtr and bpuPtr to c_invalid
-      set_commit_status_between(idx+1.U, ifuPtr, VecInit(Seq.fill(PredictWidth)(c_invalid)))
+      // set commit state of entries between ifuWbPtr and bpuPtr to c_invalid
+      set_commit_status_between(idx+1.U, ifuWbPtr, VecInit(Seq.fill(PredictWidth)(c_invalid)))
       // set replay status
-      set_replay_status_between(idx, ifuPtr, l_replaying)
+      set_replay_status_between(idx, ifuWbPtr, l_replaying)
       // set load replay offset
       loadReplayOffset.valid := true.B
       loadReplayOffset.bits := offset
