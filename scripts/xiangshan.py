@@ -50,6 +50,7 @@ class XSArgs(object):
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.trace = 1 if args.trace else None
+        self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
         self.numa = args.numa
@@ -77,7 +78,8 @@ class XSArgs(object):
         makefile_args = [
             (self.threads, "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
-            (self.trace, "EMU_TRACE")
+            (self.trace, "EMU_TRACE"),
+            (self.config, "CONFIG")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -254,6 +256,7 @@ if __name__ == "__main__":
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
+    parser.add_argument('--config', nargs='?', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
