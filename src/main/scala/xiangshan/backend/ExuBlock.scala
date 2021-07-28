@@ -111,7 +111,8 @@ class ExuBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends X
   io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
-  io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect).map(_.io.out)).foreach {
+  // to please redirectGen
+  io.exuRedirect.zip(exeUnits.reverse.filter(_.config.hasRedirect).map(_.io.out)).foreach {
     case (x, y) =>
       x.valid := y.fire() && y.bits.redirectValid
       x.bits := y.bits
