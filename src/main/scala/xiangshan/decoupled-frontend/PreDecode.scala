@@ -159,10 +159,14 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     realTakens(i)       := takens(i) && instRange(i)  
   }
 
-  val jalOH                   =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) })
+  //val jalOH                   =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) })
   val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
-  val jumpPC                  =  Mux1H(jumpOH, io.out.pc)
-  val jumpIsRVC               =  Mux1H(jumpOH, VecInit(io.out.pd.map(inst => inst.isRVC)))
+  val jumpOffset              =  PriorityEncoder(jumpOH)
+  val rvcOH                   =  VecInit(io.out.pd.map(inst => inst.isRVC))
+  //val jumpPC                  =  Mux1H(jumpOH, io.out.pc)
+  //val jumpIsRVC               =  Mux1H(jumpOH, Mux1H(jumpOH, VecInit(io.out.pd.map(inst => inst.isRVC))))
+  val jumpPC                  =  io.out.pc(jumpOffset)
+  val jumpIsRVC               =  rvcOH(jumpOffset)
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
   val endRange                =  ((Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(16, oversize))) 
@@ -182,7 +186,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   io.out.target           := targets(io.out.cfiOffset.bits)
   io.out.takens           := realTakens
 
-  io.out.jalTarget        :=  Mux1H(jalOH, targets)
+  io.out.jalTarget        :=  targets(jumpOffset)
 
   io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
 
