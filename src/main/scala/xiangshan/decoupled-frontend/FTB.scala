@@ -87,7 +87,7 @@ object FTBMeta {
 }
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
-  val ftbAddr = new TableAddr(log2Up(numSets), numBr)
+  val ftbAddr = new TableAddr(log2Up(numSets), 1)
 
   val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
