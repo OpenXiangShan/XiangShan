@@ -210,6 +210,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
   
   val cfi_is_jal = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jal
+  val cfi_is_jalr = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jalr
 
   // if not hit, establish a new entry
   init_entry.valid := true.B
@@ -273,7 +274,15 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     old_entry_modified.jmpValid := false.B
   }
 
-  io.new_entry := Mux(!hit, init_entry, Mux(is_new_br, old_entry_modified, io.old_entry))
+  val old_entry_jmp_target_modified = WireInit(io.old_entry)
+  val jalr_mispredicted = cfi_is_jalr && io.mispredict_vec(io.pd.jmpOffset)
+  when (jalr_mispredicted) {
+    old_entry_jmp_target_modified.jmpTarget := io.target
+  }
+
+  io.new_entry := Mux(!hit, init_entry,
+                    Mux(is_new_br, old_entry_modified,
+                      Mux(jalr_mispredicted, old_entry_jmp_target_modified, io.old_entry)))
   io.new_br_insert_pos := new_br_insert_onehot
   val new_offset_vec = VecInit(io.new_entry.brOffset :+ pd.jmpOffset)
   val br_jal_valid_vec = VecInit(io.new_entry.brValids :+ io.new_entry.jmpValid)
