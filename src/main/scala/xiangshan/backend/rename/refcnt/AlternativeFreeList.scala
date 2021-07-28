@@ -76,7 +76,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   }
   // send max flag of spec ref counter to rename stage
   io.maxVec zip specRefCounter foreach { case (max, cnt) =>
-    max := cnt.orR()
+    max := cnt.andR()
   }
 
 
@@ -98,16 +98,31 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   /*
   Assertions
    */
-  val enableFreeListCheck = false
+  val enableFreeListCheck = true
 
-  if (enableFreeListCheck) { // TODO add assertions here
+  if (enableFreeListCheck) {
 
-    // we cannot handle duplicate inc/dec requirements on a preg in 1 cycle for now
+    for (i <- 0 until RenameWidth) {
+      for (j <- (i + 1) until RenameWidth) {
+        XSError(io.inc.req(i) && io.inc.req(j) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && !io.inc.psrcOfMove(j).valid && io.inc.pdests(i) === io.inc.pdests(j),
+          "Duplicate INC requirements detected!" + io.inc.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+        XSError(io.inc.req(i) && io.inc.req(j) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && io.inc.psrcOfMove(j).valid && io.inc.psrcOfMove(i).bits === io.inc.psrcOfMove(j).bits,
+          "Duplicate ME requirements detected! Cannot inc same specRefCount in 1 cycle!\n")
+      }
+      // also, we cannot count ref numbers more than 3 (which is very rare)
+      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.pdests(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${io.inc.pdests(i)}]\n")
+      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.psrcOfMove(i).bits).andR(), p"(move) Exceeding specRefCounter Max Value: preg[${io.inc.psrcOfMove(i).bits}]\n")
+    }
 
-    // also, we cannot count ref numbers more than 3 (which is very rare)
-    
-    // when walking, we cannot handle duplicate requirements
-
+    for (i <- 0 until CommitWidth) {
+      // we cannot handle duplicate inc/dec requirements on a preg in 1 cycle for now
+      for (j <- (i + 1) until CommitWidth) {
+        XSError(io.dec.req(i) && io.dec.req(j) && io.dec.old_pdests(i) === io.dec.old_pdests(j), 
+          "Duplicate DEC requirements detected!" + io.dec.old_pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+        XSError(io.dec.req(i) && io.dec.req(j) && io.dec.eliminatedMove(i) && io.dec.eliminatedMove(j) && io.dec.pdests(i) === io.dec.pdests(j), 
+          "Cannot INC same archRefCount in 1 cycle!" + io.dec.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+      }
+    }
   }
 
 
@@ -127,6 +142,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
 
     // cmt counter after incrementing/ stay not change
+    // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
     cmtCounterNext(preg) := Mux(io.dec.req(i), cmtCounter(preg) + 1.U, cmtCounter(preg))
     
     // arch ref counter of pdest
@@ -156,7 +172,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     io.inc.pdests(i) := DontCare
     needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid
     
-    when (io.inc.psrcOfMove(i).valid && io.inc.req(i)) {
+    when (io.inc.psrcOfMove(i).valid && io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush) {
       specRefCounterNext(io.inc.psrcOfMove(i).bits) := specRefCounter(io.inc.psrcOfMove(i).bits) + 1.U
     }
     
@@ -241,7 +257,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   }
 
   /*
-  Re-direct: restore by walking, causing pdst-- (handled by rename using `dec` port)
+  Re-direct: restore by walking, handled by rename using `dec` port
    */
 
 
@@ -254,15 +270,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
       p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
   }
 
-  XSDebug("Free List: ")
-  for (i <- 0 until FL_SIZE) {
-    XSDebug(p"$i\t")
-  }
-  XSDebug("\n")
-  for (i <- 0 until FL_SIZE) {
-    XSDebug(p"${freeList(i)}\t")
-  }
-  XSDebug("\n")
+  XSDebug(Array.range(0, FL_SIZE).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
+  XSDebug(p"Free List (val): " + Array.range(0, FL_SIZE).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
   
   XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext\n")
   

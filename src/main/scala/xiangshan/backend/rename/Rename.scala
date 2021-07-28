@@ -207,7 +207,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     if (i == 0) {
       // calculate meEnable
-      meEnable(i) := isMove(i) && !isMax(i)      
+      meEnable(i) := isMove(i) && !isMax(uops(i).psrc(0))      
     } else {
       // compare psrc0
       psrc_cmp(i-1) := Cat((0 until i).map(j => {
@@ -215,7 +215,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }) /* reverse is not necessary here */)
       
       // calculate meEnable
-      meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(i))
+      meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(uops(i).psrc(0)))
     }
     uops(i).eliminatedMove := meEnable(i)
 
@@ -223,10 +223,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     when (meEnable(i)) {
       intFreeList.io.inc.psrcOfMove(i).valid := true.B
       intFreeList.io.inc.psrcOfMove(i).bits := uops(i).psrc(0)
-      XSInfo(io.in(i).valid && io.out(i).valid, p"Move Instruction ${Hexadecimal(io.in(i).bits.cf.pc)} Eliminated Successfully! psrc:${uops(i).psrc(0)}\n")
+      XSInfo(io.in(i).valid && io.out(i).valid, p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} eliminated successfully! psrc:${uops(i).psrc(0)}\n")
     } .otherwise {
       intFreeList.io.inc.psrcOfMove(i).valid := false.B
       intFreeList.io.inc.psrcOfMove(i).bits := DontCare
+      XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
     }
     
     // update pdest
@@ -239,7 +240,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val intSpecWen = intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
     intRat.io.specWritePorts(i).wen := intSpecWen
     intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
-    intRat.io.specWritePorts(i).wdata := intFreeList.io.inc.pdests(i)
+    intRat.io.specWritePorts(i).wdata := Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i))
     
     val fpSpecWen = fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
     fpRat.io.specWritePorts(i).wen := fpSpecWen
@@ -366,7 +367,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSDebug(io.roqCommits.isWalk, p"validVec:${Binary(io.roqCommits.valid.asUInt)}\n")
   for (i <- 0 until CommitWidth) {
     val info = io.roqCommits.info(i)
-    XSDebug(io.roqCommits.isWalk && io.roqCommits.valid(i), p"[#$i walk info] pc:${info.pc} " +
+    XSDebug(io.roqCommits.isWalk && io.roqCommits.valid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
       p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} eliminatedMove:${info.eliminatedMove} " +
       p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
   }
