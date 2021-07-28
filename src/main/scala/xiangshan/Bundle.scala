@@ -511,11 +511,6 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   val stpc = UInt(MemPredPCWidth.W)
 }
 
-class PerfInfoIO extends Bundle {
-  val clean = Input(Bool())
-  val dump = Input(Bool())
-}
-
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
   val l1plus_pf_enable = Output(Bool())
