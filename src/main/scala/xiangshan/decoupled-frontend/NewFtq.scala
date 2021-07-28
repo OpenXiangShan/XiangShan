@@ -675,7 +675,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  for (r <- redirect_infos) {
+  for (r <- redirect_infos.init) {
     //             idx   offset   mispred
     mispredict_vec(r._2)(r._3) := r._5
   }
