@@ -73,7 +73,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 }
 
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
-  val writeWay = UInt(log2Up(numWays).W)
+  val writeWay = UInt(numWays.W)
   val hit = Bool()
 }
 
@@ -87,58 +87,87 @@ object FTBMeta {
 }
 
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
+  override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
+
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
 
-  val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
+  class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
+    val io = IO(new Bundle {
+      val read_pc = Flipped(DecoupledIO(UInt(VAddrBits.W)))
+      val read_resp = Output(new FTBEntry)
 
-  val s0_idx = ftbAddr.getBankIdx(s0_pc)
-  val s1_tag = ftbAddr.getTag(s1_pc)(tagSize-1, 0)
+      // when ftb hit, read_hits.valid is true, and read_hits.bits is OH of hit way
+      // when ftb not hit, read_hits.valid is false, and read_hits is OH of allocWay
+      val read_hits = Valid(Vec(numWays, Bool()))
 
-  ftb.io.r.req.valid := io.s0_fire
-  ftb.io.r.req.bits.setIdx := s0_idx
+      val update_pc = Input(UInt(VAddrBits.W))
+      val update_write_data = Flipped(Valid(new FTBEntry))
+      val update_write_mask = Input(UInt(numWays.W))
+    })
 
-  io.in.ready := ftb.io.r.req.ready && !io.redirect.valid // TODO: remove
-  io.s1_ready := ftb.io.r.req.ready && !io.redirect.valid
-  // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
-  // io.out.valid := io.s2_fire && !io.redirect.valid
+    val ftb = Module(new SRAMTemplate(new FTBEntry, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
 
-  // io.out.bits.resp.valids(1) := io.out.valid
+    ftb.io.r.req.valid := io.read_pc.valid // io.s0_fire
+    ftb.io.r.req.bits.setIdx := ftbAddr.getIdx(io.read_pc.bits) // s0_idx
 
-  val s1_read = VecInit((0 until numWays).map(w =>
-    ftb.io.r.resp.data(w)
-  ))
+    io.read_pc.ready := ftb.io.r.req.ready
 
-  val s1_totalHits = VecInit((0 until numWays).map(b => s1_read(b).tag === s1_tag && s1_read(b).valid))
-  val s1_hit = s1_totalHits.reduce(_||_)
-  val s2_hit = RegEnable(s1_hit, io.s1_fire)
-  val s1_hit_way = PriorityEncoder(s1_totalHits) // TODO: Replace by Mux1H, and when not hit, calc tag and save it in ftb_entry
+    val read_tag = Reg(UInt(tagSize.W))
+    read_tag := ftbAddr.getTag(io.read_pc.bits)(tagSize-1, 0)
 
-  def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
-    val randomAlloc = true
-    if (numWays > 1) {
-      val w = Wire(UInt(log2Up(numWays).W))
-      val valid = WireInit(valids.andR)
-      val tags = Cat(meta_tags, req_tag)
-      val l = log2Up(numWays)
-      val nChunks = (tags.getWidth + l - 1) / l
-      val chunks = (0 until nChunks).map( i =>
-        tags(min((i+1)*l, tags.getWidth)-1, i*l)
-      )
-      w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(numWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
-      w
-    } else {
-      val w = WireInit(0.U)
-      w
+    val read_datas = ftb.io.r.resp.data
+
+    val total_hits = VecInit((0 until numWays).map(b => read_datas(b).tag === read_tag && read_datas(b).valid))
+    val hit = total_hits.reduce(_||_)
+    val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
+
+    def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
+      val randomAlloc = true
+      if (numWays > 1) {
+        val w = Wire(UInt(log2Up(numWays).W))
+        val valid = WireInit(valids.andR)
+        val tags = Cat(meta_tags, req_tag)
+        val l = log2Up(numWays)
+        val nChunks = (tags.getWidth + l - 1) / l
+        val chunks = (0 until nChunks).map( i =>
+          tags(min((i+1)*l, tags.getWidth)-1, i*l)
+        )
+        w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(numWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
+        w
+      } else {
+        val w = WireInit(0.U)
+        w
+      }
     }
-  }
-  val allocWays = VecInit((0 until numWays).map(b =>
-    allocWay(VecInit(s1_read.map(w => w.valid)).asUInt,
-      VecInit(s1_read.map(w => w.tag)).asUInt,
-      s1_tag)))
 
-  val writeWay = Mux(s1_hit, s1_hit_way, allocWays(0)) // TODO: allocWays is Vec
+    val allocWriteWay = allocWay(VecInit(read_datas.map(w => w.valid)).asUInt,
+        VecInit(read_datas.map(w => w.tag)).asUInt,
+        read_tag)
 
-  val ftb_entry = Mux1H(s1_totalHits, s1_read)
+    io.read_resp := Mux1H(total_hits, read_datas)
+    io.read_hits.valid := hit
+    io.read_hits.bits := Mux(hit, hit_way_1h, VecInit(UIntToOH(allocWriteWay).asBools()))
+
+    // Update logic
+    val u_valid = io.update_write_data.valid
+    val u_data = io.update_write_data.bits
+    val u_idx = ftbAddr.getIdx(io.update_pc)
+    val u_mask = io.update_write_mask
+
+    ftb.io.w.apply(u_valid, u_data, u_idx, u_mask)
+  } // FTBBank
+
+  val ftbBank = Module(new FTBBank(numSets, numWays))
+
+  ftbBank.io.read_pc.valid := io.s0_fire
+  ftbBank.io.read_pc.bits := s0_pc
+
+  io.s1_ready := ftbBank.io.read_pc.ready //  && !io.redirect.valid
+
+  val ftb_entry = ftbBank.io.read_resp
+  val s1_hit = ftbBank.io.read_hits.valid
+  val s2_hit = RegEnable(s1_hit, io.s1_fire)
+  val writeWay = ftbBank.io.read_hits.bits
 
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
@@ -195,20 +224,22 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val update = RegNext(io.update.bits)
 
-  val u_pc = update.pc
-
   val u_meta = update.meta.asTypeOf(new FTBMeta)
-  val u_way = u_meta.writeWay
-  val u_idx = ftbAddr.getIdx(u_pc)
+  // val u_idx = ftbAddr.getIdx(u_pc)
   val u_valid = RegNext(io.update.valid)
-  val u_way_mask = UIntToOH(u_way)
+  val u_way_mask = u_meta.writeWay
 
   val ftb_write = WireInit(update.ftb_entry)
 
   ftb_write.valid := true.B
-  ftb_write.tag   := ftbAddr.getTag(u_pc)(tagSize-1, 0)
+  ftb_write.tag   := ftbAddr.getTag(update.pc)(tagSize-1, 0)
 
-  ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
+  // ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
+
+  ftbBank.io.update_write_data.valid := u_valid
+  ftbBank.io.update_write_data.bits := ftb_write
+  ftbBank.io.update_pc := update.pc
+  ftbBank.io.update_write_mask := u_way_mask
 
   val r_updated = (0 until 64).map(i => has_update(i) === s1_pc).reduce(_||_)
   val u_updated = (0 until 64).map(i => has_update(i) === update.pc).reduce(_||_)

@@ -87,6 +87,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // need more
   }
 
+  override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBMeta)).getWidth
+
   class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val read_pc = Flipped(Valid(UInt(VAddrBits.W)))

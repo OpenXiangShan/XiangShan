@@ -74,7 +74,7 @@ abstract class TageBundle(implicit p: Parameters)
 
 abstract class TageModule(implicit p: Parameters)
   extends XSModule with TageParams with BPUUtils
-  { val debug = true }
+  {}
 
 
 class TageReq(implicit p: Parameters) extends TageBundle {
@@ -406,8 +406,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
       t
   }
 
-  val debug = true
-
   // Keep the table responses to process in s3
   // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=s3_fire)
   // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=s3_fire)
@@ -436,6 +434,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateHist = u.ghist
 
   val updateMetas = u.meta.asTypeOf(Vec(TageBanks, new TageMeta))
+
+  override val meta_size = updateMetas.getWidth
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
