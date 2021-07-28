@@ -138,7 +138,8 @@ class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUC
 
 class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst {
   val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
-  val out = DecoupledIO(new BasePredictorOutput)
+  // val out = DecoupledIO(new BasePredictorOutput)
+  val out = Output(new BasePredictorOutput)
   val flush_out = Valid(UInt(VAddrBits.W))
 
   val s0_fire = Input(Bool())
@@ -160,9 +161,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
 
   val io = IO(new BasePredictorIO())
 
-  io.out.bits.resp := io.in.bits.resp_in(0)
+  io.out.resp := io.in.bits.resp_in(0)
 
-  io.out.bits.s3_meta := 0.U
+  io.out.s3_meta := 0.U
 
   io.in.ready := !io.redirect.valid
 
@@ -175,7 +176,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
 
-  io.out.valid := io.in.valid && !io.redirect.valid
+  // io.out.valid := io.in.valid && !io.redirect.valid
 
   // val s0_mask = io.f0_mask
   // val s1_mask = RegNext(s0_mask)
@@ -207,9 +208,8 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
   io.in.ready                 := true.B
-  io.out.valid                := io.in.fire
-  io.out.bits.s3_meta         := 0.U
-  io.out.bits.resp := io.in.bits.resp_in(0)
+  io.out.s3_meta         := 0.U
+  io.out.resp := io.in.bits.resp_in(0)
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -279,9 +279,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
   val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
 
-  val s1_bp_resp = predictors.io.out.bits.resp.s1
-  val s2_bp_resp = predictors.io.out.bits.resp.s2
-  val s3_bp_resp = predictors.io.out.bits.resp.s3
+  val s1_bp_resp = predictors.io.out.resp.s1
+  val s2_bp_resp = predictors.io.out.resp.s2
+  val s3_bp_resp = predictors.io.out.resp.s3
 
   predictors.io := DontCare
   predictors.io.in.valid := s0_fire
@@ -291,7 +291,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   predictors.io.in.bits.toFtq_fire := toFtq_fire
 
-  predictors.io.out.ready := io.bpu_to_ftq.resp.ready
+  // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
   // Pipeline logic
   s2_redirect := false.B
@@ -336,9 +336,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
 
   // predictor override redirect
-  val resp_valid = predictors.io.out.bits.resp.valids
-  val finalPredValid = resp_valid(2)
-  val finalPredResp = predictors.io.out.bits.resp
+  // val resp_valid = predictors.io.out.resp.valids
+  // val finalPredValid = resp_valid(2)
+  val finalPredValid = s2_fire
+  val finalPredResp = predictors.io.out.resp
   when(finalPredValid) {
     when(finalPredResp.s2.preds.target =/= RegNext(s0_pc)) {
       s2_redirect := true.B
@@ -355,15 +356,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // io.bpu_to_ftq.resp.bits.preds := predictors.io.out.bits.resp.s3.preds
   // io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.bits.resp.s3.meta
   io.bpu_to_ftq.resp.valid := s3_fire && !io.ftq_to_bpu.redirect.valid
-  io.bpu_to_ftq.resp.bits  := predictors.io.out.bits.resp.s3
+  io.bpu_to_ftq.resp.bits  := predictors.io.out.resp.s3
 
-  val resp = predictors.io.out.bits.resp
+  val resp = predictors.io.out.resp
 
   when(io.ftq_to_bpu.redirect.valid) {
     s0_pc := io.ftq_to_bpu.redirect.bits.cfiUpdate.target
   }.elsewhen(s2_redirect) {
     s0_pc := finalPredResp.s2.preds.target
-  }.elsewhen(resp.valids(0)) {
+  }.elsewhen(s1_fire) {
     s0_pc := resp.s1.preds.target
   }.otherwise {
     s0_pc := s0_pc_reg

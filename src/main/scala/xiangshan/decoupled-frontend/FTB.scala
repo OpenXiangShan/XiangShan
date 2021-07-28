@@ -100,9 +100,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.in.ready := ftb.io.r.req.ready && !io.redirect.valid // TODO: remove
   io.s1_ready := ftb.io.r.req.ready && !io.redirect.valid
   // io.out.valid := RegEnable(RegNext(io.s0_fire), io.s1_fire) && !io.flush.valid
-  io.out.valid := io.s2_fire && !io.redirect.valid
+  // io.out.valid := io.s2_fire && !io.redirect.valid
 
-  io.out.bits.resp.valids(1) := io.out.valid
+  // io.out.bits.resp.valids(1) := io.out.valid
 
   val s1_read = VecInit((0 until numWays).map(w =>
     ftb.io.r.resp.data(w)
@@ -144,7 +144,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val jmpTarget = ftb_entry.jmpTarget
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
-  io.out.bits.resp := io.in.bits.resp_in(0)
+  io.out.resp := io.in.bits.resp_in(0)
 
   val s1_latch_target = Wire(UInt(VAddrBits.W))
   // s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
@@ -167,26 +167,26 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  io.out.bits.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_br         := RegEnable(ftb_entry.brValids, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jal        := RegEnable(ftb_entry.jmpValid && !ftb_entry.isJalr, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_jalr       := RegEnable(ftb_entry.isJalr, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_call       := RegEnable(ftb_entry.isCall, io.s1_fire)
-  io.out.bits.resp.s2.preds.is_ret        := RegEnable(ftb_entry.isRet, io.s1_fire)
+  io.out.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
+  io.out.resp.s2.preds.is_br         := RegEnable(ftb_entry.brValids, io.s1_fire)
+  io.out.resp.s2.preds.is_jal        := RegEnable(ftb_entry.jmpValid && !ftb_entry.isJalr, io.s1_fire)
+  io.out.resp.s2.preds.is_jalr       := RegEnable(ftb_entry.isJalr, io.s1_fire)
+  io.out.resp.s2.preds.is_call       := RegEnable(ftb_entry.isCall, io.s1_fire)
+  io.out.resp.s2.preds.is_ret        := RegEnable(ftb_entry.isRet, io.s1_fire)
 
-  io.out.bits.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
-  io.out.bits.resp.s2.pc                  := RegEnable(s1_pc, io.s1_fire) //s2_pc
-  io.out.bits.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
-  io.out.bits.resp.s2.ftb_entry           := RegEnable(ftb_entry, io.s1_fire)
+  io.out.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
+  io.out.resp.s2.pc                  := RegEnable(s1_pc, io.s1_fire) //s2_pc
+  io.out.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
+  io.out.resp.s2.ftb_entry           := RegEnable(ftb_entry, io.s1_fire)
 
-  io.out.bits.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit).asUInt(), io.s1_fire), io.s2_fire)
+  io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit).asUInt(), io.s1_fire), io.s2_fire)
 
-  io.out.bits.resp.s3 := RegEnable(io.out.bits.resp.s2, io.s2_fire)
+  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   when(!s2_hit) {
-    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
+    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
   }.otherwise {
-    io.out.bits.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
+    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
   }
 
   // Update logic

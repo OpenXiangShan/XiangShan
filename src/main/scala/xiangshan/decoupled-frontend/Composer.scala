@@ -23,7 +23,7 @@ import utils._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
-  io.out.bits.resp := resp
+  io.out.resp := resp
 
   var metas = 0.U(1.W)
   var meta_sz = 0
@@ -33,7 +33,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.in.bits.ghist      := io.in.bits.ghist
     c.io.in.bits.toFtq_fire := io.in.bits.toFtq_fire
     if (c.meta_size > 0) {
-      metas = (metas << c.meta_size) | c.io.out.bits.s3_meta(c.meta_size-1,0)
+      metas = (metas << c.meta_size) | c.io.out.s3_meta(c.meta_size-1,0)
     }
     meta_sz = meta_sz + c.meta_size
   }
@@ -49,7 +49,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   components.foreach(_.io.s2_fire := io.s2_fire)
   components.foreach(_.io.s3_fire := io.s3_fire)
 
-  io.out.bits.resp.valids := VecInit(components.map(_.io.out.valid))
+  // io.out.bits.resp.valids := VecInit(components.map(_.io.out.valid))
 
   when(io.redirect.valid) {
     s0_pc := io.redirect.bits.cfiUpdate.target
@@ -57,7 +57,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
 
 
   require(meta_sz < MaxMetaLength)
-  io.out.bits.s3_meta := metas
+  io.out.s3_meta := metas
 
 
   var update_meta = io.update.bits.meta

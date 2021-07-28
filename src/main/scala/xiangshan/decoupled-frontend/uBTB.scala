@@ -215,22 +215,22 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.read_pc.valid := io.s1_fire
   banks.read_pc.bits := s1_pc
 
-  io.out.valid := io.s1_fire && !io.redirect.valid
-  io.out.bits.resp := io.in.bits.resp_in(0)
-  io.out.bits.resp.valids(0) := io.out.valid
-  io.out.bits.resp.s1.pc := s1_pc
+  // io.out.valid := io.s1_fire && !io.redirect.valid
+  io.out.resp := io.in.bits.resp_in(0)
+  // io.out.resp.valids(0) := io.out.valid
+  io.out.resp.s1.pc := s1_pc
   // io.out.bits.resp.s1.meta := read_resps.pred.asUInt() // TODO: What ubtb meta need
-  io.out.bits.s3_meta := RegEnable(RegEnable(read_resps.pred.asUInt(), io.s1_fire), io.s2_fire) // s3_meta
+  io.out.s3_meta := RegEnable(RegEnable(read_resps.pred.asUInt(), io.s1_fire), io.s2_fire) // s3_meta
   // io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
-  io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
-  io.out.bits.resp.s1.preds.taken_mask := read_resps.taken_mask
+  io.out.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
+  io.out.resp.s1.preds.taken_mask := read_resps.taken_mask
   // io.out.bits.resp.s1.preds.is_br := read_resps.brValids
   // io.out.bits.resp.s1.preds.is_jal := read_resps.jmpValid && !(read_resps.isCall || read_resps.isRet || read_resps.isJalr)
   // io.out.bits.resp.s1.preds.is_jalr := read_resps.jmpValid && read_resps.isJalr
   // io.out.bits.resp.s1.preds.is_call := read_resps.jmpValid && read_resps.isCall
   // io.out.bits.resp.s1.preds.is_ret := read_resps.jmpValid && read_resps.isRet
   // io.out.bits.resp.s1.preds.call_is_rvc := read_resps.last_is_rvc
-  io.out.bits.resp.s1.hit := banks.read_hit
+  io.out.resp.s1.hit := banks.read_hit
 
   // Update logic
   val update = RegNext(io.update.bits)

@@ -159,9 +159,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_ras.recover_top := recover_cfi.rasEntry
   spec_ras.recover_new_addr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  io.out.bits.s3_meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
+  io.out.s3_meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
 
-  io.out.bits.resp.s3.preds.target := spec_top_addr
+  io.out.resp.s3.preds.target := spec_top_addr
   // TODO: back-up stack for ras
   // use checkpoint to recover RAS
 }

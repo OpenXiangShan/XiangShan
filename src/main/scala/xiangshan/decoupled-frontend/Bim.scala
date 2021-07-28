@@ -37,20 +37,20 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   resetRow := resetRow + doing_reset
   when (resetRow === (bimSize-1).U) { doing_reset := false.B }
 
-  val s1_idx = bimAddr.getIdx(s1_pc)
+  val s0_idx = bimAddr.getIdx(s0_pc)
 
   bim.io.r.req.valid := io.s0_fire
-  bim.io.r.req.bits.setIdx := s1_idx
+  bim.io.r.req.bits.setIdx := s0_idx
 
-  io.in.ready := bim.io.r.req.ready && !io.redirect.valid
-  io.s1_ready := bim.io.r.req.ready && !io.redirect.valid
-  io.out.valid := io.s2_fire && !io.redirect.valid
+  io.in.ready := bim.io.r.req.ready
+  io.s1_ready := bim.io.r.req.ready
+  // io.out.valid := io.s2_fire && !io.redirect.valid
 
   // val s1_pc = RegEnable(s0_pc, s0_valid)
 
   val s1_read = bim.io.r.resp.data
 
-  io.out.bits.resp := io.in.bits.resp_in(0)
+  io.out.resp := io.in.bits.resp_in(0)
   // io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
   // io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
   // io.out.bits.resp.s1.meta := s1_read.asUInt()
@@ -58,10 +58,10 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val s1_latch_taken_mask = VecInit(Cat(0.U(1.W), Cat((0 until numBr reverse).map(i => s1_read(i)(1)))).asBools())
   val s1_latch_meta       = s1_read.asUInt()
 
-  io.out.bits.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
+  io.out.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
 
-  io.out.bits.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
-  io.out.bits.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
+  io.out.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
+  io.out.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
 
   // Update logic
   val u_valid = RegNext(io.update.valid)

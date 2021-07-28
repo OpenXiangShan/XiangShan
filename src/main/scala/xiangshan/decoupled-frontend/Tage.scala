@@ -495,7 +495,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     if3_providerUs(w) := if3_resps(if3_provider)(w).bits.u
     if3_providerCtrs(w) := if3_resps(if3_provider)(w).bits.ctr
 
-    val resp = io.out.bits.resp.s3
+    val resp = io.out.resp.s3
 
     resp.preds.taken_mask(w) := if4_tageTakens(w) // && ctrl.tage_enable
 

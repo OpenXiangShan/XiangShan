@@ -118,7 +118,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val valids = Vec(3, Bool())
+  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle()
   val s2 = new BranchPredictionBundle()
   val s3 = new BranchPredictionBundle()
