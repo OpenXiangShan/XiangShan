@@ -25,7 +25,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.regfile.Regfile
+import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
 import scala.collection.mutable.ArrayBuffer
@@ -86,16 +86,15 @@ class Scheduler(
   val fpRfReadPorts = dpPorts.map(_.map(_._1).map(reservationStations(_).fpSrcCnt).max).sum
   val intRfWritePorts = reservationStations.map(_.numIntWbPort).sum
   val fpRfWritePorts = reservationStations.map(_.numFpWbPort).sum
-  println(s"INT Regfile: ${intRfReadPorts}R${intRfWritePorts}W")
-  println(s"FP  Regfile: ${fpRfReadPorts}R${fpRfWritePorts}W")
+
 
   // connect to dispatch
   val dpFuConfigs = dpPorts.map(_.map(p => reservationStations(p._1).addDispatchPort()).reduce(_ ++ _))
 
   for (((_, _, fastIntPorts, fastFpPorts), rs) <- configs.zip(reservationStations)) {
     // connect fast wakeup ports to target rs
-    fastIntPorts.map(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
-    fastFpPorts.map(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
+    fastIntPorts.foreach(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
+    fastFpPorts.foreach(reservationStations(_).addEarlyWakeup(rs.numAllFastWakeupPort))
 
     // connect wakeup ports to itself
     if (rs.intSrcCnt > 0) {
@@ -106,34 +105,72 @@ class Scheduler(
     }
   }
 
-  // print rs info
-  for ((rs, i) <- reservationStations.zipWithIndex) {
-    println(s"RS $i: $rs")
+  val numIssuePorts = configs.map(_._2).sum
+
+  val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
+  val memRsEntries = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
+  def getMemRsEntries = {
+    require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
+    if (memRsEntries.isEmpty) 0 else memRsEntries.max
+  }
+  val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
+  val numOutsideWakeup = reservationStations.map(_.numExtFastWakeupPort).sum
+
+  var outerIntRfWrite = 0
+  def addIntWritebackPorts(n: Int) = {
+    reservationStations.foreach{ rs => {
+      if (rs.intSrcCnt > 0) {
+        rs.addWakeup(n)
+      }
+    }}
+    outerIntRfWrite += n
+    this
   }
 
-  println("Scheduler: ")
-  val numIssuePorts = configs.map(_._2).sum
-  println(s"  number of issue ports: ${numIssuePorts}")
-  val numReplayPorts = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numDeq).sum
-  println(s"  number of replay ports: ${numReplayPorts}")
-  val memRsEntries = reservationStations.filter(_.params.hasFeedback == true).map(_.params.numEntries)
-  require(memRsEntries.max == memRsEntries.min, "different indexes not supported")
-  println(s"  size of load and store RSes: ${memRsEntries.max}")
-  val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
-  println(s"  number of std ports: ${numSTDPorts}")
-  val numOutsideWakeup = reservationStations.map(_.numExtFastWakeupPort).sum
-  println(s"  number of outside fast wakeup ports: ${numOutsideWakeup}")
+  var outerFpRfWrite = 0
+  def addFpWritebackPorts(n: Int) = {
+    reservationStations.foreach{ rs => {
+      if (rs.fpSrcCnt > 0) {
+        rs.addWakeup(n)
+      }
+    }}
+    outerFpRfWrite += n
+    this
+  }
 
   lazy val module = new SchedulerImp(this)
 }
 
 class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter {
-  val memRsEntries = outer.memRsEntries.max
+  val memRsEntries = outer.getMemRsEntries
   val updatedP = p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = memRsEntries
     )
   })
+  val intRfWritePorts = outer.intRfWritePorts + outer.outerIntRfWrite
+  val fpRfWritePorts = outer.fpRfWritePorts + outer.outerFpRfWrite
+  val intRfConfig = (outer.intRfReadPorts > 0, outer.intRfReadPorts, intRfWritePorts)
+  val fpRfConfig = (outer.fpRfReadPorts > 0, outer.fpRfReadPorts, fpRfWritePorts)
+
+  val rs_all = outer.reservationStations
+
+  // print rs info
+  println("Scheduler: ")
+  for ((rs, i) <- rs_all.zipWithIndex) {
+    println(s"RS $i: $rs")
+  }
+  println(s"  number of issue ports: ${outer.numIssuePorts}")
+  println(s"  number of replay ports: ${outer.numReplayPorts}")
+  println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
+  println(s"  number of std ports: ${outer.numSTDPorts}")
+  println(s"  number of outside fast wakeup ports: ${outer.numOutsideWakeup}")
+  if (intRfConfig._1) {
+    println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
+  }
+  if (fpRfConfig._1) {
+    println(s"FP  Regfile: ${fpRfConfig._2}R${fpRfConfig._3}W")
+  }
 
   val io = IO(new Bundle {
     // global control
@@ -141,17 +178,21 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val flush = Input(Bool())
     // dispatch and issue ports
     val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
-    // read regfile
-    val readIntRf = Vec(outer.intRfReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(outer.fpRfReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
-    val writeback = Vec(outer.intRfWritePorts + outer.fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val replay = Vec(outer.numReplayPorts, Flipped(ValidIO(new RSFeedback()(updatedP))))
-    val rsIdx = Vec(outer.numReplayPorts, Output(UInt(log2Up(memRsEntries).W)))
-    val isFirstIssue = Vec(outer.numReplayPorts, Output(Bool()))
-    val stData = Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))
+    val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
+    // read regfile
+    val readIntRf = if (intRfConfig._1) Some(Vec(intRfConfig._2, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val readFpRf = if (fpRfConfig._1) Some(Vec(fpRfConfig._2, Input(UInt(PhyRegIdxWidth.W)))) else None
+    // feedback ports
+    val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, new Bundle {
+      val replay = Flipped(ValidIO(new RSFeedback()(updatedP)))
+      val rsIdx = Output(UInt(log2Up(memRsEntries).W))
+      val isFirstIssue = Output(Bool())
+    })) else None
+    // special ports for store
+    val stData = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))) else None
     // 2LOAD, data is selected from writeback ports
-    val otherFastWakeup = Vec(outer.numOutsideWakeup, Flipped(ValidIO(new MicroOp)))
+    val otherFastWakeup = if (outer.numOutsideWakeup > 0) Some(Vec(outer.numOutsideWakeup, Flipped(ValidIO(new MicroOp)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -161,24 +202,46 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
   })
 
-  val rs_all = outer.reservationStations
+  def readIntRf: Seq[UInt] = io.readIntRf.getOrElse(Seq())
+  def readFpRf: Seq[UInt] = io.readFpRf.getOrElse(Seq())
+  def stData = io.stData.getOrElse(Seq())
+
+  def regfile(raddr: Seq[UInt], numWrite: Int, hasZero: Boolean, len: Int): Option[Regfile] = {
+    val numReadPorts = raddr.length
+    if (numReadPorts > 0) {
+      val rf = Module(new Regfile(numReadPorts, numWrite, hasZero, len))
+      rf.io.readPorts.map(_.addr).zip(raddr).foreach{ case (r1, r2) => r1 := r2 }
+      rf.io.debug_rports := DontCare
+      Some(rf)
+    }
+    else {
+      None.asInstanceOf[Option[Regfile]]
+    }
+  }
+
+  val intRf = regfile(readIntRf, intRfWritePorts, true, XLEN)
+  val fpRf = regfile(readFpRf, fpRfWritePorts, false, XLEN)
+  val intRfReadData = if (intRf.isDefined) intRf.get.io.readPorts.map(_.data) else Seq()
+  val fpRfReadData = if (fpRf.isDefined) fpRf.get.io.readPorts.map(_.data) else Seq()
 
   // write ports: 0-3 ALU, 4-5 MUL, 6-7 LOAD
-  val intRf = Module(new Regfile(
-    numReadPorts = outer.intRfReadPorts,
-    numWirtePorts = outer.intRfWritePorts,
-    hasZero = true,
-    len = XLEN
-  ))
-  // write ports: 0-3 FMA 4-5 FMISC, 6-7 LOAD
-  val fpRf = Module(new Regfile(
-    numReadPorts = outer.fpRfReadPorts,
-    numWirtePorts = outer.fpRfWritePorts,
-    hasZero = false,
-    len = XLEN
-  ))
-  io.readIntRf <> intRf.io.readPorts.map(_.addr)
-  io.readFpRf <> fpRf.io.readPorts.map(_.addr)
+  // regfile write ports
+  if (intRf.isDefined) {
+    intRf.get.io.writePorts.zip(io.writeback.take(intRfWritePorts)).foreach {
+      case (rf, wb) =>
+        rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
+        rf.addr := wb.bits.uop.pdest
+        rf.data := wb.bits.data
+    }
+  }
+  if (fpRf.isDefined) {
+    fpRf.get.io.writePorts.zip(io.writeback.drop(intRfWritePorts)).foreach {
+      case (rf, wb) =>
+        rf.wen := wb.valid
+        rf.addr := wb.bits.uop.pdest
+        rf.data := wb.bits.data
+    }
+  }
 
   var issueIdx = 0
   var feedbackIdx = 0
@@ -200,22 +263,23 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.module.io_checkwait.get.stIssuePtr <> io.stIssuePtr
     }
     if (rs.module.io_feedback.isDefined) {
-      require(io.rsIdx(0).getWidth == rs.module.io_feedback.get.rsIdx(0).getWidth)
       val width = rs.module.io_feedback.get.memfeedback.length
-      rs.module.io_feedback.get.memfeedback <> io.replay.slice(feedbackIdx, feedbackIdx + width)
-      rs.module.io_feedback.get.rsIdx <> io.rsIdx.slice(feedbackIdx, feedbackIdx + width)
-      rs.module.io_feedback.get.isFirstIssue <> io.isFirstIssue.slice(feedbackIdx, feedbackIdx + width)
+      val feedback = io.feedback.get.slice(feedbackIdx, feedbackIdx + width)
+      require(feedback(0).rsIdx.getWidth == rs.module.io_feedback.get.rsIdx(0).getWidth)
+      rs.module.io_feedback.get.memfeedback <> feedback.map(_.replay)
+      rs.module.io_feedback.get.rsIdx <> feedback.map(_.rsIdx)
+      rs.module.io_feedback.get.isFirstIssue <> feedback.map(_.isFirstIssue)
       feedbackIdx += width
     }
     if (rs.module.io_store.isDefined) {
       val width = rs.module.io_store.get.stData.length
-      rs.module.io_store.get.stData <> io.stData.slice(stDataIdx, stDataIdx + width)
+      rs.module.io_store.get.stData <> stData.slice(stDataIdx, stDataIdx + width)
       stDataIdx += width
     }
 
     (rs.intSrcCnt > 0, rs.fpSrcCnt > 0) match {
-      case (true,  false) => rs.module.io.slowPorts := io.writeback.take(outer.intRfWritePorts)
-      case (false, true) => rs.module.io.slowPorts := io.writeback.drop(outer.intRfWritePorts)
+      case (true,  false) => rs.module.io.slowPorts := io.writeback.take(intRfWritePorts)
+      case (false, true) => rs.module.io.slowPorts := io.writeback.drop(intRfWritePorts)
       case (true,  true) => rs.module.io.slowPorts := io.writeback
       case _ => throw new RuntimeException("unknown wakeup source")
     }
@@ -225,7 +289,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val fromRS = rs.numOutFastWakeupPort != 0
       val fromOther = rs.numExtFastWakeupPort != 0
       require(!(fromRS && fromOther))
-      val otherUop = io.otherFastWakeup.drop(otherFastUopIdx).take(rs.numAllFastWakeupPort)
+      val otherUop = io.otherFastWakeup.getOrElse(Seq()).drop(otherFastUopIdx).take(rs.numAllFastWakeupPort)
       val uop = if (fromOther) otherUop else rs.module.io_fastWakeup.get
       val allData = io.writeback.map(_.bits.data)
       if (rs.numIntWbPort > 0 && outer.configs(i)._3.nonEmpty) {
@@ -239,7 +303,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         }
       }
       if (rs.numFpWbPort > 0 && outer.configs(i)._4.nonEmpty) {
-        val dataBegin = outer.intRfWritePorts + outer.rsFpRfWritePort(i)
+        val dataBegin = intRfWritePorts + outer.rsFpRfWritePort(i)
         val dataEnd = dataBegin + rs.numAllFastWakeupPort
         val data = allData.slice(dataBegin, dataEnd)
         outer.configs(i)._4.foreach(rs_all(_).connectFastWakeup(uop, data))
@@ -269,7 +333,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
     val numIntRfPorts = dp.map(_._1).map(rs_all(_).intSrcCnt).max
     if (numIntRfPorts > 0) {
-      val intRfPorts = VecInit(intRf.io.readPorts.slice(intReadPort, intReadPort + numIntRfPorts).map(_.data))
+      val intRfPorts = VecInit(intRfReadData.slice(intReadPort, intReadPort + numIntRfPorts))
       for ((rs, idx) <- dp) {
         val target = rs_all(rs).module.io.srcRegValue(idx)
         target := intRfPorts.take(target.length)
@@ -279,7 +343,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
     val numFpRfPorts = dp.map(_._1).map(rs_all(_).fpSrcCnt).max
     if (numFpRfPorts > 0) {
-      val fpRfPorts = VecInit(fpRf.io.readPorts.slice(fpReadPort, fpReadPort + numFpRfPorts).map(_.data))
+      val fpRfPorts = VecInit(fpRfReadData.slice(fpReadPort, fpReadPort + numFpRfPorts))
       for ((rs, idx) <- dp) {
         val mod = rs_all(rs).module
         val target = mod.io.srcRegValue(idx)
@@ -299,40 +363,22 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
-
-  // regfile write ports
-  intRf.io.writePorts.zip(io.writeback.take(outer.intRfWritePorts)).foreach {
-    case (rf, wb) =>
-      rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
-      rf.addr := wb.bits.uop.pdest
-      rf.data := wb.bits.data
-  }
-  fpRf.io.writePorts.zip(io.writeback.drop(outer.intRfWritePorts)).foreach {
-    case (rf, wb) =>
-      rf.wen := wb.valid
-      rf.addr := wb.bits.uop.pdest
-      rf.data := wb.bits.data
-  }
-
-  intRf.io.debug_rports := DontCare
-  fpRf.io.debug_rports := DontCare
-
-  if (!env.FPGAPlatform) {
-    for ((rport, rat) <- intRf.io.debug_rports.zip(io.debug_int_rat)) {
+  if (!env.FPGAPlatform && intRf.isDefined) {
+    for ((rport, rat) <- intRf.get.io.debug_rports.zip(io.debug_int_rat)) {
       rport.addr := rat
     }
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.gpr := VecInit(intRf.io.debug_rports.map(_.data))
+    difftest.io.gpr := VecInit(intRf.get.io.debug_rports.map(_.data))
   }
-  if (!env.FPGAPlatform) {
-    for ((rport, rat) <- fpRf.io.debug_rports.zip(io.debug_fp_rat)) {
+  if (!env.FPGAPlatform && fpRf.isDefined) {
+    for ((rport, rat) <- fpRf.get.io.debug_rports.zip(io.debug_fp_rat)) {
       rport.addr := rat
     }
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.fpr := VecInit(fpRf.io.debug_rports.map(_.data))
+    difftest.io.fpr := VecInit(fpRf.get.io.debug_rports.map(_.data))
   }
 }
