@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -23,61 +24,65 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem.SqPtr
 
-class StatusArrayUpdateIO(config: RSConfig)(implicit p: Parameters) extends Bundle {
+class StatusArrayUpdateIO(params: RSParams)(implicit p: Parameters) extends Bundle {
   val enable = Input(Bool())
   // should be one-hot
-  val addr = Input(UInt(config.numEntries.W))
-  val data = Input(new StatusEntry(config))
+  val addr = Input(UInt(params.numEntries.W))
+  val data = Input(new StatusEntry(params))
 
   def isLegal() = {
     PopCount(addr.asBools) === 0.U
   }
 
   override def cloneType: StatusArrayUpdateIO.this.type =
-    new StatusArrayUpdateIO(config).asInstanceOf[this.type]
+    new StatusArrayUpdateIO(params).asInstanceOf[this.type]
 }
 
-class StatusEntry(config: RSConfig)(implicit p: Parameters) extends XSBundle {
+class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   // states
   val valid = Bool()
   val scheduled = Bool()
   val blocked = Bool()
   val credit = UInt(4.W)
-  val srcState = Vec(config.numSrc, Bool())
+  val srcState = Vec(params.numSrc, Bool())
   // data
-  val psrc = Vec(config.numSrc, UInt(config.dataIdBits.W))
-  val srcType = Vec(config.numSrc, SrcType())
+  val psrc = Vec(params.numSrc, UInt(params.dataIdBits.W))
+  val srcType = Vec(params.numSrc, SrcType())
   val roqIdx = new RoqPtr
   val sqIdx = new SqPtr
+  // misc
+  val isFirstIssue = Bool()
 
   override def cloneType: StatusEntry.this.type =
-    new StatusEntry(config).asInstanceOf[this.type]
+    new StatusEntry(params).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $roqIdx"
   }
 }
 
-class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
+class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // current status
-    val isValid = Output(UInt(config.numEntries.W))
-    val canIssue = Output(UInt(config.numEntries.W))
+    val isValid = Output(UInt(params.numEntries.W))
+    val canIssue = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
-    val update = Vec(config.numEnq, new StatusArrayUpdateIO(config))
-    val wakeup = Vec(config.numWakeup, Flipped(ValidIO(new MicroOp)))
-    val wakeupMatch = Vec(config.numEntries, Vec(config.numSrc, Output(UInt(config.numWakeup.W))))
-    val issueGranted = Vec(config.numDeq, Flipped(ValidIO(UInt(config.numEntries.W))))
-    val deqResp = Vec(config.numDeq, Flipped(ValidIO(new Bundle {
-      val rsMask = UInt(config.numEntries.W)
+    val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
+    val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
+    val wakeupMatch = Vec(params.numEntries, Vec(params.numSrc, Output(UInt(params.allWakeup.W))))
+    val issueGranted = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
+    // TODO: if more info is needed, put them in a bundle
+    val isFirstIssue = Vec(params.numDeq, Output(Bool()))
+    val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
+      val rsMask = UInt(params.numEntries.W)
       val success = Bool()
     })))
-    val stIssuePtr = if (config.checkWaitBit) Input(new SqPtr()) else null
+    val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
   })
 
-  val statusArray = Reg(Vec(config.numEntries, new StatusEntry(config)))
+  val statusArray = Reg(Vec(params.numEntries, new StatusEntry(params)))
   val statusArrayNext = WireInit(statusArray)
   statusArray := statusArrayNext
   when (reset.asBool) {
@@ -117,19 +122,23 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
         case (update, wakeup) => update || wakeup
       })
       statusNext.scheduled := updateStatus.scheduled
-      statusNext.blocked := updateStatus.blocked
+      statusNext.blocked := false.B
       statusNext.credit := updateStatus.credit
       statusNext.psrc := updateStatus.psrc
       statusNext.srcType := updateStatus.srcType
       statusNext.roqIdx := updateStatus.roqIdx
       statusNext.sqIdx := updateStatus.sqIdx
-      XSError(status.valid, p"should not update a valid entry\n")
+      statusNext.isFirstIssue := true.B
+      if (params.checkWaitBit) {
+        statusNext.blocked := updateStatus.blocked && isAfter(updateStatus.sqIdx, io.stIssuePtr)
+      }
+      XSError(status.valid, p"should not update a valid entry $i\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
       val (deqResp, deqGrant) = deqRespSel(i)
-      XSError(deqResp && !status.valid, "should not deq an invalid entry\n")
-      if (config.hasFeedback) {
-        XSError(deqResp && !status.scheduled, "should not deq an un-scheduled entry\n")
+      XSError(deqResp && !status.valid, p"should not deq an invalid entry $i\n")
+      if (params.hasFeedback) {
+        XSError(deqResp && !status.scheduled, p"should not deq an un-scheduled entry $i\n")
       }
       val wakeupEnVec = VecInit(status.psrc.zip(status.srcType).map{ case (p, t) => wakeupMatch(p, t) })
       val wakeupEn = wakeupEnVec.map(_.orR)
@@ -137,12 +146,10 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
-      XSError(hasIssued && !status.valid, "should not issue an invalid entry\n")
-      if (config.checkWaitBit) {
+      XSError(hasIssued && !status.valid, p"should not issue an invalid entry $i\n")
+      statusNext.blocked := false.B
+      if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
-      }
-      else {
-        statusNext.blocked := false.B
       }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
@@ -150,6 +157,10 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
       statusNext.srcState := VecInit(status.srcState.zip(wakeupEn).map {
         case (current, wakeup) => current || wakeup
       })
+      // when the entry is not granted to leave the RS, set isFirstIssue to false.B
+      when (deqResp && !deqGrant) {
+        statusNext.isFirstIssue := false.B
+      }
     }
 
     XSDebug(status.valid, p"entry[$i]: $status\n")
@@ -157,4 +168,19 @@ class StatusArray(config: RSConfig)(implicit p: Parameters) extends XSModule
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.canIssue := VecInit(statusArray.map(_.valid).zip(readyVec).map{ case (v, r) => v && r}).asUInt
+  io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
+
+  val validEntries = PopCount(statusArray.map(_.valid))
+  XSPerfHistogram("valid_entries", validEntries, true.B, 0, params.numEntries, 1)
+  for (i <- 0 until params.numSrc) {
+    val waitSrc = statusArray.map(_.srcState).map(s => Cat(s.zipWithIndex.filter(_._2 != i).map(_._1)).andR && !s(i))
+    val srcBlockIssue = statusArray.zip(waitSrc).map{ case (s, w) => s.valid && !s.scheduled && !s.blocked && w }
+    XSPerfAccumulate(s"wait_for_src_$i", PopCount(srcBlockIssue))
+  }
+  val isBlocked = PopCount(statusArray.map(s => s.valid && s.blocked))
+  XSPerfAccumulate("blocked_entries", isBlocked)
+  val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
+  XSPerfAccumulate("scheduled_entries", isScheduled)
+  val notSelected = PopCount(io.canIssue) - PopCount(io.issueGranted.map(_.valid))
+  XSPerfAccumulate("not_selected_entries", notSelected)
 }

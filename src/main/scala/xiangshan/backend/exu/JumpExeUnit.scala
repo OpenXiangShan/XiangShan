@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -51,6 +52,7 @@ class JumpExeUnit(implicit p: Parameters) extends Exu(JumpExeUnitCfg)
   fenceio.fencei <> fence.fencei
   fenceio.sbuffer <> fence.toSbuffer
   fence.io.out.ready := true.B
+  fence.disableSfence := csr.csrio.disableSfence
 
   val uop = io.fromInt.bits.uop
   val instr_rm = uop.ctrl.fpu.rm

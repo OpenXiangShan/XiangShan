@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -21,7 +22,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import difftest._
 import device.RAMHelper
@@ -297,8 +298,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
     // If addr match, data not ready, mark it as dataInvalid
-    // load_s1: generate dataInvalid in load_s1 to set fastUop to 
-    io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt & needForward).orR 
+    // load_s1: generate dataInvalid in load_s1 to set fastUop to
+    io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt & needForward).orR
     // load_s2
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
   }

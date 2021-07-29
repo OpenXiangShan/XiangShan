@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -132,6 +133,7 @@ case class XSCoreParameters
   ),
   L2Size: Int = 512 * 1024, // 512KB
   L2NWays: Int = 8,
+  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -140,10 +142,8 @@ case class XSCoreParameters
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
 
-  val intExuConfigs = JumpExeUnitCfg +: (
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) ++
-      Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg)
-    )
+  val intExuConfigs = Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpExeUnitCfg
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
@@ -226,11 +226,11 @@ trait HasXSParameter {
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
-  val NRIntReadPorts = coreParams.NRIntReadPorts
-  val NRIntWritePorts = coreParams.NRIntWritePorts
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
-  val NRFpReadPorts = coreParams.NRFpReadPorts
-  val NRFpWritePorts = coreParams.NRFpWritePorts
+  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
+  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
+  val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
+  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
@@ -259,6 +259,7 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
+  val usePTWRepeater = coreParams.usePTWRepeater
   val useFakeDCache = coreParams.useFakeDCache
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache

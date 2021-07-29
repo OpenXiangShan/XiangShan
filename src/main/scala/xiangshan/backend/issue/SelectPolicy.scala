@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -21,21 +22,21 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
+class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // select for enqueue
-    val validVec = Input(UInt(config.numEntries.W))
-    val allocate = Vec(config.numEnq, DecoupledIO(UInt(config.numEntries.W)))
+    val validVec = Input(UInt(params.numEntries.W))
+    val allocate = Vec(params.numEnq, DecoupledIO(UInt(params.numEntries.W)))
     // select for issue
-    val request = Input(UInt(config.numEntries.W))
-    val grant = Vec(config.numDeq, DecoupledIO(UInt(config.numEntries.W))) //TODO: optimize it
+    val request = Input(UInt(params.numEntries.W))
+    val grant = Vec(params.numDeq, DecoupledIO(UInt(params.numEntries.W))) //TODO: optimize it
   })
 
-  val policy = if (config.numDeq > 2 && config.numEntries > 32) "oddeven" else if (config.numDeq > 2) "circ" else "naive"
+  val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq > 2) "circ" else "naive"
 
   val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  val allocate = SelectOne(policy, emptyVec, config.numEnq)
-  for (i <- 0 until config.numEnq) {
+  val allocate = SelectOne(policy, emptyVec, params.numEnq)
+  for (i <- 0 until params.numEnq) {
     val sel = allocate.getNthOH(i + 1)
     io.allocate(i).valid := sel._1
     io.allocate(i).bits := sel._2.asUInt
@@ -47,8 +48,8 @@ class SelectPolicy(config: RSConfig)(implicit p: Parameters) extends XSModule {
 
   // a better one: select from both directions
   val request = io.request.asBools
-  val select = SelectOne(policy, request, config.numDeq)
-  for (i <- 0 until config.numDeq) {
+  val select = SelectOne(policy, request, params.numDeq)
+  for (i <- 0 until params.numDeq) {
     val sel = select.getNthOH(i + 1)
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
