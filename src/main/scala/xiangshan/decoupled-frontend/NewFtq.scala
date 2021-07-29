@@ -946,8 +946,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       XSPerfAccumulate(key, value)
     }
 
-    XSError(mbpJWrongs.orR, p"commit detetced jal misprediction! " +
-      p"commPtr: $commPtr, startAddr: ${commit_pc_bundle.startAddr}, offset: ${PriorityEncoder(mbpJWrongs)}\n")
+    // XSError(mbpJWrongs.orR, p"commit detetced jal misprediction! " +
+    //   p"commPtr: $commPtr, startAddr: ${commit_pc_bundle.startAddr}, offset: ${PriorityEncoder(mbpJWrongs)}\n")
 
   }
   // val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
