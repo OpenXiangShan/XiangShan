@@ -136,6 +136,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid
+  io.sbuffer.vaddr := io.in.bits.vaddr
   io.sbuffer.paddr := s1_paddr
   io.sbuffer.uop := s1_uop
   io.sbuffer.sqIdx := s1_uop.sqIdx
@@ -143,6 +144,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
 
   io.lsq.valid := io.in.valid
+  io.lsq.vaddr := io.in.bits.vaddr
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx

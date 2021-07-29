@@ -72,6 +72,7 @@ class StoreDataBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
+  val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val uop = Output(new MicroOp) // for replay
@@ -93,23 +94,12 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
 //
 // Difference between PipeLoadForwardQueryIO and LoadForwardQueryIO:
 // PipeIO use predecoded sqIdxMask for better forward timing
-class PipeLoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
-  val paddr = Output(UInt(PAddrBits.W))
-  val mask = Output(UInt(8.W))
-  val uop = Output(new MicroOp) // for replay
-  val pc = Output(UInt(VAddrBits.W)) //for debug
-  val valid = Output(Bool()) //for debug
-
-  val forwardMask = Input(Vec(8, Bool()))
-  val forwardData = Input(Vec(8, UInt(8.W)))
-
-  val sqIdx = Output(new SqPtr) // for debug, should not be used in pipeline for timing reasons
+class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO {
+  // val sqIdx = Output(new SqPtr) // for debug, should not be used in pipeline for timing reasons
   // sqIdxMask is calcuated in earlier stage for better timing
   val sqIdxMask = Output(UInt(StoreQueueSize.W))
 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
-  val dataInvalid = Input(Bool()) // resp to load_s2
-  // If dataInvalid, load inst should sleep for a while
-  // Feedback type should be RSFeedbackType.dataInvalid
+  // val dataInvalid = Input(Bool()) // resp to load_s2
 }

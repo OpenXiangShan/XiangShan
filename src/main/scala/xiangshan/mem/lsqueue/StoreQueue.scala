@@ -76,11 +76,28 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
-  val dataModule = Module(new SQDataModule(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
+  val dataModule = Module(new SQDataModule(
+    numEntries = StoreQueueSize, 
+    numRead = StorePipelineWidth, 
+    numWrite = StorePipelineWidth, 
+    numForward = StorePipelineWidth
+  ))
   dataModule.io := DontCare
-  val paddrModule = Module(new SQPaddrModule(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
+  val paddrModule = Module(new SQAddrModule(
+    dataWidth = PAddrBits, 
+    numEntries = StoreQueueSize, 
+    numRead = StorePipelineWidth, 
+    numWrite = StorePipelineWidth, 
+    numForward = StorePipelineWidth
+  ))
   paddrModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
+  val vaddrModule = Module(new SQAddrModule(
+    dataWidth = VAddrBits, 
+    numEntries = StoreQueueSize, 
+    numRead = 1, 
+    numWrite = StorePipelineWidth,
+    numForward = StorePipelineWidth
+  ))
   vaddrModule.io := DontCare
 
   // state & misc
@@ -201,6 +218,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // Write addr to sq
   for (i <- 0 until StorePipelineWidth) {
     paddrModule.io.wen(i) := false.B
+    vaddrModule.io.wen(i) := false.B
     dataModule.io.mask.wen(i) := false.B
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
@@ -215,6 +233,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wen(i) := true.B
 
+      vaddrModule.io.waddr(i) := stWbIndex
+      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
+      vaddrModule.io.wen(i) := true.B
+
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
@@ -225,10 +247,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
         io.storeIn(i).bits.mmio
       )
     }
-    // vaddrModule write is delayed, as vaddrModule will not be read right after write
-    vaddrModule.io.waddr(i) := RegNext(stWbIndex)
-    vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
-    vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
   }
 
   // Write data to sq
@@ -291,7 +309,20 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     dataModule.io.needForward(i)(0) := canForward1 & paddrModule.io.forwardMmask(i).asUInt
     dataModule.io.needForward(i)(1) := canForward2 & paddrModule.io.forwardMmask(i).asUInt
 
+    vaddrModule.io.forwardMdata(i) := io.forward(i).vaddr
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
+
+    // vaddr cam result does not equal to paddr cam result
+    // replay needed
+    val vaddrMatchFailed = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
+    when (vaddrMatchFailed & io.forward(i).valid) {
+      printf("vaddrMatchFailed: %d: pc %x pmask %x vmask %x\n",
+        GTimer(),
+        io.forward(i).uop.cf.pc,
+        needForward & paddrModule.io.forwardMmask(i).asUInt,
+        needForward & vaddrModule.io.forwardMmask(i).asUInt
+      );
+    }
 
     // Forward result will be generated 1 cycle later (load_s2)
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
@@ -518,7 +549,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   for (i <- 0 until StoreQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(false, true.B, "%x v[%x] p[%x]",
+      uop(i).cf.pc,
+      vaddrModule.io.debug_data(i),
+      paddrModule.io.debug_data(i),
+    )
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && addrvalid(i), "a")
     PrintFlag(allocated(i) && datavalid(i), "d")
