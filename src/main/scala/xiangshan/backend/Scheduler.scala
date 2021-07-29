@@ -180,6 +180,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
     val issue = Vec(outer.numIssuePorts, DecoupledIO(new ExuInput))
     val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
+    // fast wakeup from outside execution units and rs
+    val fastUopIn = if (outer.numOutsideWakeup > 0) Some(Vec(outer.numOutsideWakeup, Flipped(ValidIO(new MicroOp)))) else None
     // read regfile
     val readIntRf = if (intRfConfig._1) Some(Vec(intRfConfig._2, Input(UInt(PhyRegIdxWidth.W)))) else None
     val readFpRf = if (fpRfConfig._1) Some(Vec(fpRfConfig._2, Input(UInt(PhyRegIdxWidth.W)))) else None
@@ -191,8 +193,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     })) else None
     // special ports for store
     val stData = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))) else None
-    // 2LOAD, data is selected from writeback ports
-    val otherFastWakeup = if (outer.numOutsideWakeup > 0) Some(Vec(outer.numOutsideWakeup, Flipped(ValidIO(new MicroOp)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -204,7 +204,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   def readIntRf: Seq[UInt] = io.readIntRf.getOrElse(Seq())
   def readFpRf: Seq[UInt] = io.readFpRf.getOrElse(Seq())
-  def stData = io.stData.getOrElse(Seq())
+  def stData: Seq[ValidIO[StoreDataBundle]] = io.stData.getOrElse(Seq())
 
   def regfile(raddr: Seq[UInt], numWrite: Int, hasZero: Boolean, len: Int): Option[Regfile] = {
     val numReadPorts = raddr.length
@@ -289,7 +289,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val fromRS = rs.numOutFastWakeupPort != 0
       val fromOther = rs.numExtFastWakeupPort != 0
       require(!(fromRS && fromOther))
-      val otherUop = io.otherFastWakeup.getOrElse(Seq()).drop(otherFastUopIdx).take(rs.numAllFastWakeupPort)
+      val otherUop = io.fastUopIn.getOrElse(Seq()).drop(otherFastUopIdx).take(rs.numAllFastWakeupPort)
       val uop = if (fromOther) otherUop else rs.module.io_fastWakeup.get
       val allData = io.writeback.map(_.bits.data)
       if (rs.numIntWbPort > 0 && outer.configs(i)._3.nonEmpty) {

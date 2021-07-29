@@ -68,6 +68,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val l1pluscache = LazyModule(new L1plusCacheWrapper())
   val ptw = LazyModule(new PTWWrapper())
 
+  val intConfigs = exuConfigs.filter(_.writeIntRf)
+  val intArbiter = LazyModule(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+  println(intArbiter.allConnections)
+
+  val fpConfigs = exuConfigs.filter(_.writeFpRf)
+  val fpArbiter = LazyModule(new Wb(fpConfigs, NRFpWritePorts, isFp = true))
+  println(fpArbiter.allConnections)
 
   // TODO: better RS organization
   // generate rs according to number of function units
@@ -176,13 +183,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val scheduler = outer.scheduler.map(_.module)
 
   val allWriteback = integerBlock.io.writeback ++ floatBlock.io.writeback ++ memBlock.io.writeback
-  val intConfigs = exuConfigs.filter(_.writeIntRf)
-  val intArbiter = Module(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+
+
   val intWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   // set default value for ready
   integerBlock.io.writeback.foreach(_.ready := true.B)
   floatBlock.io.writeback.foreach(_.ready := true.B)
   memBlock.io.writeback.foreach(_.ready := true.B)
+
+  val intArbiter = outer.intArbiter.module
   intArbiter.io.in.zip(intWriteback).foreach { case (arb, wb) =>
     arb.valid := wb.valid && !wb.bits.uop.ctrl.fpWen
     arb.bits := wb.bits
@@ -191,7 +200,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     }
   }
 
-  val fpArbiter = Module(new Wb(exuConfigs.filter(_.writeFpRf), NRFpWritePorts, isFp = true))
+  val fpArbiter = outer.fpArbiter.module
   val fpWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
   fpArbiter.io.in.zip(fpWriteback).foreach{ case (arb, wb) =>
     arb.valid := wb.valid && wb.bits.uop.ctrl.fpWen
@@ -235,7 +244,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
 
 //  scheduler(0).io.otherFastWakeup.get <> memBlock.io.otherFastWakeup
-  scheduler(2).io.otherFastWakeup.get <> memBlock.io.otherFastWakeup
+  scheduler(2).io.fastUopIn.get <> memBlock.io.otherFastWakeup
   scheduler(0).io.jumpPc <> ctrlBlock.io.jumpPc
   scheduler(0).io.jalr_target <> ctrlBlock.io.jalr_target
   scheduler(0).io.stIssuePtr <> memBlock.io.stIssuePtr
