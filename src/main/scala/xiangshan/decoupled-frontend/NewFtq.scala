@@ -872,12 +872,28 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val enq = io.fromBpu.resp
   val perf_redirect = io.fromBackend.stage2Redirect
-  XSPerfAccumulate("entry", validEntries)
-  XSPerfAccumulate("stall", enq.valid && !enq.ready)
-  XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
-  XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
-
+  
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    XSPerfAccumulate("entry", validEntries)
+    XSPerfAccumulate("stall", enq.valid && !enq.ready)
+    XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
+    XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
+
+    val from_bpu = io.fromBpu.resp.bits
+    val enq_entry_len = from_bpu.ftb_entry.pftAddr - from_bpu.pc
+    val enq_entry_len_recording_vec = (1 to PredictWidth+1).map(i => enq_entry_len === i.U)
+    val enq_entry_len_map = (1 to PredictWidth+1).map(i =>
+      f"enq_ftb_entry_len_$i" -> (enq_entry_len_recording_vec(i-1) && enq_fire)
+    ).foldLeft(Map[String, UInt]())(_+_)
+
+    val to_ifu = io.toIfu.req.bits
+    val to_ifu_entry_len = to_ifu.fallThruAddr - to_ifu.startAddr
+    val to_ifu_entry_len_recording_vec = (1 to PredictWidth+1).map(i => to_ifu_entry_len === i.U)
+    val to_ifu_entry_len_map = (1 to PredictWidth+1).map(i =>
+      f"to_ifu_ftb_entry_len_$i" -> (to_ifu_entry_len_recording_vec(i-1) && io.toIfu.req.fire)
+    ).foldLeft(Map[String, UInt]())(_+_)
+
+    // commit perf counters
     val commit_inst_mask    = VecInit(commitStateQueue(commPtr.value).map(c => c === c_commited && do_commit)).asUInt
     val commit_mispred_mask = mispredict_vec(commPtr.value).asUInt
     val commit_not_mispred_mask = ~commit_mispred_mask
@@ -923,12 +939,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
 
     val ftb_entry_len = (ftbEntryGen.new_entry.pftAddr - update.pc) >> instOffsetBits
-    val ftb_entry_len_recording_vec = (0 until PredictWidth).map(i => ftb_entry_len === i.U)
-    val ftb_init_entry_len_map = (0 until PredictWidth).map(i =>
-      f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i) && ftb_new_entry)
+    val ftb_entry_len_recording_vec = (1 to PredictWidth+1).map(i => ftb_entry_len === i.U)
+    val ftb_init_entry_len_map = (1 to PredictWidth+1).map(i =>
+      f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_new_entry)
     ).foldLeft(Map[String, UInt]())(_+_)
-    val ftb_modified_entry_len_map = (0 until PredictWidth).map(i =>
-      f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i) && ftb_modified_entry)
+    val ftb_modified_entry_len_map = (1 to PredictWidth+1).map(i =>
+      f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_modified_entry)
     ).foldLeft(Map[String, UInt]())(_+_)
 
     val perfCountsMap = Map(
@@ -967,11 +983,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       "ftb_old_entry"                -> PopCount(ftb_old_entry),
       "ftb_modified_entry"           -> PopCount(ftb_modified_entry),
       "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full)
-    ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map
+    ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ enq_entry_len_map ++
+    to_ifu_entry_len_map
 
     for((key, value) <- perfCountsMap) {
       XSPerfAccumulate(key, value)
     }
+
+    XSError(mbpJWrongs.orR, p"commit detetced jal misprediction! " +
+      p"commPtr: $commPtr, startAddr: ${commit_pc_bundle.startAddr}, offset: ${PriorityEncoder(mbpJWrongs)}\n")
 
   }
   // val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
