@@ -619,21 +619,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** wb from exu ****************************
   // *********************************************************************
 
-  // when redirect cfi offset < current offset, update all cfi info
-  val cfiWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
-  // when redirect cfi offset == current offset (and only), update cfi valid bit
-  val cfiValidWbEn_vec = VecInit(Seq.fill(FtqSize)(false.B))
-
-  val cfiIndexValidWb_vec = Wire(Vec(FtqSize, Bool()))
-  val cfiIndexBitsWb_vec = Wire(Vec(FtqSize, UInt(log2Up(PredictWidth).W)))
-
-  val nWbPorts = io.fromBackend.exuWriteback.size
-  def getRedirect(exuOut: Valid[ExuOutput]): Valid[Redirect] = {
-    val redirect = Wire(Valid(new Redirect))
-    redirect.valid := exuOut.valid && exuOut.bits.redirect.cfiUpdate.isMisPred
-    redirect.bits := exuOut.bits.redirect
-    redirect
-  }
   def extractRedirectInfo(wb: Valid[Redirect]) = {
     val ftqIdx = wb.bits.ftqIdx.value
     val ftqOffset = wb.bits.ftqOffset
@@ -641,62 +626,33 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val mispred = wb.bits.cfiUpdate.isMisPred
     (wb.valid, ftqIdx, ftqOffset, taken, mispred)
   }
-  val redirect_vec = VecInit(io.fromBackend.exuWriteback.map(getRedirect) :+ fromIfuRedirect)
-  val redirect_infos = redirect_vec.map(extractRedirectInfo)
-  val wbFtqOffset_vec = VecInit(redirect_infos.map(i=>i._3))
-  // FtqSize * onehot
-  val wbPortSel_vec = Wire(Vec(FtqSize, Vec(nWbPorts + 1, Bool())))
-  // in order to handle situation in which multiple cfi taken writebacks target the same ftqEntry
-  for (i <- 0 until FtqSize) {
-    val needToUpdateThisEntry =
-      //                                 valid   taken    ftqIdx         ftqOffset          ftqIdx
-      VecInit(redirect_infos.map(r => r._1 && r._4 && r._2 === i.U && r._3 < cfiIndex_vec(r._2).bits))
-      
-    val updateCfiValidMask =
-      //                                 valid   taken          ftqOffset             ftqIdx
-      VecInit(redirect_infos.map(r => r._1 && r._2 === i.U && r._3 === cfiIndex_vec(r._2).bits))
-      
-    cfiWbEn_vec(i) := needToUpdateThisEntry.asUInt().orR()
-    cfiValidWbEn_vec(i) := updateCfiValidMask.asUInt().orR()
-
-    // TODO: distinguish exuWb and ifuWb
-    for (n <- 0 until nWbPorts+1) {
-      val hasFormerWriteBack = VecInit(
-        for (another <- 0 until nWbPorts+1 if another != n) yield {
-          needToUpdateThisEntry(another) && wbFtqOffset_vec(another) < wbFtqOffset_vec(n)
-        }
-      ).asUInt.orR
-      wbPortSel_vec(i)(n) := needToUpdateThisEntry(n) && !hasFormerWriteBack || !needToUpdateThisEntry.asUInt().orR() && updateCfiValidMask(n)
-    }
-  
-    XSError(PopCount(wbPortSel_vec(i)) > 1.U, p"multiple wb ports are selected to update cfiIndex_vec($i)\n")
-
-    cfiIndexValidWb_vec(i) := cfiWbEn_vec(i) || cfiValidWbEn_vec(i) && Mux1H(wbPortSel_vec(i) zip redirect_infos.map(i=>i._4))
-    cfiIndexBitsWb_vec(i) := Mux1H(wbPortSel_vec(i) zip wbFtqOffset_vec)
-  }
-
-  for (i <- 0 until FtqSize) {
-    when (cfiWbEn_vec(i) || cfiValidWbEn_vec(i)) {
-      cfiIndex_vec(i).valid := cfiIndexValidWb_vec(i)
-    }
-    when (cfiWbEn_vec(i)) {
-      cfiIndex_vec(i).bits := cfiIndexBitsWb_vec(i)
-    }
-  }
-
-  for (r <- redirect_infos.init) {
-    //             idx   offset   mispred
-    mispredict_vec(r._2)(r._3) := r._5
-  }
 
   // fix mispredict entry
   val lastIsMispredict = RegNext(
-    io.fromBackend.stage2Redirect.valid && io.fromBackend.stage2Redirect.bits.level === RedirectLevel.flushAfter, init = false.B
+    stage2Redirect.valid && stage2Redirect.bits.level === RedirectLevel.flushAfter, init = false.B
   )
-  when(io.fromBackend.stage3Redirect.valid && lastIsMispredict) {
-    update_target(io.fromBackend.stage3Redirect.bits.ftqIdx.value) := io.fromBackend.stage3Redirect.bits.cfiUpdate.target
+
+  def updateCfiInfo(redirect: Valid[Redirect], isBackend: Boolean = true) = {
+    val r = extractRedirectInfo(redirect)
+    val idx = r._2
+    val cfiIndex_bits_wen = r._1 && r._4 && r._3 < cfiIndex_vec(r._2).bits
+    val cfiIndex_valid_wen = r._1 && r._3 === cfiIndex_vec(r._2).bits
+    when (cfiIndex_bits_wen || cfiIndex_valid_wen) {
+      cfiIndex_vec(idx).valid := cfiIndex_bits_wen || cfiIndex_valid_wen && r._4
+    }
+    when (cfiIndex_bits_wen) {
+      cfiIndex_vec(idx).bits := r._3
+    }
+    update_target(idx) := redirect.bits.cfiUpdate.target
+    if (isBackend) {
+      mispredict_vec(r._2)(r._3) := r._5
+    }
+  }
+
+  when(stage3Redirect.valid && lastIsMispredict) {
+    updateCfiInfo(stage3Redirect)
   }.elsewhen (pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush) {
-    update_target(pdWb.bits.ftqIdx.value) := pdWb.bits.target
+    updateCfiInfo(fromIfuRedirect, isBackend=false)
   }
 
   // ***********************************************************************************

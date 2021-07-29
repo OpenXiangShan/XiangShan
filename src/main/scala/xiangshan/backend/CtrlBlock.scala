@@ -36,7 +36,6 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
     val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
   })
 
-  val exuWriteback = Vec(exuParameters.JmpCnt + exuParameters.AluCnt, Valid(new ExuOutput))
   val loadReplay = Valid(new Redirect)
   val stage3Redirect = ValidIO(new Redirect)
 }
@@ -262,7 +261,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.frontend.toFtq.stage2Redirect <> stage2Redirect
   io.frontend.toFtq.roqFlush <> RegNext(roq.io.flushOut)
   io.frontend.toFtq.stage3Redirect <> stage3Redirect
-  io.frontend.toFtq.exuWriteback <> exuRedirect
   io.frontend.toFtq.loadReplay <> loadReplay
 
   val roqPcRead = io.frontend.fromFtq.getRoqFlushPcRead
