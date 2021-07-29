@@ -68,6 +68,9 @@ class Regfile
       val zero_rdata = Mux(rport.addr === 0.U, 0.U, mem(rport.addr))
       rport.data := (if (hasZero) zero_rdata else mem(rport.addr))
     }
+    when (reset.asBool()) {
+      mem.map(_ := 0.U)
+    }
   } else {
 
     val regfile = Module(new regfile_160x64_10w16r_sim)
