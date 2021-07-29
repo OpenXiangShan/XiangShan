@@ -26,6 +26,9 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     // flush
     val flush = Input(Bool())
 
+    // redirect
+    val redirect = Input(Bool())
+
     // increase physical registers reference count (rename)
     val inc = new Bundle {
       // need to increase reference count (not actually do the increment)
@@ -94,60 +97,69 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
 
   val tailPtr = RegInit(IntFreeListPtr(false.B, (NRPhyRegs-32).U)) // TODO change 128 into parameters
 
-  
-  /*
-  Assertions
-   */
-  val enableFreeListCheck = true
-
-  if (enableFreeListCheck) {
-
-    for (i <- 0 until RenameWidth) {
-      for (j <- (i + 1) until RenameWidth) {
-        XSError(io.inc.req(i) && io.inc.req(j) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && !io.inc.psrcOfMove(j).valid && io.inc.pdests(i) === io.inc.pdests(j),
-          "Duplicate INC requirements detected!" + io.inc.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-        XSError(io.inc.req(i) && io.inc.req(j) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && io.inc.psrcOfMove(j).valid && io.inc.psrcOfMove(i).bits === io.inc.psrcOfMove(j).bits,
-          "Duplicate ME requirements detected! Cannot inc same specRefCount in 1 cycle!\n")
-      }
-      // also, we cannot count ref numbers more than 3 (which is very rare)
-      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.pdests(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${io.inc.pdests(i)}]\n")
-      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.psrcOfMove(i).bits).andR(), p"(move) Exceeding specRefCounter Max Value: preg[${io.inc.psrcOfMove(i).bits}]\n")
-    }
-
-    for (i <- 0 until CommitWidth) {
-      // we cannot handle duplicate inc/dec requirements on a preg in 1 cycle for now
-      for (j <- (i + 1) until CommitWidth) {
-        XSError(io.dec.req(i) && io.dec.req(j) && io.dec.old_pdests(i) === io.dec.old_pdests(j), 
-          "Duplicate DEC requirements detected!" + io.dec.old_pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-        XSError(io.dec.req(i) && io.dec.req(j) && io.dec.eliminatedMove(i) && io.dec.eliminatedMove(j) && io.dec.pdests(i) === io.dec.pdests(j), 
-          "Cannot INC same archRefCount in 1 cycle!" + io.dec.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-      }
-    }
-  }
-
 
   /*
   Decrements: from roq commits
    */
   val freeVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // if dec(i).bits is freed and ready for writing back to free list
   val freeRegCandidates = (0 until CommitWidth).map(io.dec.old_pdests(_))
-  
+
+  // handle duplicate INC requirements on cmtCounter and archRefCounter
+  val old_pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
+  val pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
+
+  for (i <- 1 until CommitWidth) {
+    // compare pdest and old_pdest with former inputs
+    old_pdests_cmp(i - 1) := Cat((0 until i).map(j => {
+      io.dec.req(i) && io.dec.req(j) && io.dec.old_pdests(i) === io.dec.old_pdests(j)
+    }))
+    pdests_cmp(i - 1) := Cat((0 until i).map(j => {
+      io.dec.req(i) && io.dec.req(j) && io.dec.eliminatedMove(i) && io.dec.eliminatedMove(j) && io.dec.pdests(i) === io.dec.pdests(j)
+    }))
+  }
+
+  def getCompareResult(m: MixedVec[UInt]): (Vec[Bool], Vec[Bool], Vec[UInt]) = {
+    val is_last = WireInit(VecInit(Seq.tabulate(CommitWidth){
+      case last if (last == CommitWidth - 1) => true.B
+      case i => !(Cat((i until (CommitWidth - 1)).map(j => m(j)(i))).orR)
+    }))
+    val has_same_before = WireInit(VecInit(Seq.tabulate(CommitWidth){
+      case 0 => false.B
+      case i => m(i - 1).orR()
+    }))
+    val times = WireInit(VecInit(Seq.tabulate(CommitWidth){
+      case 0 => 0.U
+      case i => PopCount(m(i - 1))
+    }))
+    (is_last, has_same_before, times)
+  }
+
+  val (old_pdests_is_last, old_pdests_has_same_before, old_pdests_times) = getCompareResult(old_pdests_cmp)
+  val (pdests_is_last, pdests_has_same_before, pdests_times) = getCompareResult(pdests_cmp)
+
   for (i <- 0 until CommitWidth) {
     val preg = freeRegCandidates(i) // physical register waiting for freeing
-    // specRefCounter(i) must >= cmtCounter(i)
-    // XSError(specRefCounter(preg) >= cmtCounter(preg), p"Error: Multiple commits of preg${preg}")
 
-    freeVec(i) := ((specRefCounter(preg) === 0.U) || (cmtCounter(preg) === specRefCounter(preg))) && io.dec.req(i)
-    XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
-    XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
+    val oldPdestIsUnique = old_pdests_is_last(i) && !old_pdests_has_same_before(i)
+    val oldPdestNotUniqueButLast = old_pdests_is_last(i) && old_pdests_has_same_before(i)
 
+    val pdestIsUnique = pdests_is_last(i) && !pdests_has_same_before(i)
+    val pdestNotUniqueButLast = pdests_is_last(i) && pdests_has_same_before(i)
+
+    freeVec(i) := (oldPdestIsUnique && cmtCounter(preg) === specRefCounter(preg) || oldPdestNotUniqueButLast && cmtCounter(preg) + old_pdests_times(i) === specRefCounter(preg)) && io.dec.req(i)
+    
     // cmt counter after incrementing/ stay not change
     // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
-    cmtCounterNext(preg) := Mux(io.dec.req(i), cmtCounter(preg) + 1.U, cmtCounter(preg))
+    cmtCounterNext(preg) := Mux(io.dec.req(i) && oldPdestIsUnique, cmtCounter(preg) + 1.U,
+                    Mux(io.dec.req(i) && oldPdestNotUniqueButLast, cmtCounter(preg) + 1.U + old_pdests_times(i), 
+                                             /* stay not change */ cmtCounter(preg)))
     
     // arch ref counter of pdest
-    archRefCounterNext(io.dec.pdests(i)) := Mux(/* if this is me inst*/io.dec.req(i) && io.dec.eliminatedMove(i), 
-      archRefCounter(io.dec.pdests(i)) + 1.U, archRefCounter(io.dec.pdests(i)))
+    archRefCounterNext(io.dec.pdests(i)) := Mux(/* if this is me inst */io.dec.req(i) && io.dec.eliminatedMove(i) && pdestIsUnique, archRefCounter(io.dec.pdests(i)) + 1.U, 
+      Mux(io.dec.req(i) && io.dec.eliminatedMove(i) && pdestNotUniqueButLast, archRefCounter(io.dec.pdests(i)) + 1.U + pdests_times(i), archRefCounter(io.dec.pdests(i))))
+
+    XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
+    XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
 
     // write freed preg into free list at tail ptr
     val offset = i match {
@@ -170,7 +182,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   XSDebug(needAllocatingVec.asUInt().orR(), p"needAllocatingVec:${Binary(needAllocatingVec.asUInt)}\n")
   for (i <- 0 until RenameWidth) {
     io.inc.pdests(i) := DontCare
-    needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid
+    needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid && !io.redirect
     
     when (io.inc.psrcOfMove(i).valid && io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush) {
       specRefCounterNext(io.inc.psrcOfMove(i).bits) := specRefCounter(io.inc.psrcOfMove(i).bits) + 1.U
@@ -235,7 +247,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   // update head pointer
   val headPtrNext = Mux(state === s_idle && io.flush, tailPtr - (NRPhyRegs-32).U, 
                       Mux(state === s_flush_2, headPtr - PopCount(archRefCounter.map(_.orR())), 
-                                               headPtr + PopCount(needAllocatingVec)))
+                                               headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
                                                
   freeRegCnt := distanceBetween(tailPtr, headPtrNext)
   io.inc.canInc := RegNext(freeRegCnt >= RenameWidth.U)
@@ -268,12 +280,46 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   for (i <- 0 until NRPhyRegs) {
     XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
       p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
+    
+    // specRefCounter(i) must >= cmtCounter(i)
+    XSError(specRefCounter(i) < cmtCounter(i), p"Commits Overflow of preg${i}")
   }
 
   XSDebug(Array.range(0, FL_SIZE).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
   XSDebug(p"Free List (val): " + Array.range(0, FL_SIZE).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
   
-  XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext\n")
+  XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext freeRegCnt:$freeRegCnt\n")
   
   XSDebug(p"io.flush ${io.flush} Flush State [ ${state} ]\n")
+
+  
+  /*
+  Assertions
+   */
+  val enableFreeListCheck = false
+
+  if (enableFreeListCheck) {
+
+    for (i <- 0 until RenameWidth) {
+      for (j <- (i + 1) until RenameWidth) {
+        XSError(needAllocatingVec(i) && needAllocatingVec(j) && io.inc.pdests(i) === io.inc.pdests(j),
+          p"Duplicate INC requirements detected!" + io.inc.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+        XSError(io.inc.req(i) && io.inc.req(j) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && io.inc.psrcOfMove(j).valid && io.inc.psrcOfMove(i).bits === io.inc.psrcOfMove(j).bits,
+          p"Duplicate ME requirements detected! Cannot inc same specRefCount in 1 cycle!\n")
+      }
+      // also, we cannot count ref numbers more than 3 (which is very rare)
+      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.pdests(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${io.inc.pdests(i)}]\n")
+      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.psrcOfMove(i).bits).andR(), p"(move) Exceeding specRefCounter Max Value: preg[${io.inc.psrcOfMove(i).bits}]\n")
+    }
+
+    for (i <- 0 until CommitWidth) {
+      // we cannot handle duplicate inc/dec requirements on a preg in 1 cycle for now
+      for (j <- (i + 1) until CommitWidth) {
+        XSInfo(io.dec.req(i) && io.dec.req(j) && io.dec.old_pdests(i) === io.dec.old_pdests(j), 
+          p"Duplicate DEC requirements detected!" + io.dec.old_pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+        XSInfo(io.dec.req(i) && io.dec.req(j) && io.dec.eliminatedMove(i) && io.dec.eliminatedMove(j) && io.dec.pdests(i) === io.dec.pdests(j), 
+          p"Duplicate INC requirements on archRefCount detected!" + io.dec.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+      }
+    }
+  }
 }

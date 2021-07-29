@@ -69,6 +69,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // connect flush and redirect ports for __integer__ free list *(walk) is handled by dec
   intFreeList.io.flush := io.flush
+  intFreeList.io.redirect := io.redirect.valid
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk
