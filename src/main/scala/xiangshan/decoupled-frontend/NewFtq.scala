@@ -836,14 +836,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
 
     val from_bpu = io.fromBpu.resp.bits
-    val enq_entry_len = from_bpu.ftb_entry.pftAddr - from_bpu.pc
+    val enq_entry_len = (from_bpu.ftb_entry.pftAddr - from_bpu.pc) >> instOffsetBits
     val enq_entry_len_recording_vec = (1 to PredictWidth+1).map(i => enq_entry_len === i.U)
     val enq_entry_len_map = (1 to PredictWidth+1).map(i =>
       f"enq_ftb_entry_len_$i" -> (enq_entry_len_recording_vec(i-1) && enq_fire)
     ).foldLeft(Map[String, UInt]())(_+_)
 
     val to_ifu = io.toIfu.req.bits
-    val to_ifu_entry_len = to_ifu.fallThruAddr - to_ifu.startAddr
+    val to_ifu_entry_len = (to_ifu.fallThruAddr - to_ifu.startAddr) >> instOffsetBits
     val to_ifu_entry_len_recording_vec = (1 to PredictWidth+1).map(i => to_ifu_entry_len === i.U)
     val to_ifu_entry_len_map = (1 to PredictWidth+1).map(i =>
       f"to_ifu_ftb_entry_len_$i" -> (to_ifu_entry_len_recording_vec(i-1) && io.toIfu.req.fire)
