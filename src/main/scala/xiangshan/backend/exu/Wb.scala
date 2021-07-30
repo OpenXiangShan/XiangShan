@@ -97,7 +97,7 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameter
 
   val otherConnections = splitN(otherPorts, sharedPorts.length)
   val sharedConnections = sharedPorts.zip(otherConnections).map{ case (s, o) => s +: o }
-  val allConnections = exclusivePorts.map(Seq(_)) ++ sharedConnections
+  val allConnections: Seq[Seq[Int]] = exclusivePorts.map(Seq(_)) ++ sharedConnections
 
   val sb = new StringBuffer(s"\n${if(isFp) "fp" else "int"} wb arbiter:\n")
   for ((port, i) <- exclusivePorts.zipWithIndex) {

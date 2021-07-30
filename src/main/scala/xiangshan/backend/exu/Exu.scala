@@ -80,6 +80,8 @@ case class ExuConfig
   // NOTE: dirty code for MulDivExeUnit
   val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
   val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
+  val wakeupFromRS = hasCertainLatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
+  val wakeupFromExu = !wakeupFromRS
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()

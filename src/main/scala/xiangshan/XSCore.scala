@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.Wb
+import xiangshan.backend.exu.{ExuConfig, Wb}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import xiangshan.cache.L1plusCacheWrapper
@@ -61,7 +61,7 @@ case class EnviromentParameters
 )
 
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
-  with HasXSParameter
+  with HasXSParameter with HasExuWbMappingHelper
 {
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
@@ -70,11 +70,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
   val intArbiter = LazyModule(new Wb(intConfigs, NRIntWritePorts, isFp = false))
-  println(intArbiter.allConnections)
+  val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
+  val numIntWbPorts = intWbPorts.length
 
   val fpConfigs = exuConfigs.filter(_.writeFpRf)
   val fpArbiter = LazyModule(new Wb(fpConfigs, NRFpWritePorts, isFp = true))
-  println(fpArbiter.allConnections)
+  val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
+  val numFpWbPorts = fpWbPorts.length
 
   // TODO: better RS organization
   // generate rs according to number of function units
@@ -90,11 +92,29 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpCSRExeUnitCfg, LdExeUnitCfg, StExeUnitCfg), Seq()),
     (JumpCSRExeUnitCfg, 1, Seq(), Seq())),
     Seq((FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
-    (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg))),
+    (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq())),
     Seq((LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
     (StExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()))
   )
+
   // should do outer fast wakeup ports here
+  val otherFastPorts = schedulePorts.zipWithIndex.map { case (sche, i) =>
+    val otherCfg = schedulePorts.zipWithIndex.filter(_._2 != i).map(_._1).reduce(_ ++ _)
+    val outerPorts = sche.map(cfg => {
+      // exe units from this scheduler need fastUops from exeunits
+      val outerWakeupInSche = sche.filter(_._1.wakeupFromExu)
+      val intraIntScheOuter = outerWakeupInSche.filter(_._3.contains(cfg._1)).map(_._1)
+      val intraFpScheOuter = outerWakeupInSche.filter(_._4.contains(cfg._1)).map(_._1)
+      // exe units from other schedulers need fastUop from outside
+      val otherIntSource = otherCfg.filter(_._3.contains(cfg._1)).map(_._1)
+      val otherFpSource = otherCfg.filter(_._4.contains(cfg._1)).map(_._1)
+      val intSource = findInWbPorts(intWbPorts, intraIntScheOuter ++ otherIntSource)
+      val fpSource = findInWbPorts(fpWbPorts, intraFpScheOuter ++ otherFpSource)
+      getFastWakeupIndex(cfg._1, intSource, fpSource, numIntWbPorts).sorted
+    })
+    println(s"inter-scheduler wakeup sources for $i: $outerPorts")
+    outerPorts
+  }
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
@@ -114,21 +134,15 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   )
   val dispatchPorts = Seq(intDpPorts, fpDpPorts, lsDpPorts)
 
-  val scheduler = schedulePorts.zip(dispatchPorts).map{ case (sche, disp) => {
+  val scheduler = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).map{ case ((sche, disp), other) =>
     val mappedSchedulePorts = sche.map(port => {
       val intWakeup = port._3.flatMap(cfg => sche.zipWithIndex.filter(_._1._1 == cfg).map(_._2))
       val fpWakeup = port._4.flatMap(cfg => sche.zipWithIndex.filter(_._1._1 == cfg).map(_._2))
       (port._1, port._2, intWakeup, fpWakeup)
     })
 
-    LazyModule(new Scheduler(mappedSchedulePorts, disp))
-  }}
-  scheduler.zipWithIndex.foreach{ case (sche, i) => {
-    val otherSche = scheduler.zipWithIndex.filter(_._2 != i).map(_._1)
-    val numInt = otherSche.map(_.intRfWritePorts).sum
-    val numFp = otherSche.map(_.fpRfWritePorts).sum
-    sche.addIntWritebackPorts(numInt).addFpWritebackPorts(numFp)
-  }}
+    LazyModule(new Scheduler(sche, disp, intWbPorts, fpWbPorts, other))
+  }
 
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
@@ -184,7 +198,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val allWriteback = integerBlock.io.writeback ++ floatBlock.io.writeback ++ memBlock.io.writeback
 
-
   val intWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   // set default value for ready
   integerBlock.io.writeback.foreach(_.ready := true.B)
@@ -232,6 +245,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
   ctrlBlock.io.writeback <> VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
+  val allFastUop = scheduler(0).io.fastUopOut ++ scheduler(1).io.fastUopOut ++ memBlock.io.otherFastWakeup
+  val intFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
+  val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
+  val intFastUop1 = outer.intArbiter.allConnections.map(c => intFastUop(c(0)))
+  val fpFastUop1 = outer.fpArbiter.allConnections.map(c => fpFastUop(c(0)))
+  val allFastUop1 = intFastUop1 ++ fpFastUop1
+
   scheduler.foreach(_.io.redirect <> ctrlBlock.io.redirect)
   scheduler.foreach(_.io.flush <> ctrlBlock.io.flush)
   ctrlBlock.io.enqIQ <> scheduler(0).io.allocate ++ scheduler(1).io.allocate ++ scheduler(2).io.allocate
@@ -241,10 +261,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   scheduler(0).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
   scheduler(1).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
   scheduler(2).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
+  scheduler(0).io.fastUopIn := allFastUop1
+  scheduler(1).io.fastUopIn := allFastUop1
+  scheduler(2).io.fastUopIn := allFastUop1
 
 
 //  scheduler(0).io.otherFastWakeup.get <> memBlock.io.otherFastWakeup
-  scheduler(2).io.fastUopIn.get <> memBlock.io.otherFastWakeup
   scheduler(0).io.jumpPc <> ctrlBlock.io.jumpPc
   scheduler(0).io.jalr_target <> ctrlBlock.io.jalr_target
   scheduler(0).io.stIssuePtr <> memBlock.io.stIssuePtr
