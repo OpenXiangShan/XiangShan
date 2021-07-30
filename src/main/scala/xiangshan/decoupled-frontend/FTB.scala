@@ -57,17 +57,6 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 
   val last_is_rvc = Bool()
 
-  // def getTarget(pred: Vec[UInt], pc: UInt): (UInt, UInt) = {
-  //   val taken_mask = Cat(jmpValid, pred(1)(1), pred(0)(1))
-  //   val target = pc + (FetchWidth*4).U
-
-  //   when(taken_mask =/= 0.U) {
-  //     target := PriorityMux(taken_mask, Seq(brTargets(0), brTargets(1), jmpTarget))
-  //   }
-
-  //   (taken_mask, target)
-  // }
-
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
 }
@@ -75,13 +64,15 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
   val writeWay = UInt(numWays.W)
   val hit = Bool()
+  val pred_cycle = UInt(64.W)
 }
 
 object FTBMeta {
-  def apply(writeWay: UInt, hit: Bool)(implicit p: Parameters): FTBMeta = {
+  def apply(writeWay: UInt, hit: Bool, pred_cycle: UInt)(implicit p: Parameters): FTBMeta = {
     val e = Wire(new FTBMeta)
     e.writeWay := writeWay
     e.hit := hit
+    e.pred_cycle := pred_cycle
     e
   }
 }
@@ -122,7 +113,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
     val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
 
     def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
-      val randomAlloc = true
+      val randomAlloc = false
       if (numWays > 1) {
         val w = Wire(UInt(log2Up(numWays).W))
         val valid = WireInit(valids.andR)
@@ -144,7 +135,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
         VecInit(read_datas.map(w => w.tag)).asUInt,
         read_tag)
 
-    io.read_resp := Mux1H(total_hits, read_datas)
+    io.read_resp := PriorityMux(total_hits, read_datas) // Mux1H
     io.read_hits.valid := hit
     io.read_hits.bits := Mux(hit, hit_way_1h, VecInit(UIntToOH(allocWriteWay).asBools()))
 
@@ -208,7 +199,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   io.out.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
   io.out.resp.s2.ftb_entry           := RegEnable(ftb_entry, io.s1_fire)
 
-  io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit).asUInt(), io.s1_fire), io.s2_fire)
+  io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 
   io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 

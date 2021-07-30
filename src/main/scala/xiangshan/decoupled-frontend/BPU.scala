@@ -388,7 +388,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     // final_gh := updatedGh
   }
 
-  // if(debug) {
-  //   XSDebug(true.B, )
-  // }
+  if(debug) {
+    XSPerfAccumulate("s2_redirect", s2_redirect)
+  }
 }

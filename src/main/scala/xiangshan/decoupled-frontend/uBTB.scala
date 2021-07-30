@@ -67,8 +67,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   class MicroBTBData extends XSBundle
   {
-    val brTargets    = Vec(numBr, UInt(VAddrBits.W))
-    val jmpTarget   = UInt(VAddrBits.W)
+    val brTargets = Vec(numBr, UInt(VAddrBits.W))
+    val jmpTarget = UInt(VAddrBits.W)
+    val pftAddr   = UInt(VAddrBits.W)
   }
 
   class ReadResp extends XSBundle
@@ -132,10 +133,18 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val hit_data = ParallelMux(hits zip rdatas)
     val hit_and_taken_mask = ParallelMux(hits zip taken_masks)
 
-    val target = Mux(hit_and_taken_mask =/= 0.U,
-      PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
-      // PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(0))),
-      read_pc + (FetchWidth*4).U) // TODO: Add pftAddr
+    val target = Wire(UInt(VAddrBits.W))
+    target := read_pc + (FetchWidth*4).U
+
+    when(hit_oh =/= 0.U) {
+      target := Mux(hit_and_taken_mask =/= 0.U,
+        PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
+        hit_data.pftAddr)
+    }
+    // val target = Mux(hit_and_taken_mask =/= 0.U,
+    //   PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
+    //   // PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(0))),
+    //   read_pc + (FetchWidth*4).U) // TODO: Add pftAddr
 
     val ren = io.read_pc.valid
     io.read_resp.valid := ren
@@ -265,6 +274,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // update_write_datas.lower := u_target_lower
   update_write_datas.jmpTarget := update.ftb_entry.jmpTarget
   update_write_datas.brTargets := update.ftb_entry.brTargets
+  update_write_datas.pftAddr := update.ftb_entry.pftAddr
 
   banks.update_write_meta.valid := meta_write_valid
   banks.update_write_meta.bits := update_write_metas

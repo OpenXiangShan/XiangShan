@@ -96,6 +96,13 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
+
+  override def toPrintable: Printable = {
+    p"[taken_mask] ${Binary(taken_mask.asUInt)}\n" +
+      p"[is_br] ${Binary(is_br.asUInt)}, [is_jal] ${Binary(is_jal.asUInt)}\n" +
+      p"[is_jalr] ${Binary(is_jalr.asUInt)}, [is_call] ${Binary(is_call.asUInt)}, [is_ret] ${Binary(is_ret.asUInt)}\n" +
+      p"[target] ${Hexadecimal(target)}}, [hit] $hit\n"
+  }
 }
 
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst {
