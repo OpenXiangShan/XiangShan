@@ -189,7 +189,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     // for perf counters
     val is_init_entry = Output(Bool())
     val is_old_entry = Output(Bool())
-    val is_old_entry_modified = Output(Bool())
+    val is_new_br = Output(Bool())
+    val is_jalr_target_modified = Output(Bool())
     val is_br_full = Output(Bool())
   })
 
@@ -296,8 +297,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
   // for perf counters
   io.is_init_entry := !hit
-  io.is_old_entry := hit && !is_new_br
-  io.is_old_entry_modified := hit && is_new_br
+  io.is_old_entry := hit && !is_new_br && !jalr_mispredicted
+  io.is_new_br := hit && is_new_br
+  io.is_jalr_target_modified := hit && jalr_mispredicted
   io.is_br_full := hit && is_new_br && br_full 
 }
 
@@ -835,6 +837,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
     XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
 
+    XSPerfAccumulate("toIfuBubble", io.toIfu.req.ready && !io.toIfu.req.valid)
+
     val from_bpu = io.fromBpu.resp.bits
     val enq_entry_len = (from_bpu.ftb_entry.pftAddr - from_bpu.pc) >> instOffsetBits
     val enq_entry_len_recording_vec = (1 to PredictWidth+1).map(i => enq_entry_len === i.U)
@@ -891,7 +895,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     val ftb_old_entry = u(ftbEntryGen.is_old_entry)
     
-    val ftb_modified_entry = u(ftbEntryGen.is_old_entry_modified)
+    val ftb_modified_entry = u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified)
+    val ftb_modified_entry_new_br = u(ftbEntryGen.is_new_br)
+    val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
     val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
 
     val ftb_entry_len = (ftbEntryGen.new_entry.pftAddr - update.pc) >> instOffsetBits
@@ -938,6 +944,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       "ftb_new_entry_has_br_and_jmp" -> PopCount(ftb_new_entry_has_br_and_jmp),
       "ftb_old_entry"                -> PopCount(ftb_old_entry),
       "ftb_modified_entry"           -> PopCount(ftb_modified_entry),
+      "ftb_modified_entry_new_br"    -> PopCount(ftb_modified_entry_new_br),
+      "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
       "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full)
     ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ enq_entry_len_map ++
     to_ifu_entry_len_map
