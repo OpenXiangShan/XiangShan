@@ -28,7 +28,7 @@ trait MicroBTBParams extends HasXSParameter {
   val numWays = 16
   val tagSize = 20
   val lowerBitSize = 20
-  val untaggedBits = log2Up(PredictWidth) + instOffsetBits
+  val untaggedBits = instOffsetBits
 }
 
 @chiselName
@@ -282,6 +282,18 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_write_data.bits := update_write_datas
   banks.update_taken_mask := u_taken_mask
 
-  XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && banks.read_hit)
-  XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !banks.read_hit)
+  if (debug) {
+    XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, banks.read_hit)
+    XSDebug("target=%x, taken_mask=%b\n", io.out.resp.s1.preds.target, read_resps.taken_mask.asUInt)
+
+    XSDebug(u_valid, "Update from ftq\n")
+    XSDebug(u_valid, "update_pc=%x, tag=%x\n", u_pc, getTag(u_pc))
+    XSDebug(u_valid, "taken_mask=%b, brValids=%b, jmpValid=%b\n",
+      u_taken_mask.asUInt, update.preds.is_br.asUInt, update.preds.is_jal || update.preds.is_jalr)
+
+    XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && banks.read_hit)
+    XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !banks.read_hit)
+  }
+
+
 }

@@ -59,6 +59,17 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
+
+  override def toPrintable: Printable = {
+    p"-----------FTBEntry----------- " +
+      p"[valid] $valid  " +
+      p"[tag] ${Hexadecimal(tag)} " +
+      (0 until numBr).map( i => p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, target=${Hexadecimal(brTargets(i))} ").reduce(_+_) +
+      p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, target=${Hexadecimal(jmpTarget)} " +
+      p"[pgfAddr] ${Hexadecimal(pftAddr)} " +
+      p"isCall=$isCall, isRet=$isRet, isJalr=$isJalr " +
+      p"carry=$carry, oversize=$oversize, last_is_rvc=$last_is_rvc "
+  }
 }
 
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
@@ -103,8 +114,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
     io.read_pc.ready := ftb.io.r.req.ready
 
-    val read_tag = Reg(UInt(tagSize.W))
-    read_tag := ftbAddr.getTag(io.read_pc.bits)(tagSize-1, 0)
+    val read_tag = RegEnable(ftbAddr.getTag(io.read_pc.bits)(tagSize-1, 0), io.read_pc.valid)
 
     val read_datas = ftb.io.r.resp.data
 
@@ -203,10 +213,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
-  when(!s2_hit) {
-    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
-  }.otherwise {
+  when(s2_hit) {
     io.out.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
+  }.otherwise {
+    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
   }
 
   // Update logic
@@ -241,15 +251,33 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
     has_update_ptr := has_update_ptr + !u_updated
   }
 
-  XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.hit)
-  XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.hit)
+  if (debug) {
+    XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.read_pc.ready)
+    XSDebug("s1_hit=%b, hit_way=%b\n", s1_hit, writeWay.asUInt)
+    XSDebug("taken_mask=%b\n", s1_latch_taken_mask.asUInt)
+    XSDebug("target=%x\n", s1_latch_target)
 
-  XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
-  XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
+    XSDebug(ftb_entry.toPrintable)
+    XSDebug("\n")
 
-  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
-  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+    XSDebug(u_valid, "Update from ftq\n")
+    XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b\n",
+      update.pc, ftbAddr.getTag(update.pc), u_way_mask)
 
-  XSPerfAccumulate("ftb_commit_hits", u_valid && update.hit)
-  XSPerfAccumulate("ftb_commit_misses", u_valid && !update.hit)
+
+
+
+
+    XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.hit)
+    XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.hit)
+
+    XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
+    XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
+
+    XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
+    XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+
+    XSPerfAccumulate("ftb_commit_hits", u_valid && update.hit)
+    XSPerfAccumulate("ftb_commit_misses", u_valid && !update.hit)
+  }
 }

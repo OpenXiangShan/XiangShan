@@ -259,6 +259,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s0_pc = WireInit(resetVector.U)
   val s0_pc_reg = RegInit(resetVector.U)
   val s1_pc = RegEnable(s0_pc, s0_fire)
+  val s2_pc = RegEnable(s1_pc, s1_fire)
+  val s3_pc = RegEnable(s2_pc, s2_fire)
 
   // val s3_gh = predictors.io.out.bits.resp.s3.ghist
   // val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
@@ -356,7 +358,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // io.bpu_to_ftq.resp.bits.hit   := predictors.io.out.bits.resp.s3.hit
   // io.bpu_to_ftq.resp.bits.preds := predictors.io.out.bits.resp.s3.preds
-  io.bpu_to_ftq.resp.valid := s3_fire && !io.ftq_to_bpu.redirect.valid
+  io.bpu_to_ftq.resp.valid := s3_valid && !io.ftq_to_bpu.redirect.valid
   io.bpu_to_ftq.resp.bits  := predictors.io.out.resp.s3
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
 
@@ -389,6 +391,26 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   }
 
   if(debug) {
+    XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
+    XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"Redirect from ftq\n")
+
+    XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire, s0_pc)
+    XSDebug("[BP1] v=%d r=%d sr=%d fire=%d             flush=%d pc=%x\n",
+      s1_valid, s1_ready, s1_components_ready, s1_fire, s1_flush, s1_pc)
+    XSDebug("[BP2] v=%d r=%d sr=%d fire=%d redirect=%d flush=%d pc=%x\n",
+    s2_valid, s2_ready, s2_components_ready, s2_fire, s2_redirect, s2_flush, s2_pc)
+    XSDebug("[BP3] v=%d r=%d sr=%d fire=%d redirect=%d flush=%d pc=%x\n",
+    s3_valid, s3_ready, s3_components_ready, s3_fire, s3_redirect, s3_flush, s3_pc)
+    XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
+    XSDebug("resp.s1.preds.target=%x\n", resp.s1.preds.target)
+    XSDebug("resp.s2.preds.target=%x\n", resp.s2.preds.target)
+
+
+    XSDebug(io.ftq_to_bpu.update.valid, io.ftq_to_bpu.update.bits.toPrintable)
+    XSDebug(io.ftq_to_bpu.redirect.valid, io.ftq_to_bpu.redirect.bits.toPrintable)
+
+
     XSPerfAccumulate("s2_redirect", s2_redirect)
   }
 }

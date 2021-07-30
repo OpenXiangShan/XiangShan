@@ -17,8 +17,8 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
 
   override def toPrintable: Printable = {
     p"[start] ${Hexadecimal(startAddr)} [pft] ${Hexadecimal(fallThruAddr)}" +
-    p"[tgt] ${Hexadecimal(target)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
-    p" offset: ${ftqOffset.bits}\n"
+      p"[tgt] ${Hexadecimal(target)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
+      p" offset: ${ftqOffset.bits}\n"
   }
 }
 
@@ -98,10 +98,11 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
 
   override def toPrintable: Printable = {
-    p"[taken_mask] ${Binary(taken_mask.asUInt)}\n" +
-      p"[is_br] ${Binary(is_br.asUInt)}, [is_jal] ${Binary(is_jal.asUInt)}\n" +
-      p"[is_jalr] ${Binary(is_jalr.asUInt)}, [is_call] ${Binary(is_call.asUInt)}, [is_ret] ${Binary(is_ret.asUInt)}\n" +
-      p"[target] ${Hexadecimal(target)}}, [hit] $hit\n"
+    p"-----------BranchPrediction----------- " +
+      p"[taken_mask] ${Binary(taken_mask.asUInt)} " +
+      p"[is_br] ${Binary(is_br.asUInt)}, [is_jal] ${Binary(is_jal.asUInt)} " +
+      p"[is_jalr] ${Binary(is_jalr.asUInt)}, [is_call] ${Binary(is_call.asUInt)}, [is_ret] ${Binary(is_ret.asUInt)} " +
+      p"[target] ${Hexadecimal(target)}}, [hit] $hit "
   }
 }
 
@@ -119,8 +120,11 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
 
   override def toPrintable: Printable = {
-    p"[pc] ${Hexadecimal(pc)} [pft] ${Hexadecimal(ftb_entry.pftAddr)}" +
-    p"[tgt] ${Hexadecimal(preds.target)} [hit] $hit\n"
+    p"-----------BranchPredictionBundle----------- " +
+      p"[pc] ${Hexadecimal(pc)} [hit] $hit " +
+      p"[ghist] ${Binary(ghist.predHist)}  " +
+      preds.toPrintable +
+      ftb_entry.toPrintable
   }
 }
 
@@ -136,6 +140,32 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val false_hit = Bool()
   val new_br_insert_pos = Vec(numBr, Bool())
   // val ghist = new GlobalHistory() This in spec_meta
+
+  override def toPrintable: Printable = {
+    p"-----------BranchPredictionUpdate----------- " +
+      p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] ${Binary(false_hit)}" +
+      p"[new_br_insert_pos] ${Binary(new_br_insert_pos.asUInt)} " +
+      super.toPrintable +
+      p"\n"
+  }
+
 }
 
-class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with HasBPUConst {}
+class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with HasBPUConst {
+  override def toPrintable: Printable = {
+    p"-----------BranchPredictionRedirect----------- " +
+      p"-----------cfiUpdate----------- " +
+      p"[pc] ${Hexadecimal(cfiUpdate.pc)} " +
+      p"[predTaken] ${cfiUpdate.predTaken}, [taken] ${cfiUpdate.taken}, [isMisPred] ${cfiUpdate.isMisPred} " +
+      p"[target] ${cfiUpdate.target} " +
+      p"------------------------------- " +
+      p"[roqPtr] f=${roqIdx.flag} v=${roqIdx.value} " +
+      p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} " +
+      p"[ftqOffset] ${ftqOffset} " +
+      p"[level] ${level}, [interrupt] ${interrupt} " +
+      p"[stFtqIdx] f=${stFtqIdx.flag} v=${stFtqIdx.value} " +
+      p"[stFtqOffset] ${stFtqOffset} " +
+      p"\n"
+
+  }
+}
