@@ -68,11 +68,16 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
   val pftAddr = UInt(VAddrBits.W)
   val isNextMask = Vec(PredictWidth, Bool())
   val oversize = Bool()
+  val carry = Bool()
   def getPc(offset: UInt) = {
     def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits)
     def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits)
     Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
+  }
+  def getFallThrough(start: UInt = startAddr, carry: Bool = carry, pft: UInt = pftAddr) = {
+    val higher = start.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits)
+    Cat(Mux(carry, higher+1.U, higher), pft)
   }
 }
 
@@ -213,6 +218,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val cfi_is_jal = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jal
   val cfi_is_jalr = io.cfiIndex.bits === pd.jmpOffset && new_jmp_is_jalr
 
+  def getLower(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits)
   // if not hit, establish a new entry
   init_entry.valid := true.B
   // tag is left for ftb to assign
@@ -222,10 +228,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_jmp_is_jal || new_jmp_is_jalr
   init_entry.jmpTarget := Mux(!cfi_is_jal, pd.jalTarget, io.target)
-  init_entry.pftAddr := Mux(entry_has_jmp,
-    io.start_addr + (pd.jmpOffset << instOffsetBits) + Mux(pd.rvcMask(pd.jmpOffset), 2.U, 4.U),
-    io.start_addr + Mux(last_br_rvi, (FetchWidth*4+2).U, (FetchWidth * 4).U)
-  )
+  val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
+  init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + Mux(last_br_rvi, 1.U, 0.U))
+  init_entry.carry   := Mux(entry_has_jmp, jmpPft(log2Ceil(PredictWidth)+instOffsetBits).asBool, true.B)
   // TODO: carry bit is currently ignored
   init_entry.isJalr := new_jmp_is_jalr
   init_entry.isCall := new_jmp_is_call
@@ -269,8 +274,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   // it should either be the given last br or the new br
   when (pft_need_to_change) {
     val new_pft_offset = Mux(new_br_insert_onehot.asUInt.orR, oe.brOffset.last, new_br_offset)
-    old_entry_modified.pftAddr := io.start_addr + (new_pft_offset << instOffsetBits)
-    old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U)
+    old_entry_modified.pftAddr := getLower(io.start_addr) + new_pft_offset
+    old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U) // TODO: fix this
+    old_entry_modified.carry := (getLower(io.start_addr) +& new_pft_offset).head(1).asBool
     old_entry_modified.oversize := false.B
     old_entry_modified.jmpValid := false.B
   }
@@ -300,7 +306,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.is_old_entry := hit && !is_new_br && !jalr_mispredicted
   io.is_new_br := hit && is_new_br
   io.is_jalr_target_modified := hit && jalr_mispredicted
-  io.is_br_full := hit && is_new_br && br_full 
+  io.is_br_full := hit && is_new_br && br_full
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
@@ -359,6 +365,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     (io.fromBpu.resp.bits.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
   ))
   ftq_pc_mem.io.wdata(0).oversize := io.fromBpu.resp.bits.ftb_entry.oversize
+  ftq_pc_mem.io.wdata(0).carry := io.fromBpu.resp.bits.ftb_entry.carry
 
   // read ports:                                                       redirects + ifuRedirect + commit
   val ftq_hist_mem = Module(new SyncDataModuleTemplate(new GlobalHistory, FtqSize, numRedirect+1+1, 1))
@@ -540,9 +547,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       loadReplayOffset.valid := false.B
     }
   }
+
   when (RegNext(to_buf_fire)) {
     ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
+    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
     ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
   }
   
@@ -551,7 +559,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toIfu.req.bits  := ifu_req_buf.bits
   when (last_cycle_to_buf_fire) {
     io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.pftAddr
+    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
     io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
   }
         
