@@ -36,7 +36,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
-
+import huancun.{HuanCun}
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
@@ -324,28 +324,31 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   
   plic.node := peripheralXbar
 
-  val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 3,
-      ways = L3NWays,
-      sets = L3NSets,
-      blockBytes = L3BlockSize,
-      beatBytes = L3InnerBusWidth / 8,
-      cacheName = "L3",
-      uncachedGet = false,
-      enablePerf = false
-    ),
-    InclusiveCacheMicroParameters(
-      memCycles = 25,
-      writeBytes = 32
-    ),
-    fpga = debugOpts.FPGAPlatform
+//  val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
+//    CacheParameters(
+//      level = 3,
+//      ways = L3NWays,
+//      sets = L3NSets,
+//      blockBytes = L3BlockSize,
+//      beatBytes = L3InnerBusWidth / 8,
+//      cacheName = "L3",
+//      uncachedGet = false,
+//      enablePerf = false
+//    ),
+//    InclusiveCacheMicroParameters(
+//      memCycles = 25,
+//      writeBytes = 32
+//    ),
+//    fpga = debugOpts.FPGAPlatform
+//  ))
+  val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun(
   ))
-  if(!useFakeL3Cache){
-    ResourceBinding{
-      Resource(l3cache.device, "reg").bind(ResourceAddress(0))
-    }
-  }
+
+//  if(!useFakeL3Cache){
+//    ResourceBinding{
+//      Resource(l3cache.device, "reg").bind(ResourceAddress(0))
+//    }
+//  }
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
