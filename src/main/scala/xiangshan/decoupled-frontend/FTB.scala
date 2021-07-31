@@ -46,7 +46,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
   val jmpValid    = Bool()
 
   // Partial Fall-Through Address
-  val pftAddr     = UInt(VAddrBits.W) // TODO: Modify only use lowerbits
+  val pftAddr     = UInt(log2Up(PredictWidth).W) // TODO: Modify only use lowerbits
   val carry       = Bool()
 
   val isCall      = Bool()
@@ -66,7 +66,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
       p"[tag] ${Hexadecimal(tag)} " +
       (0 until numBr).map( i => p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, target=${Hexadecimal(brTargets(i))} ").reduce(_+_) +
       p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, target=${Hexadecimal(jmpTarget)} " +
-      p"[pgfAddr] ${Hexadecimal(pftAddr)} " +
+      p"[pgfAddr] ${Hexadecimal(pftAddr)} [carry] ${carry}" +
       p"isCall=$isCall, isRet=$isRet, isJalr=$isJalr " +
       p"carry=$carry, oversize=$oversize, last_is_rvc=$last_is_rvc "
   }
@@ -88,7 +88,7 @@ object FTBMeta {
   }
 }
 
-class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
+class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
@@ -173,6 +173,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   val brTargets = ftb_entry.brTargets
   val jmpTarget = ftb_entry.jmpTarget
 
+  val fallThruAddr = getFallThroughAddr(s1_pc, ftb_entry.carry, ftb_entry.pftAddr)
+
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out.resp := io.in.bits.resp_in(0)
 
@@ -182,7 +184,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
   when(s1_hit) {
     s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, ftb_entry.pftAddr))
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
 
   val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
@@ -211,13 +213,15 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams {
 
   io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 
-  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
-
   when(s2_hit) {
     io.out.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
+    io.out.resp.s2.ftb_entry.carry := RegEnable(ftb_entry.carry, io.s1_fire)
   }.otherwise {
-    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc + (FetchWidth*4).U, io.s1_fire)
+    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits) , io.s1_fire)
+    io.out.resp.s2.ftb_entry.carry := true.B
   }
+
+  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   // Update logic
   val has_update = RegInit(VecInit(Seq.fill(64)(0.U(VAddrBits.W))))

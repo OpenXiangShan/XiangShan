@@ -52,7 +52,7 @@ class BPUCtrl(implicit p: Parameters) extends XSBundle {
   val loop_enable = Bool()
 }
 
-trait BPUUtils{
+trait BPUUtils extends HasXSParameter {
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
@@ -85,6 +85,11 @@ trait BPUUtils{
     Mux(oldSatTaken && taken, ((1 << (len-1))-1).S,
       Mux(oldSatNotTaken && !taken, (-(1 << (len-1))).S,
         Mux(taken, old + 1.S, old - 1.S)))
+  }
+
+  def getFallThroughAddr(start: UInt, carry: Bool, pft: UInt) = {
+    val higher = start.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits)
+    Cat(Mux(carry, higher+1.U, higher), pft, 0.U(instOffsetBits.W))
   }
 }
 

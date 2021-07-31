@@ -69,7 +69,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   {
     val brTargets = Vec(numBr, UInt(VAddrBits.W))
     val jmpTarget = UInt(VAddrBits.W)
-    val pftAddr   = UInt(VAddrBits.W)
+    val pftAddr   = UInt(log2Up(PredictWidth).W)
   }
 
   class ReadResp extends XSBundle
@@ -136,10 +136,12 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val target = Wire(UInt(VAddrBits.W))
     target := read_pc + (FetchWidth*4).U
 
+    val fallThruAddr = getFallThroughAddr(read_pc, hit_meta.carry, hit_data.pftAddr)
+
     when(hit_oh =/= 0.U) {
       target := Mux(hit_and_taken_mask =/= 0.U,
         PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
-        hit_data.pftAddr)
+        fallThruAddr)
     }
     // val target = Mux(hit_and_taken_mask =/= 0.U,
     //   PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
@@ -270,6 +272,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // isCall
   // isRet
   update_write_metas.pred := DontCare // TODO: ???
+  update_write_metas.carry := update.ftb_entry.carry
 
   // update_write_datas.lower := u_target_lower
   update_write_datas.jmpTarget := update.ftb_entry.jmpTarget

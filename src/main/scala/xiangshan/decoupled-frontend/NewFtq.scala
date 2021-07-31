@@ -62,10 +62,10 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
 
 }
 
-class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
+class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   val startAddr = UInt(VAddrBits.W)
   val nextRangeAddr = UInt(VAddrBits.W)
-  val pftAddr = UInt(VAddrBits.W)
+  val pftAddr = UInt(log2Ceil(PredictWidth).W)
   val isNextMask = Vec(PredictWidth, Bool())
   val oversize = Bool()
   val carry = Bool()
@@ -75,9 +75,8 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle {
     Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
-  def getFallThrough(start: UInt = startAddr, carry: Bool = carry, pft: UInt = pftAddr) = {
-    val higher = start.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits)
-    Cat(Mux(carry, higher+1.U, higher), pft)
+  def getFallThrough() = {
+    getFallThroughAddr(this.startAddr, this.carry, this.pftAddr)
   }
 }
 
@@ -230,7 +229,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.jmpTarget := Mux(!cfi_is_jal, pd.jalTarget, io.target)
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + Mux(last_br_rvi, 1.U, 0.U))
-  init_entry.carry   := Mux(entry_has_jmp, jmpPft(log2Ceil(PredictWidth)+instOffsetBits).asBool, true.B)
+  init_entry.carry   := Mux(entry_has_jmp, jmpPft(log2Ceil(PredictWidth)).asBool, true.B)
   // TODO: carry bit is currently ignored
   init_entry.isJalr := new_jmp_is_jalr
   init_entry.isCall := new_jmp_is_call
