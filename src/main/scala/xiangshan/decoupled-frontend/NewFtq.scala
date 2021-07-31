@@ -308,7 +308,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   io.is_br_full := hit && is_new_br && br_full
 }
 
-class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasBackendRedirectInfo {
+class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+  with HasBackendRedirectInfo with BPUUtils {
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -847,7 +848,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     XSPerfAccumulate("toIfuBubble", io.toIfu.req.ready && !io.toIfu.req.valid)
 
     val from_bpu = io.fromBpu.resp.bits
-    val enq_entry_len = (from_bpu.ftb_entry.pftAddr - from_bpu.pc) >> instOffsetBits
+    val enq_entry_len = (from_bpu.ftb_entry.getFallThrough(from_bpu.pc) - from_bpu.pc) >> instOffsetBits
     val enq_entry_len_recording_vec = (1 to PredictWidth+1).map(i => enq_entry_len === i.U)
     val enq_entry_len_map = (1 to PredictWidth+1).map(i =>
       f"enq_ftb_entry_len_$i" -> (enq_entry_len_recording_vec(i-1) && enq_fire)
@@ -907,7 +908,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
     val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
 
-    val ftb_entry_len = (ftbEntryGen.new_entry.pftAddr - update.pc) >> instOffsetBits
+    val ftb_entry_len = (ftbEntryGen.new_entry.getFallThrough(update.pc) - update.pc) >> instOffsetBits
     val ftb_entry_len_recording_vec = (1 to PredictWidth+1).map(i => ftb_entry_len === i.U)
     val ftb_init_entry_len_map = (1 to PredictWidth+1).map(i =>
       f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_new_entry)

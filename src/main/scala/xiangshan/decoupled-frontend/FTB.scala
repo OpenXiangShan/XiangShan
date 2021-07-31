@@ -33,7 +33,7 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val tagSize    = 20
 }
 
-class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
+class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
   val valid       = Bool()
   val tag         = UInt(tagSize.W)
 
@@ -59,6 +59,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams {
 
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
+  def getFallThrough(pc: UInt) = getFallThroughAddr(pc, carry, pftAddr)
 
   override def toPrintable: Printable = {
     p"-----------FTBEntry----------- " +
