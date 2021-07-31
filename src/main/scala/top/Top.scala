@@ -41,7 +41,7 @@ import huancun.{HuanCun}
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-  private val l2prefetcher = LazyModule(new L2Prefetcher())
+//  private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val l2xbar = TLXbar()
   private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
@@ -76,9 +76,9 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     l2xbar := TLBuffer() := core.l1pluscache.clientNode
   }
   if (!useFakePTW) {
-    l2xbar := TLBuffer() := core.ptw.node
+    l2xbar := TLBuffer() := TLFragmenter(L3BlockSize, L3BlockSize) := core.ptw.node
   }
-  l2xbar := TLBuffer() := l2prefetcher.clientNode
+//  l2xbar := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
     memory_port := l2xbar
   }
@@ -99,12 +99,12 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
-    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
+//    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
     if (useFakeL2Cache) {
-      l2prefetcher.module.io.in := DontCare
+//      l2prefetcher.module.io.in := DontCare
     }
     else {
-      l2prefetcher.module.io.in <> l2cache.module.io
+//      l2prefetcher.module.io.in <> l2cache.module.io
     }
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
@@ -114,7 +114,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.reset := core_reset_gen.io.out
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    l2prefetcher.module.reset := l2_reset_gen.io.out
+//    l2prefetcher.module.reset := l2_reset_gen.io.out
     if (!useFakeL2Cache) {
       l2cache.module.reset := l2_reset_gen.io.out
     }
