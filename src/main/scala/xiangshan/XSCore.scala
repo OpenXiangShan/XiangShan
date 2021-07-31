@@ -258,20 +258,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   scheduler(0).io.issue <> integerBlock.io.issue
   scheduler(1).io.issue <> floatBlock.io.issue
   scheduler(2).io.issue <> memBlock.io.issue
-  scheduler(0).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
-  scheduler(1).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
-  scheduler(2).io.writeback <> intArbiter.io.out ++ fpArbiter.io.out
-  scheduler(0).io.fastUopIn := allFastUop1
-  scheduler(1).io.fastUopIn := allFastUop1
-  scheduler(2).io.fastUopIn := allFastUop1
-
+  scheduler.foreach(_.io.writeback <> intArbiter.io.out ++ fpArbiter.io.out)
+  scheduler.foreach(_.io.fastUopIn := allFastUop1)
 
 //  scheduler(0).io.otherFastWakeup.get <> memBlock.io.otherFastWakeup
-  scheduler(0).io.jumpPc <> ctrlBlock.io.jumpPc
-  scheduler(0).io.jalr_target <> ctrlBlock.io.jalr_target
-  scheduler(0).io.stIssuePtr <> memBlock.io.stIssuePtr
-  scheduler(1).io.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
-  scheduler(0).io.debug_int_rat <> ctrlBlock.io.debug_int_rat
+  scheduler.foreach(_.io.jumpPc <> ctrlBlock.io.jumpPc)
+  scheduler.foreach(_.io.jalr_target <> ctrlBlock.io.jalr_target)
+  scheduler.foreach(_.io.stIssuePtr <> memBlock.io.stIssuePtr)
+  scheduler.foreach(_.io.debug_fp_rat <> ctrlBlock.io.debug_fp_rat)
+  scheduler.foreach(_.io.debug_int_rat <> ctrlBlock.io.debug_int_rat)
   ctrlBlock.io.readIntRf <> scheduler(0).readIntRf ++ scheduler(2).readIntRf
   ctrlBlock.io.readFpRf <> scheduler(1).readFpRf ++ scheduler(2).readFpRf
 
