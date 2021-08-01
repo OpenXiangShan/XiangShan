@@ -96,6 +96,8 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
+  def hit_taken_on_call = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_call
+  def hit_taken_on_ret  = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_ret
 
   override def toPrintable: Printable = {
     p"-----------BranchPrediction----------- " +

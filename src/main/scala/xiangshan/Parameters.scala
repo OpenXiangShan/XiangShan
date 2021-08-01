@@ -25,6 +25,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, Tage}
+import xiangshan.frontend.RAS
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -70,10 +71,12 @@ case class XSCoreParameters
       val ubtb = Module(new MicroBTB()(p))
       val bim = Module(new BIM()(p))
       val tage = Module(new Tage()(p))
+      val ras = Module(new RAS()(p))
+      // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(ubtb, bim, ftb, tage)
+      val preds = Seq(ubtb, bim, ftb, tage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -85,9 +88,9 @@ case class XSCoreParameters
       bim.io.in.bits.resp_in(0)   := ubtb.io.out.resp
       ftb.io.in.bits.resp_in(0)   := bim.io.out.resp
       tage.io.in.bits.resp_in(0)  := ftb.io.out.resp
-
-      (preds, tage.io.out.resp)
-      // (preds, ftb.io.out.resp)
+      ras.io.in.bits.resp_in(0)   := tage.io.out.resp
+      
+      (preds, ras.io.out.resp)
     }),
 
 

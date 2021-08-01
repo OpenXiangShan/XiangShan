@@ -162,7 +162,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
 }
 
-abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBPUConst {
+abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBPUConst with BPUUtils {
   val meta_size = 0
   val spec_meta_size = 0
 

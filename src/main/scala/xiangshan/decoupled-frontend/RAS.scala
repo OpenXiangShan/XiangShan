@@ -134,24 +134,34 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.in.bits.resp_in(0).s3.ftb_entry.pftAddr
+  val spec_new_addr = getFallThroughAddr(s3_pc,
+                                         io.in.bits.resp_in(0).s3.ftb_entry.carry,
+                                         io.in.bits.resp_in(0).s3.ftb_entry.pftAddr) 
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
-  spec_ras.spec_new_addr   := spec_new_addr
+  spec_ras.spec_new_addr := spec_new_addr
   val spec_top_addr = spec_ras.top.retAddr
 
-  spec_push := io.s2_fire && io.in.bits.resp_in(0).s3.preds.is_call
-  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s3.preds.is_ret
+  // confirm that the call/ret is the taken cfi
+  spec_push := io.s3_fire && io.in.bits.resp_in(0).s3.preds.hit_taken_on_call
+  spec_pop  := io.s3_fire && io.in.bits.resp_in(0).s3.preds.hit_taken_on_ret
+  
+  when (spec_pop) {
+    io.out.resp.s3.preds.target := spec_top_addr
+  }
+
+  io.out.resp.s3.rasSp  := spec_ras.sp
+  io.out.resp.s3.rasTop := spec_ras.top
 
   val redirect = RegNext(io.redirect)
-  val copy_valid = redirect.valid
+  val do_recover = redirect.valid
   val recover_cfi = redirect.bits.cfiUpdate
 
-  val retMissPred  = copy_valid && redirect.bits.level === 0.U && recover_cfi.pd.isRet
-  val callMissPred = copy_valid && redirect.bits.level === 0.U && recover_cfi.pd.isCall
+  val retMissPred  = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isRet
+  val callMissPred = do_recover && redirect.bits.level === 0.U && recover_cfi.pd.isCall
   // when we mispredict a call, we must redo a push operation
   // similarly, when we mispredict a return, we should redo a pop
-  spec_ras.recover_valid := copy_valid
+  spec_ras.recover_valid := do_recover
   spec_ras.recover_push := callMissPred
   spec_ras.recover_pop  := retMissPred
 
@@ -159,9 +169,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_ras.recover_top := recover_cfi.rasEntry
   spec_ras.recover_new_addr := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
-  io.out.s3_meta := Cat(spec_ras.sp, spec_ras.top.asUInt())
-
-  io.out.resp.s3.preds.target := spec_top_addr
   // TODO: back-up stack for ras
   // use checkpoint to recover RAS
 }
