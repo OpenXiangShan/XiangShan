@@ -715,19 +715,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   when(redirectVec.map(r => r.valid).reduce(_||_)){
     val r = PriorityMux(redirectVec.map(r => (r.valid -> r)))
+    val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
     val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, r.flushItSelf)
     val next = idx + 1.U
     when (!flushItSelf) {
       bpuPtr := next
       ifuPtr := next
       ifuWbPtr := next
-      commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-        when(i.U > offset){
-          s := c_invalid
+      when (notIfu) {
+        commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
+          when(i.U > offset){
+            s := c_invalid
+          }
+        })
+        when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
+          commitStateQueue(next.value).foreach(_ := c_invalid)
         }
-      })
-      when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
-        commitStateQueue(next.value).foreach(_ := c_invalid)
       }
       set_replay_status_between(ifuPtr, ifuPtr, l_invalid) // set all to invalid
       loadReplayOffset.valid := false.B
