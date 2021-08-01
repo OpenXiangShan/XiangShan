@@ -356,7 +356,7 @@ class TageTable
 
 }
 
-abstract class BaseTage(implicit p: Parameters) extends BasePredictor with TageParams {
+abstract class BaseTage(implicit p: Parameters) extends BasePredictor with TageParams with BPUUtils {
   // class TAGEResp {
   //   val takens = Vec(PredictWidth, Bool())
   //   val hits = Vec(PredictWidth, Bool())
@@ -387,6 +387,7 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 
 @chiselName
 class Tage(implicit p: Parameters) extends BaseTage {
+  override val meta_size = 0.U.asTypeOf(Vec(TageBanks, new TageMeta)).getWidth
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) =>
@@ -410,15 +411,40 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val if2_resps = VecInit(tables.map(t => t.io.resp))
 
-
   val if2_bim = RegEnable(io.in.bits.resp_in(0).s2.preds, enable=io.s1_fire)
   val if3_bim = RegEnable(if2_bim, enable=io.s2_fire)
 
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
 
   val debug_hist_s1 = io.in.bits.ghist
   val debug_hist_s2 = RegEnable(debug_hist_s1, enable=io.s1_fire)
+  val debug_hist_s3 = RegEnable(debug_hist_s2, enable=io.s2_fire)
+
+  val if2_tageTakens    = Wire(Vec(TageBanks, Bool()))
+  val if2_provideds     = Wire(Vec(TageBanks, Bool()))
+  val if2_providers     = Wire(Vec(TageBanks, UInt(log2Ceil(TageNTables).W)))
+  val if2_finalAltPreds = Wire(Vec(TageBanks, Bool()))
+  val if2_providerUs    = Wire(Vec(TageBanks, UInt(2.W)))
+  val if2_providerCtrs  = Wire(Vec(TageBanks, UInt(TageCtrBits.W)))
+
+  val if3_tageTakens    = RegEnable(if2_tageTakens, io.s2_fire)
+  val if3_provideds     = RegEnable(if2_provideds, io.s2_fire)
+  val if3_providers     = RegEnable(if2_providers, io.s2_fire)
+  val if3_finalAltPreds = RegEnable(if2_finalAltPreds, io.s2_fire)
+  val if3_providerUs    = RegEnable(if2_providerUs, io.s2_fire)
+  val if3_providerCtrs  = RegEnable(if2_providerCtrs, io.s2_fire)
+
+  // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
+  val resp_meta = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageMeta)))
+
+  io.out.resp := io.in.bits.resp_in(0)
+  io.out.s3_meta := resp_meta.asUInt // TODO: Remove io.out.bits.resp.s3.meta
+
+  val ftb_hit = io.in.bits.resp_in(0).s3.hit
+  val ftb_entry = io.in.bits.resp_in(0).s3.ftb_entry
+  val resp_s3 = io.out.resp.s3
 
   // Update logic
   val u_valid = io.update.valid
@@ -427,8 +453,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateHist = update.ghist
 
   val updateMetas = update.meta.asTypeOf(Vec(TageBanks, new TageMeta))
-
-  override val meta_size = updateMetas.getWidth
 
   val updateMask    = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
   val updateUMask   = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
@@ -441,26 +465,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   updateOldCtr  := DontCare
   updateU       := DontCare
 
-  val if2_tageTakens    = Wire(Vec(TageBanks, Bool()))
-  val if2_provideds     = Wire(Vec(TageBanks, Bool()))
-  val if2_providers     = Wire(Vec(TageBanks, UInt(log2Ceil(TageBanks).W)))
-  val if2_finalAltPreds = Wire(Vec(TageBanks, Bool()))
-  val if2_providerUs    = Wire(Vec(TageBanks, UInt(2.W)))
-  val if2_providerCtrs  = Wire(Vec(TageBanks, UInt(TageCtrBits.W)))
-
-  val if3_tageTakens    = RegEnable(if2_tageTakens, io.s2_fire)
-  val if3_provideds     = RegEnable(if2_provideds, io.s2_fire)
-  val if3_providers     = RegEnable(if2_providers, io.s2_fire)
-  val if3_finalAltPreds = RegEnable(if2_finalAltPreds, io.s2_fire)
-  val if3_providerUs    = RegEnable(if2_providerUs, io.s2_fire)
-  val if3_providerCtrs  = RegEnable(if2_providerCtrs, io.s2_fire)
-
-
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
   val updateMisPreds = update.mispred_mask
-
-  // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
-  val resp_meta = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageMeta)))
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -488,13 +494,16 @@ class Tage(implicit p: Parameters) extends BaseTage {
     if2_providerUs(w)     := if2_resps(if2_provider)(w).bits.u
     if2_providerCtrs(w)   := if2_resps(if2_provider)(w).bits.ctr
 
-    val resp = io.out.resp.s3
-
-    resp.preds.taken_mask(w) := if3_tageTakens(w) // && ctrl.tage_enable
+    // resp.preds.taken_mask(w) := if3_tageTakens(w) // && ctrl.tage_enable
+    when(ftb_hit) { // TODO: Move this logic to s2
+      resp_s3.preds.taken_mask(w) := if3_tageTakens(w) // && ctrl.tage_enable
+    }.otherwise {
+      resp_s3.preds.taken_mask(w) := false.B
+    }
 
     resp_meta(w).provider.valid := if3_provideds(w)
     resp_meta(w).provider.bits  := if3_providers(w)
-    resp_meta(w).altDiffers     := if3_finalAltPreds(w) =/= resp.preds.taken_mask(w)
+    resp_meta(w).altDiffers     := if3_finalAltPreds(w) =/= resp_s3.preds.taken_mask(w)
     resp_meta(w).providerU      := if3_providerUs(w)
     resp_meta(w).providerCtr    := if3_providerCtrs(w)
     resp_meta(w).taken          := if3_tageTakens(w)
@@ -511,7 +520,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta(w).allocate.valid := allocatableSlots =/= 0.U
     resp_meta(w).allocate.bits  := allocEntry
 
-    // Update
+    // Update in loop
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
     val isUpdateTaken = updateValid && update.preds.taken_mask(w)
@@ -554,6 +563,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
 
+  val fallThruAddr = getFallThroughAddr(s3_pc, ftb_entry.carry, ftb_entry.pftAddr)
+
+  when(ftb_hit) {
+    io.out.resp.s3.preds.target := Mux((resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr) )
+  }
+
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
       tables(i).io.update.mask(w) := RegNext(updateMask(i)(w))
@@ -569,62 +586,65 @@ class Tage(implicit p: Parameters) extends BaseTage {
     tables(i).io.update.hist := RegNext(updateHist.predHist)
   }
 
+  // Debug and perf info
 
-//   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
-//   def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
-//   def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
-//     pred_perf(name, pred_cnt)
-//     commit_perf(name, commit_cnt)
-//   }
-//   for (i <- 0 until TageNTables) {
-//     val pred_i_provided =
-//       VecInit(io.meta map (m => m.provider.valid && m.provider.bits === i.U))
-//     val commit_i_provided =
-//       VecInit(updateMetas zip updateValids map {
-//         case (m, v) => m.provider.valid && m.provider.bits === i.U && v
-//       })
-//     tage_perf(s"tage_table_${i}_provided",
-//       PopCount(pred_i_provided),
-//       PopCount(commit_i_provided))
-//   }
-//   tage_perf("tage_use_bim",
-//     PopCount(VecInit(io.meta map (!_.provider.valid))),
-//     PopCount(VecInit(updateMetas zip updateValids map {
-//         case (m, v) => !m.provider.valid && v}))
-//     )
-//   def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
-//   tage_perf("tage_use_altpred",
-//     PopCount(VecInit(io.meta map (
-//       m => m.provider.valid && unconf(m.providerCtr)))),
-//     PopCount(VecInit(updateMetas zip updateValids map {
-//       case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
-//     })))
-//   tage_perf("tage_provided",
-//     PopCount(io.meta.map(_.provider.valid)),
-//     PopCount(VecInit(updateMetas zip updateValids map {
-//       case (m, v) => m.provider.valid && v
-//     })))
-//
-//   if (BPUDebug && debug) {
-//     for (b <- 0 until TageBanks) {
-//       val m = updateMetas(b)
-//       val bri = u.metas(b)
-//       XSDebug(updateValids(b), "update(%d): pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-//         b.U, u.ftqPC, packetAligned(u.ftqPC)+(b << instOffsetBits).U, bri.debug_tage_cycle, updateHist, u.takens(b), u.mispred(b),
-//         bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
-//       )
-//     }
-//     val if4_resps = RegEnable(if3_resps, s3_fire)
-//     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
-//     XSDebug(s3_fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", s3_fire, debug_pc_s2, debug_hist_s2)
-//     XSDebug(RegNext(s3_fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
-//       debug_pc_s3, debug_hist_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
-//     for (i <- 0 until TageNTables) {
-//       XSDebug(RegNext(s3_fire), "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(if4_resps(i).map(_.valid)).asUInt, Cat(if4_resps(i).map(_.bits.ctr)), Cat(if4_resps(i).map(_.bits.u)))
-//     }
-//     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
-//     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
-//   }
+  def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
+  def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
+  def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
+    pred_perf(name, pred_cnt)
+    commit_perf(name, commit_cnt)
+  }
+  for (i <- 0 until TageNTables) {
+    val pred_i_provided =
+      VecInit(updateMetas map (m => m.provider.valid && m.provider.bits === i.U))
+    val commit_i_provided =
+      VecInit(updateMetas zip updateValids map {
+        case (m, v) => m.provider.valid && m.provider.bits === i.U && v
+      })
+    tage_perf(s"tage_table_${i}_provided",
+      PopCount(pred_i_provided),
+      PopCount(commit_i_provided))
+  }
+  tage_perf("tage_use_bim",
+    PopCount(VecInit(updateMetas map (!_.provider.valid))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+        case (m, v) => !m.provider.valid && v}))
+    )
+  def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
+  tage_perf("tage_use_altpred",
+    PopCount(VecInit(updateMetas map (
+      m => m.provider.valid && unconf(m.providerCtr)))),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
+    })))
+  tage_perf("tage_provided",
+    PopCount(updateMetas.map(_.provider.valid)),
+    PopCount(VecInit(updateMetas zip updateValids map {
+      case (m, v) => m.provider.valid && v
+    })))
+
+  if (debug) {
+    for (b <- 0 until TageBanks) {
+      val m = updateMetas(b)
+      // val bri = u.metas(b)
+      XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+        b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
+        0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
+      )
+    }
+    val if3_resps = RegEnable(if2_resps, io.s2_fire)
+    XSDebug("req: v=%d, pc=0x%x, hist=%x\n", io.s1_fire, s1_pc, io.in.bits.ghist)
+    XSDebug("s2_fire:%d, resp: pc=%x, hist=%x\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
+    XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%x, hits=%b, takens=%b\n",
+      debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, if3_provideds.asUInt, if3_tageTakens.asUInt)
+    for (i <- 0 until TageNTables) {
+      XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n",
+        i.U, VecInit(if3_resps(i).map(_.valid)).asUInt, Cat(if3_resps(i).map(_.bits.ctr)),
+        Cat(if3_resps(i).map(_.bits.u)))
+    }
+    // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
+    // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
+  }
 }
 
 

@@ -277,6 +277,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.valid := s3_valid && !io.ftq_to_bpu.redirect.valid
   io.bpu_to_ftq.resp.bits  := predictors.io.out.resp.s3
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
+  io.bpu_to_ftq.resp.bits.ghist  := s0_ghist
 
   val resp = predictors.io.out.resp
 
@@ -285,7 +286,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   when(RegNext(reset.asBool) && !reset.asBool) {
     s0_ghist := 0.U.asTypeOf(new GlobalHistory)
-    // s0_pc := resetVector.U
+    s0_pc := resetVector.U
   }
 
   when(toFtq_fire) {
@@ -296,9 +297,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_flush, s2_flush, s3_flush = Wire(Bool())
   val s2_redirect, s3_redirect = Wire(Bool())
 
-  val s1_bp_resp = predictors.io.out.resp.s1
-  val s2_bp_resp = predictors.io.out.resp.s2
-  val s3_bp_resp = predictors.io.out.resp.s3
+  // val s1_bp_resp = predictors.io.out.resp.s1
+  // val s2_bp_resp = predictors.io.out.resp.s2
+  // val s3_bp_resp = predictors.io.out.resp.s3
 
   predictors.io := DontCare
   predictors.io.in.valid := s0_fire
@@ -371,14 +372,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.bits  := predictors.io.out.resp.s3
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
 
-  // History manage
-  when(RegNext(reset.asBool) && !reset.asBool) {
-    s0_ghist := 0.U.asTypeOf(new GlobalHistory)
-    s0_pc := resetVector.U
-  }
-
   s0_pc := s0_pc_reg
 
+  // History manage
   // s1
   val s1_sawNTBr = resp.s1.preds.is_br.zip(resp.s1.preds.taken_mask.take(numBr)).map{ case (b, t) => b && !t }.reduce(_||_)
   val s1_takenOnBr = resp.s1.preds.taken_mask.take(numBr).reduce(_||_)
@@ -401,7 +397,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   when(s2_valid && (!s3_components_ready || !s3_ready)) {
     s0_ghist := s2_ghist
   }.elsewhen(s2_fire) {
-    when(s1_valid && s1_pc =/= resp.s2.preds.target && !s2_correct_s1_ghist) {
+    when(s1_valid && s1_pc === resp.s2.preds.target && !s2_correct_s1_ghist) {
       s2_ghist := s2_predicted_ghist
     }
 
@@ -432,11 +428,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val redirect = io.ftq_to_bpu.redirect.bits
 
-  when(io.ftq_to_bpu.redirect.valid) {
-    s0_pc := redirect.cfiUpdate.target
-    s0_ghist := redirect.cfiUpdate.hist
-  }
-  
   s0_pc_reg := s0_pc
 
   predictors.io.update := io.ftq_to_bpu.update
@@ -449,7 +440,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val isBr = redirect.cfiUpdate.pd.isBr
     val taken = Mux(isMisPred, redirect.cfiUpdate.taken, redirect.cfiUpdate.predTaken)
     val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
-    // final_gh := updatedGh
+    s0_ghist := updatedGh // TODO: History fix logic
+    s0_pc := redirect.cfiUpdate.target
   }
 
   if(debug) {
