@@ -76,7 +76,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
   val writeWay = UInt(numWays.W)
   val hit = Bool()
-  val pred_cycle = UInt(64.W)
+  val pred_cycle = UInt(64.W) // TODO: Use Option
 }
 
 object FTBMeta {

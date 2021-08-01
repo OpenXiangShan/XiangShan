@@ -38,7 +38,7 @@ trait TageParams extends HasXSParameter with HasBPUParameter {
                       ( 128,   32,    9),
                       ( 128,   64,    9))
                       // (  64,   64,   11),
-                      // (  64,  101,   12)Tage.scala,
+                      // (  64,  101,   12),
                       // (  64,  160,   12),
                       // (  64,  254,   13),
                       // (  32,  403,   14),
@@ -165,7 +165,7 @@ class TageTable
   val if1_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val (if1_idx, if1_tag) = compute_tag_and_hash(if1_unhashed_idx, io.req.bits.hist)
-  val (if2_idx, if2_tag) = (RegEnable(if1_idx, io.req.valid), RegEnable(if1_tag, io.req.valid))
+  val (s2_idx, s2_tag) = (RegEnable(if1_idx, io.req.valid), RegEnable(if1_tag, io.req.valid))
 
   val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
@@ -178,21 +178,21 @@ class TageTable
   hi_us.io.r.req.bits.setIdx := if1_idx
   lo_us.io.r.req.bits.setIdx := if1_idx
 
-  val if2_hi_us_r = hi_us.io.r.resp.data
-  val if2_lo_us_r = lo_us.io.r.resp.data
-  val if2_table_r = table.io.r.resp.data
+  val s2_hi_us_r = hi_us.io.r.resp.data
+  val s2_lo_us_r = lo_us.io.r.resp.data
+  val s2_table_r = table.io.r.resp.data
 
   val if1_mask = io.req.bits.mask
-  val if2_mask = RegEnable(if1_mask, enable=io.req.valid)
+  val s2_mask = RegEnable(if1_mask, enable=io.req.valid)
 
-  val if2_req_rhits = VecInit((0 until TageBanks).map(b => {
-    if2_table_r(b).valid && if2_table_r(b).tag === if2_tag
+  val s2_req_rhits = VecInit((0 until TageBanks).map(b => {
+    s2_table_r(b).valid && s2_table_r(b).tag === s2_tag
   }))
 
   (0 until TageBanks).map(b => {
-    io.resp(b).valid := if2_req_rhits(b) && if2_mask(b)
-    io.resp(b).bits.ctr := if2_table_r(b).ctr
-    io.resp(b).bits.u := Cat(if2_hi_us_r(b),if2_lo_us_r(b))
+    io.resp(b).valid := s2_req_rhits(b) && s2_mask(b)
+    io.resp(b).bits.ctr := s2_table_r(b).ctr
+    io.resp(b).bits.u := Cat(s2_hi_us_r(b),s2_lo_us_r(b))
   })
 
 
@@ -259,7 +259,7 @@ class TageTable
   // when (RegNext(wrbypass_rhit)) {
   //   for (b <- 0 until TageBanks) {
   //     when (RegNext(wrbypass_rctr_hits(b.U + baseBank))) {
-  //       io.resp(b).bits.ctr := rhit_ctrs(if3_bankIdxInOrder(b))
+  //       io.resp(b).bits.ctr := rhit_ctrs(s3_bankIdxInOrder(b))
   //     }
   //   }
   // }
@@ -321,8 +321,8 @@ class TageTable
       p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
       p"tag=$tag, mask=${Binary(if1_mask)}\n")
     for (i <- 0 until TageBanks) {
-      XSDebug(RegNext(io.req.valid && io.req.bits.mask(i)) && if2_req_rhits(i),
-        p"TageTableResp[$i]: idx=$if2_idx, hit:${if2_req_rhits(i)}, " +
+      XSDebug(RegNext(io.req.valid && io.req.bits.mask(i)) && s2_req_rhits(i),
+        p"TageTableResp[$i]: idx=$s2_idx, hit:${s2_req_rhits(i)}, " +
         p"ctr:${io.resp(i).bits.ctr}, u:${io.resp(i).bits.u}\n")
       XSDebug(io.update.mask(i),
         p"update Table bank $i: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
@@ -336,7 +336,7 @@ class TageTable
         p"ctr:$hitCtr, newCtr:${update_wdata(i).ctr}")
     }
 
-    XSDebug(RegNext(io.req.valid) && !if2_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
+    XSDebug(RegNext(io.req.valid) && !s2_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
 
     // when (wrbypass_rhit && wrbypass_ctr_valids(wrbypass_rhit_idx).reduce(_||_)) {
     //   for (b <- 0 until TageBanks) {
@@ -409,10 +409,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=s3_fire)
   // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=s3_fire)
 
-  val if2_resps = VecInit(tables.map(t => t.io.resp))
+  val s2_resps = VecInit(tables.map(t => t.io.resp))
 
-  val if2_bim = RegEnable(io.in.bits.resp_in(0).s2.preds, enable=io.s1_fire)
-  val if3_bim = RegEnable(if2_bim, enable=io.s2_fire)
+  val s2_bim = io.in.bits.resp_in(0).s2.preds
+  val s3_bim = RegEnable(s2_bim, enable=io.s2_fire)
 
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
@@ -422,19 +422,19 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val debug_hist_s2 = RegEnable(debug_hist_s1, enable=io.s1_fire)
   val debug_hist_s3 = RegEnable(debug_hist_s2, enable=io.s2_fire)
 
-  val if2_tageTakens    = Wire(Vec(TageBanks, Bool()))
-  val if2_provideds     = Wire(Vec(TageBanks, Bool()))
-  val if2_providers     = Wire(Vec(TageBanks, UInt(log2Ceil(TageNTables).W)))
-  val if2_finalAltPreds = Wire(Vec(TageBanks, Bool()))
-  val if2_providerUs    = Wire(Vec(TageBanks, UInt(2.W)))
-  val if2_providerCtrs  = Wire(Vec(TageBanks, UInt(TageCtrBits.W)))
+  val s2_tageTakens    = Wire(Vec(TageBanks, Bool()))
+  val s2_provideds     = Wire(Vec(TageBanks, Bool()))
+  val s2_providers     = Wire(Vec(TageBanks, UInt(log2Ceil(TageNTables).W)))
+  val s2_finalAltPreds = Wire(Vec(TageBanks, Bool()))
+  val s2_providerUs    = Wire(Vec(TageBanks, UInt(2.W)))
+  val s2_providerCtrs  = Wire(Vec(TageBanks, UInt(TageCtrBits.W)))
 
-  val if3_tageTakens    = RegEnable(if2_tageTakens, io.s2_fire)
-  val if3_provideds     = RegEnable(if2_provideds, io.s2_fire)
-  val if3_providers     = RegEnable(if2_providers, io.s2_fire)
-  val if3_finalAltPreds = RegEnable(if2_finalAltPreds, io.s2_fire)
-  val if3_providerUs    = RegEnable(if2_providerUs, io.s2_fire)
-  val if3_providerCtrs  = RegEnable(if2_providerCtrs, io.s2_fire)
+  val s3_tageTakens    = RegEnable(s2_tageTakens, io.s2_fire)
+  val s3_provideds     = RegEnable(s2_provideds, io.s2_fire)
+  val s3_providers     = RegEnable(s2_providers, io.s2_fire)
+  val s3_finalAltPreds = RegEnable(s2_finalAltPreds, io.s2_fire)
+  val s3_providerUs    = RegEnable(s2_providerUs, io.s2_fire)
+  val s3_providerCtrs  = RegEnable(s2_providerCtrs, io.s2_fire)
 
   // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
   val resp_meta = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageMeta)))
@@ -470,48 +470,45 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
-    val if2_tageTaken     = WireInit(if2_bim.taken_mask(w))
-    var if2_altPred       = if2_bim.taken_mask(w)
-    val if2_finalAltPred  = WireInit(if2_bim.taken_mask(w))
-    var if2_provided      = false.B
-    var if2_provider      = 0.U
+    val s2_tageTaken     = WireInit(s2_bim.taken_mask(w))
+    var s2_altPred       = s2_bim.taken_mask(w)
+    val s2_finalAltPred  = WireInit(s2_bim.taken_mask(w))
+    var s2_provided      = false.B
+    var s2_provider      = 0.U
 
     for (i <- 0 until TageNTables) {
-      val hit = if2_resps(i)(w).valid
-      val ctr = if2_resps(i)(w).bits.ctr
+      val hit = s2_resps(i)(w).valid
+      val ctr = s2_resps(i)(w).bits.ctr
       when (hit) {
-        if2_tageTaken := Mux(ctr === 3.U || ctr === 4.U, if2_altPred, ctr(2)) // Use altpred on weak taken
-        if2_finalAltPred := if2_altPred
+        s2_tageTaken := Mux(ctr === 3.U || ctr === 4.U, s2_altPred, ctr(2)) // Use altpred on weak taken
+        s2_finalAltPred := s2_altPred
       }
-      if2_provided = if2_provided || hit          // Once hit then provide
-      if2_provider = Mux(hit, i.U, if2_provider)  // Use the last hit as provider
-      if2_altPred = Mux(hit, ctr(2), if2_altPred) // Save current pred as potential altpred
+      s2_provided = s2_provided || hit          // Once hit then provide
+      s2_provider = Mux(hit, i.U, s2_provider)  // Use the last hit as provider
+      s2_altPred = Mux(hit, ctr(2), s2_altPred) // Save current pred as potential altpred
     }
-    if2_provideds(w)      := if2_provided
-    if2_providers(w)      := if2_provider
-    if2_finalAltPreds(w)  := if2_finalAltPred
-    if2_tageTakens(w)     := if2_tageTaken
-    if2_providerUs(w)     := if2_resps(if2_provider)(w).bits.u
-    if2_providerCtrs(w)   := if2_resps(if2_provider)(w).bits.ctr
+    s2_provideds(w)      := s2_provided
+    s2_providers(w)      := s2_provider
+    s2_finalAltPreds(w)  := s2_finalAltPred
+    s2_tageTakens(w)     := s2_tageTaken
+    s2_providerUs(w)     := s2_resps(s2_provider)(w).bits.u
+    s2_providerCtrs(w)   := s2_resps(s2_provider)(w).bits.ctr
 
-    // resp.preds.taken_mask(w) := if3_tageTakens(w) // && ctrl.tage_enable
-    when(ftb_hit) { // TODO: Move this logic to s2
-      resp_s3.preds.taken_mask(w) := if3_tageTakens(w) // && ctrl.tage_enable
-    }.otherwise {
-      resp_s3.preds.taken_mask(w) := false.B
+    when(ftb_hit) {
+      resp_s3.preds.taken_mask(w) := s3_tageTakens(w) // && ctrl.tage_enable
     }
 
-    resp_meta(w).provider.valid := if3_provideds(w)
-    resp_meta(w).provider.bits  := if3_providers(w)
-    resp_meta(w).altDiffers     := if3_finalAltPreds(w) =/= resp_s3.preds.taken_mask(w)
-    resp_meta(w).providerU      := if3_providerUs(w)
-    resp_meta(w).providerCtr    := if3_providerCtrs(w)
-    resp_meta(w).taken          := if3_tageTakens(w)
+    resp_meta(w).provider.valid := s3_provideds(w)
+    resp_meta(w).provider.bits  := s3_providers(w)
+    resp_meta(w).altDiffers     := s3_finalAltPreds(w) =/= resp_s3.preds.taken_mask(w)
+    resp_meta(w).providerU      := s3_providerUs(w)
+    resp_meta(w).providerCtr    := s3_providerCtrs(w)
+    resp_meta(w).taken          := s3_tageTakens(w)
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
-    val allocatableSlots = RegEnable(VecInit(if2_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
-      ~(LowerMask(UIntToOH(if2_provider), TageNTables) & Fill(TageNTables, if2_provided.asUInt)), io.s2_fire
+    val allocatableSlots = RegEnable(VecInit(s2_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
+      ~(LowerMask(UIntToOH(s2_provider), TageNTables) & Fill(TageNTables, s2_provided.asUInt)), io.s2_fire
     )
     val allocLFSR   = LFSR64()(TageNTables - 1, 0)
     val firstEntry  = PriorityEncoder(allocatableSlots)
@@ -568,8 +565,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
   when(ftb_hit) {
     io.out.resp.s3.preds.target := Mux((resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr) )
+      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
+
 
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
@@ -632,15 +630,15 @@ class Tage(implicit p: Parameters) extends BaseTage {
         0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
       )
     }
-    val if3_resps = RegEnable(if2_resps, io.s2_fire)
+    val s3_resps = RegEnable(s2_resps, io.s2_fire)
     XSDebug("req: v=%d, pc=0x%x, hist=%x\n", io.s1_fire, s1_pc, io.in.bits.ghist)
     XSDebug("s2_fire:%d, resp: pc=%x, hist=%x\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
     XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%x, hits=%b, takens=%b\n",
-      debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, if3_provideds.asUInt, if3_tageTakens.asUInt)
+      debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, s3_provideds.asUInt, s3_tageTakens.asUInt)
     for (i <- 0 until TageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n",
-        i.U, VecInit(if3_resps(i).map(_.valid)).asUInt, Cat(if3_resps(i).map(_.bits.ctr)),
-        Cat(if3_resps(i).map(_.bits.u)))
+        i.U, VecInit(s3_resps(i).map(_.valid)).asUInt, Cat(s3_resps(i).map(_.bits.ctr)),
+        Cat(s3_resps(i).map(_.bits.u)))
     }
     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")

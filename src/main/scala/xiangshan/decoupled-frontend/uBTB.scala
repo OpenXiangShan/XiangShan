@@ -77,8 +77,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val valid = Bool()
     val taken_mask = Vec(numBr+1, Bool())
     val target = UInt(VAddrBits.W)
-    // val brValids = Vec(numBr, Bool())
-    // val jmpValid = Bool()
+    val brValids = Vec(numBr, Bool())
+    val jmpValid = Bool()
     // val isCall = Bool()
     // val isRet = Bool()
     // val isJalr = Bool()
@@ -158,6 +158,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, 0.U((numBr+1).W))
     io.read_resp.taken_mask := Mux(ren, VecInit(hit_and_taken_mask.asBools()), VecInit(Seq.fill(numBr+1)(false.B)))
     io.read_resp.target := target
+    io.read_resp.brValids := hit_meta.brValids
+    io.read_resp.jmpValid := hit_meta.jmpValid
     io.read_resp.pred := hit_meta.pred
     io.read_hit := hit_oh.orR
 
@@ -217,7 +219,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // debug_io.update_write_way := update_way
     // debug_io.update_old_pred := update_old_pred
     // debug_io.update_new_pred := update_new_pred
-  }
+  } // uBTBBank
 
   val ubtbBanks = Module(new UBTBBank(numWays))
   val banks = ubtbBanks.io
@@ -237,7 +239,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.resp.s1.preds.taken_mask := read_resps.taken_mask
-  // io.out.bits.resp.s1.preds.is_br := read_resps.brValids
+  io.out.resp.s1.preds.is_br := read_resps.brValids
   // io.out.bits.resp.s1.preds.is_jal := read_resps.jmpValid && !(read_resps.isCall || read_resps.isRet || read_resps.isJalr)
   // io.out.bits.resp.s1.preds.is_jalr := read_resps.jmpValid && read_resps.isJalr
   // io.out.bits.resp.s1.preds.is_call := read_resps.jmpValid && read_resps.isCall
