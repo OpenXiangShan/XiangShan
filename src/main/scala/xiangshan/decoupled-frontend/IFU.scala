@@ -401,7 +401,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
 
   io.toIbuffer.valid          := (f2_valid && f2_hit) || miss_all_fix
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := f2_predecode_range
+  io.toIbuffer.bits.valid     := f2_predecode_range & preDecoderOut.instrRange.asUInt
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
