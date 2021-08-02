@@ -69,7 +69,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // connect flush and redirect ports for __integer__ free list *(walk) is handled by dec
   intFreeList.io.flush := io.flush
-  intFreeList.io.redirect := io.redirect.valid
+  intFreeList.io.redirect := io.redirect.valid || io.roqCommits.isWalk
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk
@@ -82,31 +82,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
 
-  // initialize dec input of int free list
-  intFreeList.io.dec.req.foreach(_ := false.B)
-  intFreeList.io.dec.old_pdests.foreach(_ := DontCare)
-  intFreeList.io.dec.eliminatedMove.foreach(_ := false.B)
-  intFreeList.io.dec.pdests.foreach(_ := DontCare)
-
   // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
   fpFreeList.io.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
-  when (io.roqCommits.isWalk) { // FIXME Should I use hasWalkInstr or isWalk?
-    for (i <- 0 until CommitWidth) {
-      val walkValid = io.roqCommits.valid(i)
-      val walkInfo = io.roqCommits.info(i)
 
-      // during walk process:
-      // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
-      // 2. for ME inst, free pdest(commit counter++) + revert rat
-
-      // conclusion: 
-      // a. rat recovery has nothing to do with ME or not
-      // b. treat walk as normal commit except replace old_pdests with pdests
-      // c. ignore eliminatedMove and pdests port
-      intFreeList.io.dec.req(i) := walkValid && needDestRegCommit(false, walkInfo)
-      intFreeList.io.dec.old_pdests(i) := walkInfo.pdest // free pdest when cancelling this inst
-    }
-  }
 
   // walk has higher priority than allocation and thus we don't use isWalk here
   // only when both fp and int free list and dispatch1 has enough space can we do allocation
@@ -299,7 +277,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     Seq((intRat, false), (fpRat, true)) foreach { case (rat, fp) => 
       // is valid commit req and given instruction has destination register
       val commitDestValid = io.roqCommits.valid(i) && needDestRegCommit(fp, io.roqCommits.info(i))
-
+      XSDebug(p"isFp[${fp}]index[$i]-commitDestValid:$commitDestValid,isWalk:${io.roqCommits.isWalk}\n")
       /*
       I. RAT Update
        */
@@ -330,15 +308,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
        */
 
       if (fp) { // Float Point free list
-        fpFreeList.io.deallocReqs(i)  := rat.io.archWritePorts(i).wen
+        fpFreeList.io.deallocReqs(i)  := commitDestValid && !io.roqCommits.isWalk
         fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
       } else { // Integer free list
-        when (commitDestValid && !io.roqCommits.isWalk) {
-          intFreeList.io.dec.req(i) := rat.io.archWritePorts(i).wen
-          intFreeList.io.dec.old_pdests(i)  := io.roqCommits.info(i).old_pdest
-          intFreeList.io.dec.eliminatedMove(i) := io.roqCommits.info(i).eliminatedMove
-          intFreeList.io.dec.pdests(i) := io.roqCommits.info(i).pdest
-        }
+        
+        // during walk process:
+        // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
+        // 2. for ME inst, free pdest(commit counter++) + revert rat
+
+        // conclusion: 
+        // a. rat recovery has nothing to do with ME or not
+        // b. treat walk as normal commit except replace old_pdests with pdests
+        // c. ignore eliminatedMove and pdests port
+
+        intFreeList.io.dec.req(i) := commitDestValid // walk or not walk
+        intFreeList.io.dec.old_pdests(i)  := Mux(io.roqCommits.isWalk, io.roqCommits.info(i).pdest, io.roqCommits.info(i).old_pdest)
+        intFreeList.io.dec.eliminatedMove(i) := Mux(io.roqCommits.isWalk, false.B, io.roqCommits.info(i).eliminatedMove)
+        intFreeList.io.dec.pdests(i) := io.roqCommits.info(i).pdest
       }
     }
   }
@@ -375,11 +361,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
-  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc}\n")
+  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc} dispatch1ready:${io.out(0).ready}, isWalk:${io.roqCommits.isWalk}\n")
   XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
   
   intRat.io.debug_rdata <> io.debug_int_rat
   fpRat.io.debug_rdata <> io.debug_fp_rat
+
+  XSDebug(p"Arch Int RAT:" + io.debug_int_rat.zipWithIndex.map{ case (r, i) => p"#$i:$r " }.reduceLeft(_ + _) + p"\n")
 
   XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))

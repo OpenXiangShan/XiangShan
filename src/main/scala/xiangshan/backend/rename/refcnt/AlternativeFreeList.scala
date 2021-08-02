@@ -26,7 +26,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     // flush
     val flush = Input(Bool())
 
-    // redirect
+    // redirect and walk enabled
+    // ! Note: We shouldn't allocate registers when walking or redirect
     val redirect = Input(Bool())
 
     // increase physical registers reference count (rename)
@@ -69,14 +70,20 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val cmtCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(2.W))))
 
   val archRefCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
+  archRefCounterNext.foreach(_ := DontCare)
+  val updateArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
+  val clearArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
+
   val specRefCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
+  specRefCounterNext.foreach(_ := DontCare)
+  val updateSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // update with xxxNext
+  val clearSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // reset to zero
+  
   val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
-  // initialization for next counter val
-  for (i <- 0 until NRPhyRegs) {
-    archRefCounterNext(i) := archRefCounter(i)
-    specRefCounterNext(i) := specRefCounter(i)
-    cmtCounterNext(i) := cmtCounter(i)
-  }
+  cmtCounterNext.foreach(_ := DontCare)
+  val updateCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
+  val clearCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
+
   // send max flag of spec ref counter to rename stage
   io.maxVec zip specRefCounter foreach { case (max, cnt) =>
     max := cnt.andR()
@@ -103,6 +110,14 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
    */
   val freeVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // if dec(i).bits is freed and ready for writing back to free list
   val freeRegCandidates = (0 until CommitWidth).map(io.dec.old_pdests(_))
+
+  val updateCmtCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val updateArchRefCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+
+  val oldPdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val oldPdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val pdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val pdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
 
   // handle duplicate INC requirements on cmtCounter and archRefCounter
   val old_pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
@@ -138,29 +153,39 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val (pdests_is_last, pdests_has_same_before, pdests_times) = getCompareResult(pdests_cmp)
 
   for (i <- 0 until CommitWidth) {
+    XSDebug(p"decReq:${io.dec.req(i)},dec_old_pdst:${io.dec.old_pdests(i)},dec_is_me:${io.dec.eliminatedMove(i)},dec_pdest:${io.dec.pdests(i)}\n")
     val preg = freeRegCandidates(i) // physical register waiting for freeing
 
-    val oldPdestIsUnique = old_pdests_is_last(i) && !old_pdests_has_same_before(i)
-    val oldPdestNotUniqueButLast = old_pdests_is_last(i) && old_pdests_has_same_before(i)
+    oldPdestIsUnique(i) := old_pdests_is_last(i) && !old_pdests_has_same_before(i)
+    oldPdestNotUniqueButLast(i) := old_pdests_is_last(i) && old_pdests_has_same_before(i)
 
-    val pdestIsUnique = pdests_is_last(i) && !pdests_has_same_before(i)
-    val pdestNotUniqueButLast = pdests_is_last(i) && pdests_has_same_before(i)
+    XSDebug(io.dec.req(i), p"port[$i]:old_pdest:${io.dec.old_pdests(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
+    
+    pdestIsUnique(i) := pdests_is_last(i) && !pdests_has_same_before(i)
+    pdestNotUniqueButLast(i) := pdests_is_last(i) && pdests_has_same_before(i)
+    
+    XSDebug(io.dec.req(i) && io.dec.eliminatedMove(i), p"port[$i]:pdest:${io.dec.pdests(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
 
-    freeVec(i) := (oldPdestIsUnique && cmtCounter(preg) === specRefCounter(preg) || oldPdestNotUniqueButLast && cmtCounter(preg) + old_pdests_times(i) === specRefCounter(preg)) && io.dec.req(i)
+    freeVec(i) := ((oldPdestIsUnique(i) && (cmtCounter(preg) === specRefCounter(preg))) || (oldPdestNotUniqueButLast(i) && (cmtCounter(preg) + old_pdests_times(i) === specRefCounter(preg)))) && io.dec.req(i)
     
-    // cmt counter after incrementing/ stay not change
-    // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
-    cmtCounterNext(preg) := Mux(io.dec.req(i) && oldPdestIsUnique, cmtCounter(preg) + 1.U,
-                    Mux(io.dec.req(i) && oldPdestNotUniqueButLast, cmtCounter(preg) + 1.U + old_pdests_times(i), 
-                                             /* stay not change */ cmtCounter(preg)))
+    // clearArchRefCounter(preg) := freeVec(i)
+    // clearSpecRefCounter(preg) := freeVec(i)
+    // clearCmtCounter(preg) := freeVec(i)
+
     
-    // arch ref counter of pdest
-    archRefCounterNext(io.dec.pdests(i)) := Mux(/* if this is me inst */io.dec.req(i) && io.dec.eliminatedMove(i) && pdestIsUnique, archRefCounter(io.dec.pdests(i)) + 1.U, 
-      Mux(io.dec.req(i) && io.dec.eliminatedMove(i) && pdestNotUniqueButLast, archRefCounter(io.dec.pdests(i)) + 1.U + pdests_times(i), archRefCounter(io.dec.pdests(i))))
+
+    updateCmtCounterVec(i) := io.dec.req(i) && (oldPdestIsUnique(i) || oldPdestNotUniqueButLast(i))
+
+    XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
+    XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(io.dec.req(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${io.dec.req(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
+    
+  
+    updateArchRefCounterVec(i) := io.dec.req(i) && io.dec.eliminatedMove(i) && (pdestIsUnique(i) || pdestNotUniqueButLast(i))
 
     XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
     XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
 
+    
     // write freed preg into free list at tail ptr
     val offset = i match {
       case 0 => 0.U
@@ -170,7 +195,39 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     val idx = ptr.value
     when (freeVec(i)) {
       freeList(idx) := freeRegCandidates(i)
-      XSDebug(p"Free List enqueue: [ preg ${freeRegCandidates(i)} ]\n")
+      XSDebug(p"[$i] Free List enqueue: [ preg ${freeRegCandidates(i)} ]\n")
+    }
+  }
+
+  for (preg <- 0 until NRPhyRegs) {
+    // set clear bit
+    freeVec.zipWithIndex.foreach { case (ready, idx) => 
+      when (ready && preg.U === freeRegCandidates(idx)) { 
+        clearArchRefCounter(preg) := true.B
+        clearSpecRefCounter(preg) := true.B
+        clearCmtCounter(preg) := true.B
+      } 
+    }
+
+    // set update bit
+    updateCmtCounterVec.zipWithIndex.foreach { case (ready, idx) => 
+      when (ready && preg.U === freeRegCandidates(idx)) {
+        updateCmtCounter(preg) := true.B
+        // cmt counter after incrementing/ stay not change
+        // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
+        cmtCounterNext(preg) := Mux(io.dec.req(idx) && oldPdestIsUnique(idx), cmtCounter(preg) + 1.U,
+                        Mux(io.dec.req(idx) && oldPdestNotUniqueButLast(idx), cmtCounter(preg) + 1.U + old_pdests_times(idx), 
+                                                /* stay not change */ cmtCounter(preg)))
+      }
+    }
+
+    updateArchRefCounterVec.zipWithIndex.foreach { case (ready, idx) => 
+      when (ready && preg.U === io.dec.pdests(idx)) {
+        updateArchRefCounter(preg) := true.B
+        // arch ref counter of pdest
+        archRefCounterNext(io.dec.pdests(idx)) := Mux(/* if this is me inst */io.dec.req(idx) && io.dec.eliminatedMove(idx) && pdestIsUnique(idx), archRefCounter(io.dec.pdests(idx)) + 1.U, 
+          Mux(io.dec.req(idx) && io.dec.eliminatedMove(idx) && pdestNotUniqueButLast(idx), archRefCounter(io.dec.pdests(idx)) + 1.U + pdests_times(idx), archRefCounter(io.dec.pdests(idx))))
+      }
     }
   }
 
@@ -182,10 +239,13 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   XSDebug(needAllocatingVec.asUInt().orR(), p"needAllocatingVec:${Binary(needAllocatingVec.asUInt)}\n")
   for (i <- 0 until RenameWidth) {
     io.inc.pdests(i) := DontCare
+    // enqueue instr, isn't move elimination
     needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid && !io.redirect
     
-    when (io.inc.psrcOfMove(i).valid && io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush) {
+    // enqueue instr, is move elimination
+    when (io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && io.inc.psrcOfMove(i).valid && !io.redirect) {
       specRefCounterNext(io.inc.psrcOfMove(i).bits) := specRefCounter(io.inc.psrcOfMove(i).bits) + 1.U
+      updateSpecRefCounter(io.inc.psrcOfMove(i).bits) := true.B
     }
     
     val offset = i match {
@@ -211,7 +271,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   switch (state) {
     is (s_idle) {
       when (io.flush) {
-        specRefCounter := archRefCounter
+        // ! specRefCounter := archRefCounter : handled in below
         state := s_flush_1
         XSDebug("Start Flush Process Next Cycle")
       }
@@ -243,30 +303,26 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   }
 
   // update tail pointer
-  tailPtr := Mux(state === s_flush_1, tailPtr + PopCount(flushFreeVec), tailPtr + PopCount(freeVec))
+  val tailPtrNext = Mux(state === s_flush_1, tailPtr + PopCount(flushFreeVec), tailPtr + PopCount(freeVec))
   // update head pointer
   val headPtrNext = Mux(state === s_idle && io.flush, tailPtr - (NRPhyRegs-32).U, 
                       Mux(state === s_flush_2, headPtr - PopCount(archRefCounter.map(_.orR())), 
                                                headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
                                                
-  freeRegCnt := distanceBetween(tailPtr, headPtrNext)
+  freeRegCnt := distanceBetween(tailPtrNext, headPtrNext)
   io.inc.canInc := RegNext(freeRegCnt >= RenameWidth.U)
 
   headPtr := headPtrNext
+  tailPtr := tailPtrNext
 
   // update reg counter
   for (i <- 0 until NRPhyRegs) {
-    specRefCounter(i) := Mux(flushFreeVec(i), 0.U, specRefCounterNext(i))
-    archRefCounter(i) := Mux(flushFreeVec(i), 0.U, archRefCounterNext(i))
-    cmtCounter(i) := Mux(flushFreeVec(i), 0.U, cmtCounterNext(i))
+    specRefCounter(i) := Mux(io.flush, archRefCounter(i), 
+                           Mux(flushFreeVec(i) || clearSpecRefCounter(i), 0.U, Mux(updateSpecRefCounter(i), specRefCounterNext(i), specRefCounter(i))))
+    archRefCounter(i) :=   Mux(flushFreeVec(i) || clearArchRefCounter(i), 0.U, Mux(updateArchRefCounter(i), archRefCounterNext(i), archRefCounter(i) ))
+    cmtCounter(i)     :=   Mux(flushFreeVec(i) || clearCmtCounter(i),     0.U, Mux(updateCmtCounter(i),     cmtCounterNext(i),     cmtCounter(i)     ))
   }
-  for (i <- 0 until CommitWidth) {
-    when (freeVec(i)) {
-      specRefCounter(freeRegCandidates(i)) := 0.U
-      archRefCounter(freeRegCandidates(i)) := 0.U
-      cmtCounter(freeRegCandidates(i)) := 0.U
-    }
-  }
+
 
   /*
   Re-direct: restore by walking, handled by rename using `dec` port
@@ -280,6 +336,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   for (i <- 0 until NRPhyRegs) {
     XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
       p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
+    XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
+      p"preg[$i] specRefCounterNext:${specRefCounterNext(i)} archRefCounterNext:${archRefCounterNext(i)} cmtCounterNext:${cmtCounterNext(i)}\n")
     
     // specRefCounter(i) must >= cmtCounter(i)
     XSError(specRefCounter(i) < cmtCounter(i), p"Commits Overflow of preg${i}")
@@ -292,11 +350,13 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   
   XSDebug(p"io.flush ${io.flush} Flush State [ ${state} ]\n")
 
-  
+  XSDebug(PopCount(io.dec.req) =/= PopCount(freeVec), p"WARNING: Please check DEC requirement\n")
+  XSDebug(PopCount(io.inc.req) =/= PopCount(needAllocatingVec), p"WARNING: Please check INC requirement\n")
+
   /*
   Assertions
    */
-  val enableFreeListCheck = false
+  val enableFreeListCheck = true
 
   if (enableFreeListCheck) {
 
@@ -308,7 +368,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
           p"Duplicate ME requirements detected! Cannot inc same specRefCount in 1 cycle!\n")
       }
       // also, we cannot count ref numbers more than 3 (which is very rare)
-      XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.pdests(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${io.inc.pdests(i)}]\n")
+      XSError(needAllocatingVec(i) && !io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.pdests(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${io.inc.pdests(i)}]\n")
       XSError(io.inc.req(i) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(i).valid && specRefCounter(io.inc.psrcOfMove(i).bits).andR(), p"(move) Exceeding specRefCounter Max Value: preg[${io.inc.psrcOfMove(i).bits}]\n")
     }
 
@@ -319,6 +379,12 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
           p"Duplicate DEC requirements detected!" + io.dec.old_pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
         XSInfo(io.dec.req(i) && io.dec.req(j) && io.dec.eliminatedMove(i) && io.dec.eliminatedMove(j) && io.dec.pdests(i) === io.dec.pdests(j), 
           p"Duplicate INC requirements on archRefCount detected!" + io.dec.pdests.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
+        XSError(freeVec(i) && freeVec(j) && io.dec.old_pdests(i) === io.dec.old_pdests(j), "Fatal Error: free 1 reg 2 times in 1 cycle!\n")
+      }
+      // not inc and dec same reg in 1 cycle
+      for (j <- 0 until RenameWidth) {
+        XSDebug(io.inc.req(j) && io.inc.canInc && io.inc.doInc && io.inc.psrcOfMove(j).valid && !io.redirect &&
+          io.dec.req(i) && io.dec.old_pdests(i) === io.inc.pdests(j), p"INC and DEC Conflict Detected! inc($j): preg ${io.inc.pdests(j)}, dec($i): preg ${io.dec.old_pdests(i)}\n")
       }
     }
   }
