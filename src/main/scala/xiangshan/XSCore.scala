@@ -232,7 +232,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei := fenceio.fencei
 
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
-  val redirectBlocks = exuBlocks.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
+  val redirectBlocks = exuBlocks.reverse.filter(_.fuConfigs.map(_._1).map(_.hasRedirect).reduce(_ || _))
   ctrlBlock.io.exuRedirect <> redirectBlocks.map(_.io.fuExtra.exuRedirect).fold(Seq())(_ ++ _)
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.stOut <> memBlock.io.stOut
