@@ -623,6 +623,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   toBpuCfi.rasSp := ftq_redirect_sram.io.rdata(1).rasSp
   toBpuCfi.rasEntry := ftq_redirect_sram.io.rdata(1).rasEntry
   toBpuCfi.specCnt := ftq_redirect_sram.io.rdata(1).specCnt
+  when (ifuRedirectReg.bits.cfiUpdate.pd.isRet) {
+    toBpuCfi.target := toBpuCfi.rasEntry.retAddr
+  }
   // TODO: sawNotTakenBranch
 
   // *********************************************************************                                  
@@ -661,8 +664,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   when(stage3Redirect.valid && lastIsMispredict) {
     updateCfiInfo(stage3Redirect)
-  }.elsewhen (pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush) {
-    updateCfiInfo(fromIfuRedirect, isBackend=false)
+  }.elsewhen (ifuRedirectToBpu.valid) {
+    updateCfiInfo(ifuRedirectToBpu, isBackend=false)
   }
 
   // ***********************************************************************************
