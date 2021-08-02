@@ -486,7 +486,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val wb_idx_reg   = RegEnable(ifu_wb_idx,      enable = pdWb.valid)
 
   when (ifu_wb_valid) {
-    val comm_stq_wen = VecInit(pds.map(_.valid))
+    val comm_stq_wen = VecInit(pds.map(_.valid).zip(pdWb.bits.instrRange).map{
+      case (v, inRange) => v && inRange
+    })
     (commitStateQueue(ifu_wb_idx) zip comm_stq_wen).map{
       case (qe, v) => when (v) { qe := c_valid }
     }

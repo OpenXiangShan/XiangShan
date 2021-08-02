@@ -9,7 +9,7 @@ import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
 
-trait HasPdconst extends HasXSParameter {
+trait HasPdConst extends HasXSParameter {
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
@@ -35,8 +35,7 @@ trait HasPdconst extends HasXSParameter {
   def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
     val byteOffset = pc - start 
     byteOffset(4,1) - 1.U
-  } 
-  def MAXINSNUM = 16
+  }
 }
 
 object BrType {
@@ -65,19 +64,20 @@ class PreDecodeInfo extends Bundle {  // 8 bit
   def notCFI  = brType === BrType.notCFI
 }
 
-class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdconst {
-  val pc          = Vec(MAXINSNUM, UInt(VAddrBits.W))
-  val instrs      = Vec(MAXINSNUM, UInt(32.W))
-  val pd          = Vec(MAXINSNUM, (new PreDecodeInfo))
-  val takens      = Vec(MAXINSNUM, Bool())
+class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
+  val pc          = Vec(PredictWidth, UInt(VAddrBits.W))
+  val instrs      = Vec(PredictWidth, UInt(32.W))
+  val pd          = Vec(PredictWidth, (new PreDecodeInfo))
+  val takens      = Vec(PredictWidth, Bool())
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val hasLastHalf   = Bool()
+  val instrRange   = Vec(16, Bool())
 }
 
-class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with HasIFUConst {
+class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val io = IO(new Bundle() {
     val in = Input(new IfuToPreDecode)
     val out = Output(new PreDecodeResp)
@@ -93,29 +93,29 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val bbTarget  = io.in.target
   val oversize  = io.in.oversize
 
-  val validStart   = Wire(Vec(MAXINSNUM, Bool()))
-  val validEnd     = Wire(Vec(MAXINSNUM, Bool()))
-  val targets      = Wire(Vec(MAXINSNUM, UInt(VAddrBits.W)))
-  val misPred      = Wire(Vec(MAXINSNUM, Bool()))
-  val takens       = Wire(Vec(MAXINSNUM, Bool()))
-  val falseHit     = Wire(Vec(MAXINSNUM, Bool()))
-  val instRange    = Wire(Vec(MAXINSNUM, Bool()))
+  val validStart   = Wire(Vec(PredictWidth, Bool()))
+  val validEnd     = Wire(Vec(PredictWidth, Bool()))
+  val targets      = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
+  val misPred      = Wire(Vec(PredictWidth, Bool()))
+  val takens       = Wire(Vec(PredictWidth, Bool()))
+  val falseHit     = Wire(Vec(PredictWidth, Bool()))
+  val instRange    = Wire(Vec(PredictWidth, Bool()))
   //"real" means signals that are genrated by repaired end pc of this basic block using predecode information
   val realEndPC    = Wire(UInt(VAddrBits.W))
-  val realHasLastHalf  = Wire(Vec(MAXINSNUM, Bool()))
-  val realMissPred      = Wire(Vec(MAXINSNUM, Bool()))
-  val realTakens        = Wire(Vec(MAXINSNUM, Bool()))
+  val realHasLastHalf  = Wire(Vec(PredictWidth, Bool()))
+  val realMissPred      = Wire(Vec(PredictWidth, Bool()))
+  val realTakens        = Wire(Vec(PredictWidth, Bool()))
 
-  val rawInsts = if (HasCExtension) VecInit((0 until MAXINSNUM).map(i => Cat(data(i+1), data(i))))  
-                       else         VecInit((0 until MAXINSNUM/2).map(i => Cat(data(i*2+1) ,data(i*2))))
+  val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))  
+                       else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  for (i <- 0 until MAXINSNUM) {
+  for (i <- 0 until PredictWidth) {
     val inst        = WireInit(rawInsts(i))
     val expander    = Module(new RVCExpander)
     
     val isFirstInBlock = i.U === 0.U
-    val isLastInBlock  = (i == MAXINSNUM - 1).B
-    val currentPC      = pcStart + (i << 1).U((log2Ceil(MAXINSNUM)+1).W)
+    val isLastInBlock  = (i == PredictWidth - 1).B
+    val currentPC      = pcStart + (i << 1).U((log2Ceil(PredictWidth)+1).W)
     val currentIsRVC   = isRVC(inst) && HasCExtension.B
     
 
@@ -128,6 +128,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
+    io.out.pd(i).valid  := (lastIsValidEnd || !HasCExtension.B)
     io.out.pd(i).isRVC  := currentIsRVC
     io.out.pd(i).brType := brType
     io.out.pd(i).isCall := isCall 
@@ -147,7 +148,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
                        //An not-CFI instruction is predicted taken
     val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) 
                        //A jal instruction is predicted not taken
-    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) 
+    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+                       //A ret instruction is predicted not taken
     val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet) 
                        //An invalid instruction is predicted taken
     val invalidInsFault  = (!validStart(i) && i.U === bbOffset && bbTaken)
@@ -170,16 +172,17 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
   val jumpIsRVC               =  rvcOH(jumpOffset)
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
-  val endRange                =  ((Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(16, oversize))) 
-  val takeRange               =  Fill(16, !ParallelOR(takens))   | Fill(16, 1.U(1.W)) >> (~PriorityEncoder(takens))
+  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
+  val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
 
-  instRange               :=  VecInit((0 until MAXINSNUM).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
+  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
   realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + 32.U), pcEnd)
 
 
-  io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := instRange(i) && validStart(i)}
+  //io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := validStart(i)}
   io.out.misOffset.valid  := ParallelOR(realMissPred)
   io.out.misOffset.bits   := PriorityEncoder(realMissPred)
+  io.out.instrRange.zipWithIndex.map{case (bit,i) => bit := instRange(i).asBool()}
 
   io.out.cfiOffset.valid  := ParallelOR(realTakens)
   io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
@@ -191,7 +194,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
 
   io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
 
-  for (i <- 0 until MAXINSNUM) {
+  for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
       p"instr ${Hexadecimal(io.out.instrs(i))}, " +
       p"validStart ${Binary(validStart(i))}, " +

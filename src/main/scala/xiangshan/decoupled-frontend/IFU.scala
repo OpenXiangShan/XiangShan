@@ -420,6 +420,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target
   toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
+  toFtq.pdWb.bits.instrRange := preDecoderOut.instrRange
 
   val predecodeFlush     = preDecoderOut.misOffset.valid && predecodeOutValid
   val predecodeFlushReg  = RegNext(predecodeFlush && !f1_fire)
