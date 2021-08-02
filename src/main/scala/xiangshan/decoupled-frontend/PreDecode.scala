@@ -138,7 +138,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     expander.io.in := inst
     io.out.instrs(i) := expander.io.out.bits
 
-    takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U && !io.out.pd(i).notCFI || io.out.pd(i).isJal))
+    takens(i)    := (validStart(i) && (bbTaken && bbOffset === i.U && !io.out.pd(i).notCFI || io.out.pd(i).isJal || io.out.pd(i).isRet))
 
     val jumpTarget      = io.out.pc(i) + Mux(io.out.pd(i).isBr, brOffset, jalOffset)
     targets(i) := Mux(takens(i), jumpTarget, pcEnd)
@@ -148,10 +148,11 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdconst with Ha
     val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken) 
                        //A jal instruction is predicted not taken
     val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) 
+    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet) 
                        //An invalid instruction is predicted taken
     val invalidInsFault  = (!validStart(i) && i.U === bbOffset && bbTaken)
 
-    misPred(i)   := targetFault  || notCFIFault || jalFault || invalidInsFault
+    misPred(i)   := targetFault  || notCFIFault || jalFault || retFault || invalidInsFault
     falseHit(i)  := invalidInsFault || notCFIFault
 
     realMissPred(i)     := misPred(i) && instRange(i)
