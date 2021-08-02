@@ -60,6 +60,9 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
   def getFallThrough(pc: UInt) = getFallThroughAddr(pc, carry, pftAddr)
+  def hasBr(offset: UInt) = (brValids zip brOffset).map{
+    case (v, off) => v && off <= offset
+  }.reduce(_||_)
 
   override def toPrintable: Printable = {
     p"-----------FTBEntry----------- " +
