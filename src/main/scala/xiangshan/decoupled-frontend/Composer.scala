@@ -32,6 +32,14 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.in.bits.s0_pc      := io.in.bits.s0_pc
     c.io.in.bits.ghist      := io.in.bits.ghist
     c.io.in.bits.toFtq_fire := io.in.bits.toFtq_fire
+
+    c.io.s0_fire := io.s0_fire
+    c.io.s1_fire := io.s1_fire
+    c.io.s2_fire := io.s2_fire
+    c.io.s3_fire := io.s3_fire
+
+    c.io.redirect := io.redirect
+
     if (c.meta_size > 0) {
       metas = (metas << c.meta_size) | c.io.out.s3_meta(c.meta_size-1,0)
     }
@@ -43,18 +51,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   io.s1_ready := components.map(_.io.s1_ready).reduce(_ && _)
   io.s2_ready := components.map(_.io.s2_ready).reduce(_ && _)
   io.s3_ready := components.map(_.io.s3_ready).reduce(_ && _)
-
-  components.foreach(_.io.s0_fire := io.s0_fire)
-  components.foreach(_.io.s1_fire := io.s1_fire)
-  components.foreach(_.io.s2_fire := io.s2_fire)
-  components.foreach(_.io.s3_fire := io.s3_fire)
-
-  // io.out.bits.resp.valids := VecInit(components.map(_.io.out.valid))
-
-  when(io.redirect.valid) {
-    s0_pc := io.redirect.bits.cfiUpdate.target
-  }
-
 
   require(meta_sz < MaxMetaLength)
   io.out.s3_meta := metas

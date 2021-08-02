@@ -206,7 +206,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.resp.s2.preds.is_jalr       := RegEnable(ftb_entry.isJalr, io.s1_fire)
   io.out.resp.s2.preds.is_call       := RegEnable(ftb_entry.isCall, io.s1_fire)
   io.out.resp.s2.preds.is_ret        := RegEnable(ftb_entry.isRet, io.s1_fire)
-
+  
+  io.out.resp.s2.preds.hit           := RegEnable(s1_hit, io.s1_fire)
   io.out.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
   io.out.resp.s2.pc                  := RegEnable(s1_pc, io.s1_fire) //s2_pc
   io.out.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
