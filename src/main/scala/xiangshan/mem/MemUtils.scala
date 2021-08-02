@@ -78,16 +78,22 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
-
-  val forwardMask = Input(Vec(8, Bool()))
-  val forwardData = Input(Vec(8, UInt(8.W)))
-
+  
+  val forwardMask = Input(Vec(8, Bool())) // resp to load_s2
+  val forwardData = Input(Vec(8, UInt(8.W))) // resp to load_s2
+  
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
-
+  
+  // dataInvalid suggests store to load forward found forward should happen,
+  // but data is not available for now. If dataInvalid, load inst should 
+  // be replayed from RS. Feedback type should be RSFeedbackType.dataInvalid
   val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
-  // If dataInvalid, load inst should sleep for a while
-  // Feedback type should be RSFeedbackType.dataInvalid
+
+  // matchInvalid suggests in store to load forward logic, paddr cam result does
+  // to equal to vaddr cam result. If matchInvalid, a microarchitectural exception
+  // should be raised to flush SQ and committed sbuffer.
+  val matchInvalid = Input(Bool()) // resp to load_s2
 }
 
 // LoadForwardQueryIO used in load pipeline
@@ -102,4 +108,6 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
+
+  val invalidPaddr = Output(Bool()) // generated in load_s1
 }

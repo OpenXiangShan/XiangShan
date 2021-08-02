@@ -306,23 +306,27 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     )
 
     // do real fwd query (cam lookup in load_s1)
-    dataModule.io.needForward(i)(0) := canForward1 & paddrModule.io.forwardMmask(i).asUInt
-    dataModule.io.needForward(i)(1) := canForward2 & paddrModule.io.forwardMmask(i).asUInt
+    dataModule.io.needForward(i)(0) := canForward1 & vaddrModule.io.forwardMmask(i).asUInt
+    dataModule.io.needForward(i)(1) := canForward2 & vaddrModule.io.forwardMmask(i).asUInt
 
     vaddrModule.io.forwardMdata(i) := io.forward(i).vaddr
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
 
     // vaddr cam result does not equal to paddr cam result
     // replay needed
-    val vaddrMatchFailed = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
-    when (vaddrMatchFailed & io.forward(i).valid) {
-      printf("vaddrMatchFailed: %d: pc %x pmask %x vmask %x\n",
-        GTimer(),
-        io.forward(i).uop.cf.pc,
-        needForward & paddrModule.io.forwardMmask(i).asUInt,
-        needForward & vaddrModule.io.forwardMmask(i).asUInt
+    // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
+    // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid && !io.forward(i).invalidPaddr
+    val vpmaskNotEqual = ((RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & RegNext(needForward)) =/= 0.U
+    val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid && !io.forward(i).invalidPaddr)
+    when (vaddrMatchFailed) {
+      XSInfo("vaddrMatchFailed: pc %x pmask %x vmask %x\n",
+        RegNext(io.forward(i).uop.cf.pc),
+        RegNext(needForward & paddrModule.io.forwardMmask(i).asUInt),
+        RegNext(needForward & vaddrModule.io.forwardMmask(i).asUInt)
       );
     }
+    XSPerfAccumulate("vaddr_match_failed", vpmaskNotEqual)
+    XSPerfAccumulate("vaddr_match_really_failed", vaddrMatchFailed)
 
     // Forward result will be generated 1 cycle later (load_s2)
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)
@@ -330,9 +334,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
     // If addr match, data not ready, mark it as dataInvalid
     // load_s1: generate dataInvalid in load_s1 to set fastUop to
-    io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & paddrModule.io.forwardMmask(i).asUInt & needForward).orR
+    io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & needForward).orR
     // load_s2
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
+    
+    // load_s2
+    // check if vaddr forward mismatched
+    io.forward(i).matchInvalid := vaddrMatchFailed
   }
 
   /**
