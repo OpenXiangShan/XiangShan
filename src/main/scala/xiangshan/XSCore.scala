@@ -265,8 +265,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.enqIQ <> scheduler(0).io.allocate ++ scheduler(2).io.allocate ++scheduler(3).io.allocate
   for (i <- 0 until exuParameters.AluCnt) {
     val rsIn = VecInit(Seq(scheduler(0).io.allocate(i), scheduler(1).io.allocate(i)))
-    val func1 = (op: MicroOp) => scheduler(0).rs_all(0).canAccept(op.ctrl.fuType)
-    val func2 = (op: MicroOp) => !scheduler(0).rs_all(0).canAccept(op.ctrl.fuType)
+    val func1 = (op: MicroOp) => outer.scheduler(0).canAccept(op.ctrl.fuType)
+    val func2 = (op: MicroOp) => outer.scheduler(1).canAccept(op.ctrl.fuType)
     val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
     rsIn <> arbiterOut
   }

@@ -121,6 +121,10 @@ class Scheduler(
   val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
 
   lazy val module = new SchedulerImp(this)
+
+  def canAccept(fuType: UInt): Bool = {
+    VecInit(configs.map(_._1.canAccept(fuType))).asUInt.orR
+  }
 }
 
 class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSParameter {
