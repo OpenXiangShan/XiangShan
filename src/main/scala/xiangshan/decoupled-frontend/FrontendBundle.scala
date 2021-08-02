@@ -145,7 +145,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
 
   override def toPrintable: Printable = {
     p"-----------BranchPredictionUpdate----------- " +
-      p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] ${Binary(false_hit)}" +
+      p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] ${Binary(false_hit)} " +
       p"[new_br_insert_pos] ${Binary(new_br_insert_pos.asUInt)} " +
       super.toPrintable +
       p"\n"

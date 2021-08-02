@@ -439,7 +439,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val sawNTBr = redirect.cfiUpdate.br_hit
     val isBr = redirect.cfiUpdate.pd.isBr
     val taken = redirect.cfiUpdate.taken
-    val updatedGh = oldGh.update(sawNTBr || isBr, isBr && taken)
+    val updatedGh = oldGh.update(sawNTBr || (isBr && taken), isBr && taken)
     s0_ghist := updatedGh // TODO: History fix logic
     s0_pc := redirect.cfiUpdate.target
   }
@@ -462,12 +462,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
     XSDebug("resp.s1.preds.target=%x\n", resp.s1.preds.target)
     XSDebug("resp.s2.preds.target=%x\n", resp.s2.preds.target)
-    XSDebug("s0_ghits: %b\n", s0_ghist.predHist)
-    XSDebug("s1_ghits: %b\n", s1_ghist.predHist)
-    XSDebug("s2_ghits: %b\n", s2_ghist.predHist)
-    XSDebug("s3_ghits: %b\n", s3_ghist.predHist)
-    XSDebug("s2_predicted_ghits: %b\n", s2_predicted_ghist.predHist)
-    XSDebug("s3_predicted_ghits: %b\n", s3_predicted_ghist.predHist)
+    XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
+    XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
+    XSDebug("s2_ghist: %b\n", s2_ghist.predHist)
+    XSDebug("s3_ghist: %b\n", s3_ghist.predHist)
+    XSDebug("s2_predicted_ghist: %b\n", s2_predicted_ghist.predHist)
+    XSDebug("s3_predicted_ghist: %b\n", s3_predicted_ghist.predHist)
     XSDebug("s3_correct_s2_ghist: %b, s3_correct_s1_ghist: %b, s2_correct_s1_ghist: %b\n",
     s3_correct_s2_ghist,  s3_correct_s1_ghist,  s2_correct_s1_ghist)
 

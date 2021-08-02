@@ -55,6 +55,22 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   require(meta_sz < MaxMetaLength)
   io.out.s3_meta := metas
 
+  // var meta_start_idx: Seq[Int] = Nil
+  // var meta_end_idx:   Seq[Int] = Nil
+
+  // for (i <- 0 until components.length) {
+  //   if(i == 0) {
+  //     meta_start_idx = meta_start_idx :+ 0
+  //     meta_end_idx = meta_end_idx :+ (components(i).meta_size - 1)
+  //   } else {
+  //     meta_start_idx = meta_start_idx :+ (meta_end_idx(i-1) + 1)
+  //     meta_end_idx = meta_end_idx :+ (meta_start_idx(i) + components(i).meta_size - 1)
+  //   }
+  // }
+
+  // def extractMeta(meta: UInt, cpt_idx: Int) = {
+  //   Reverse(meta)(meta_end_idx(cpt_idx), meta_start_idx(cpt_idx))
+  // }
 
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {
@@ -62,4 +78,9 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.update.bits.meta := update_meta
     update_meta = update_meta >> c.meta_size
   }
+
+  // for(i <- 0 until components.length) {
+  //   components(i).io.update := io.update
+  //   components(i).io.update.bits.meta := extractMeta(io.update.bits.meta, i)
+  // }
 }

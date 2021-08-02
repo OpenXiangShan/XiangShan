@@ -270,8 +270,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     XSDebug("\n")
 
     XSDebug(u_valid, "Update from ftq\n")
-    XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b\n",
-      update.pc, ftbAddr.getTag(update.pc), u_way_mask)
+    XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b, pred_cycle=%d\n",
+      update.pc, ftbAddr.getTag(update.pc), u_way_mask, u_meta.pred_cycle)
 
 
 

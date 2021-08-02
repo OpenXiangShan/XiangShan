@@ -633,7 +633,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val s3_resps = RegEnable(s2_resps, io.s2_fire)
     XSDebug("req: v=%d, pc=0x%x, hist=%x\n", io.s1_fire, s1_pc, io.in.bits.ghist)
     XSDebug("s2_fire:%d, resp: pc=%x, hist=%x\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
-    XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%x, hits=%b, takens=%b\n",
+    XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
       debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, s3_provideds.asUInt, s3_tageTakens.asUInt)
     for (i <- 0 until TageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n",
