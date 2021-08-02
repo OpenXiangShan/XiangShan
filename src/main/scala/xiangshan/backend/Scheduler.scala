@@ -202,7 +202,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   def extraReadRf(numRead: Seq[Int]): Seq[UInt] = {
     require(numRead.length == io.allocate.length)
     val enq = io.allocate.map(_.bits.psrc)
-    enq.zip(numRead).map{ case (src, num) => src.take(num) }.fold(Seq())(_ ++ _)
+    // TODO: for store, fp is located at the second operand
+    // currently use numInt>0 && numFp>0. should make this configurable
+    val containsStore = outer.dpFuConfigs.map(_.contains(stuCfg))
+    enq.zip(numRead).zip(containsStore).map{ case ((src, num), hasStore) =>
+      if (hasStore && num == 1) Seq(src(num)) else src.take(num)
+    }.fold(Seq())(_ ++ _)
   }
   def readIntRf: Seq[UInt] = extraReadRf(outer.numDpPortIntRead)
   def readFpRf: Seq[UInt] = extraReadRf(outer.numDpPortFpRead)
