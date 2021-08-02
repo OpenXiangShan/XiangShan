@@ -19,137 +19,58 @@ package xiangshan.backend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
 import xiangshan.backend.exu._
-import xiangshan.backend.fu.CSRFileIO
 
+class ExuBlock(
+  val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],
+  val dpPorts: Seq[Seq[(Int, Int)]],
+  val intRfWbPorts: Seq[Seq[ExuConfig]],
+  val fpRfWbPorts: Seq[Seq[ExuConfig]],
+  val outFastPorts: Seq[Seq[Int]]
+)(implicit p: Parameters) extends LazyModule {
+  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts))
 
-class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
-  val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
-  val fast = Vec(numFast, Flipped(ValidIO(new ExuOutput))) //one cycle later than fastUops
-  val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
-
-  override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
+  lazy val module = new ExuBlockImp(this)
 }
 
-trait HasExeBlockHelper {
-  def fpUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
-    val uop = WireInit(x)
-    uop.valid := x.valid && x.bits.ctrl.fpWen
-    uop
-  }
-  def fpOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
-    val out = WireInit(x)
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
-    out
-  }
-  def fpOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
-    val out = WireInit(x)
-    if(connectReady) x.ready := out.ready
-    out.valid := x.valid && x.bits.uop.ctrl.fpWen
-    out
-  }
-  def intUopValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
-    val uop = WireInit(x)
-    uop.valid := x.valid && x.bits.ctrl.rfWen
-    uop
-  }
-  def intOutValid(x: ValidIO[ExuOutput]): ValidIO[ExuOutput] = {
-    val out = WireInit(x)
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
-    out
-  }
-  def intOutValid(x: DecoupledIO[ExuOutput], connectReady: Boolean = false): DecoupledIO[ExuOutput] = {
-    val out = WireInit(x)
-    if(connectReady) x.ready := out.ready
-    out.valid := x.valid && !x.bits.uop.ctrl.fpWen
-    out
-  }
-  def decoupledIOToValidIO[T <: Data](d: DecoupledIO[T]): Valid[T] = {
-    val v = Wire(Valid(d.bits.cloneType))
-    v.valid := d.valid
-    v.bits := d.bits
-    v
-  }
+class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer) {
+  val scheduler = outer.scheduler.module
 
-  def validIOToDecoupledIO[T <: Data](v: Valid[T]): DecoupledIO[T] = {
-    val d = Wire(DecoupledIO(v.bits.cloneType))
-    d.valid := v.valid
-    d.ready := true.B
-    d.bits := v.bits
-    d
-  }
-}
-
-class ExuBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {
-  val hasCSR = configs.map(_._1).contains(JumpCSRExeUnitCfg)
-  val hasFence = configs.map(_._1).contains(JumpCSRExeUnitCfg)
-  val hasFrm = configs.map(_._1).contains(FmacExeUnitCfg) || configs.map(_._1).contains(FmiscExeUnitCfg)
-
-  val numIn = configs.map(_._2).sum
-  val numRedirectOut = configs.filter(_._1.hasRedirect).map(_._2).sum
+  val fuConfigs = outer.configs.map(c => (c._1, c._2))
+  val fuBlock = Module(new FUBlock(fuConfigs))
 
   val io = IO(new Bundle {
+    // global control
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    // in
-    val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput)))
-    // out
-    val exuRedirect = Vec(numRedirectOut, ValidIO(new ExuOutput))
-    val writeback = Vec(numIn, DecoupledIO(new ExuOutput))
-    // misc
-    val csrio = if (hasCSR) Some(new CSRFileIO) else None
-    val fenceio = if (hasFence) Some(new FenceIO) else None
-    val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
+    // dispatch ports
+    val allocate = scheduler.io.allocate.cloneType
+    // issue and wakeup ports
+    val fastUopOut = scheduler.io.fastUopOut.cloneType
+    val rfWriteback = scheduler.io.writeback.cloneType
+    val fastUopIn = scheduler.io.fastUopIn.cloneType
+    val fuWriteback = fuBlock.io.writeback.cloneType
+    // extra
+    val scheExtra = scheduler.io.extra.cloneType
+    val fuExtra = fuBlock.io.extra.cloneType
   })
 
-  val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
+  scheduler.io.redirect <> io.redirect
+  scheduler.io.flush <> io.flush
+  scheduler.io.allocate <> io.allocate
+  scheduler.io.fastUopOut <> io.fastUopOut
+  scheduler.io.writeback <> io.rfWriteback
+  scheduler.io.fastUopIn <> io.fastUopIn
+  scheduler.io.extra <> io.scheExtra
 
-  val intExeUnits = exeUnits.filter(_.config.readIntRf)
-  val fpExeUnits = exeUnits.filter(_.config.readFpRf)
-  io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
-  io.writeback <> exeUnits.map(_.io.out)
+  scheduler.io.issue <> fuBlock.io.issue
 
-  // to please redirectGen
-  io.exuRedirect.zip(exeUnits.reverse.filter(_.config.hasRedirect).map(_.io.out)).foreach {
-    case (x, y) =>
-      x.valid := y.fire() && y.bits.redirectValid
-      x.bits := y.bits
-  }
+  fuBlock.io.redirect <> io.redirect
+  fuBlock.io.flush <> io.flush
+  fuBlock.io.writeback <> io.fuWriteback
+  fuBlock.io.extra <> io.fuExtra
 
-  for ((exu, i) <- exeUnits.zipWithIndex) {
-    exu.io.redirect <> io.redirect
-    exu.io.flush <> io.flush
-
-    if (exu.csrio.isDefined) {
-      exu.csrio.get <> io.csrio.get
-      exu.csrio.get.perf <> RegNext(io.csrio.get.perf)
-      // RegNext customCtrl for better timing
-      io.csrio.get.customCtrl := RegNext(exu.csrio.get.customCtrl)
-    }
-
-    if (exu.fenceio.isDefined) {
-      exu.fenceio.get <> io.fenceio.get
-    }
-
-    if (exu.frm.isDefined) {
-      // fp instructions have three operands
-      for (j <- 0 until 3) {
-        // when one of the higher bits is zero, then it's not a legal single-precision number
-        val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR
-        val single = recode(io.issue(i).bits.src(j)(31, 0), S)
-        val double = recode(io.issue(i).bits.src(j)(63, 0), D)
-        exu.io.fromFp.bits.src(j) := Mux(isLegalSingle, single, double)
-      }
-
-      // out
-      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
-        ieee(exu.io.out.bits.data),
-        exu.io.out.bits.data
-      )
-
-      exu.frm.get := io.frm.get
-    }
-  }
 }
