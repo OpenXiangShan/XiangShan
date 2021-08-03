@@ -135,7 +135,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
 
   // load forward query datapath
-  io.sbuffer.valid := io.in.valid
+  io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
   io.sbuffer.vaddr := io.in.bits.vaddr
   io.sbuffer.paddr := s1_paddr
   io.sbuffer.uop := s1_uop
@@ -143,7 +143,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.sbuffer.mask := s1_mask
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.lsq.valid := io.in.valid
+  io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
   io.lsq.vaddr := io.in.bits.vaddr
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
@@ -151,7 +151,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
-  io.lsq.invalidPaddr := s1_exception || s1_tlb_miss
 
   io.out.valid := io.in.valid// && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr

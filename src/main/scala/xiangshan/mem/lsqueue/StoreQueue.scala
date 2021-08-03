@@ -316,9 +316,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     // vaddr cam result does not equal to paddr cam result
     // replay needed
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
-    // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid && !io.forward(i).invalidPaddr
+    // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = ((RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) & RegNext(needForward)) =/= 0.U
-    val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid && !io.forward(i).invalidPaddr)
+    val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
       XSInfo("vaddrMatchFailed: pc %x pmask %x vmask %x\n",
         RegNext(io.forward(i).uop.cf.pc),
