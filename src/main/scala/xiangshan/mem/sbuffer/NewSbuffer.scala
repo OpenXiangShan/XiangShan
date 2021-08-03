@@ -113,10 +113,14 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(countBits.W))))
 
   /*
-       idle --[flush]--> drian_sbuffer --[buf empty]--> idle
+       idle --[flush]   --> drain   --[buf empty]--> idle
             --[buf full]--> replace --[dcache resp]--> idle
   */
-  val x_idle :: x_drain_sbuffer :: x_replace :: Nil = Enum(3)
+  // x_drain_all: drain store queue and sbuffer
+  // x_drain_sbuffer: drain sbuffer only, block store queue to sbuffer write
+  val x_idle :: x_replace :: x_drain_all :: x_drain_sbuffer :: Nil = Enum(4)
+  def needDrain(state: UInt): Bool =
+    state(1)
   val sbuffer_state = RegInit(x_idle)
 
   // ---------------------- Store Enq Sbuffer ---------------------
@@ -205,11 +209,13 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     firstInsertIdx,
     Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
   )
-  val firstCanInsert = Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
-  val secondCanInsert = Mux(sameTag,
+  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
+  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(sameTag,
     firstCanInsert,
     Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
   )
+  val do_uarch_drain = WireInit(false.B)
+  XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
@@ -234,13 +240,23 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     }
   }
 
-  def mergeWordReq(req: DCacheWordReq, mergeIdx:UInt, wordOffset:UInt): Unit = {
+  def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
     cohCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         mask(mergeIdx)(wordOffset)(i) := true.B
 //        data(mergeIdx)(wordOffset)(i) := req.data(i*8+7, i*8)
       }
+    }
+    // check if vtag is the same, if not, trigger sbuffer flush
+    when(reqvtag =/= vtag(mergeIdx)) {
+      XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n", 
+        reqvtag << OffsetWidth, 
+        reqptag << OffsetWidth,
+        vtag(mergeIdx) << OffsetWidth, 
+        ptag(mergeIdx) << OffsetWidth
+      )
+      do_uarch_drain := true.B
     }
   }
 
@@ -256,7 +272,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     when(in.fire()){
       when(canMerge(i)){
         writeReq(i).bits.idx := mergeIdx(i)
-        mergeWordReq(in.bits, mergeIdx(i), wordOffset)
+        mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), wordOffset)
         XSDebug(p"merge req $i to line [${mergeIdx(i)}]\n")
       }.otherwise({
         writeReq(i).bits.idx := insertIdx
@@ -287,7 +303,9 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
+  val sbuffer_empty = Cat(invalidMask).andR()
+  val sq_empty = !Cat(io.in.map(_.valid)).orR()
+  val empty = sbuffer_empty && sq_empty
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   val validCount = PopCount(validMask)
   val do_eviction = RegNext(validCount >= threshold || validCount === StoreBufferSize.U, init = false.B)
@@ -295,22 +313,31 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   XSDebug(p"validCount[$validCount]\n")
 
   io.flush.empty := RegNext(empty && io.sqempty)
-  // lru.io.flush := sbuffer_state === x_drain_sbuffer && empty
+  // lru.io.flush := sbuffer_state === x_drain_all && empty
   switch(sbuffer_state){
     is(x_idle){
       when(io.flush.valid){
+        sbuffer_state := x_drain_all
+      }.elsewhen(do_uarch_drain){
         sbuffer_state := x_drain_sbuffer
       }.elsewhen(do_eviction){
         sbuffer_state := x_replace
       }
     }
-    is(x_drain_sbuffer){
+    is(x_drain_all){
       when(empty){
+        sbuffer_state := x_idle
+      }
+    }
+    is(x_drain_sbuffer){
+      when(sbuffer_empty){
         sbuffer_state := x_idle
       }
     }
     is(x_replace){
       when(io.flush.valid){
+        sbuffer_state := x_drain_all
+      }.elsewhen(do_uarch_drain){
         sbuffer_state := x_drain_sbuffer
       }.elsewhen(!do_eviction){
         sbuffer_state := x_idle
@@ -324,7 +351,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR()
   }
 
-  val need_drain = sbuffer_state === x_drain_sbuffer
+  val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(need_drain,
     drainIdx,
@@ -398,17 +425,23 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
 
   // ---------------------- Load Data Forward ---------------------
   val mismatch = Wire(Vec(LoadPipelineWidth, Bool()))
-  XSPerfAccumulate("vaddr_match_failed", mismatch(0) +& mismatch(1))
+  XSPerfAccumulate("vaddr_match_failed", mismatch(0) || mismatch(1))
   for ((forward, i) <- io.forward.zipWithIndex) {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
-    val tag_matches = vtag_matches
+    val tag_matches = ptag_matches
     val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w => 
       RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((validMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
-      XSDebug("forward tag mismatch: pmatch %x vmatch %x\n", RegNext(ptag_matches.asUInt), RegNext(vtag_matches.asUInt))
+      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n", 
+        RegNext(ptag_matches.asUInt), 
+        RegNext(vtag_matches.asUInt),
+        RegNext(forward.vaddr),
+        RegNext(forward.paddr)
+      )
+      do_uarch_drain := true.B
     }
     val valid_tag_matches = widthMap(w => tag_matches(w) && validMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))

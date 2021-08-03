@@ -23,7 +23,6 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.mem.SBufferWordReq
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import difftest._
 import device.RAMHelper

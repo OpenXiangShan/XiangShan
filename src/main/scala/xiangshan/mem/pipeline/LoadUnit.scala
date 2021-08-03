@@ -194,7 +194,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
-  assert(!s2_forward_fail)
+  // assert(!s2_forward_fail)
 
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
