@@ -23,6 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
+import xiangshan.mem.SBufferWordReq
 import xiangshan.backend.roq.{RoqLsqIO, RoqPtr}
 import difftest._
 import device.RAMHelper
@@ -58,7 +59,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val flush = Input(Bool())
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq)) // write commited store to sbuffer
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new SBufferWordReq)) // write commited store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)
@@ -94,7 +95,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val vaddrModule = Module(new SQAddrModule(
     dataWidth = VAddrBits, 
     numEntries = StoreQueueSize, 
-    numRead = 1, 
+    numRead = StorePipelineWidth + 1, // sbuffer 2 + badvaddr 1 (TODO) 
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -142,10 +143,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.raddr(i) := deqPtrExtNext(i).value
     paddrModule.io.raddr(i) := deqPtrExtNext(i).value
+    vaddrModule.io.raddr(i) := deqPtrExtNext(i).value
   }
 
   // no inst will be commited 1 cycle before tval update
-  vaddrModule.io.raddr(0) := (cmtPtrExt(0) + commitCount).value
+  vaddrModule.io.raddr(StorePipelineWidth) := (cmtPtrExt(0) + commitCount).value
 
   /**
     * Enqueue at dispatch
@@ -446,11 +448,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     // Note that store data/addr should both be valid after store's commit
     assert(!io.sbuffer(i).valid || allvalid(ptr))
-    io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr := paddrModule.io.rdata(i)
-    io.sbuffer(i).bits.data := dataModule.io.rdata(i).data
-    io.sbuffer(i).bits.mask := dataModule.io.rdata(i).mask
-    io.sbuffer(i).bits.id   := DontCare
+    io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
+    io.sbuffer(i).bits.addr  := paddrModule.io.rdata(i)
+    io.sbuffer(i).bits.vaddr := vaddrModule.io.rdata(i)
+    io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
+    io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
+    io.sbuffer(i).bits.id    := DontCare
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
@@ -493,7 +496,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(StorePipelineWidth)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
