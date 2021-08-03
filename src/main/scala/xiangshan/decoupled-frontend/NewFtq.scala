@@ -204,7 +204,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
     val new_entry = Output(new FTBEntry)
     val new_br_insert_pos = Output(Vec(numBr, Bool()))
-    val taken_mask = Output(Vec(numBr+1, Bool()))
+    val taken_mask = Output(Vec(numBr, Bool()))
     val mispred_mask = Output(Vec(numBr+1, Bool()))
 
     // for perf counters
@@ -305,9 +305,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
                     Mux(is_new_br, old_entry_modified,
                       Mux(jalr_mispredicted, old_entry_jmp_target_modified, io.old_entry)))
   io.new_br_insert_pos := new_br_insert_onehot
-  val new_offset_vec = VecInit(io.new_entry.brOffset :+ pd.jmpOffset)
-  val br_jal_valid_vec = VecInit(io.new_entry.brValids :+ io.new_entry.jmpValid)
-  io.taken_mask := VecInit((new_offset_vec zip br_jal_valid_vec).map{
+  io.taken_mask := VecInit((io.new_entry.brOffset zip io.new_entry.brValids).map{
     case (off, v) => io.cfiIndex.bits === off && io.cfiIndex.valid && v
   })
   for (i <- 0 until numBr) {
@@ -446,16 +444,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val enqIdx = bpuPtr.value
     val preds = io.fromBpu.resp.bits.preds
     val ftb_entry = io.fromBpu.resp.bits.ftb_entry
-    val real_taken_mask = preds.taken_mask.asUInt
     val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
     entry_fetch_status(enqIdx) := f_to_send
     commitStateQueue(enqIdx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     entry_replay_status(enqIdx) := l_invalid // may be useless
     entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
-    enq_cfiIndex.valid := preds.taken_mask.asUInt.orR
+    enq_cfiIndex.valid := preds.real_taken_mask.asUInt.orR
     // when no takens, set cfiIndex to PredictWidth-1
-    enq_cfiIndex.bits := ParallelPriorityMux(preds.taken_mask, ftb_entry.getOffsetVec) |
-                         Fill(log2Ceil(PredictWidth), (!preds.taken_mask.asUInt.orR).asUInt)
+    enq_cfiIndex.bits := ParallelPriorityMux(preds.real_taken_mask, ftb_entry.getOffsetVec) |
+                         Fill(log2Ceil(PredictWidth), (!preds.real_taken_mask.asUInt.orR).asUInt)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := preds.target

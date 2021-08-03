@@ -85,7 +85,7 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
   def getBankIdx(x: UInt) = if (banks > 1) getIdx(x)(idxBits - 1, log2Up(banks)) else getIdx(x)
 }
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val taken_mask = Vec(numBr+1, Bool())
+  val taken_mask = Vec(numBr, Bool())
   val is_br = Vec(numBr, Bool())
   val is_jal = Bool()
   val is_jalr = Bool()
@@ -96,6 +96,17 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
+  def real_taken_mask(): Vec[Bool] = {
+    Mux(hit,
+      VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b } :+ (is_jal || is_jalr)),
+      VecInit(Seq.fill(numBr+1)(false.B)))
+  }
+
+  def real_br_taken_mask(): Vec[Bool] = {
+    Mux(hit,
+      VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b }),
+      VecInit(Seq.fill(numBr)(false.B)))
+  }
   def hit_taken_on_call = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_call
   def hit_taken_on_ret  = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_ret
 
@@ -159,7 +170,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
       p"-----------cfiUpdate----------- " +
       p"[pc] ${Hexadecimal(cfiUpdate.pc)} " +
       p"[predTaken] ${cfiUpdate.predTaken}, [taken] ${cfiUpdate.taken}, [isMisPred] ${cfiUpdate.isMisPred} " +
-      p"[target] ${cfiUpdate.target} " +
+      p"[target] ${Hexadecimal(cfiUpdate.target)} " +
       p"------------------------------- " +
       p"[roqPtr] f=${roqIdx.flag} v=${roqIdx.value} " +
       p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} " +

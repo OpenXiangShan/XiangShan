@@ -374,9 +374,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // History manage
   // s1
   val s1_sawNTBr = Mux(resp.s1.hit,
-    resp.s1.preds.is_br.zip(resp.s1.preds.taken_mask.take(numBr)).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s1.preds.is_br.zip(resp.s1.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
-  val s1_takenOnBr = Mux(resp.s1.hit, resp.s1.preds.taken_mask.take(numBr).reduce(_||_), false.B)
+
+  val s1_takenOnBr  = resp.s1.preds.real_br_taken_mask.asUInt =/= 0.U
   val s1_predicted_ghist = s1_ghist.update(s1_sawNTBr, s1_takenOnBr)
 
   when(s1_valid) {
@@ -389,19 +390,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // s2
   val s2_sawNTBr = Mux(resp.s2.hit,
-    resp.s2.preds.is_br.zip(resp.s2.preds.taken_mask.take(numBr)).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s2.preds.is_br.zip(resp.s2.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
-  val s2_takenOnBr = Mux(resp.s2.hit, resp.s2.preds.taken_mask.take(numBr).reduce(_||_), false.B)
+  val s2_takenOnBr  = resp.s2.preds.real_br_taken_mask.asUInt =/= 0.U
   val s2_predicted_ghist = s2_ghist.update(s2_sawNTBr, s2_takenOnBr)
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
 
-  when(s2_valid && (!s3_components_ready || !s3_ready)) {
-    s0_ghist := s2_ghist
-  }.elsewhen(s2_fire) {
-    when(s1_valid && s1_pc === resp.s2.preds.target && !s2_correct_s1_ghist) {
-      s2_ghist := s2_predicted_ghist
-    }
-
+  when(s2_fire) {
     when((s1_valid && (s1_pc =/= resp.s2.preds.target || s2_correct_s1_ghist)) || !s1_valid) {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
@@ -411,9 +406,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // s3
   val s3_sawNTBr = Mux(resp.s3.hit,
-    resp.s3.preds.is_br.zip(resp.s3.preds.taken_mask.take(numBr)).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s3.preds.is_br.zip(resp.s3.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
-  val s3_takenOnBr = Mux(resp.s3.hit, resp.s3.preds.taken_mask.take(numBr).reduce(_||_), false.B)
+  val s3_takenOnBr  = resp.s3.preds.real_br_taken_mask.asUInt =/= 0.U
   val s3_predicted_ghist = s3_ghist.update(s3_sawNTBr, s3_takenOnBr)
   val s3_correct_s2_ghist = s2_ghist =/= s3_predicted_ghist
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist

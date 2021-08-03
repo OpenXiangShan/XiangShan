@@ -46,7 +46,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
     val brValids    = Vec(numBr, Bool())
 
-    val jmpValid    = Bool()
+    val jmpValid    = Bool() // include jal and jalr
 
     val carry       = Bool()
 
@@ -62,7 +62,15 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val pred        = Vec(numBr, UInt(2.W))
 
     def taken = pred.map(_(1)).reduce(_ || _)
-    def taken_mask = { Cat(jmpValid, Cat((0 until numBr reverse).map(i => brValids(i) && pred(i)(1)))) }
+    def taken_mask = VecInit(pred.map(_(1)))
+    // def real_taken_mask = VecInit(pred.zip(brValids).map{case (p, b) => p(1) && b})
+    def real_taken_mask(): Vec[Bool] = {
+      VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b } :+ jmpValid)
+    }
+
+    def real_br_taken_mask(): Vec[Bool] = {
+      VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b })
+    }
   }
 
   class MicroBTBData extends XSBundle
@@ -75,7 +83,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   class ReadResp extends XSBundle
   {
     val valid = Bool()
-    val taken_mask = Vec(numBr+1, Bool())
+    val taken_mask = Vec(numBr, Bool())
     val target = UInt(VAddrBits.W)
     val brValids = Vec(numBr, Bool())
     val jmpValid = Bool()
@@ -85,7 +93,24 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // val last_is_rvc = Bool()
     val pred        = Vec(numBr, UInt(2.W))
 
-    // need more
+    // def real_taken_mask(): Vec[Bool] = {
+    //   Mux(hit,
+    //     VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b } :+ (is_jal || is_jalr)),
+    //     VecInit(Seq.fill(numBr+1)(false.B)))
+    // }
+
+    // def real_br_taken_mask(): Vec[Bool] = {
+    //   Mux(hit,
+    //     VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b }),
+    //     VecInit(Seq.fill(numBr)(false.B)))
+    // }
+    def real_taken_mask(): Vec[Bool] = {
+      VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b } :+ jmpValid)
+    }
+
+    def real_br_taken_mask(): Vec[Bool] = {
+      VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b })
+    }
   }
 
   override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBMeta)).getWidth
@@ -98,7 +123,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
       val update_write_meta = Flipped(Valid(new MicroBTBMeta))
       val update_write_data = Flipped(Valid(new MicroBTBData))
-      val update_taken_mask = Input(Vec(numBr+1, Bool()))
+      val update_taken_mask = Input(Vec(numBr, Bool()))
     })
 
     // val debug_io = IO(new Bundle {
@@ -128,10 +153,12 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
     val taken_masks = VecInit(rmetas.map(m => m.taken_mask))
+    val reaL_taken_masks = VecInit(rmetas.map(m => m.real_taken_mask))
     val hit_oh = hits.asUInt
     val hit_meta = ParallelMux(hits zip rmetas)
     val hit_data = ParallelMux(hits zip rdatas)
     val hit_and_taken_mask = ParallelMux(hits zip taken_masks)
+    val hit_and_real_taken_mask = ParallelMux(hits zip reaL_taken_masks)
 
     val target = Wire(UInt(VAddrBits.W))
     target := read_pc + (FetchWidth*4).U
@@ -139,8 +166,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val fallThruAddr = getFallThroughAddr(read_pc, hit_meta.carry, hit_data.pftAddr)
 
     when(hit_oh =/= 0.U) {
-      target := Mux(hit_and_taken_mask =/= 0.U,
-        PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
+      target := Mux(hit_and_real_taken_mask.asUInt =/= 0.U,
+        PriorityMux(hit_and_real_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
         fallThruAddr)
     }
     // val target = Mux(hit_and_taken_mask =/= 0.U,
@@ -156,7 +183,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     //   io.read_resp.brValids := 0.U(numBr.W)
     // }
     // io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, 0.U((numBr+1).W))
-    io.read_resp.taken_mask := Mux(ren, VecInit(hit_and_taken_mask.asBools()), VecInit(Seq.fill(numBr+1)(false.B)))
+    io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, VecInit(Seq.fill(numBr)(false.B)))
     io.read_resp.target := target
     io.read_resp.brValids := hit_meta.brValids
     io.read_resp.jmpValid := hit_meta.jmpValid
@@ -185,7 +212,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val update_new_pred = VecInit(
       (0 until numBr).map { i =>
         Mux(update_hit, satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
-          Mux(io.update_taken_mask(i), 3.U, 0.U))
+          Mux(io.update_taken_mask(i), 3.U, 0.U)) // TODO: use take_mask or readl_taken_mask
       })
 
     val update_alloc_way = {

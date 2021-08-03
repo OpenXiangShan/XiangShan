@@ -186,20 +186,23 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   // s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
   s1_latch_target := s1_pc + (FetchWidth*4).U
   when(s1_hit) {
-    s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-      PriorityMux(io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+    s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(io.in.bits.resp_in(0).s1.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
 
-  val s1_latch_taken_mask = Wire(Vec(numBr+1, Bool()))
+  val s1_latch_taken_mask = Wire(Vec(numBr, Bool()))
+  val s1_latch_real_taken_mask = Wire(Vec(numBr+1, Bool()))
 
   // TODO: mask must is zero when ftb not hit
-  when(s1_hit) {
-    s1_latch_taken_mask     := VecInit((io.in.bits.resp_in(0).s1.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt).asBools())
-    s1_latch_taken_mask(numBr)  := ftb_entry.jmpValid
-  }.otherwise {
-    s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
-  }
+  // when(s1_hit) {
+  //   s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.real_taken_mask
+  //   s1_latch_taken_mask(numBr)  := ftb_entry.jmpValid
+  // }.otherwise {
+  //   s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
+  // }
+  s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
+  s1_latch_real_taken_mask     := io.in.bits.resp_in(0).s1.preds.real_taken_mask
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
@@ -263,7 +266,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   if (debug) {
     XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.read_pc.ready)
     XSDebug("s1_hit=%b, hit_way=%b\n", s1_hit, writeWay.asUInt)
-    XSDebug("taken_mask=%b\n", s1_latch_taken_mask.asUInt)
+    XSDebug("taken_mask=%b, real_taken_mask=%b\n", s1_latch_taken_mask.asUInt, s1_latch_real_taken_mask.asUInt)
     XSDebug("target=%x\n", s1_latch_target)
 
     XSDebug(ftb_entry.toPrintable)

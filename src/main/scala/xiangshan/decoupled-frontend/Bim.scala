@@ -55,11 +55,11 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   // io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
   // io.out.bits.resp.s1.meta := s1_read.asUInt()
 
-  val s1_latch_taken_mask = VecInit(Cat(0.U(1.W), Cat((0 until numBr reverse).map(i => s1_read(i)(1)))).asBools())
+  val s1_latch_taken_mask = VecInit(Cat((0 until numBr reverse).map(i => s1_read(i)(1))).asBools())
   val s1_latch_meta       = s1_read.asUInt()
   override val meta_size = s1_latch_meta.getWidth
 
-  io.out.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr+1, Bool())), io.s1_fire)
+  io.out.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
   io.out.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
   io.out.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
@@ -90,7 +90,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
 
-  val update_mask = LowerMask(PriorityEncoderOH(update.preds.taken_mask.asUInt))
+  val update_mask = LowerMask(PriorityEncoderOH(update.preds.real_taken_mask.asUInt))
   val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.preds.is_br(i) && update_mask(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}

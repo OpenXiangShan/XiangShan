@@ -161,11 +161,11 @@ class TageTable
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
   def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
 
-  val if1_pc = io.req.bits.pc
-  val if1_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
+  val s1_pc = io.req.bits.pc
+  val s1_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val (if1_idx, if1_tag) = compute_tag_and_hash(if1_unhashed_idx, io.req.bits.hist)
-  val (s2_idx, s2_tag) = (RegEnable(if1_idx, io.req.valid), RegEnable(if1_tag, io.req.valid))
+  val (s1_idx, s1_tag) = compute_tag_and_hash(s1_unhashed_idx, io.req.bits.hist)
+  val (s2_idx, s2_tag) = (RegEnable(s1_idx, io.req.valid), RegEnable(s1_tag, io.req.valid))
 
   val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
@@ -174,16 +174,16 @@ class TageTable
   table.io.r.req.valid := io.req.valid
   hi_us.io.r.req.valid := io.req.valid
   lo_us.io.r.req.valid := io.req.valid
-  table.io.r.req.bits.setIdx := if1_idx
-  hi_us.io.r.req.bits.setIdx := if1_idx
-  lo_us.io.r.req.bits.setIdx := if1_idx
+  table.io.r.req.bits.setIdx := s1_idx
+  hi_us.io.r.req.bits.setIdx := s1_idx
+  lo_us.io.r.req.bits.setIdx := s1_idx
 
   val s2_hi_us_r = hi_us.io.r.resp.data
   val s2_lo_us_r = lo_us.io.r.resp.data
   val s2_table_r = table.io.r.resp.data
 
-  val if1_mask = io.req.bits.mask
-  val s2_mask = RegEnable(if1_mask, enable=io.req.valid)
+  val s1_mask = io.req.bits.mask
+  val s2_mask = RegEnable(s1_mask, enable=io.req.valid)
 
   val s2_req_rhits = VecInit((0 until TageBanks).map(b => {
     s2_table_r(b).valid && s2_table_r(b).tag === s2_tag
@@ -314,12 +314,12 @@ class TageTable
     val u = io.update
     val b = PriorityEncoder(u.mask)
     val ub = PriorityEncoder(u.uMask)
-    val idx = if1_idx
-    val tag = if1_tag
+    val idx = s1_idx
+    val tag = s1_tag
     XSDebug(io.req.valid,
       p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
       p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
-      p"tag=$tag, mask=${Binary(if1_mask)}\n")
+      p"tag=$tag, mask=${Binary(s1_mask)}\n")
     for (i <- 0 until TageBanks) {
       XSDebug(RegNext(io.req.valid && io.req.bits.mask(i)) && s2_req_rhits(i),
         p"TageTableResp[$i]: idx=$s2_idx, hit:${s2_req_rhits(i)}, " +
@@ -500,7 +500,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     resp_meta(w).provider.valid := s3_provideds(w)
     resp_meta(w).provider.bits  := s3_providers(w)
-    resp_meta(w).altDiffers     := s3_finalAltPreds(w) =/= resp_s3.preds.taken_mask(w)
+    resp_meta(w).altDiffers     := s3_finalAltPreds(w) =/= s3_tageTakens(w)
     resp_meta(w).providerU      := s3_providerUs(w)
     resp_meta(w).providerCtr    := s3_providerCtrs(w)
     resp_meta(w).taken          := s3_tageTakens(w)
@@ -563,8 +563,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val fallThruAddr = getFallThroughAddr(s3_pc, ftb_entry.carry, ftb_entry.pftAddr)
 
   when(ftb_hit) {
-    io.out.resp.s3.preds.target := Mux((resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-      PriorityMux(resp_s3.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+    io.out.resp.s3.preds.target := Mux((resp_s3.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(resp_s3.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
 
@@ -578,7 +578,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
       tables(i).io.update.uMask(w) := RegNext(updateUMask(i)(w))
       tables(i).io.update.u(w) := RegNext(updateU(i)(w))
-      tables(i).io.update.pc := RegNext(packetAligned(update.pc) + (w << instOffsetBits).U)
+      tables(i).io.update.pc := RegNext(update.pc)
     }
     // use fetch pc instead of instruction pc
     tables(i).io.update.hist := RegNext(updateHist.predHist)
@@ -625,14 +625,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
     for (b <- 0 until TageBanks) {
       val m = updateMetas(b)
       // val bri = u.metas(b)
-      XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+      XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
         b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
         0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
       )
     }
     val s3_resps = RegEnable(s2_resps, io.s2_fire)
-    XSDebug("req: v=%d, pc=0x%x, hist=%x\n", io.s1_fire, s1_pc, io.in.bits.ghist)
-    XSDebug("s2_fire:%d, resp: pc=%x, hist=%x\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
+    XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s1_fire, s1_pc, io.in.bits.ghist)
+    XSDebug("s2_fire:%d, resp: pc=%x, hist=%b\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
     XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
       debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, s3_provideds.asUInt, s3_tageTakens.asUInt)
     for (i <- 0 until TageNTables) {
