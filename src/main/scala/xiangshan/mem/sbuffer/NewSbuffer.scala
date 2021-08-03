@@ -429,7 +429,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   for ((forward, i) <- io.forward.zipWithIndex) {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
-    val tag_matches = ptag_matches
+    val tag_matches = vtag_matches
     val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w => 
       RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((validMask(w) || inflightMask(w)))
     )).asUInt.orR
