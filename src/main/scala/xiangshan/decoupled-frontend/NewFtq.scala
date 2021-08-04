@@ -829,7 +829,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.rasTop := commit_spec_meta.rasEntry
   update.specCnt := commit_spec_meta.specCnt
   update.meta := commit_meta.meta
-  
+
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
   
@@ -845,6 +845,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update_ftb_entry := ftbEntryGen.new_entry
   update.new_br_insert_pos := ftbEntryGen.new_br_insert_pos
   update.mispred_mask := ftbEntryGen.mispred_mask
+
+  // Cfi Info
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    for (i <- 0 until PredictWidth) {
+      val pc = commit_pc_bundle.startAddr + (i * instBytes).U
+      val v = commitStateQueue(commPtr.value)(i) === c_commited
+      val isBr = commit_pd.brMask(i)
+      val isJmp = commit_pd.jmpInfo.valid && commit_pd.jmpOffset === i.U
+      val isCfi = isBr || isJmp
+      val isTaken = cfiIndex_vec(commPtr.value).valid && cfiIndex_vec(commPtr.value).bits === i.U
+      val misPred = mispredict_vec(commPtr.value)(i)
+      val ghist = commit_ghist.predHist
+      val predCycle = commit_meta.meta(63, 0)
+      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)})\n")
+    }
+  }
 
   val preds = update.preds
   preds.is_br := update_ftb_entry.brValids

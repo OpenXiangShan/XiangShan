@@ -90,7 +90,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
 
-  val update_mask = LowerMask(PriorityEncoderOH(update.preds.real_taken_mask.asUInt))
+  val update_mask = LowerMask(PriorityEncoderOH(update.preds.taken_mask.asUInt))
   val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.preds.is_br(i) && update_mask(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}

@@ -109,6 +109,7 @@ class TageMeta(implicit p: Parameters) extends XSBundle with TageParams{
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val taken = Bool()
   // val scMeta = new SCMeta(EnableSC)
+  val pred_cycle = UInt(64.W) // TODO: Use Option
 }
 
 class FakeTageTable()(implicit p: Parameters) extends TageModule {
@@ -400,7 +401,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
       t.io.req.valid := io.s1_fire
       t.io.req.bits.pc := s1_pc
-      t.io.req.bits.hist := io.in.bits.ghist // TODO: Is this right?
+      t.io.req.bits.hist := io.in.bits.ghist
       t.io.req.bits.mask := VecInit(Seq.fill(numBr)(1.U(1.W))).asUInt()
       t
   }
@@ -440,7 +441,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val resp_meta = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageMeta)))
 
   io.out.resp := io.in.bits.resp_in(0)
-  io.out.s3_meta := resp_meta.asUInt // TODO: Remove io.out.bits.resp.s3.meta
+  io.out.s3_meta := resp_meta.asUInt
 
   val ftb_hit = io.in.bits.resp_in(0).s3.hit
   val ftb_entry = io.in.bits.resp_in(0).s3.ftb_entry
@@ -504,6 +505,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta(w).providerU      := s3_providerUs(w)
     resp_meta(w).providerCtr    := s3_providerCtrs(w)
     resp_meta(w).taken          := s3_tageTakens(w)
+    resp_meta(w).pred_cycle     := GTimer()
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider

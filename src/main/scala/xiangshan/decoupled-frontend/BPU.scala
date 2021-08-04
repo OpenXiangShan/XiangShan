@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 
 trait HasBPUConst extends HasXSParameter with HasIFUConst {
-  val MaxMetaLength = 240
+  val MaxMetaLength = 320
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   val numBr = 2
@@ -128,9 +128,9 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   val ghist = UInt(HistoryLength.W)
 
   val resp_in = Vec(nInputs, new BranchPredictionResp)
-  val toFtq_fire = Bool()
+  // val toFtq_fire = Bool()
 
-  val s0_all_ready = Bool()
+  // val s0_all_ready = Bool()
 }
 
 class BasePredictorOutput (implicit p: Parameters) extends XSBundle with HasBPUConst {
@@ -147,7 +147,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val in  = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
-  val flush_out = Valid(UInt(VAddrBits.W))
+  // val flush_out = Valid(UInt(VAddrBits.W))
 
   val s0_fire = Input(Bool())
   val s1_fire = Input(Bool())
@@ -182,35 +182,6 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s1_pc       = RegEnable(s0_pc, resetVector.U, io.s0_fire)
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
-
-  // io.out.valid := io.in.valid && !io.redirect.valid
-
-  // val s0_mask = io.f0_mask
-  // val s1_mask = RegNext(s0_mask)
-  // val s2_mask = RegNext(s1_mask)
-  // val s3_mask = RegNext(s2_mask)
-
-  // val s0_pc = io.f0_pc
-  // val s1_pc = RegNext(s0_pc)
-
-  val s0_update     = io.update
-  val s0_update_pc = io.update.bits.pc
-  val s0_update_valid = io.update.valid
-
-  val s1_update     = RegNext(s0_update)
-  val s1_update_idx = RegNext(s0_update_pc)
-  val s1_update_valid = RegNext(s0_update_valid)
-
-  val s0_redirect     = io.redirect
-  val s0_redirect_pc = io.redirect.bits.cfiUpdate.target
-  val s0_redirect_valid = io.redirect.valid
-
-  val s1_redirect     = RegNext(s0_redirect)
-  val s1_redirect_idx = RegNext(s0_redirect_pc)
-  val s1_redirect_valid = RegNext(s0_redirect_valid)
-
-  io.flush_out.valid := false.B
-  io.flush_out.bits := DontCare
 }
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
@@ -284,10 +255,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     s0_pc := resetVector.U
   }
 
-  when(toFtq_fire) {
+  // when(toFtq_fire) {
     // final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
     //   io.bpu_to_ftq.resp.bits.preds.taken)
-  }
+  // }
 
   val s1_flush, s2_flush, s3_flush = Wire(Bool())
   val s2_redirect, s3_redirect = Wire(Bool())
@@ -296,13 +267,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // val s2_bp_resp = predictors.io.out.resp.s2
   // val s3_bp_resp = predictors.io.out.resp.s3
 
-  predictors.io := DontCare
+  // predictors.io := DontCare
   predictors.io.in.valid := s0_fire
   predictors.io.in.bits.s0_pc := s0_pc
   predictors.io.in.bits.ghist := s1_ghist.predHist
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
-  predictors.io.in.bits.toFtq_fire := toFtq_fire
+  // predictors.io.in.bits.toFtq_fire := toFtq_fire
 
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
@@ -380,12 +351,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_takenOnBr  = resp.s1.preds.real_br_taken_mask.asUInt =/= 0.U
   val s1_predicted_ghist = s1_ghist.update(s1_sawNTBr, s1_takenOnBr)
 
-  when(s1_valid) {
-    s0_ghist := s1_predicted_ghist
-  }
+  // when(s1_valid) {
+  //   s0_ghist := s1_predicted_ghist
+  // }
 
   when(s1_fire) {
     s0_pc := resp.s1.preds.target
+    s0_ghist := s1_predicted_ghist
   }
 
   // s2
@@ -473,5 +445,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
     XSPerfAccumulate("s2_redirect", s2_redirect)
     XSPerfAccumulate("s3_redirect", s3_redirect)
+
   }
 }

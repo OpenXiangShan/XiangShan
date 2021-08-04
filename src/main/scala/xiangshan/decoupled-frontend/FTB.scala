@@ -46,7 +46,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
   val jmpValid    = Bool()
 
   // Partial Fall-Through Address
-  val pftAddr     = UInt(log2Up(PredictWidth).W) // TODO: Modify only use lowerbits
+  val pftAddr     = UInt(log2Up(PredictWidth).W)
   val carry       = Bool()
 
   val isCall      = Bool()
@@ -169,63 +169,46 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   io.s1_ready := ftbBank.io.read_pc.ready //  && !io.redirect.valid
 
-  val ftb_entry = ftbBank.io.read_resp
+  val ftb_entry = RegEnable(ftbBank.io.read_resp, io.s1_fire)
   val s1_hit = ftbBank.io.read_hits.valid
   val s2_hit = RegEnable(s1_hit, io.s1_fire)
   val writeWay = ftbBank.io.read_hits.bits
 
-  val brTargets = ftb_entry.brTargets
-  val jmpTarget = ftb_entry.jmpTarget
-
-  val fallThruAddr = getFallThroughAddr(s1_pc, ftb_entry.carry, ftb_entry.pftAddr)
+  val fallThruAddr = getFallThroughAddr(s2_pc, ftb_entry.carry, ftb_entry.pftAddr)
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out.resp := io.in.bits.resp_in(0)
 
-  val s1_latch_target = Wire(UInt(VAddrBits.W))
-  // s1_latch_target := io.in.bits.resp_in(0).s1.preds.target
-  s1_latch_target := s1_pc + (FetchWidth*4).U
-  when(s1_hit) {
-    s1_latch_target := Mux((io.in.bits.resp_in(0).s1.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-      PriorityMux(io.in.bits.resp_in(0).s1.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+  val s2_target = Wire(UInt(VAddrBits.W))
+  s2_target := s2_pc + (FetchWidth*4).U
+  when(s2_hit) {
+    s2_target := Mux((io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
 
-  val s1_latch_taken_mask = Wire(Vec(numBr, Bool()))
-  val s1_latch_real_taken_mask = Wire(Vec(numBr+1, Bool()))
-
-  // TODO: mask must is zero when ftb not hit
-  // when(s1_hit) {
-  //   s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.real_taken_mask
-  //   s1_latch_taken_mask(numBr)  := ftb_entry.jmpValid
-  // }.otherwise {
-  //   s1_latch_taken_mask     := 0.U.asTypeOf(Vec(numBr+1, Bool()))
-  // }
-  s1_latch_taken_mask     := io.in.bits.resp_in(0).s1.preds.taken_mask
-  s1_latch_real_taken_mask     := io.in.bits.resp_in(0).s1.preds.real_taken_mask
-
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
-  io.out.resp.s2.preds.taken_mask    := RegEnable(s1_latch_taken_mask, io.s1_fire)
-  io.out.resp.s2.preds.is_br         := RegEnable(ftb_entry.brValids, io.s1_fire)
-  io.out.resp.s2.preds.is_jal        := RegEnable(ftb_entry.jmpValid && !ftb_entry.isJalr, io.s1_fire)
-  io.out.resp.s2.preds.is_jalr       := RegEnable(ftb_entry.isJalr, io.s1_fire)
-  io.out.resp.s2.preds.is_call       := RegEnable(ftb_entry.isCall, io.s1_fire)
-  io.out.resp.s2.preds.is_ret        := RegEnable(ftb_entry.isRet, io.s1_fire)
-  
-  io.out.resp.s2.preds.hit           := RegEnable(s1_hit, io.s1_fire)
-  io.out.resp.s2.preds.target        := RegEnable(s1_latch_target, io.s1_fire)
-  io.out.resp.s2.pc                  := RegEnable(s1_pc, io.s1_fire) //s2_pc
-  io.out.resp.s2.hit                 := RegEnable(s1_hit, io.s1_fire)
-  io.out.resp.s2.ftb_entry           := RegEnable(ftb_entry, io.s1_fire)
+  io.out.resp.s2.preds.taken_mask    := io.in.bits.resp_in(0).s2.preds.taken_mask
+  io.out.resp.s2.preds.is_br         := ftb_entry.brValids
+  io.out.resp.s2.preds.is_jal        := ftb_entry.jmpValid && !ftb_entry.isJalr
+  io.out.resp.s2.preds.is_jalr       := ftb_entry.isJalr
+  io.out.resp.s2.preds.is_call       := ftb_entry.isCall
+  io.out.resp.s2.preds.is_ret        := ftb_entry.isRet
+
+  io.out.resp.s2.preds.hit           := s2_hit
+  io.out.resp.s2.preds.target        := s2_target
+  io.out.resp.s2.pc                  := s2_pc
+  io.out.resp.s2.hit                 := s2_hit
+  io.out.resp.s2.ftb_entry           := ftb_entry
 
   io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 
   when(s2_hit) {
-    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(ftb_entry.pftAddr, io.s1_fire)
-    io.out.resp.s2.ftb_entry.carry := RegEnable(ftb_entry.carry, io.s1_fire)
+    io.out.resp.s2.ftb_entry.pftAddr := ftb_entry.pftAddr
+    io.out.resp.s2.ftb_entry.carry := ftb_entry.carry
   }.otherwise {
-    io.out.resp.s2.ftb_entry.pftAddr := RegEnable(s1_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits) , io.s1_fire)
+    io.out.resp.s2.ftb_entry.pftAddr := s2_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits)
     io.out.resp.s2.ftb_entry.carry := true.B
   }
 
@@ -265,9 +248,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   if (debug) {
     XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.read_pc.ready)
-    XSDebug("s1_hit=%b, hit_way=%b\n", s1_hit, writeWay.asUInt)
-    XSDebug("taken_mask=%b, real_taken_mask=%b\n", s1_latch_taken_mask.asUInt, s1_latch_real_taken_mask.asUInt)
-    XSDebug("target=%x\n", s1_latch_target)
+    XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
+    XSDebug("s2_taken_mask=%b, s2_real_taken_mask=%b\n",
+      io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.preds.real_taken_mask().asUInt)
+    XSDebug("s2_target=%x\n", s2_target)
 
     XSDebug(ftb_entry.toPrintable)
     XSDebug("\n")

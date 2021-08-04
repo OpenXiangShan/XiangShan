@@ -173,7 +173,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // val target = Mux(hit_and_taken_mask =/= 0.U,
     //   PriorityMux(hit_and_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
     //   // PriorityMux(hit_and_taken_mask, Seq(hit_data.jmpTarget, hit_data.brTargets(0))),
-    //   read_pc + (FetchWidth*4).U) // TODO: Add pftAddr
+    //   read_pc + (FetchWidth*4).U)
 
     val ren = io.read_pc.valid
     io.read_resp.valid := ren
@@ -212,7 +212,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val update_new_pred = VecInit(
       (0 until numBr).map { i =>
         Mux(update_hit, satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
-          Mux(io.update_taken_mask(i), 3.U, 0.U)) // TODO: use take_mask or readl_taken_mask
+          Mux(io.update_taken_mask(i), 3.U, 0.U))
       })
 
     val update_alloc_way = {
@@ -261,9 +261,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp := io.in.bits.resp_in(0)
   // io.out.resp.valids(0) := io.out.valid
   io.out.resp.s1.pc := s1_pc
-  // io.out.bits.resp.s1.meta := read_resps.pred.asUInt() // TODO: What ubtb meta need
   io.out.s3_meta := RegEnable(RegEnable(read_resps.pred.asUInt(), io.s1_fire), io.s2_fire) // s3_meta
-  // io.out.bits.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.resp.s1.preds.taken_mask := read_resps.taken_mask
   io.out.resp.s1.preds.is_br := read_resps.brValids
@@ -300,7 +298,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // isJalr
   // isCall
   // isRet
-  update_write_metas.pred := DontCare // TODO: ???
+  update_write_metas.pred := DontCare
   update_write_metas.carry := update.ftb_entry.carry
 
   // update_write_datas.lower := u_target_lower
