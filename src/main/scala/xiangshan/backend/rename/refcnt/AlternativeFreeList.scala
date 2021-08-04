@@ -153,18 +153,18 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val (pdests_is_last, pdests_has_same_before, pdests_times) = getCompareResult(pdests_cmp)
 
   for (i <- 0 until CommitWidth) {
-    XSDebug(p"decReq:${io.dec.req(i)},dec_old_pdst:${io.dec.old_pdests(i)},dec_is_me:${io.dec.eliminatedMove(i)},dec_pdest:${io.dec.pdests(i)}\n")
+    // XSDebug(p"decReq:${io.dec.req(i)},dec_old_pdst:${io.dec.old_pdests(i)},dec_is_me:${io.dec.eliminatedMove(i)},dec_pdest:${io.dec.pdests(i)}\n")
     val preg = freeRegCandidates(i) // physical register waiting for freeing
 
     oldPdestIsUnique(i) := old_pdests_is_last(i) && !old_pdests_has_same_before(i)
     oldPdestNotUniqueButLast(i) := old_pdests_is_last(i) && old_pdests_has_same_before(i)
 
-    XSDebug(io.dec.req(i), p"port[$i]:old_pdest:${io.dec.old_pdests(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
+    // XSDebug(io.dec.req(i), p"port[$i]:old_pdest:${io.dec.old_pdests(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
     
     pdestIsUnique(i) := pdests_is_last(i) && !pdests_has_same_before(i)
     pdestNotUniqueButLast(i) := pdests_is_last(i) && pdests_has_same_before(i)
     
-    XSDebug(io.dec.req(i) && io.dec.eliminatedMove(i), p"port[$i]:pdest:${io.dec.pdests(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
+    // XSDebug(io.dec.req(i) && io.dec.eliminatedMove(i), p"port[$i]:pdest:${io.dec.pdests(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
 
     freeVec(i) := ((oldPdestIsUnique(i) && (cmtCounter(preg) === specRefCounter(preg))) || (oldPdestNotUniqueButLast(i) && (cmtCounter(preg) + old_pdests_times(i) === specRefCounter(preg)))) && io.dec.req(i)
     
@@ -176,8 +176,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
 
     updateCmtCounterVec(i) := io.dec.req(i) && (oldPdestIsUnique(i) || oldPdestNotUniqueButLast(i))
 
-    XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
-    XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(io.dec.req(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${io.dec.req(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
+    // XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
+    // XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(io.dec.req(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${io.dec.req(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
     
   
     updateArchRefCounterVec(i) := io.dec.req(i) && io.dec.eliminatedMove(i) && (pdestIsUnique(i) || pdestNotUniqueButLast(i))

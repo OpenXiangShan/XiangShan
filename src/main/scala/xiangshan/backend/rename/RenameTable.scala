@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import utils.XSDebug
 
 class RatReadPort(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(5.W))
@@ -74,4 +75,16 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   }
 
   io.debug_rdata := arch_table
+
+  // XSDebug(p"redirect:${io.redirect},flush:${io.flush},walkWen:${io.walkWen}\n")
+  //   XSDebug(p"[spec]WritePorts:" + io.specWritePorts.zipWithIndex.map{ 
+  //     case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
+  //   }.reduceLeft(_ + _) + p"\n")
+  //   XSDebug(p"[arch]WritePorts:" + io.archWritePorts.zipWithIndex.map{ 
+  //     case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
+  //   }.reduceLeft(_ + _) + p"\n")
+  XSDebug(p"[spec]WritePorts:" + io.specWritePorts.zipWithIndex.map{ case (wp, idx) => p"($idx)wen:${wp.wen},addr:${wp.addr},data:${wp.wdata} " }.reduceLeft(_ + _) + p"\n")
+  XSDebug(p"[arch]WritePorts:" + io.archWritePorts.zipWithIndex.map{ case (wp, idx) => p"($idx)wen:${wp.wen},addr:${wp.addr},data:${wp.wdata} " }.reduceLeft(_ + _) + p"\n")
+
+
 }

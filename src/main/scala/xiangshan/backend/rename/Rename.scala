@@ -129,6 +129,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val psrc_cmp = Wire(MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W))))
 
+  val intSpecWen = Wire(Vec(RenameWidth, Bool()))
+  val fpSpecWen = Wire(Vec(RenameWidth, Bool()))
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
@@ -217,15 +220,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
                      /* default */, fpFreeList.io.req.pdests(i)))) // normal fp inst
     
     // write speculative rename table
-    val intSpecWen = intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
-    intRat.io.specWritePorts(i).wen := intSpecWen
-    intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
-    intRat.io.specWritePorts(i).wdata := Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i))
+    intSpecWen(i) := intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
+    // intRat.io.specWritePorts(i).wen := intSpecWen
+    // intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
+    // intRat.io.specWritePorts(i).wdata := Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i))
     
-    val fpSpecWen = fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
-    fpRat.io.specWritePorts(i).wen := fpSpecWen
-    fpRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
-    fpRat.io.specWritePorts(i).wdata := fpFreeList.io.req.pdests(i)
+    fpSpecWen(i) := fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
+    // fpRat.io.specWritePorts(i).wen := fpSpecWen
+    // fpRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
+    // fpRat.io.specWritePorts(i).wdata := fpFreeList.io.req.pdests(i)
   }
 
   // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
@@ -278,16 +281,31 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // is valid commit req and given instruction has destination register
       val commitDestValid = io.roqCommits.valid(i) && needDestRegCommit(fp, io.roqCommits.info(i))
       XSDebug(p"isFp[${fp}]index[$i]-commitDestValid:$commitDestValid,isWalk:${io.roqCommits.isWalk}\n")
+
       /*
       I. RAT Update
        */
       
       // walk back write - restore spec state : ldest => old_pdest
-      when (commitDestValid && io.roqCommits.isWalk) {
-        rat.io.specWritePorts(i).wen := true.B
+      if (fp && i < RenameWidth) {
+        rat.io.specWritePorts(i).wen := (commitDestValid && io.roqCommits.isWalk) || fpSpecWen(i)
+        rat.io.specWritePorts(i).addr := Mux(fpSpecWen(i), uops(i).ctrl.ldest, io.roqCommits.info(i).ldest)
+        rat.io.specWritePorts(i).wdata := Mux(fpSpecWen(i), fpFreeList.io.req.pdests(i), io.roqCommits.info(i).old_pdest)
+      } else if (!fp && i < RenameWidth) {
+        rat.io.specWritePorts(i).wen := (commitDestValid && io.roqCommits.isWalk) || intSpecWen(i)
+        rat.io.specWritePorts(i).addr := Mux(intSpecWen(i), uops(i).ctrl.ldest, io.roqCommits.info(i).ldest)
+        rat.io.specWritePorts(i).wdata := Mux(intSpecWen(i), Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i)), io.roqCommits.info(i).old_pdest)
+      } else if (fp && i >= RenameWidth) {
+        rat.io.specWritePorts(i).wen := commitDestValid && io.roqCommits.isWalk
         rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
         rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
+      } else if (!fp && i >= RenameWidth) {
+        rat.io.specWritePorts(i).wen := commitDestValid && io.roqCommits.isWalk
+        rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
+        rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
+      }
 
+      when (commitDestValid && io.roqCommits.isWalk) {
         XSInfo({if(fp) p"[fp" else p"[int"} + p" walk] " +
           p"ldest:${rat.io.specWritePorts(i).addr} -> old_pdest:${rat.io.specWritePorts(i).wdata}\n")
       }
