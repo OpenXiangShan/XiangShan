@@ -166,7 +166,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   io.mispredict := (io.pred_taken ^ taken) && io.isBranch
 }
 
-class Alu(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
+class Alu(implicit p: Parameters) extends FUWithRedirect {
 
   val (src1, src2, func, pc, uop) = (
     io.in.bits.src(0),

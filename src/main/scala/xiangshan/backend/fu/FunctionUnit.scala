@@ -75,6 +75,8 @@ abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSMod
 
 }
 
+abstract class FUWithRedirect(len: Int = 64)(implicit p: Parameters) extends FunctionUnit(len: Int) with HasRedirectOut
+
 trait HasPipelineReg {
   this: FunctionUnit =>
 
