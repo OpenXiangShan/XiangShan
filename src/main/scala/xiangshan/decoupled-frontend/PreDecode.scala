@@ -74,7 +74,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val hasLastHalf   = Bool()
-  val instrRange   = Vec(16, Bool())
+  val instrRange   = Vec(PredictWidth, Bool())
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{

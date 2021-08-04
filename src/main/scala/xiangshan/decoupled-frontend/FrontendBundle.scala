@@ -23,15 +23,15 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
 }
 
 class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
-  val pc           = Vec(16, UInt(VAddrBits.W))
-  val pd           = Vec(16, new PreDecodeInfo) // TODO: redefine Predecode
+  val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pd           = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
   val ftqIdx       = new FtqPtr
-  val ftqOffset    = UInt(log2Ceil(16).W)
+  val ftqOffset    = UInt(log2Ceil(PredictWidth).W)
   val misOffset    = ValidUndirectioned(UInt(4.W))
   val cfiOffset    = ValidUndirectioned(UInt(4.W))
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
-  val instrRange   = Vec(16, Bool())
+  val instrRange   = Vec(PredictWidth, Bool())
 }
 
 class Exception(implicit p: Parameters) extends XSBundle {
@@ -39,14 +39,14 @@ class Exception(implicit p: Parameters) extends XSBundle {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs    = Vec(16, UInt(32.W))
-  val valid     = UInt(16.W)
-  val pd        = Vec(16, new PreDecodeInfo)
-  val pc        = Vec(16, UInt(VAddrBits.W))
-  val foldpc    = Vec(16, UInt(MemPredPCWidth.W))
+  val instrs    = Vec(PredictWidth, UInt(32.W))
+  val valid     = UInt(PredictWidth.W)
+  val pd        = Vec(PredictWidth, new PreDecodeInfo)
+  val pc        = Vec(PredictWidth, UInt(VAddrBits.W))
+  val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   //val exception = new Exception
   val ftqPtr       = new FtqPtr
-  val ftqOffset    = Vec(16, ValidUndirectioned(UInt(log2Ceil(16).W)))
+  val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
 
 }
 

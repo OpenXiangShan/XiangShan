@@ -31,7 +31,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val useLHist = true
 
   val debug = true
-  // val resetVector = 0x10000000L//TODO: set reset vec
+  val resetVector = 0x80000000L//TODO: set reset vec
   // TODO: Replace log2Up by log2Ceil
 }
 

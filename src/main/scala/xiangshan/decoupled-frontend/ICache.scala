@@ -8,7 +8,7 @@ import xiangshan.cache._
 import utils._
 
 case class ICacheParameters(
-    nSets: Int = 64,
+    nSets: Int = 128,
     nWays: Int = 4,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
@@ -25,70 +25,21 @@ case class ICacheParameters(
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst with HasInstrMMIOConst {
+trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
   val cacheParams = icacheParameters
-  val groupAlign = log2Up(cacheParams.blockBytes)
-  val packetInstNum = packetBytes/instBytes
-  val packetInstNumBit = log2Up(packetInstNum)
-  val ptrHighBit = log2Up(groupBytes) - 1
-  val ptrLowBit = log2Up(packetBytes)
-  val encUnitBits = 8
-  val bankRows = 2
-  val bankBits = bankRows * rowBits
-  val nBanks = blockRows/bankRows
-  val bankUnitNum = (bankBits / encUnitBits)
-
-  def cacheID = 0
-  def insLen = if (HasCExtension) 16 else 32
-  def RVCInsLen = 16
-  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
-  def plruAccessNum = 2  //hit and miss
-  // def encRowBits = cacheParams.dataCode.width(rowBits)
-  // def encTagBits = cacheParams.tagCode.width(tagBits)
-
-  //
-  def encMetaBits = cacheParams.tagCode.width(tagBits)
-  def metaEntryBits = encMetaBits
-  def encDataBits = cacheParams.dataCode.width(encUnitBits)
-  def dataEntryBits = encDataBits * bankUnitNum
-  // def encDataBits
-  // def encCacheline
-
-
+  
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
-  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
-  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
-  // this is a VIPT L1 cache
-  require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
-}
-
-trait Temperary {
-  // val idxBits = log2Ceil(nSets)
-  // val wayBits = log2Ceil(nWays)
-  val offBits = log2Ceil(64)
-  // val tagBits = 39 - idxBits - offBits
-  // val bbBits  = 5
-  // def plruAccessNum = 2  //hit and miss
-
-  // val nSets   = 128           //32 KB
-  // val nWays   = 4
-
-  // val nMissEntries = 2
-
 }
 
 abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
   with HasICacheParameters
-  with Temperary 
 
 abstract class ICacheModule(implicit p: Parameters) extends XSModule
   with HasICacheParameters
-  with Temperary 
 
 abstract class ICacheArray(implicit p: Parameters) extends XSModule
   with HasICacheParameters
-  with Temperary 
 
 class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle 
 {
@@ -230,11 +181,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 abstract class ICacheMissQueueModule(implicit p: Parameters) extends XSModule
   with HasICacheParameters 
-  with Temperary 
 
 abstract class ICacheMissQueueBundle(implicit p: Parameters) extends XSBundle
   with HasICacheParameters
-  with Temperary 
 
 class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 {

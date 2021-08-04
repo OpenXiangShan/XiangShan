@@ -17,23 +17,11 @@ trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
 }
 
 trait HasIFUConst extends HasXSParameter {
-  val resetVector = 0x80000000L//TODO: set reset vec
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
-  val groupBytes = 64 // correspond to cache line size
-  val groupOffsetBits = log2Ceil(groupBytes)
-  val groupWidth = groupBytes / instBytes
-  val packetBytes = PredictWidth * instBytes
-  val packetOffsetBits = log2Ceil(packetBytes)
-  def offsetInPacket(pc: UInt) = pc(packetOffsetBits-1, instOffsetBits)
-  def packetIdx(pc: UInt) = pc(VAddrBits-1, log2Ceil(packetBytes))
-  def groupAligned(pc: UInt)  = align(pc, groupBytes)
-  def packetAligned(pc: UInt) = align(pc, packetBytes)
-  def mask(pc: UInt): UInt = ((~(0.U(PredictWidth.W))) << offsetInPacket(pc))(PredictWidth-1,0)
-  def snpc(pc: UInt): UInt = packetAligned(pc) + packetBytes.U
-
-  val enableGhistRepair = true
-  val IFUDebug = true
+  // def groupAligned(pc: UInt)  = align(pc, groupBytes)
+  // def packetAligned(pc: UInt) = align(pc, packetBytes)
 }
+
 class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
 }
@@ -68,28 +56,29 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
-  val data          = Vec(17, UInt(16.W))   //34Bytes 
+  val data          = if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))  
   val startAddr     = UInt(VAddrBits.W)
   val fallThruAddr  = UInt(VAddrBits.W)
-  val ftqOffset     = Valid(UInt(log2Ceil(32).W))
+  val ftqOffset     = Valid(UInt(log2Ceil(PredictWidth).W))
   val target        = UInt(VAddrBits.W)
   val instValid     = Bool() 
   val lastHalfMatch = Bool()
   val oversize      = Bool()
-  val startRange     = Vec(16, Bool())
+  val startRange     = Vec(PredictWidth, Bool())
 }
 
-class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICacheParameters
+class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 {
+  println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val (toMeta, toData, meta_resp, data_resp) =  (io.icacheInter.toIMeta, io.icacheInter.toIData, io.icacheInter.fromIMeta, io.icacheInter.fromIData)
   val (toMissQueue, fromMissQueue) = (io.icacheInter.toMissQueue, io.icacheInter.fromMissQueue)
   val (toITLB, fromITLB) = (io.iTLBInter.req, io.iTLBInter.resp)
   
-  def isCrossLineReq(start: UInt, end: UInt): Bool = start(offBits) ^ end(offBits)
+  def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
-  def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(offBits - 1, 1) === 0.U
+  def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(blockOffBits - 1, 1) === 0.U
 
 
   //---------------------------------------------
@@ -174,8 +163,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(Some("random"),nWays,nSets/2))
   val f1_victim_masks = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(f1_vSetIdx(i)))})
 
-  val touch_sets = Seq.fill(2)(Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets/2).W))))
-  val touch_ways = Seq.fill(2)(Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
+  val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
+  val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
    
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
   
@@ -326,21 +315,30 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
     if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
-  //val f2_bb_valids            = (Fill(16, 1.U(1.W)) >> (~getBasicBlockIdx(f2_ftq_req.fallThruAddr, f2_ftq_req.startAddr))) | (Fill(16, f2_ftq_req.oversize))
-  val f2_ldreplay_valids      = Fill(16, !f2_ftq_req.ldReplayOffset.valid) | Fill(16, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
-
-  val f2_jump_valids          = Fill(16, !preDecoderOut.cfiOffset.valid)   | Fill(16, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
+  
+  val f2_ldreplay_valids      = Fill(PredictWidth, !f2_ftq_req.ldReplayOffset.valid) | Fill(PredictWidth, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
+  val f2_jump_valids          = Fill(PredictWidth, !preDecoderOut.cfiOffset.valid)   | Fill(PredictWidth, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
   val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
 
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
-    val result   = Wire(Vec(17, UInt(16.W)))
-    val dataVec  = cacheline.asTypeOf(Vec(64, UInt(16.W)))
-    val startPtr = Cat(0.U(1.W), start(offBits-1, 1))
-    (0 until 17).foreach( i =>
-      result(i) := dataVec(startPtr + i.U)
-    )
-    result
+    if(HasCExtension){
+      val result   = Wire(Vec(PredictWidth + 1, UInt(16.W)))
+      val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 2, UInt(16.W)))
+      val startPtr = Cat(0.U(1.W), start(blockOffBits-1, 1))
+      (0 until PredictWidth + 1).foreach( i =>
+        result(i) := dataVec(startPtr + i.U)
+      )
+      result 
+    } else {
+      val result   = Wire(Vec(PredictWidth, UInt(32.W)) )
+      val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 4, UInt(32.W)))
+      val startPtr = Cat(0.U(1.W), start(blockOffBits-1, 2))
+      (0 until PredictWidth).foreach( i =>
+        result(i) := dataVec(startPtr + i.U)
+      )
+      result 
+    }
   }
 
   val f2_lastHalf = RegInit(0.U.asTypeOf(new LastHalfInfo))
@@ -354,7 +352,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with Temperary with HasICa
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.oversize      :=  f2_ftq_req.oversize
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-  preDecoderIn.startRange    :=  f2_ldreplay_valids.asTypeOf(Vec(16, Bool()))
+  preDecoderIn.startRange    :=  f2_ldreplay_valids.asTypeOf(Vec(PredictWidth, Bool()))
 
 
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix
