@@ -489,17 +489,22 @@ package object xiangshan {
     UncertainLatency()
   )
 
-  val stuCfg = FuConfig(
+  val staCfg = FuConfig(
     null,
     null,
-    FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
+  )
+
+  val stdCfg = FuConfig(
+    null, null, FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
   )
 
   val mouCfg = FuConfig(
     null,
     null,
-    FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
@@ -515,5 +520,6 @@ package object xiangshan {
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }

@@ -120,7 +120,7 @@ class Scheduler(
     require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
     if (memRsEntries.isEmpty) 0 else memRsEntries.max
   }
-  val numSTDPorts = reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
+  val numSTDPorts = 0//reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
 
   lazy val module = new SchedulerImp(this)
 
@@ -204,9 +204,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val enq = io.allocate.map(_.bits.psrc)
     // TODO: for store, fp is located at the second operand
     // currently use numInt>0 && numFp>0. should make this configurable
-    val containsStore = outer.dpFuConfigs.map(_.contains(stuCfg))
+    val containsStore = outer.dpFuConfigs.map(_.contains(staCfg))
     enq.zip(numRead).zip(containsStore).map{ case ((src, num), hasStore) =>
-      if (hasStore && num == 1) Seq(src(num)) else src.take(num)
+      src.take(num)
     }.fold(Seq())(_ ++ _)
   }
   def readIntRf: Seq[UInt] = extraReadRf(outer.numDpPortIntRead)
@@ -285,7 +285,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       rs.io_feedback.get.isFirstIssue <> feedback.map(_.isFirstIssue)
       feedbackIdx += width
     }
-    if (rs.io_store.isDefined) {
+    if (false && rs.io_store.isDefined) {
       val width = rs.io_store.get.stData.length
       rs.io_store.get.stData <> stData.slice(stDataIdx, stDataIdx + width)
       stDataIdx += width
@@ -344,14 +344,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         val mod = rs_all(rs).module
         val target = mod.io.srcRegValue(idx)
         // dirty code for store
+        val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
+        val fromFp = if (numIntRfPorts > 0) isFp else false.B
         if (numIntRfPorts > 0) {
-          require(numFpRfPorts == 1)
-          require(numIntRfPorts == 2)
-          when(RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(1) === SrcType.fp)) {
-            target(1) := fpRfPorts(0)
-          }
+          require(numFpRfPorts == 1 && numIntRfPorts == 1)
         }
-        else {
+        when (fromFp) {
           target := fpRfPorts.take(target.length)
         }
       }

@@ -69,7 +69,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     exuCfg match {
       case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
-      case StExeUnitCfg => params.isStore = true
+      case StaExeUnitCfg => params.isStore = true
       case MulDivExeUnitCfg => params.isMul = true
       case _ =>
     }
@@ -77,7 +77,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     if (exuCfg == JumpCSRExeUnitCfg) {
       params.numSrc = 2
     }
-    if (exuCfg == StExeUnitCfg || exuCfg == LdExeUnitCfg) {
+    if (exuCfg == StaExeUnitCfg || exuCfg == LdExeUnitCfg) {
       params.hasFeedback = true
       params.checkWaitBit = true
     }
