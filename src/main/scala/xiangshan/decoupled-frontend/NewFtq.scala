@@ -266,7 +266,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   // vec(i) means new br will be inserted BEFORE old br(i)
   val new_br_insert_onehot = VecInit((0 until numBr).map{
     i => i match {
-      case 0 => oe.brValids(0) && new_br_offset < oe.brOffset(0)
+      case 0 => !oe.brValids(0) || new_br_offset < oe.brOffset(0)
       case idx => oe.brValids(idx-1) && new_br_offset > oe.brOffset(idx-1) &&
         (!oe.brValids(idx) || new_br_offset < oe.brOffset(idx))
     }
