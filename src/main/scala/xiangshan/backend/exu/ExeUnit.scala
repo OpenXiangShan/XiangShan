@@ -21,6 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import utils.XSDebug
 import xiangshan._
+import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
@@ -70,6 +71,16 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
     i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr_frm)
   }
 
+  if (config.fuConfigs.contains(stdCfg)) {
+    val std = supportedFunctionUnits.collectFirst {
+      case s: Std => s
+    }.get
+    stData.get.valid := std.io.out.valid
+    stData.get.bits.uop := std.io.out.bits.uop
+    stData.get.bits.data := std.io.out.bits.data
+    io.out.valid := false.B
+    io.out.bits := DontCare
+  }
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out

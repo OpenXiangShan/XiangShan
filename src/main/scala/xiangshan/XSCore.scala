@@ -93,7 +93,8 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     ),
     Seq(
       (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpCSRExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
-      (JumpCSRExeUnitCfg, 1, Seq(), Seq())
+      (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
+      (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
     ),
     Seq(
       (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
@@ -101,8 +102,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     ),
     Seq(
       (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
-      (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
-      (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
+      (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
     )
   )
 
@@ -130,7 +130,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val int1DpPorts = (0 until 2*exuParameters.MduCnt).map(i => {
     if (i < exuParameters.JmpCnt) Seq((0, i), (1, i))
     else Seq((0, i))
-  })
+  }) ++ (0 until exuParameters.StuCnt).map(i => Seq((2, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
     if (i < 2*exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((1, i))
@@ -139,16 +139,14 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     Seq((0, 0)),
     Seq((0, 1)),
     Seq((1, 0)),
-    Seq((1, 1)),
-    Seq((2, 0)),
-    Seq((2, 1))
+    Seq((1, 1))
   )
   val dispatchPorts = Seq(intDpPorts, int1DpPorts, fpDpPorts, lsDpPorts)
 
   val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).reverse.drop(1).reverseMap { case ((sche, disp), other) =>
     LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other))
   }
-  
+
   val memScheduler = LazyModule(new Scheduler(schedulePorts.last, dispatchPorts.last, intWbPorts, fpWbPorts, otherFastPorts.last))
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
@@ -250,7 +248,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val fpFastUop1 = outer.fpArbiter.allConnections.map(c => fpFastUop(c.head))
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
-  ctrlBlock.io.enqIQ <> exuBlocks(0).io.allocate ++ exuBlocks(2).io.allocate ++ memScheduler.io.allocate.take(4)
+  ctrlBlock.io.enqIQ <> exuBlocks(0).io.allocate ++ exuBlocks(2).io.allocate ++ memScheduler.io.allocate
   for (i <- 0 until exuParameters.AluCnt) {
     val rsIn = VecInit(Seq(exuBlocks(0).io.allocate(i), exuBlocks(1).io.allocate(i)))
     val func1 = (op: MicroOp) => outer.exuBlocks(0).scheduler.canAccept(op.ctrl.fuType)
@@ -258,7 +256,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
     rsIn <> arbiterOut
   }
-  memScheduler.io.allocate.drop(4).zip(ctrlBlock.io.enqIQ.takeRight(2)).zipWithIndex.foreach{ case ((sch, enq), i) =>
+  exuBlocks(1).io.allocate.takeRight(2).zip(ctrlBlock.io.enqIQ.takeRight(2)).zipWithIndex.foreach{ case ((sch, enq), i) =>
     sch.valid := enq.valid
     sch.bits := enq.bits
     sch.bits.psrc(0) := enq.bits.psrc(1)
@@ -268,7 +266,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memScheduler.io.redirect <> ctrlBlock.io.redirect
   memScheduler.io.flush <> ctrlBlock.io.flush
-  memBlock.io.issue <> memScheduler.io.issue.take(4)
+  memBlock.io.issue <> memScheduler.io.issue
   memScheduler.io.writeback <> rfWriteback
   memScheduler.io.fastUopIn <> allFastUop1
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc

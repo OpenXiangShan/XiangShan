@@ -22,6 +22,7 @@ import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -363,6 +364,7 @@ package object xiangshan {
   def f2iGen(p: Parameters) = new FPToInt()(p)
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
+  def stdGen(p: Parameters) = new Std()(p)
 
   def f2iSel(x: FunctionUnit): Bool = {
     x.io.in.bits.uop.ctrl.rfWen
@@ -497,7 +499,7 @@ package object xiangshan {
   )
 
   val stdCfg = FuConfig(
-    null, null, FuType.stu, 1, 1,
+    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
     writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
   )
 

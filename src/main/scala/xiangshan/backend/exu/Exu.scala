@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu._
+import xiangshan.mem.StoreDataBundle
 
 case class ExuParameters
 (
@@ -106,6 +107,7 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
   val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
   val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
+  val stData = if (config == StdExeUnitCfg) Some(ValidIO(new StoreDataBundle)) else None
 
   for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
 

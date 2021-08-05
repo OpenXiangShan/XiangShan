@@ -27,8 +27,14 @@ import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
-import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
+import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
+
+class Std(implicit p: Parameters) extends FunctionUnit {
+  io.out.valid := io.in.valid
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.data := io.in.bits.src(0)
+}
 
 class MemBlock()(implicit p: Parameters) extends LazyModule {
 
