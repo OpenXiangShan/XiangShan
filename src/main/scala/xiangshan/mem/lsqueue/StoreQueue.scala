@@ -370,7 +370,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.uncache.resp.ready := true.B
 
   // (4) writeback to ROB (and other units): mark as writebacked
-  val hasInflightMMIO = RegInit(false.B)
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
@@ -381,9 +380,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
+  // Remove MMIO inst from store queue after MMIO request is being sent
+  // That inst will be traced by uncache state machine
   when (io.mmioStout.fire()) {
     allocated(deqPtr) := false.B
-    hasInflightMMIO := true.B
   }
 
   /**
@@ -392,13 +392,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * (1) When store commits, mark it as commited.
     * (2) They will not be cancelled and can be sent to lower level.
     */
-  XSError(hasInflightMMIO && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
-  // when any instruction commits, reset hasInflightMMIO flag
-  when (commitCount > 0.U) {
-    hasInflightMMIO := false.B
-  }
+  XSError(uncacheState === s_wait && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
+  XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
+   "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
-    when (commitCount > i.U && !hasInflightMMIO) {
+    when (commitCount > i.U && uncacheState === s_idle) { // MMIO inst is not in progress
       commited(cmtPtrExt(i).value) := true.B
     }
   }
