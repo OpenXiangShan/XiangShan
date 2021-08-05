@@ -19,6 +19,7 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 
 class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
@@ -60,24 +61,73 @@ class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 }
 
-class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends XSModule {
-
+class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
 
+  // NOTE:
+  // 0 for direct connect (exclusive);
+  // 1 for shared connect but non-blocked;
+  // other for shared and may blocked
+  val exclusivePorts = priorities.zipWithIndex.filter(_._1 == 0).map(_._2)
+  val sharedPorts = priorities.zipWithIndex.filter(_._1 == 1).map(_._2)
+  val otherPorts = priorities.zipWithIndex.filter(_._1 > 1).map(_._2)
+
+  val numInPorts = cfgs.length
+  val numOutPorts = exclusivePorts.length + sharedPorts.length
+  require(numOutPorts <= numOut)
+  if (numOutPorts < numOut) {
+    println(s"Warning: only $numOutPorts of $numOut ports are used!")
+  }
+
+  def splitN(in: Seq[Int], n: Int): Seq[Seq[Int]] = {
+    if (n == 0) {
+      Seq()
+    }
+    else if (n == 1) {
+      Seq(in)
+    } else {
+      if (in.size < n) {
+        Seq(in) ++ Seq.fill(n - 1)(Seq())
+      } else {
+        val m = in.size / n
+        in.take(m) +: splitN(in.drop(m), n - 1)
+      }
+    }
+  }
+
+  val otherConnections = splitN(otherPorts, sharedPorts.length)
+  val sharedConnections = sharedPorts.zip(otherConnections).map{ case (s, o) => s +: o }
+  val allConnections: Seq[Seq[Int]] = exclusivePorts.map(Seq(_)) ++ sharedConnections
+
+  val sb = new StringBuffer(s"\n${if(isFp) "fp" else "int"} wb arbiter:\n")
+  for ((port, i) <- exclusivePorts.zipWithIndex) {
+    sb.append(s"[ ${cfgs(port).name} ] -> out #$i\n")
+  }
+  for ((port, i) <- sharedPorts.zipWithIndex) {
+    sb.append(s"[ ${cfgs(port).name} ")
+    val useArb = otherConnections(i).nonEmpty
+    for (req <- otherConnections(i)) {
+      sb.append(s"${cfgs(req).name} ")
+    }
+    sb.append(s"] -> ${if(useArb) "arb ->" else ""} out #${exclusivePorts.size + i}\n")
+  }
+  println(sb)
+
+  lazy val module = new WbImp(this)
+}
+
+class WbImp(outer: Wb)(implicit p: Parameters) extends LazyModuleImp(outer) {
+
   val io = IO(new Bundle() {
-    val in = Vec(cfgs.size, Flipped(DecoupledIO(new ExuOutput)))
-    val out = Vec(numOut, ValidIO(new ExuOutput))
+    val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput)))
+    val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
   })
 
-  val directConnect = io.in.zip(priorities).filter(x => x._2 == 0).map(_._1)
-  val mulReq = io.in.zip(priorities).filter(x => x._2 == 1).map(_._1)
-  val otherReq = io.in.zip(priorities).filter(x => x._2 > 1).map(_._1)
-  // NOTE: 0 for direct connect; 1 for shared connect but non-blocked; other for shared and may blocked
+  val exclusiveIn = outer.exclusivePorts.map(io.in(_))
+  val sharedIn = outer.sharedPorts.map(io.in(_))
 
-  val portUsed = directConnect.size + mulReq.size
-  require(portUsed <= numOut)
-
-  io.out.take(directConnect.size).zip(directConnect).foreach{
+  // exclusive ports are connected directly
+  io.out.take(exclusiveIn.size).zip(exclusiveIn).foreach{
     case (o, i) =>
       val arb = Module(new ExuWbArbiter(1))
       arb.io.in.head <> i
@@ -86,52 +136,14 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameter
       arb.io.out.ready := true.B
   }
 
-  def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
-    if(n == 0) return Seq()
-    if(n == 1){
-      Seq(Some(in))
-    } else {
-      if(in.size < n ){
-        Seq(Some(in)) ++ Seq.fill(n-1)(None)
-      } else {
-        val m = in.size / n
-        Some(in.take(m)) +: splitN(in.drop(m), n-1)
-      }
-    }
-  }
-
-  val arbReq = splitN(
-    otherReq,
-    mulReq.size
-  )
-
-  for(i <- mulReq.indices) {
-    val out = io.out(directConnect.size + i)
-    val other = arbReq(i).getOrElse(Seq())
-    val arb = Module(new ExuWbArbiter(1+other.size))
-    arb.io.in <> mulReq(i) +: other
+  // shared ports are connected with an arbiter
+  for (i <- sharedIn.indices) {
+    val out = io.out(exclusiveIn.size + i)
+    val shared = outer.sharedConnections(i).map(io.in(_))
+    val arb = Module(new ExuWbArbiter(shared.size))
+    arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
     arb.io.out.ready := true.B
   }
-
-  if(portUsed < numOut){
-    println(s"Warning: ${numOut - portUsed} ports are not used!")
-    io.out.drop(portUsed).foreach(_ <> DontCare)
-  }
-
-  val sb = new StringBuffer(s"\n${if(isFp) "fp" else "int"} wb arbiter:\n")
-  for((conn, i) <- directConnect.zipWithIndex){
-    sb.append(s"[ ${cfgs(io.in.indexOf(conn)).name} ] -> out #$i\n")
-  }
-  for(i <- mulReq.indices){
-    sb.append(s"[ ${cfgs(io.in.indexOf(mulReq(i))).name} ")
-    val useArb = arbReq(i).nonEmpty
-    for(req <- arbReq(i).getOrElse(Nil)){
-      sb.append(s"${cfgs(io.in.indexOf(req)).name} ")
-    }
-    sb.append(s"] -> ${if(useArb) "arb ->" else ""} out #${directConnect.size + i}\n")
-  }
-  println(sb)
-
 }
