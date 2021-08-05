@@ -64,7 +64,6 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val instValid     = Bool() 
   val lastHalfMatch = Bool()
   val oversize      = Bool()
-  val startRange     = Vec(PredictWidth, Bool())
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
@@ -184,8 +183,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_ftq_req      = RegEnable(next = f1_ftq_req, enable = f1_fire)
   val f2_situation    = RegEnable(next = f1_situation, enable=f1_fire)
   val f2_doubleLine   = RegEnable(next = f1_doubleLine, enable=f1_fire)
-  val f2_isLoadReplay = f2_ftq_req.ldReplayOffset.valid
-  val f2_ldReplayIdx  = f2_ftq_req.ldReplayOffset.bits
   val f2_fire         = io.toIbuffer.fire()
 
   f1_ready := f2_ready || !f1_valid
@@ -316,7 +313,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
   
-  val f2_ldreplay_valids      = Fill(PredictWidth, !f2_ftq_req.ldReplayOffset.valid) | Fill(PredictWidth, 1.U(1.W)) << (f2_ftq_req.ldReplayOffset.bits)
   val f2_jump_valids          = Fill(PredictWidth, !preDecoderOut.cfiOffset.valid)   | Fill(PredictWidth, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
   val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
 
@@ -352,7 +348,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.oversize      :=  f2_ftq_req.oversize
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-  preDecoderIn.startRange    :=  f2_ldreplay_valids.asTypeOf(Vec(PredictWidth, Bool()))
 
 
   predecodeOutValid       := (f2_valid && f2_hit) || miss_all_fix

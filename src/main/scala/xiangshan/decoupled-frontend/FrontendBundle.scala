@@ -10,7 +10,6 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr    = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
   val ftqIdx       = new FtqPtr
-  val ldReplayOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val target       = UInt(VAddrBits.W)
   val oversize     = Bool()

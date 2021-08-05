@@ -85,7 +85,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   })
 
   val instValid = io.in.instValid 
-  val startRange = io.in.startRange
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val pcEnd     = io.in.fallThruAddr
@@ -122,7 +121,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
     val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
     
-    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && startRange(i)
+    validStart(i)   := (lastIsValidEnd || !HasCExtension.B)
     validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -176,7 +175,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
 
-  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
+  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
   realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + (PredictWidth * 2).U), pcEnd)
 
 

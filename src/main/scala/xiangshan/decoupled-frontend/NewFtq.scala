@@ -354,11 +354,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val allowBpuIn, allowToIfu = WireInit(false.B)
   val flushToIfu = !allowToIfu
-  // all redirect except load replay
-  allowBpuIn := !ifuFlush && !roqFlush.valid &&
-                !(stage2Redirect.valid && !isLoadReplay(stage2Redirect)) &&
-                !(stage3Redirect.valid && !isLoadReplay(stage3Redirect))
-  
+  allowBpuIn := !ifuFlush && !roqFlush.valid && !stage2Redirect.valid && !stage3Redirect.valid
   allowToIfu := !ifuFlush && !roqFlush.valid && !stage2Redirect.valid && !stage3Redirect.valid
   
   val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -420,9 +416,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val f_to_send :: f_sent :: Nil = Enum(2)
   val entry_fetch_status = RegInit(VecInit(Seq.fill(FtqSize)(f_sent)))
 
-  val l_invalid :: l_replaying :: Nil = Enum(2)
-  val entry_replay_status = RegInit(VecInit(Seq.fill(FtqSize)(l_invalid)))
-
   val h_not_hit :: h_false_hit :: h_hit :: Nil = Enum(3)
   val entry_hit_status = RegInit(VecInit(Seq.fill(FtqSize)(h_not_hit)))
 
@@ -441,7 +434,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
   val set_fetch_status_between = set_status_between(entry_fetch_status)(_, _, _)
   val set_commit_status_between = set_status_between(commitStateQueue)(_, _, _)
-  val set_replay_status_between = set_status_between(entry_replay_status)(_, _, _)
 
   when (enq_fire) {
     val enqIdx = bpuPtr.value
@@ -450,7 +442,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
     entry_fetch_status(enqIdx) := f_to_send
     commitStateQueue(enqIdx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
-    entry_replay_status(enqIdx) := l_invalid // may be useless
     entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
     enq_cfiIndex.valid := preds.real_taken_mask.asUInt.orR
     // when no takens, set cfiIndex to PredictWidth-1
@@ -472,12 +463,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifu_wb_idx = pdWb.bits.ftqIdx.value
   // read ports:                                                         commit update
   val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, 1, 1))
-  ftq_pd_mem.io.wen(0) := ifu_wb_valid && entry_replay_status(ifu_wb_idx) =/= l_replaying
+  ftq_pd_mem.io.wen(0) := ifu_wb_valid
   ftq_pd_mem.io.waddr(0) := pdWb.bits.ftqIdx.value
   ftq_pd_mem.io.wdata(0).fromPdWb(pdWb.bits)
 
   val hit_pd_valid = entry_hit_status(ifu_wb_idx) === h_hit &&
-                     entry_replay_status(ifu_wb_idx) =/= l_replaying &&
                      ifu_wb_valid
   val hit_pd_mispred = hit_pd_valid && pdWb.bits.misOffset.valid
   val hit_pd_mispred_reg = RegNext(hit_pd_mispred, init=false.B)
@@ -492,7 +482,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     (commitStateQueue(ifu_wb_idx) zip comm_stq_wen).map{
       case (qe, v) => when (v) { qe := c_valid }
     }
-    entry_replay_status(ifu_wb_idx) := l_invalid
   }
 
   ifuWbPtr := ifuWbPtr + ifu_wb_valid
@@ -523,10 +512,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_hit_status(wb_idx_reg) := h_false_hit
   }
 
-  XSError(ifu_wb_valid && pdWb.bits.misOffset.valid && entry_replay_status(ifu_wb_idx) === l_replaying,
-    p"unexpected predecode mispredict detected at idx: ${ifu_wb_idx} startAddr: ${Hexadecimal(pdWb.bits.pc(0))} " +
-    p"misOffset: ${pdWb.bits.misOffset.bits}\n")
-
 
   // ****************************************************************
   // **************************** to ifu ****************************
@@ -551,15 +536,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // read pc and target
   ftq_pc_mem.io.raddr.init.last := ifuPtr.value
 
-  val loadReplayOffset = RegInit(0.U.asTypeOf(Valid(UInt(log2Ceil(PredictWidth).W))))
   when (to_buf_fire) {
     ifu_req_buf.bits.ftqIdx := ifuPtr
-    ifu_req_buf.bits.ldReplayOffset := loadReplayOffset
     ifu_req_buf.bits.target := update_target(ifuPtr.value)
     ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-    when (loadReplayOffset.valid) {
-      loadReplayOffset.valid := false.B
-    }
   }
 
   when (RegNext(to_buf_fire)) {
@@ -722,52 +702,23 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   )
   
   // when redirect, we should reset ptrs and status queues
-
-  // For normal redirects, the inst casusing redirect itself
-  // should not be flushed (called flushAfter), we should reset
-  // both bpuPtr and ifuPtr, and send redirect request to both module.
-
-  // However, for load replays, the load instruction itself should be
-  // re-fetched and re-executed. In this case we only send another
-  // fetch request to ifu, fetching instructions starting from this load,
-  // resetting ifuPtr. We do not trigger a redirect for bpu, and we reuse
-  // previously predicted results to provide the following fetch stream
-
-
   when(redirectVec.map(r => r.valid).reduce(_||_)){
     val r = PriorityMux(redirectVec.map(r => (r.valid -> r)))
     val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
     val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, r.flushItSelf)
     val next = idx + 1.U
-    when (!flushItSelf) {
-      bpuPtr := next
-      ifuPtr := next
-      ifuWbPtr := next
-      when (notIfu) {
-        commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
-          when(i.U > offset){
-            s := c_invalid
-          }
-        })
-        when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
-          commitStateQueue(next.value).foreach(_ := c_invalid)
+    bpuPtr := next
+    ifuPtr := next
+    ifuWbPtr := next
+    when (notIfu) {
+      commitStateQueue(idx.value).zipWithIndex.foreach({ case (s, i) =>
+        when(i.U > offset || i.U === offset && flushItSelf){
+          s := c_invalid
         }
+      })
+      when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
+        commitStateQueue(next.value).foreach(_ := c_invalid)
       }
-      set_replay_status_between(ifuPtr, FtqPtr.inverse(ifuPtr), l_invalid) // set all to invalid
-      loadReplayOffset.valid := false.B
-    // load replay
-    }.otherwise {
-      ifuPtr := idx
-      ifuWbPtr := idx
-      // set fetch status of entries between ifuPtr and bpuPtr to f_to_send
-      set_fetch_status_between(idx, ifuPtr, f_to_send)
-      // set commit state of entries between ifuWbPtr and bpuPtr to c_invalid
-      set_commit_status_between(idx+1.U, ifuWbPtr, VecInit(Seq.fill(PredictWidth)(c_invalid)))
-      // set replay status
-      set_replay_status_between(idx, ifuWbPtr, l_replaying)
-      // set load replay offset
-      loadReplayOffset.valid := true.B
-      loadReplayOffset.bits := offset
     }
   }
 
@@ -786,11 +737,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** to bpu ****************************
   // ****************************************************************
   
-  // do not send redirect to bpu when load replay
-  io.toBpu.redirect <> 
-    Mux(fromBackendRedirect.valid && !fromBackendRedirect.bits.flushItself,
-      fromBackendRedirect,
-      ifuRedirectToBpu)
+  io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
   
   val do_commit = Wire(Bool())
   val canCommit = commPtr =/= ifuWbPtr && !do_commit &&
