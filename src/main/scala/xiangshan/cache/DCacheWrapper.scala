@@ -155,7 +155,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
-  val metaArray = Module(new DuplicatedMetaArray)
+  val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
   /*
   dataArray.dump()
   metaArray.dump()
@@ -187,17 +187,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMetaReadPort = 0
   val LoadPipeMetaReadPort = 1
 
-  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
+  metaArray.io.read(LoadPipelineWidth) <> mainPipe.io.meta_read
+  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth)
 
-  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(LoadPipelineWidth - 1).io.meta_read
-  metaReadArb.io.in(MainPipeMetaReadPort) <> mainPipe.io.meta_read
-
-  metaArray.io.read(LoadPipelineWidth - 1) <> metaReadArb.io.out
-
-  ldu(LoadPipelineWidth - 1).io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
-  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
-
-  for (w <- 0 until (LoadPipelineWidth - 1)) {
+  for (w <- 0 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
     ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }

@@ -420,23 +420,23 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   }
 }
 
-class DuplicatedMetaArray(implicit p: Parameters) extends DCacheModule {
+class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
 
   val metaBits = onReset.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
 
   val io = IO(new DCacheBundle {
-    val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
+    val read = Vec(numReadPorts, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
-    val resp = Output(Vec(LoadPipelineWidth, Vec(nWays, UInt(encMetaBits.W))))
-    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
+    val resp = Output(Vec(numReadPorts, Vec(nWays, UInt(encMetaBits.W))))
+    val errors = Output(Vec(numReadPorts, new L1CacheErrorInfo))
   })
-  val meta = Seq.fill(LoadPipelineWidth) {
+  val meta = Seq.fill(numReadPorts) {
     Module(new L1MetadataArray(onReset _))
   }
 
-  for (w <- 0 until LoadPipelineWidth) {
+  for (w <- 0 until numReadPorts) {
     // meta(w).io.write <> io.write
     meta(w).io.write.valid := io.write.valid
     meta(w).io.write.bits := io.write.bits
@@ -448,7 +448,7 @@ class DuplicatedMetaArray(implicit p: Parameters) extends DCacheModule {
   io.write.ready := true.B
 
   def dumpRead() = {
-    (0 until LoadPipelineWidth) map { w =>
+    (0 until numReadPorts) map { w =>
       when(io.read(w).fire()) {
         XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
           io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
