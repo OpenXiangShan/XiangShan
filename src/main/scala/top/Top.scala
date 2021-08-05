@@ -31,40 +31,23 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import xiangshan.cache.prefetch.L2Prefetcher
-import huancun.{HuanCun}
+import huancun.{CacheParamsKey, HuanCun}
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-//  private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val l2xbar = TLXbar()
-  private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
-    CacheParameters(
+  private val l2cache = if(useFakeL2Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
+    case CacheParamsKey => huancun.CacheParameters(
+      name = "L2",
       level = 2,
       ways = L2NWays,
       sets = L2NSets,
       blockBytes = L2BlockSize,
-      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2",
-      uncachedGet = true,
-      enablePerf = false
-    ),
-    InclusiveCacheMicroParameters(
-      memCycles = 25,
-      writeBytes = 32
-    ),
-    fpga = debugOpts.FPGAPlatform
-  ))
-  if(!useFakeL2Cache) {
-    ResourceBinding {
-      Resource(l2cache.device, "reg").bind(ResourceAddress(hardId))
-    }
-  }
+    )
+  })))
 
   val memory_port = TLIdentityNode()
   val uncache = TLXbar()
@@ -78,7 +61,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   if (!useFakePTW) {
     l2xbar := TLBuffer() := TLFragmenter(L3BlockSize, L3BlockSize) := core.ptw.node
   }
-//  l2xbar := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
     memory_port := l2xbar
   }
@@ -99,13 +81,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
-//    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
-    if (useFakeL2Cache) {
-//      l2prefetcher.module.io.in := DontCare
-    }
-    else {
-//      l2prefetcher.module.io.in <> l2cache.module.io
-    }
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
@@ -114,7 +89,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.reset := core_reset_gen.io.out
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-//    l2prefetcher.module.reset := l2_reset_gen.io.out
     if (!useFakeL2Cache) {
       l2cache.module.reset := l2_reset_gen.io.out
     }
@@ -324,31 +298,17 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   
   plic.node := peripheralXbar
 
-//  val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
-//    CacheParameters(
-//      level = 3,
-//      ways = L3NWays,
-//      sets = L3NSets,
-//      blockBytes = L3BlockSize,
-//      beatBytes = L3InnerBusWidth / 8,
-//      cacheName = "L3",
-//      uncachedGet = false,
-//      enablePerf = false
-//    ),
-//    InclusiveCacheMicroParameters(
-//      memCycles = 25,
-//      writeBytes = 32
-//    ),
-//    fpga = debugOpts.FPGAPlatform
-//  ))
-  val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun(
-  ))
+  val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
+    case CacheParamsKey => huancun.CacheParameters(
+      name = "L3",
+      level = 3,
+      ways = L3NWays,
+      sets = L3NSets,
+      blockBytes = L3BlockSize,
+      channelBytes = TLChannelBeatBytes(L3InnerBusWidth / 8)
+    )
+  })))
 
-//  if(!useFakeL3Cache){
-//    ResourceBinding{
-//      Resource(l3cache.device, "reg").bind(ResourceAddress(0))
-//    }
-//  }
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
