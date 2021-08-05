@@ -37,6 +37,9 @@ object FtqPtr {
     ptr.value := v
     ptr
   }
+  def inverse(ptr: FtqPtr)(implicit p: Parameters): FtqPtr = {
+    apply(!ptr.flag, ptr.value)
+  }
 }
 
 class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
@@ -428,9 +431,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     require(status_vec.length == FtqSize)
     XSError(isAfter(from, to), "in set_status_between, \'from\' must be not after \'to\'\n")
     for (i <- 0 until FtqSize) {
-      val wen = Mux(from.value < to.value,
-                      i.U >= from.value && i.U < to.value,
-                      i.U >= from.value || i.U < to.value) // when from.value === to.value, all entry is set
+      val wen = (from.value < to.value && i.U >= from.value && i.U < to.value) ||
+                (from.value > to.value && i.U >= from.value || i.U < to.value) ||
+                (from.flag =/= to.flag)
       when (wen) {
         status_vec(i) := status
       }
@@ -750,7 +753,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
           commitStateQueue(next.value).foreach(_ := c_invalid)
         }
       }
-      set_replay_status_between(ifuPtr, ifuPtr, l_invalid) // set all to invalid
+      set_replay_status_between(ifuPtr, FtqPtr.inverse(ifuPtr), l_invalid) // set all to invalid
       loadReplayOffset.valid := false.B
     // load replay
     }.otherwise {
