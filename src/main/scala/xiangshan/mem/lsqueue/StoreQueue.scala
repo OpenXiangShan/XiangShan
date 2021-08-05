@@ -370,6 +370,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.uncache.resp.ready := true.B
 
   // (4) writeback to ROB (and other units): mark as writebacked
+  val hasInflightMMIO = RegInit(false.B)
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
@@ -382,6 +383,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.mmioStout.bits.fflags := DontCare
   when (io.mmioStout.fire()) {
     allocated(deqPtr) := false.B
+    hasInflightMMIO := true.B
   }
 
   /**
@@ -390,8 +392,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * (1) When store commits, mark it as commited.
     * (2) They will not be cancelled and can be sent to lower level.
     */
+  XSError(hasInflightMMIO && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
+  // when any instruction commits, reset hasInflightMMIO flag
+  when (commitCount > 0.U) {
+    hasInflightMMIO := false.B
+  }
   for (i <- 0 until CommitWidth) {
-    when (commitCount > i.U) {
+    when (commitCount > i.U && !hasInflightMMIO) {
       commited(cmtPtrExt(i).value) := true.B
     }
   }
