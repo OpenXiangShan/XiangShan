@@ -10,8 +10,8 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr    = UInt(VAddrBits.W)
   val fallThruAddr = UInt(VAddrBits.W)
   val ftqIdx       = new FtqPtr
-  val ldReplayOffset = ValidUndirectioned(UInt(log2Ceil(32).W))
-  val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(32).W))
+  val ldReplayOffset = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val target       = UInt(VAddrBits.W)
   val oversize     = Bool()
 
@@ -27,8 +27,8 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val pd           = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
   val ftqIdx       = new FtqPtr
   val ftqOffset    = UInt(log2Ceil(PredictWidth).W)
-  val misOffset    = ValidUndirectioned(UInt(4.W))
-  val cfiOffset    = ValidUndirectioned(UInt(4.W))
+  val misOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val cfiOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val instrRange   = Vec(PredictWidth, Bool())

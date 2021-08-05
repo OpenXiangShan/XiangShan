@@ -34,7 +34,8 @@ trait HasPdConst extends HasXSParameter {
   }
   def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
     val byteOffset = pc - start 
-    byteOffset(4,1) - 1.U
+    if(HasCExtension) (byteOffset -2.U )(log2Ceil(PredictWidth),1)
+         else         (byteOffset -4.U )(log2Ceil(PredictWidth),2)
   }
 }
 
@@ -176,7 +177,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
 
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
-  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + 32.U), pcEnd)
+  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + (PredictWidth * 2).U), pcEnd)
 
 
   //io.out.pd.zipWithIndex.map{case (inst,i) => inst.valid := validStart(i)}
