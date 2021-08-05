@@ -107,8 +107,8 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
       VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b }),
       VecInit(Seq.fill(numBr)(false.B)))
   }
-  def hit_taken_on_call = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_call
-  def hit_taken_on_ret  = !VecInit(taken_mask.take(numBr)).asUInt.orR && hit && is_ret
+  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && hit && is_call
+  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && hit && is_ret
 
   override def toPrintable: Printable = {
     p"-----------BranchPrediction----------- " +
