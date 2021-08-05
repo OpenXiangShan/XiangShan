@@ -50,41 +50,86 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   // arch state rename table
   val arch_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
 
+  // handle duplicate arch/spec write requirements
+  val arch_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
+  val spec_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
+
+  for (i <- 1 until CommitWidth) {
+    // compare archWritePorts and specWritePorts
+    arch_cmp(i - 1) := Cat((0 until i).map(j => {
+      io.archWritePorts(i).wen && io.archWritePorts(j).wen && io.archWritePorts(i).addr === io.archWritePorts(j).addr
+    }))
+    spec_cmp(i - 1) := Cat((0 until i).map(j => {
+      io.specWritePorts(i).wen && io.specWritePorts(j).wen && io.specWritePorts(i).addr === io.specWritePorts(j).addr
+    }))
+  }
+
+  // TODO this method is duplicate, which is also defined in AlternativeFreeList.scala
+  def getCompareResult(m: MixedVec[UInt]): Vec[Bool] = {
+    WireInit(VecInit(Seq.tabulate(CommitWidth){
+      case last if (last == CommitWidth - 1) => true.B
+      case i => !(Cat((i until (CommitWidth - 1)).map(j => m(j)(i))).orR)
+    }))
+  }
+
+  val arch_is_last = getCompareResult(arch_cmp)
+  val spec_is_last = getCompareResult(spec_cmp)
+
+  val archUpdate = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val specUpdate = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+
   // When redirect happens (mis-prediction), don't update the rename table
   // However, when mis-prediction and walk happens at the same time, rename table needs to be updated
-  for (w <- io.specWritePorts){
-    when (w.wen && (!(io.redirect || io.flush) || io.walkWen)) {
-      spec_table(w.addr) := w.wdata
+  // spec table needs to be updated when flushPipe
+  for ((w, i) <- io.specWritePorts.zipWithIndex){
+    when (w.wen && (!(io.redirect || io.flush) || io.walkWen || io.flush)) {
+      // spec_table(w.addr) := w.wdata
+      specUpdate(i) := true.B
     }
   }
 
+  // SPECulative table Write
+  when (io.flush) {
+    spec_table := arch_table
+  }
+
+  for (reg <- 0 until 32) {
+    specUpdate.zipWithIndex.foreach { case (update, i) =>
+      when (update && reg.U === io.specWritePorts(i).addr) {
+        spec_table(io.specWritePorts(i).addr) := io.specWritePorts(i).wdata
+      }
+    }
+  }
+
+  // SPECulative table Read
   for(r <- io.readPorts){
     r.rdata := spec_table(r.addr)
   }
 
-  for(w <- io.archWritePorts){
-    when(w.wen){ arch_table(w.addr) := w.wdata }
-  }
-
-  when (io.flush) {
-    spec_table := arch_table
-    // spec table needs to be updated when flushPipe
-    for (w <- io.archWritePorts) {
-      when(w.wen){ spec_table(w.addr) := w.wdata }
+  // ARCHitecture table Write
+  for((w, i) <- io.archWritePorts.zipWithIndex){
+    when(w.wen){ 
+      // arch_table(w.addr) := w.wdata 
+      archUpdate(i) := true.B
     }
   }
 
+  for (reg <- 0 until 32) {
+    archUpdate.zipWithIndex.foreach { case (update, i) =>
+      when (update && reg.U === io.archWritePorts(i).addr) {
+        arch_table(io.archWritePorts(i).addr) := io.archWritePorts(i).wdata
+      }
+    }
+  }
+
+  // ARCHitecture table Read
   io.debug_rdata := arch_table
 
-  // XSDebug(p"redirect:${io.redirect},flush:${io.flush},walkWen:${io.walkWen}\n")
-  //   XSDebug(p"[spec]WritePorts:" + io.specWritePorts.zipWithIndex.map{ 
-  //     case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
-  //   }.reduceLeft(_ + _) + p"\n")
-  //   XSDebug(p"[arch]WritePorts:" + io.archWritePorts.zipWithIndex.map{ 
-  //     case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
-  //   }.reduceLeft(_ + _) + p"\n")
-  XSDebug(p"[spec]WritePorts:" + io.specWritePorts.zipWithIndex.map{ case (wp, idx) => p"($idx)wen:${wp.wen},addr:${wp.addr},data:${wp.wdata} " }.reduceLeft(_ + _) + p"\n")
-  XSDebug(p"[arch]WritePorts:" + io.archWritePorts.zipWithIndex.map{ case (wp, idx) => p"($idx)wen:${wp.wen},addr:${wp.addr},data:${wp.wdata} " }.reduceLeft(_ + _) + p"\n")
-
-
+  XSDebug(p"redirect:${io.redirect},flush:${io.flush},walkWen:${io.walkWen}\n")
+  XSDebug(p"[spec]WritePorts:" + io.specWritePorts.zipWithIndex.map{ 
+    case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
+  }.reduceLeft(_ + _) + p"\n")
+  XSDebug(p"[arch]WritePorts:" + io.archWritePorts.zipWithIndex.map{ 
+    case (wp, idx) => p"($idx)wen:${wp.wen},addr:${Mux(wp.wen, wp.addr, 0.U)},data:${Mux(wp.wen, wp.wdata, 0.U)} " 
+  }.reduceLeft(_ + _) + p"\n")
 }
