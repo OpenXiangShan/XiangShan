@@ -19,7 +19,7 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import utils.XSDebug
+import utils.{XSDebug, XSPerfAccumulate}
 import xiangshan._
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}

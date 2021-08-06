@@ -160,4 +160,9 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
       exu.frm.get := io.extra.frm.get
     }
   }
+
+  for ((iss, i) <- io.issue.zipWithIndex) {
+    XSPerfAccumulate(s"issue_count_$i", iss.fire())
+  }
+  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
 }
