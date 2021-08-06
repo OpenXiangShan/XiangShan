@@ -351,7 +351,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
   }
 
   lazy val module = new LazyRawModuleImp(this) {
