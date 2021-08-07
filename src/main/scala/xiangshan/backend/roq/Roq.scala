@@ -275,6 +275,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val roqDeqPtr = Output(new RoqPtr)
     val csr = new RoqCSRIO
     val roqFull = Output(Bool())
+
+    val debug_prf = Input(Vec(NRPhyRegs, UInt(XLEN.W)))
   })
 
   println("Roq: size:" + RoqSize + " wbports:" + numWbPorts  + " commitwidth:" + CommitWidth)
@@ -296,6 +298,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // Warn: debug_* prefix should not exist in generated verilog.
   val debug_microOp = Mem(RoqSize, new MicroOp)
   val debug_exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
+
+  XSDebug(p"Debug_exuData:${debug_exuData.zipWithIndex.map{ case (v, i) => p" ($i)${Hexadecimal(v)}" }.reduceLeft(_ + _)}\n")
   val debug_exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
   // pointers
@@ -386,6 +390,13 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       debug_microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       debug_microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
+      // fix exuData of eliminated move instruction
+      for (j <- 0 until RoqSize) {
+        when (eliminatedMove(j) && io.exeWbResults(i).bits.uop.pdest === debug_microOp(j).pdest) {
+          debug_exuData(j) := io.exeWbResults(i).bits.data
+          XSDebug(p"Update exuData($j) from ${Hexadecimal(debug_exuData(j))} to ${io.exeWbResults(i).bits.data}\n")
+        }
+      }
       debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
       debug_microOp(wbIdx).debugInfo.issueTime := io.exeWbResults(i).bits.uop.debugInfo.issueTime
       debug_microOp(wbIdx).debugInfo.writebackTime := io.exeWbResults(i).bits.uop.debugInfo.writebackTime
@@ -679,6 +690,10 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     when (canEnqueue(i)) {
       eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
       writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+      when (io.enq.req(i).bits.eliminatedMove) {
+        debug_exuData(enqPtrVec(i).value) := io.debug_prf(io.enq.req(i).bits.pdest)
+        XSDebug(p"Update debug_exuData (${enqPtrVec(i).value}) as ${Hexadecimal(io.debug_prf(io.enq.req(i).bits.pdest))}\n")
+      }
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
     }

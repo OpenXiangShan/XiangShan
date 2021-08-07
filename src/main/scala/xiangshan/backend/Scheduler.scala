@@ -197,6 +197,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
     // feedback ports
     val extra = new SchedulerExtraIO
+    // debug: phy register file
+    val debug_prf = Vec(NRPhyRegs, Output(UInt(XLEN.W)))
   })
 
   def extraReadRf(numRead: Seq[Int]): Seq[UInt] = {
@@ -367,6 +369,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
     difftest.io.gpr := VecInit(intRf.get.io.debug_rports.map(_.data))
+    io.debug_prf := intRf.get.io.debug_prf
+  } else {
+    io.debug_prf := DontCare
   }
   if (!env.FPGAPlatform && fpRf.isDefined) {
     for ((rport, rat) <- fpRf.get.io.debug_rports.zip(io.extra.debug_fp_rat)) {

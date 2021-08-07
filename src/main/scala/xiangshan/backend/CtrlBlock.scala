@@ -221,6 +221,8 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val readFpRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+
+    val debug_prf = Input(Vec(NRPhyRegs, UInt(XLEN.W)))
   })
 
   val ftq = Module(new Ftq)
@@ -234,6 +236,8 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
   val roq = Module(new Roq(roqWbSize))
+
+  roq.io.debug_prf <> io.debug_prf
 
   val backendRedirect = redirectGen.io.stage2Redirect
   val frontendRedirect = redirectGen.io.stage3Redirect

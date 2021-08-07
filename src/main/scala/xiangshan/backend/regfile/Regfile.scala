@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import utils.XSDebug
 
 class RfReadPort(len: Int)(implicit p: Parameters) extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
@@ -47,6 +48,7 @@ class Regfile
     val readPorts = Vec(numReadPorts, new RfReadPort(len))
     val writePorts = Vec(numWirtePorts, new RfWritePort(len))
     val debug_rports = Vec(32, new RfReadPort(len))
+    val debug_prf = Output(Vec(NRPhyRegs, UInt(len.W)))
   })
 
   println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWirtePorts)
@@ -71,6 +73,10 @@ class Regfile
     when (reset.asBool()) {
       mem.map(_ := 0.U)
     }
+    if (hasZero) {
+      XSDebug(p"PhyRegValues:${mem.zipWithIndex.map{case (v, i) => p" ($i):${Hexadecimal(v)}"}.reduceLeft(_ + _)}\n")
+    }
+    io.debug_prf := mem
   } else {
 
     val regfile = Module(new regfile_160x64_10w16r_sim)

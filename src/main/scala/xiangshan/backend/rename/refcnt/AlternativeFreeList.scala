@@ -273,7 +273,6 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
       when (io.flush) {
         // ! specRefCounter := archRefCounter : handled in below
         state := s_flush_1
-        XSDebug("Start Flush Process Next Cycle")
       }
     }
 
@@ -282,6 +281,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
         when (archRefCounter(i) < cmtCounter(i)) {
           // free reg i
           flushFreeVec(i) := true.B
+          XSDebug(p"Free preg [ $i ] after flush (archRefCounter=${archRefCounter(i)},cmtCounter=${cmtCounter(i)})\n")
         }
 
         val offset = i match {
@@ -352,6 +352,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
 
   XSDebug(PopCount(io.dec.req) =/= PopCount(freeVec), p"WARNING: Please check DEC requirement\n")
   XSDebug(PopCount(io.inc.req) =/= PopCount(needAllocatingVec), p"WARNING: Please check INC requirement\n")
+
+  XSDebug(state === s_idle && io.flush, "Start Flush Process Next Cycle\n")
 
   /*
   Assertions

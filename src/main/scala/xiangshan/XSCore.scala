@@ -191,6 +191,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   exuBlocks.foreach(_.io.fuWriteback.foreach(_.ready := true.B))
   memBlock.io.writeback.foreach(_.ready := true.B)
 
+  ctrlBlock.io.debug_prf <> exuBlocks(0).io.debug_prf
+
   val intArbiter = outer.intArbiter.module
   intArbiter.io.in.zip(intWriteback).foreach { case (arb, wb) =>
     arb.valid := wb.valid && !wb.bits.uop.ctrl.fpWen
