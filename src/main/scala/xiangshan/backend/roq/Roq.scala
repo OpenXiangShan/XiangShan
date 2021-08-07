@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import xiangshan.backend.ftq.FtqPtr
@@ -834,6 +835,23 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   XSPerfAccumulate("waitLoadCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
   XSPerfAccumulate("waitStoreCycleAcc", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
   XSPerfAccumulate("roqHeadPC", io.commits.info(0).pc)
+
+  val l1Miss = Wire(Bool())
+  val l2Miss = Wire(Bool())
+  val l3Miss = Wire(Bool())
+  val l2Handleget = Wire(Bool())
+  l1Miss := false.B
+  l2Miss := false.B
+  l3Miss := false.B
+  l2Handleget := false.B
+  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
+  BoringUtils.addSink(l2Miss, "TMA_l2miss")
+  BoringUtils.addSink(l3Miss, "TMA_l3miss")
+  BoringUtils.addSink(l2Handleget, "TMA_l2handleget")
+  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
+  XSPerfAccumulate("TMA_L2miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l2Miss)
+  XSPerfAccumulate("TMA_L3miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l3Miss)
+  XSPerfAccumulate("TMA_L2handleget", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l2Handleget)
 
   val instrCnt = RegInit(0.U(64.W))
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
