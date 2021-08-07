@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 
 trait HasBPUConst extends HasXSParameter with HasIFUConst {
-  val MaxMetaLength = 320
+  val MaxMetaLength = 1024 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   val numBr = 2
@@ -148,6 +148,8 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
   // val flush_out = Valid(UInt(VAddrBits.W))
+
+  // val ctrl = Input(new BPUCtrl())
 
   val s0_fire = Input(Bool())
   val s1_fire = Input(Bool())

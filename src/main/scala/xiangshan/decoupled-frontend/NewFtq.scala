@@ -808,7 +808,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       val misPred = mispredict_vec(commPtr.value)(i)
       val ghist = commit_ghist.predHist
       val predCycle = commit_meta.meta(63, 0)
-      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)})\n")
+      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) startAddr(${commit_pc_bundle.startAddr})\n")
     }
   }
 

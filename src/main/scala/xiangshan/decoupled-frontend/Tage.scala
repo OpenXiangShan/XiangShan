@@ -101,6 +101,14 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
   val u = Vec(TageBanks, UInt(2.W))
 }
 
+class SCMeta(val useSC: Boolean)(implicit p: Parameters) extends XSBundle with HasSCParameter {
+  val tageTaken = if (useSC) Bool() else UInt(0.W)
+  val scUsed = if (useSC) Bool() else UInt(0.W)
+  val scPred = if (useSC) Bool() else UInt(0.W)
+  // Suppose ctrbits of all tables are identical
+  val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+}
+
 class TageMeta(implicit p: Parameters) extends XSBundle with TageParams{
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
@@ -108,7 +116,7 @@ class TageMeta(implicit p: Parameters) extends XSBundle with TageParams{
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val taken = Bool()
-  // val scMeta = new SCMeta(EnableSC)
+  val scMeta = new SCMeta(EnableSC)
   val pred_cycle = UInt(64.W) // TODO: Use Option
 }
 
@@ -648,4 +656,4 @@ class Tage(implicit p: Parameters) extends BaseTage {
 }
 
 
-// class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
+class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}

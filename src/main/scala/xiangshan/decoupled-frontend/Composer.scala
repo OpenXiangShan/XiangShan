@@ -22,7 +22,7 @@ import xiangshan._
 import utils._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, EnableSC)
   io.out.resp := resp
 
   var metas = 0.U(1.W)
