@@ -151,6 +151,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val mispred_mask = Vec(numBr+1, Bool())
   val false_hit = Bool()
   val new_br_insert_pos = Vec(numBr, Bool())
+  val old_entry = Bool()
   // val ghist = new GlobalHistory() This in spec_meta
 
   override def toPrintable: Printable = {

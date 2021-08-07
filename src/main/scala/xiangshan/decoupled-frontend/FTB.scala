@@ -46,7 +46,7 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
   val jmpValid    = Bool()
 
   // Partial Fall-Through Address
-  val pftAddr     = UInt(log2Up(PredictWidth).W)
+  val pftAddr     = UInt((log2Up(PredictWidth)+1).W)
   val carry       = Bool()
 
   val isCall      = Bool()
@@ -208,8 +208,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.out.resp.s2.ftb_entry.pftAddr := ftb_entry.pftAddr
     io.out.resp.s2.ftb_entry.carry := ftb_entry.carry
   }.otherwise {
-    io.out.resp.s2.ftb_entry.pftAddr := s2_pc(instOffsetBits + log2Ceil(PredictWidth) - 1, instOffsetBits)
-    io.out.resp.s2.ftb_entry.carry := true.B
+    io.out.resp.s2.ftb_entry.pftAddr := s2_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U
+    io.out.resp.s2.ftb_entry.carry := s2_pc(instOffsetBits + log2Ceil(PredictWidth)).asBool
   }
 
   io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
@@ -222,7 +222,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   val u_meta = update.meta.asTypeOf(new FTBMeta)
   // val u_idx = ftbAddr.getIdx(u_pc)
-  val u_valid = RegNext(io.update.valid)
+  val u_valid = RegNext(io.update.valid && !io.update.bits.old_entry)
   val u_way_mask = u_meta.writeWay
 
   val ftb_write = WireInit(update.ftb_entry)
@@ -275,5 +275,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
     XSPerfAccumulate("ftb_commit_hits", u_valid && update.hit)
     XSPerfAccumulate("ftb_commit_misses", u_valid && !update.hit)
+
+    XSPerfAccumulate("ftb_update_req", io.update.valid)
+    XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
+    XSPerfAccumulate("ftb_updated", u_valid)
   }
 }
