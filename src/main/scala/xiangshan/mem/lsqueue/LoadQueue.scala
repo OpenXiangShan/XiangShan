@@ -252,11 +252,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // Generate writeback indexes
 
   def getEvenBits(input: UInt): UInt = {
-    require(input.getWidth == LoadQueueSize)
     VecInit((0 until LoadQueueSize/2).map(i => {input(2*i)})).asUInt
   }
   def getOddBits(input: UInt): UInt = {
-    require(input.getWidth == LoadQueueSize)
     VecInit((0 until LoadQueueSize/2).map(i => {input(2*i+1)})).asUInt
   }
 
@@ -349,7 +347,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   (0 until CommitWidth).map(i => {
     when(commitCount > i.U){
-      allocated(deqPtr+i.U) := false.B
+      allocated((deqPtrExt+i.U).value) := false.B
     }
   })
 
