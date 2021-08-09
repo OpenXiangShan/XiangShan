@@ -338,7 +338,7 @@ class TageTable
         p"taken:${u.taken(i)}, alloc:${u.alloc(i)}, oldCtr:${u.oldCtr(i)}\n")
       XSDebug(io.update.mask(i),
         p"update Table bank $i: writing tag:${update_tag}, " +
-        p"ctr: ${update_wdata(b).ctr} in idx $update_idx\n")
+        p"ctr: ${update_wdata(i).ctr} in idx $update_idx\n")
       val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(i)
       XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i) && io.update.mask(i),
         p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
@@ -528,7 +528,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta(w).allocate.bits  := allocEntry
 
     // Update in loop
-    val updateValid = updateValids(w)
+    val updateValid = updateValids(w) && !(PriorityEncoder(update.preds.taken_mask) < w.U)
     val updateMeta = updateMetas(w)
     val isUpdateTaken = updateValid && update.preds.taken_mask(w)
     val updateMisPred = updateMisPreds(w)
