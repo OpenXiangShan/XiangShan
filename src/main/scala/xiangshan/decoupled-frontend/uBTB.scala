@@ -93,6 +93,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // val last_is_rvc = Bool()
     val pred        = Vec(numBr, UInt(2.W))
 
+    val hit = Bool()
+
     // def real_taken_mask(): Vec[Bool] = {
     //   Mux(hit,
     //     VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b } :+ (is_jal || is_jalr)),
@@ -188,6 +190,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     io.read_resp.brValids := hit_meta.brValids
     io.read_resp.jmpValid := hit_meta.jmpValid
     io.read_resp.pred := hit_meta.pred
+    io.read_resp.hit := hit_oh.orR
     io.read_hit := hit_oh.orR
 
     // debug_io.read_hit := hit_oh.orR
@@ -278,6 +281,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_pc = update.pc
   val u_taken = update.preds.taken
   val u_taken_mask = update.preds.taken_mask
+  val u_meta = update.meta.asTypeOf(new ReadResp)
 
   val u_tag = getTag(u_pc)
   // val u_target_lower = update.preds.target(lowerBitSize-1+instOffsetBits, instOffsetBits)
@@ -323,6 +327,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && banks.read_hit)
     XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !banks.read_hit)
+
+    XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
+    XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
   }
 
 
