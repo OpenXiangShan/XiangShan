@@ -676,31 +676,25 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(4.W)
     val flushItSelf = Bool()
-    def apply(valid: Bool, idx: FtqPtr, offset: UInt, flushItSelf: Bool = false.B) = {
-      this.valid := valid
-      this.ftqIdx := idx
-      this.ftqOffset := offset
-      this.flushItSelf := flushItSelf
+    def apply(redirect: Valid[Redirect]) = {
+      this.valid := redirect.valid
+      this.ftqIdx := redirect.bits.ftqIdx
+      this.ftqOffset := redirect.bits.ftqOffset
+      this.flushItSelf := RedirectLevel.flushItself(redirect.bits.level)
       this
     }
   }
   val redirectVec = Wire(Vec(3, new RedirectInfo))
-  redirectVec(0).apply(
-    roqFlush.valid,
-    roqFlush.bits.ftqIdx,
-    roqFlush.bits.ftqOffset
-  )
-  redirectVec(1).apply(
-    stage2Redirect.valid,
-    stage2Redirect.bits.ftqIdx,
-    stage2Redirect.bits.ftqOffset,
-    RedirectLevel.flushItself(stage2Redirect.bits.level)
-  )
-  redirectVec(2).apply(
-    fromIfuRedirect.valid,
-    fromIfuRedirect.bits.ftqIdx,
-    fromIfuRedirect.bits.ftqOffset
-  )
+  val roqRedirect = Wire(Valid(new Redirect))
+  roqRedirect := DontCare
+  roqRedirect.valid := roqFlush.valid
+  roqRedirect.bits.ftqIdx := roqFlush.bits.ftqIdx
+  roqRedirect.bits.ftqOffset := roqFlush.bits.ftqOffset
+  roqRedirect.bits.level := RedirectLevel.flushAfter
+
+  redirectVec.zip(Seq(roqRedirect, stage2Redirect, fromIfuRedirect)).map {
+    case (ve, r) => ve(r)
+  }
   
   // when redirect, we should reset ptrs and status queues
   when(redirectVec.map(r => r.valid).reduce(_||_)){
@@ -717,9 +711,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
           s := c_invalid
         }
       })
-      when(next.value =/= commPtr.value){ // if next.value === commPtr.value, ftq is full
-        commitStateQueue(next.value).foreach(_ := c_invalid)
-      }
     }
   }
 
@@ -745,15 +736,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       s === c_invalid || s === c_commited
     })).andR()
 
-  // need one cycle to read mem and srams 
-  val do_commit = RegNext(canCommit, init=false.B)
-  val do_commit_ptr = RegNext(commPtr)
-  when (canCommit) { commPtr := commPtr + 1.U }
-  val commit_hit = entry_hit_status(do_commit_ptr.value)
-  val commit_entry_taken = cfiIndex_vec(do_commit_ptr.value).valid
-  val commit_valid = commit_hit === h_hit || commit_entry_taken // hit or taken
-  
-
+  // commit reads
   ftq_pc_mem.io.raddr.last := commPtr.value
   val commit_pc_bundle = ftq_pc_mem.io.rdata.last
   ftq_hist_mem.io.raddr.last := commPtr.value
@@ -768,6 +751,24 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_meta = ftq_meta_1r_sram.io.rdata(0)
   ftb_entry_mem.io.raddr.last := commPtr.value
   val commit_ftb_entry = ftb_entry_mem.io.rdata.last
+
+  // need one cycle to read mem and srams 
+  val do_commit = RegNext(canCommit, init=false.B)
+  val do_commit_ptr = RegNext(commPtr)
+  when (canCommit) { commPtr := commPtr + 1.U }
+  val commit_state = RegNext(commitStateQueue(commPtr.value))
+  val commit_cfi = WireInit(RegNext(cfiIndex_vec(commPtr.value)))
+  when (commit_state(commit_cfi.bits) =/= c_commited) {
+    commit_cfi.valid := false.B
+  }
+
+  val commit_mispredict = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
+    case (mis, state) => mis && state === c_commited
+  })
+  val commit_hit = RegNext(entry_hit_status(commPtr.value))
+  val commit_target = RegNext(update_target(commPtr.value))
+  val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
+  
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
@@ -788,29 +789,30 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftbEntryGen.start_addr := commit_pc_bundle.startAddr
   ftbEntryGen.old_entry := commit_ftb_entry
   ftbEntryGen.pd := commit_pd
-  ftbEntryGen.cfiIndex := cfiIndex_vec(do_commit_ptr.value)
-  ftbEntryGen.target := update_target(do_commit_ptr.value)
+  ftbEntryGen.cfiIndex := commit_cfi
+  ftbEntryGen.target := commit_target
   ftbEntryGen.hit := commit_real_hit
-  ftbEntryGen.mispredict_vec := mispredict_vec(do_commit_ptr.value)
+  ftbEntryGen.mispredict_vec := commit_mispredict
   
   update_ftb_entry := ftbEntryGen.new_entry
   update.new_br_insert_pos := ftbEntryGen.new_br_insert_pos
   update.mispred_mask := ftbEntryGen.mispred_mask
   update.old_entry := ftbEntryGen.is_old_entry
 
+
   // Cfi Info
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     for (i <- 0 until PredictWidth) {
       val pc = commit_pc_bundle.startAddr + (i * instBytes).U
-      val v = commitStateQueue(do_commit_ptr.value)(i) === c_commited
+      val v = commit_state(i) === c_commited
       val isBr = commit_pd.brMask(i)
       val isJmp = commit_pd.jmpInfo.valid && commit_pd.jmpOffset === i.U
       val isCfi = isBr || isJmp
-      val isTaken = cfiIndex_vec(do_commit_ptr.value).valid && cfiIndex_vec(do_commit_ptr.value).bits === i.U
-      val misPred = mispredict_vec(do_commit_ptr.value)(i)
+      val isTaken = commit_cfi.valid && commit_cfi.bits === i.U
+      val misPred = commit_mispredict(i)
       val ghist = commit_ghist.predHist
       val predCycle = commit_meta.meta(63, 0)
-      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) startAddr(${commit_pc_bundle.startAddr})\n")
+      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) startAddr(${Hexadecimal(commit_pc_bundle.startAddr)})\n")
     }
   }
 
@@ -821,7 +823,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
   preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
   preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
-  preds.target := update_target(do_commit_ptr.value)
+  preds.target := commit_target
   preds.taken_mask := ftbEntryGen.taken_mask
 
 
@@ -855,9 +857,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ).foldLeft(Map[String, UInt]())(_+_)
 
     // commit perf counters
-    val commit_inst_mask    = VecInit(commitStateQueue(do_commit_ptr.value).map(c => c === c_commited && do_commit)).asUInt
-    val commit_mispred_mask = mispredict_vec(do_commit_ptr.value).asUInt
+    val commit_inst_mask    = VecInit(commit_state.map(c => c === c_commited && do_commit)).asUInt
+    val commit_mispred_mask = commit_mispredict.asUInt
     val commit_not_mispred_mask = ~commit_mispred_mask
+    
+    val commit_num_inst_recording_vec = (1 to PredictWidth).map(i => PopCount(commit_inst_mask) === i.U)
+    val commit_num_inst_map = (1 to PredictWidth).map(i => 
+      f"commit_num_inst_$i" -> (commit_num_inst_recording_vec(i-1) && do_commit)
+    ).foldLeft(Map[String, UInt]())(_+_)
 
     val commit_br_mask = commit_pd.brMask.asUInt
     val commit_jmp_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.jmpInfo.valid.asTypeOf(UInt(1.W)))
@@ -949,7 +956,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
       "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full)
     ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ enq_entry_len_map ++
-    to_ifu_entry_len_map
+    to_ifu_entry_len_map ++ commit_num_inst_map
 
     for((key, value) <- perfCountsMap) {
       XSPerfAccumulate(key, value)
