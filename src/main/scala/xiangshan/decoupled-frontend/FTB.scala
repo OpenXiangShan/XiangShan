@@ -64,15 +64,17 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
     case (v, off) => v && off <= offset
   }.reduce(_||_)
 
-  override def toPrintable: Printable = {
-    p"-----------FTBEntry----------- " +
-      p"[valid] $valid  " +
-      p"[tag] ${Hexadecimal(tag)} " +
-      (0 until numBr).map( i => p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, target=${Hexadecimal(brTargets(i))} ").reduce(_+_) +
-      p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, target=${Hexadecimal(jmpTarget)} " +
-      p"[pgfAddr] ${Hexadecimal(pftAddr)} [carry] ${carry}" +
-      p"isCall=$isCall, isRet=$isRet, isJalr=$isJalr " +
-      p"carry=$carry, oversize=$oversize, last_is_rvc=$last_is_rvc "
+  def display(cond: Bool): Unit = {
+    XSDebug(cond, p"-----------FTB entry----------- \n")
+    XSDebug(cond, p"v=${valid}, tag=${Hexadecimal(tag)}\n")
+    for(i <- 0 until numBr) {
+      XSDebug(cond, p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, target=${Hexadecimal(brTargets(i))}\n")
+    }
+    XSDebug(cond, p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, target=${Hexadecimal(jmpTarget)}\n")
+    XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
+    XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
+    XSDebug(cond, p"oversize=$oversize, last_is_rvc=$last_is_rvc\n")
+    XSDebug(cond, p"------------------------------- \n")
   }
 }
 
@@ -185,9 +187,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s2_target := Mux((io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
-
-    XSDebug("s2 FTB resp:\n")
-    XSDebug(p"$ftb_entry\n")
   }
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
@@ -202,7 +201,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.preds.target        := s2_target
   io.out.resp.s2.pc                  := s2_pc
-  io.out.resp.s2.hit                 := s2_hit
   io.out.resp.s2.ftb_entry           := ftb_entry
 
   io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
@@ -224,7 +222,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val update = RegNext(io.update.bits)
 
   val u_meta = update.meta.asTypeOf(new FTBMeta)
-  // val u_idx = ftbAddr.getIdx(u_pc)
   val u_valid = RegNext(io.update.valid && !io.update.bits.old_entry)
   val u_way_mask = u_meta.writeWay
 
@@ -232,8 +229,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   ftb_write.valid := true.B
   ftb_write.tag   := ftbAddr.getTag(update.pc)(tagSize-1, 0)
-
-  // ftb.io.w.apply(u_valid, ftb_write, u_idx, u_way_mask)
 
   ftbBank.io.update_write_data.valid := u_valid
   ftbBank.io.update_write_data.bits := ftb_write
@@ -256,8 +251,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.preds.real_taken_mask().asUInt)
     XSDebug("s2_target=%x\n", s2_target)
 
-    XSDebug(ftb_entry.toPrintable)
-    XSDebug("\n")
+    ftb_entry.display(true.B)
 
     XSDebug(u_valid, "Update from ftq\n")
     XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b, pred_cycle=%d\n",
@@ -267,8 +261,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
 
 
-    XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.hit)
-    XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.hit)
+    XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.preds.hit)
+    XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.preds.hit)
 
     XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
     XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
@@ -276,8 +270,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
     XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
 
-    XSPerfAccumulate("ftb_commit_hits", u_valid && update.hit)
-    XSPerfAccumulate("ftb_commit_misses", u_valid && !update.hit)
+    XSPerfAccumulate("ftb_commit_hits", u_valid && update.preds.hit)
+    XSPerfAccumulate("ftb_commit_misses", u_valid && !update.preds.hit)
 
     XSPerfAccumulate("ftb_update_req", io.update.valid)
     XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)

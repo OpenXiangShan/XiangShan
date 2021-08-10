@@ -443,7 +443,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val enq_cfiIndex = WireInit(0.U.asTypeOf(new ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))))
     entry_fetch_status(enqIdx) := f_to_send
     commitStateQueue(enqIdx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
-    entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
+    entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.preds.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
     enq_cfiIndex.valid := preds.real_taken_mask.asUInt.orR
     // when no takens, set cfiIndex to PredictWidth-1
     enq_cfiIndex.bits := ParallelPriorityMux(preds.real_taken_mask, ftb_entry.getOffsetVec) |
@@ -775,7 +775,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val update = io.toBpu.update.bits
   update.false_hit := commit_hit === h_false_hit
   update.pc := commit_pc_bundle.startAddr
-  update.hit := commit_hit === h_hit || commit_hit === h_false_hit
+  update.preds.hit := commit_hit === h_hit || commit_hit === h_false_hit
   update.ghist := commit_ghist
   update.rasSp := commit_spec_meta.rasSp
   update.rasTop := commit_spec_meta.rasEntry

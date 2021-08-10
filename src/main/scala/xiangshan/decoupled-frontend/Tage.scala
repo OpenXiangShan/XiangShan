@@ -141,7 +141,6 @@ class TageTable
     val update = Input(new TageUpdate)
   })
 
-  // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 4
 
@@ -255,24 +254,8 @@ class TageTable
     wrbypass_idxs(i) === update_idx
   })
 
-
   val wrbypass_hit      = wrbypass_hits.reduce(_||_)
-  // val wrbypass_rhit     = wrbypass_rhits.reduce(_||_)
   val wrbypass_hit_idx  = ParallelPriorityEncoder(wrbypass_hits)
-  // val wrbypass_rhit_idx = PriorityEncoder(wrbypass_rhits)
-
-  // val wrbypass_rctr_hits = VecInit((0 until TageBanks).map( b => wrbypass_ctr_valids(wrbypass_rhit_idx)(b)))
-
-  // val rhit_ctrs = RegEnable(wrbypass_ctrs(wrbypass_rhit_idx), wrbypass_rhit)
-
-  // when (RegNext(wrbypass_rhit)) {
-  //   for (b <- 0 until TageBanks) {
-  //     when (RegNext(wrbypass_rctr_hits(b.U + baseBank))) {
-  //       io.resp(b).bits.ctr := rhit_ctrs(s3_bankIdxInOrder(b))
-  //     }
-  //   }
-  // }
-
 
   val updateBank = PriorityEncoder(io.update.mask)
 
@@ -347,14 +330,6 @@ class TageTable
 
     XSDebug(RegNext(io.req.valid) && !s2_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
 
-    // when (wrbypass_rhit && wrbypass_ctr_valids(wrbypass_rhit_idx).reduce(_||_)) {
-    //   for (b <- 0 until TageBanks) {
-    //     XSDebug(wrbypass_ctr_valids(wrbypass_rhit_idx)(b),
-    //       "wrbypass rhits, wridx:%d, tag:%x, idx:%d, hitctr:%d, bank:%d\n",
-    //       wrbypass_rhit_idx, tag, idx, wrbypass_ctrs(wrbypass_rhit_idx)(b), b.U)
-    //   }
-    // }
-
     // ------------------------------Debug-------------------------------------
     val valids = Reg(Vec(TageBanks, Vec(nRows, Bool())))
     when (reset.asBool) { valids.foreach(b => b.foreach(r => r := false.B)) }
@@ -366,23 +341,6 @@ class TageTable
 }
 
 abstract class BaseTage(implicit p: Parameters) extends BasePredictor with TageParams with BPUUtils {
-  // class TAGEResp {
-  //   val takens = Vec(PredictWidth, Bool())
-  //   val hits = Vec(PredictWidth, Bool())
-  // }
-  // class TAGEMeta {
-  // }
-  // class FromBIM {
-  //   val ctrs = Vec(PredictWidth, UInt(2.W))
-  // }
-  // class TageIO extends DefaultBasePredictorIO {
-  //   val resp = Output(new TAGEResp)
-  //   val meta = Output(Vec(PredictWidth, new TageMeta))
-  //   val bim = Input(new FromBIM)
-  //   val s3Fire = Input(Bool())
-  // }
-
-  // override val io = IO(new TageIO)
 }
 
 class FakeTage(implicit p: Parameters) extends BaseTage {
@@ -400,13 +358,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) =>
-      // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new TageTable(nRows, histLen, tagLen, UBitPeriod))
-      // t.io.req.valid := io.pc.valid
-      // t.io.req.bits.pc := io.pc.bits
-      // t.io.req.bits.hist := io.hist
-      // t.io.req.bits.mask := io.inMask
-
       t.io.req.valid := io.s1_fire
       t.io.req.bits.pc := s1_pc
       t.io.req.bits.hist := io.in.bits.ghist
@@ -445,13 +397,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s3_providerUs    = RegEnable(s2_providerUs, io.s2_fire)
   val s3_providerCtrs  = RegEnable(s2_providerCtrs, io.s2_fire)
 
-  // val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
   val resp_meta = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageMeta)))
 
   io.out.resp := io.in.bits.resp_in(0)
   io.out.s3_meta := resp_meta.asUInt
 
-  val ftb_hit = io.in.bits.resp_in(0).s3.hit
+  val ftb_hit = io.in.bits.resp_in(0).s3.preds.hit
   val ftb_entry = io.in.bits.resp_in(0).s3.ftb_entry
   val resp_s3 = io.out.resp.s3
 
@@ -474,7 +425,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   updateOldCtr  := DontCare
   updateU       := DontCare
 
-  // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
   val updateMisPreds = update.mispred_mask
 
   // access tag tables and output meta info

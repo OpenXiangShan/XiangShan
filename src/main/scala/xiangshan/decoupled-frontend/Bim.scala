@@ -44,16 +44,10 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   io.in.ready := bim.io.r.req.ready
   io.s1_ready := bim.io.r.req.ready
-  // io.out.valid := io.s2_fire && !io.redirect.valid
-
-  // val s1_pc = RegEnable(s0_pc, s0_valid)
 
   val s1_read = bim.io.r.resp.data
 
   io.out.resp := io.in.bits.resp_in(0)
-  // io.out.bits.resp.s1.preds.taken_mask := Cat(0.U(1.W), s1_read(1)(1), s1_read(0)(1))
-  // io.out.bits.resp.s1.preds.taken_mask := VecInit(Cat(0.U(1.W), s1_read(0)(1)).asBools())
-  // io.out.bits.resp.s1.meta := s1_read.asUInt()
 
   val s1_latch_taken_mask = VecInit(Cat((0 until numBr reverse).map(i => s1_read(i)(1))).asBools())
   val s1_latch_meta       = s1_read.asUInt()
