@@ -77,7 +77,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   {
     val brTargets = Vec(numBr, UInt(VAddrBits.W))
     val jmpTarget = UInt(VAddrBits.W)
-    val pftAddr   = UInt(log2Up(PredictWidth).W)
+    val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
   }
 
   class ReadResp extends XSBundle
@@ -115,7 +115,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     }
   }
 
-  override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBMeta)).getWidth
+  // override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBMeta)).getWidth
+  override val meta_size = WireInit(0.U.asTypeOf(Bool())).getWidth
 
   class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
@@ -126,6 +127,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val update_write_meta = Flipped(Valid(new MicroBTBMeta))
       val update_write_data = Flipped(Valid(new MicroBTBData))
       val update_taken_mask = Input(Vec(numBr, Bool()))
+      val update_mask = Input(UInt(numBr.W))
     })
 
     // val debug_io = IO(new Bundle {
@@ -214,7 +216,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val update_old_pred = update_hit_meta.pred
     val update_new_pred = VecInit(
       (0 until numBr).map { i =>
-        Mux(update_hit, satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
+        Mux(update_hit && io.update_mask(i), satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
           Mux(io.update_taken_mask(i), 3.U, 0.U))
       })
 
@@ -255,6 +257,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val banks = ubtbBanks.io
   val read_resps = banks.read_resp
 
+  XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
+  XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
+
   // io.in.ready := !io.flush.valid
 
   banks.read_pc.valid := io.s1_fire
@@ -264,10 +269,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp := io.in.bits.resp_in(0)
   // io.out.resp.valids(0) := io.out.valid
   io.out.resp.s1.pc := s1_pc
-  io.out.s3_meta := RegEnable(RegEnable(read_resps.pred.asUInt(), io.s1_fire), io.s2_fire) // s3_meta
+  io.out.s3_meta := RegEnable(RegEnable(read_resps.hit.asUInt(), io.s1_fire), io.s2_fire) // s3_meta
   io.out.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
   io.out.resp.s1.preds.taken_mask := read_resps.taken_mask
   io.out.resp.s1.preds.is_br := read_resps.brValids
+  io.out.resp.s1.preds.hit := banks.read_hit
   // io.out.bits.resp.s1.preds.is_jal := read_resps.jmpValid && !(read_resps.isCall || read_resps.isRet || read_resps.isJalr)
   // io.out.bits.resp.s1.preds.is_jalr := read_resps.jmpValid && read_resps.isJalr
   // io.out.bits.resp.s1.preds.is_call := read_resps.jmpValid && read_resps.isCall
@@ -315,6 +321,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_write_data.valid := data_write_valid
   banks.update_write_data.bits := update_write_datas
   banks.update_taken_mask := u_taken_mask
+  banks.update_mask := LowerMaskFromLowest(u_taken_mask.asUInt)
 
   if (debug) {
     XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, banks.read_hit)

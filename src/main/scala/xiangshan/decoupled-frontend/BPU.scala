@@ -353,11 +353,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_takenOnBr  = resp.s1.preds.real_br_taken_mask.asUInt =/= 0.U
   val s1_predicted_ghist = s1_ghist.update(s1_sawNTBr, s1_takenOnBr)
 
+  XSDebug(p"s1_sawNTBR=${s1_sawNTBr}, resp.s1.hit=${resp.s1.hit}, is_br=${Binary(resp.s1.preds.is_br.asUInt)}, taken_mask=${Binary(resp.s1.preds.taken_mask.asUInt)}\n")
+  XSDebug(p"s1_takenOnBr=$s1_takenOnBr, real_taken_mask=${Binary(resp.s1.preds.real_taken_mask.asUInt)}\n")
+  XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.asUInt)}\n")
   // when(s1_valid) {
   //   s0_ghist := s1_predicted_ghist
   // }
 
-  when(s1_fire) {
+  when(s1_valid) {
     s0_pc := resp.s1.preds.target
     s0_ghist := s1_predicted_ghist
   }
@@ -375,8 +378,16 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
       s0_pc := resp.s2.preds.target
+      XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.preds.target)}\n")
+      XSDebug(p"s2_correct_s1_ghist=$s2_correct_s1_ghist\n")
+      XSDebug(p"s1_ghist=${Binary(s1_ghist.predHist)}\n")
+      XSDebug(p"s2_predicted_ghist=${Binary(s2_predicted_ghist.predHist)}\n")
     }
   }
+
+  XSPerfAccumulate("s2_redirect_because_s1_not_valid", s2_fire && !s1_valid)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
+  XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
   // s3
   val s3_sawNTBr = Mux(resp.s3.hit,

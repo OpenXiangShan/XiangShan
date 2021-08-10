@@ -185,6 +185,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s2_target := Mux((io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
       PriorityMux(io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
+
+    XSDebug("s2 FTB resp:\n")
+    XSDebug(p"$ftb_entry\n")
   }
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
