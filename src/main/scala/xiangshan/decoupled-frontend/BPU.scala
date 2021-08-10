@@ -193,7 +193,7 @@ class FakePredictor(implicit p: Parameters) extends BasePredictor {
 }
 
 class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
-  val resp = DecoupledIO(new BPUToFtqBundle())
+  val resp = DecoupledIO(new BpuToFtqBundle())
 }
 
 class PredictorIO(implicit p: Parameters) extends XSBundle {
@@ -258,7 +258,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   }
 
   // when(toFtq_fire) {
-    // final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.preds.is_br.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
+    // final_gh := s3_gh.update(io.bpu_to_ftq.resp.bits.ftb_entry.brValids.reduce(_||_) && !io.bpu_to_ftq.resp.bits.preds.taken,
     //   io.bpu_to_ftq.resp.bits.preds.taken)
   // }
 
@@ -321,7 +321,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   predictors.io.s3_fire := s3_fire
 
   io.bpu_to_ftq.resp.valid := s3_valid && !io.ftq_to_bpu.redirect.valid
-  io.bpu_to_ftq.resp.bits  := BPUToFtqBundle(predictors.io.out.resp.s3)
+  io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp.s3)
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
   io.bpu_to_ftq.resp.bits.ghist  := s3_ghist
 
@@ -331,14 +331,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // History manage
   // s1
   val s1_sawNTBr = Mux(resp.s1.preds.hit,
-    resp.s1.preds.is_br.zip(resp.s1.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s1.ftb_entry.brValids.zip(resp.s1.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
 
-  val s1_takenOnBr  = resp.s1.preds.real_br_taken_mask.asUInt =/= 0.U
+  val s1_takenOnBr  = resp.s1.real_br_taken_mask.asUInt =/= 0.U
   val s1_predicted_ghist = s1_ghist.update(s1_sawNTBr, s1_takenOnBr)
 
-  XSDebug(p"s1_sawNTBR=${s1_sawNTBr}, resp.s1.hit=${resp.s1.preds.hit}, is_br=${Binary(resp.s1.preds.is_br.asUInt)}, taken_mask=${Binary(resp.s1.preds.taken_mask.asUInt)}\n")
-  XSDebug(p"s1_takenOnBr=$s1_takenOnBr, real_taken_mask=${Binary(resp.s1.preds.real_taken_mask.asUInt)}\n")
+  XSDebug(p"s1_sawNTBR=${s1_sawNTBr}, resp.s1.hit=${resp.s1.preds.hit}, is_br=${Binary(resp.s1.ftb_entry.brValids.asUInt)}, taken_mask=${Binary(resp.s1.preds.taken_mask.asUInt)}\n")
+  XSDebug(p"s1_takenOnBr=$s1_takenOnBr, real_taken_mask=${Binary(resp.s1.real_taken_mask.asUInt)}\n")
   XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.asUInt)}\n")
   // when(s1_valid) {
   //   s0_ghist := s1_predicted_ghist
@@ -351,9 +351,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // s2
   val s2_sawNTBr = Mux(resp.s2.preds.hit,
-    resp.s2.preds.is_br.zip(resp.s2.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s2.ftb_entry.brValids.zip(resp.s2.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
-  val s2_takenOnBr  = resp.s2.preds.real_br_taken_mask.asUInt =/= 0.U
+  val s2_takenOnBr  = resp.s2.real_br_taken_mask.asUInt =/= 0.U
   val s2_predicted_ghist = s2_ghist.update(s2_sawNTBr, s2_takenOnBr)
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
 
@@ -375,9 +375,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // s3
   val s3_sawNTBr = Mux(resp.s3.preds.hit,
-    resp.s3.preds.is_br.zip(resp.s3.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
+    resp.s3.ftb_entry.brValids.zip(resp.s3.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
     false.B)
-  val s3_takenOnBr  = resp.s3.preds.real_br_taken_mask.asUInt =/= 0.U
+  val s3_takenOnBr  = resp.s3.real_br_taken_mask.asUInt =/= 0.U
   val s3_predicted_ghist = s3_ghist.update(s3_sawNTBr, s3_takenOnBr)
   val s3_correct_s2_ghist = s2_ghist =/= s3_predicted_ghist
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist

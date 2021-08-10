@@ -85,29 +85,16 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
 }
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val taken_mask = Vec(numBr, Bool())
-  val is_br = Vec(numBr, Bool())
-  val is_jal = Bool()
-  val is_jalr = Bool()
-  val is_call = Bool()
-  val is_ret = Bool()
-  val call_is_rvc = Bool()
+  // val is_br = Vec(numBr, Bool())
+  // val is_jal = Bool()
+  // val is_jalr = Bool()
+  // val is_call = Bool()
+  // val is_ret = Bool()
+  // val call_is_rvc = Bool()
   val target = UInt(VAddrBits.W)
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
-  def real_taken_mask(): Vec[Bool] = {
-    Mux(hit,
-      VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b } :+ (is_jal || is_jalr)),
-      VecInit(Seq.fill(numBr+1)(false.B)))
-  }
-
-  def real_br_taken_mask(): Vec[Bool] = {
-    Mux(hit,
-      VecInit(taken_mask.zip(is_br).map{ case(m, b) => m && b }),
-      VecInit(Seq.fill(numBr)(false.B)))
-  }
-  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && hit && is_call
-  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && hit && is_ret
 
   // override def toPrintable: Printable = {
   //   p"-----------BranchPrediction----------- " +
@@ -118,7 +105,7 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   // }
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[taken_mask] ${Binary(taken_mask.asUInt)} [is_br] ${Binary(is_br.asUInt)} [is_jal] $is_jal [is_jalr] $is_jalr [is_call] $is_call [is_ret] $is_ret\n")
+    XSDebug(cond, p"[taken_mask] ${Binary(taken_mask.asUInt)}\n")
     XSDebug(cond, p"[hit] $hit [target] ${Hexadecimal(target)}\n")
   }
 }
@@ -135,6 +122,20 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   // val meta = UInt(MaxMetaLength.W)
 
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
+
+  def real_taken_mask(): Vec[Bool] = {
+    Mux(preds.hit,
+      VecInit(preds.taken_mask.zip(ftb_entry.brValids).map{ case(m, b) => m && b } :+ ftb_entry.jmpValid),
+      VecInit(Seq.fill(numBr+1)(false.B)))
+  }
+
+  def real_br_taken_mask(): Vec[Bool] = {
+    Mux(preds.hit,
+      VecInit(preds.taken_mask.zip(ftb_entry.brValids).map{ case(m, b) => m && b }),
+      VecInit(Seq.fill(numBr)(false.B)))
+  }
+  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall
+  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet
 
   // override def toPrintable: Printable = {
   //   p"-----------BranchPredictionBundle----------- " +
@@ -159,13 +160,13 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   val s3 = new BranchPredictionBundle()
 }
 
-class BPUToFtqBundle(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
+class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
   val meta = UInt(MaxMetaLength.W)
 }
 
-object BPUToFtqBundle {
-  def apply(resp: BranchPredictionBundle)(implicit p: Parameters): BPUToFtqBundle = {
-    val e = Wire(new BPUToFtqBundle())
+object BpuToFtqBundle {
+  def apply(resp: BranchPredictionBundle)(implicit p: Parameters): BpuToFtqBundle = {
+    val e = Wire(new BpuToFtqBundle())
     e.pc := resp.pc
     e.preds := resp.preds
     e.ghist := resp.ghist

@@ -85,7 +85,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   ))
 
   val update_mask = LowerMask(PriorityEncoderOH(update.preds.taken_mask.asUInt))
-  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.preds.is_br(i) && update_mask(i)))
+  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}
 
@@ -129,7 +129,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
       XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
     }
 
-    XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.preds.is_br.asUInt)
+    XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.ftb_entry.brValids.asUInt)
 
     XSDebug(u_valid, "newTakens=%b\n", newTakens.asUInt)
 

@@ -523,8 +523,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val fallThruAddr = getFallThroughAddr(s3_pc, ftb_entry.carry, ftb_entry.pftAddr)
 
   when(ftb_hit) {
-    io.out.resp.s3.preds.target := Mux((resp_s3.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-      PriorityMux(resp_s3.preds.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+    io.out.resp.s3.preds.target := Mux((resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+      PriorityMux(resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
       Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
   }
 

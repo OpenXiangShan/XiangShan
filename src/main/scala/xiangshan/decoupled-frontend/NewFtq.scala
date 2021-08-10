@@ -444,10 +444,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_fetch_status(enqIdx) := f_to_send
     commitStateQueue(enqIdx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
     entry_hit_status(enqIdx) := Mux(io.fromBpu.resp.bits.preds.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
-    enq_cfiIndex.valid := preds.real_taken_mask.asUInt.orR
+    enq_cfiIndex.valid := io.fromBpu.resp.bits.real_taken_mask.asUInt.orR
     // when no takens, set cfiIndex to PredictWidth-1
-    enq_cfiIndex.bits := ParallelPriorityMux(preds.real_taken_mask, ftb_entry.getOffsetVec) |
-                         Fill(log2Ceil(PredictWidth), (!preds.real_taken_mask.asUInt.orR).asUInt)
+    enq_cfiIndex.bits := ParallelPriorityMux(io.fromBpu.resp.bits.real_taken_mask, ftb_entry.getOffsetVec) |
+                         Fill(log2Ceil(PredictWidth), (!io.fromBpu.resp.bits.real_taken_mask.asUInt.orR).asUInt)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(enqIdx) := preds.target
@@ -817,12 +817,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   val preds = update.preds
-  preds.is_br := update_ftb_entry.brValids
-  preds.is_jal := update_ftb_entry.jmpValid && !update_ftb_entry.isJalr
-  preds.is_jalr := update_ftb_entry.jmpValid && update_ftb_entry.isJalr
-  preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
-  preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
-  preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
+  // preds.is_br := update_ftb_entry.brValids
+  // preds.is_jal := update_ftb_entry.jmpValid && !update_ftb_entry.isJalr
+  // preds.is_jalr := update_ftb_entry.jmpValid && update_ftb_entry.isJalr
+  // preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
+  // preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
+  // preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
   preds.target := commit_target
   preds.taken_mask := ftbEntryGen.taken_mask
 

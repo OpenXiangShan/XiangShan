@@ -192,11 +192,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
   io.out.resp.s2.preds.taken_mask    := io.in.bits.resp_in(0).s2.preds.taken_mask
-  io.out.resp.s2.preds.is_br         := ftb_entry.brValids
-  io.out.resp.s2.preds.is_jal        := ftb_entry.jmpValid && !ftb_entry.isJalr
-  io.out.resp.s2.preds.is_jalr       := ftb_entry.isJalr
-  io.out.resp.s2.preds.is_call       := ftb_entry.isCall
-  io.out.resp.s2.preds.is_ret        := ftb_entry.isRet
+  // io.out.resp.s2.preds.is_br         := ftb_entry.brValids
+  // io.out.resp.s2.preds.is_jal        := ftb_entry.jmpValid && !ftb_entry.isJalr
+  // io.out.resp.s2.preds.is_jalr       := ftb_entry.isJalr
+  // io.out.resp.s2.preds.is_call       := ftb_entry.isCall
+  // io.out.resp.s2.preds.is_ret        := ftb_entry.isRet
 
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.preds.target        := s2_target
@@ -248,7 +248,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.read_pc.ready)
     XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
     XSDebug("s2_taken_mask=%b, s2_real_taken_mask=%b\n",
-      io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.preds.real_taken_mask().asUInt)
+      io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.real_taken_mask().asUInt)
     XSDebug("s2_target=%x\n", s2_target)
 
     ftb_entry.display(true.B)
