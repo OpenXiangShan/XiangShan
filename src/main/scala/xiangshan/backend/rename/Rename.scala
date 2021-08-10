@@ -69,7 +69,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // connect flush and redirect ports for __integer__ free list *(walk) is handled by dec
   intFreeList.io.flush := io.flush
-  intFreeList.io.redirect := io.redirect.valid || io.roqCommits.isWalk
+  intFreeList.io.redirect := io.redirect.valid
+  intFreeList.io.walk := io.roqCommits.isWalk
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk
@@ -336,12 +337,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
         // conclusion: 
         // a. rat recovery has nothing to do with ME or not
-        // b. treat walk as normal commit except replace old_pdests with pdests
-        // c. ignore eliminatedMove and pdests port
+        // b. treat walk as normal commit except replace old_pdests with pdests and set io.walk to true
+        // c. ignore pdests port when walking
 
         intFreeList.io.dec.req(i) := commitDestValid // walk or not walk
         intFreeList.io.dec.old_pdests(i)  := Mux(io.roqCommits.isWalk, io.roqCommits.info(i).pdest, io.roqCommits.info(i).old_pdest)
-        intFreeList.io.dec.eliminatedMove(i) := Mux(io.roqCommits.isWalk, false.B, io.roqCommits.info(i).eliminatedMove)
+        intFreeList.io.dec.eliminatedMove(i) := io.roqCommits.info(i).eliminatedMove
         intFreeList.io.dec.pdests(i) := io.roqCommits.info(i).pdest
       }
     }
