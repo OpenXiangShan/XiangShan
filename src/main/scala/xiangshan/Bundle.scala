@@ -147,6 +147,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val target = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
+  val shift = UInt((log2Ceil(numBr)+1).W)
+  val addIntoHist = Bool()
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

@@ -326,7 +326,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 }
 
 class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
-  with HasBackendRedirectInfo with BPUUtils {
+  with HasBackendRedirectInfo with BPUUtils with HasBPUConst{
   val io = IO(new Bundle {
     val fromBpu = Flipped(new BpuToFtqIO)
     val fromIfu = Flipped(new IfuToFtqIO)
@@ -583,6 +583,22 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   backendRedirectCfi.hist := ftq_hist_mem.io.rdata.init.last
   backendRedirectCfi.br_hit := ftb_entry_mem.io.rdata.init.last.hasBr(fromBackendRedirect.bits.ftqOffset) &&
                                entry_hit_status(fromBackendRedirect.bits.ftqIdx.value) === h_hit
+
+  val r_ftb_entry = ftb_entry_mem.io.rdata.init.last
+  val r_ftqOffset = fromBackendRedirect.bits.ftqOffset
+
+  when (entry_hit_status(fromBackendRedirect.bits.ftqIdx.value) === h_hit) {
+    backendRedirectCfi.shift := PopCount(r_ftb_entry.getBrMaskByOffset(r_ftqOffset)) +&
+      (backendRedirectCfi.pd.isBr && !r_ftb_entry.brIsSaved(r_ftqOffset) &&
+      !(r_ftb_entry.brValids(numBr-1) && r_ftqOffset > r_ftb_entry.brOffset(numBr-1)))
+
+    backendRedirectCfi.addIntoHist := backendRedirectCfi.pd.isBr && (r_ftb_entry.brIsSaved(r_ftqOffset) ||
+        !(r_ftb_entry.brValids(numBr-1) && r_ftqOffset > r_ftb_entry.brOffset(numBr-1)))
+  }.otherwise {
+    backendRedirectCfi.shift := backendRedirectCfi.pd.isBr.asUInt
+    backendRedirectCfi.addIntoHist := backendRedirectCfi.pd.isBr.asUInt
+  }
+  
   backendRedirectCfi.rasSp := stage3CfiInfo.rasSp
   backendRedirectCfi.rasEntry := stage3CfiInfo.rasEntry
   backendRedirectCfi.specCnt := stage3CfiInfo.specCnt
@@ -812,7 +828,12 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       val misPred = commit_mispredict(i)
       val ghist = commit_ghist.predHist
       val predCycle = commit_meta.meta(63, 0)
-      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${!isJmp}) pc(${Hexadecimal(pc)}) taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) startAddr(${Hexadecimal(commit_pc_bundle.startAddr)})\n")
+
+      val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
+      val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
+      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
+      p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
+      p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist})\n")
     }
   }
 

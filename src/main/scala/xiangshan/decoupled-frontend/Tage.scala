@@ -175,6 +175,7 @@ class TageTable
   val (s1_idx, s1_tag) = compute_tag_and_hash(s1_unhashed_idx, io.req.bits.hist)
   val (s2_idx, s2_tag) = (RegEnable(s1_idx, io.req.valid), RegEnable(s1_tag, io.req.valid))
 
+  // TODO: hi_us lo_us use DataModule
   val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val lo_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Module(new SRAMTemplate(new TageEntry, set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
