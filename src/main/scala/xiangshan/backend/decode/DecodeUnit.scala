@@ -458,7 +458,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  cs.isMove := BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr && cs.lsrc(0) =/= 0.U && cs.ldest =/= 0.U
+  cs.isMove := BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr && cs.lsrc(0) =/= 0.U && cs.ldest =/= 0.U && cs.lsrc(0) =/= cs.ldest
 
   cf_ctrl.ctrl := cs
 

@@ -392,9 +392,12 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
       // fix exuData of eliminated move instruction
       for (j <- 0 until RoqSize) {
-        when (eliminatedMove(j) && io.exeWbResults(i).bits.uop.pdest === debug_microOp(j).pdest) {
-          debug_exuData(j) := io.exeWbResults(i).bits.data
-          XSDebug(p"Update exuData($j) from ${Hexadecimal(debug_exuData(j))} to ${io.exeWbResults(i).bits.data}\n")
+        val tempPtr = deqPtr + j.U
+        when (valid(tempPtr.value) && eliminatedMove(tempPtr.value) && io.exeWbResults(i).bits.uop.pdest === debug_microOp(tempPtr.value).pdest &&
+        /* instruction(wbidx) must execute before j in program order */
+        isAfter(tempPtr, io.exeWbResults(i).bits.uop.roqIdx) && io.exeWbResults(i).bits.uop.ctrl.rfWen) {
+          debug_exuData(tempPtr.value) := io.exeWbResults(i).bits.data
+          XSDebug(p"Update exuData($j) from ${Hexadecimal(debug_exuData(tempPtr.value))} to ${io.exeWbResults(i).bits.data}\n")
         }
       }
       debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
