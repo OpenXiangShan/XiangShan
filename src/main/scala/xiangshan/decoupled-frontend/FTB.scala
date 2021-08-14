@@ -64,6 +64,14 @@ class FTBEntry (implicit p: Parameters) extends XSBundle with FTBParams with BPU
     case (v, off) => v && off <= offset
   }.reduce(_||_)
 
+  def getBrMaskByOffset(offset: UInt) = (brValids zip brOffset).map{
+    case (v, off) => v && off <= offset
+  }
+  
+  def brIsSaved(offset: UInt) = (brValids zip brOffset).map{
+    case (v, off) => v && off === offset
+  }.reduce(_||_)
+
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"-----------FTB entry----------- \n")
     XSDebug(cond, p"v=${valid}, tag=${Hexadecimal(tag)}\n")

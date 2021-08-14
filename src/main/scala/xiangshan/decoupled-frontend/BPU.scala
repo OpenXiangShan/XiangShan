@@ -341,19 +341,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // History manage
   // s1
-  val s1_sawNTBr = Mux(resp.s1.preds.hit,
-    resp.s1.ftb_entry.brValids.zip(resp.s1.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
-    false.B)
+  val s1_shift = Mux(resp.s1.preds.hit,
+    Mux(resp.s1.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s1.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s1.real_br_taken_mask.asUInt))),
+    0.U((log2Ceil(numBr)+1).W))
+  val s1_taken = Mux(resp.s1.preds.hit, resp.s1.real_br_taken_mask.asUInt =/= 0.U, false.B)
+  val s1_predicted_ghist = s1_ghist.update(s1_shift, s1_taken)
 
-  val s1_takenOnBr  = resp.s1.real_br_taken_mask.asUInt =/= 0.U
-  val s1_predicted_ghist = s1_ghist.update(s1_sawNTBr, s1_takenOnBr)
-
-  XSDebug(p"s1_sawNTBR=${s1_sawNTBr}, resp.s1.hit=${resp.s1.preds.hit}, is_br=${Binary(resp.s1.ftb_entry.brValids.asUInt)}, taken_mask=${Binary(resp.s1.preds.taken_mask.asUInt)}\n")
-  XSDebug(p"s1_takenOnBr=$s1_takenOnBr, real_taken_mask=${Binary(resp.s1.real_taken_mask.asUInt)}\n")
-  XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.asUInt)}\n")
-  // when(s1_valid) {
-  //   s0_ghist := s1_predicted_ghist
-  // }
+  XSDebug(p"[hit] ${resp.s1.preds.hit} [s1_real_br_taken_mask] ${Binary(resp.s1.real_br_taken_mask.asUInt)} [s1_shift] ${s1_shift} [s1_taken] ${s1_taken}\n")
+  XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
 
   when(s1_valid) {
     s0_pc := resp.s1.preds.target
@@ -362,11 +357,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   }
 
   // s2
-  val s2_sawNTBr = Mux(resp.s2.preds.hit,
-    resp.s2.ftb_entry.brValids.zip(resp.s2.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
-    false.B)
-  val s2_takenOnBr  = resp.s2.real_br_taken_mask.asUInt =/= 0.U
-  val s2_predicted_ghist = s2_ghist.update(s2_sawNTBr, s2_takenOnBr)
+  val s2_shift = Mux(resp.s2.preds.hit,
+    Mux(resp.s2.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s2.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s2.real_br_taken_mask.asUInt))),
+    0.U((log2Ceil(numBr)+1).W))
+  val s2_taken = Mux(resp.s2.preds.hit, resp.s2.real_br_taken_mask.asUInt =/= 0.U, false.B)
+  val s2_predicted_ghist = s2_ghist.update(s2_shift, s2_taken)
+
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
 
   when(s2_fire) {
@@ -387,11 +383,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
   // s3
-  val s3_sawNTBr = Mux(resp.s3.preds.hit,
-    resp.s3.ftb_entry.brValids.zip(resp.s3.preds.taken_mask).map{ case (b, t) => b && !t }.reduce(_||_),
-    false.B)
-  val s3_takenOnBr  = resp.s3.real_br_taken_mask.asUInt =/= 0.U
-  val s3_predicted_ghist = s3_ghist.update(s3_sawNTBr, s3_takenOnBr)
+  val s3_shift = Mux(resp.s3.preds.hit,
+    Mux(resp.s3.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s3.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s3.real_br_taken_mask.asUInt))),
+    0.U((log2Ceil(numBr)+1).W))
+  val s3_taken = Mux(resp.s3.preds.hit, resp.s3.real_br_taken_mask.asUInt =/= 0.U, false.B)
+  val s3_predicted_ghist = s3_ghist.update(s3_shift, s3_taken)
+
   val s3_correct_s2_ghist = s2_ghist =/= s3_predicted_ghist
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist
 
@@ -414,15 +411,26 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   when(io.ftq_to_bpu.redirect.valid) {
     val oldGh = redirect.cfiUpdate.hist
-    val sawNTBr = redirect.cfiUpdate.br_hit
+
+    val shift = redirect.cfiUpdate.shift
+    val addIntoHist = redirect.cfiUpdate.addIntoHist
+
     val isBr = redirect.cfiUpdate.pd.isBr
     val taken = redirect.cfiUpdate.taken
-    val updatedGh = oldGh.update(sawNTBr || (isBr && taken), isBr && taken)
+
+    val updatedGh = oldGh.update(shift, taken && addIntoHist)
     s0_ghist := updatedGh // TODO: History fix logic
     s0_pc := redirect.cfiUpdate.target
     val oldPh = redirect.cfiUpdate.phist
     val phNewBit = redirect.cfiUpdate.phNewBit
     s0_phist := (oldPh << 1) | phNewBit
+    
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"-------------redirect Repair------------\n")
+    // XSDebug(io.ftq_to_bpu.redirect.valid, p"taken_mask=${Binary(taken_mask.asUInt)}, brValids=${Binary(brValids.asUInt)}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"isBr: ${isBr}, taken: ${taken}, addIntoHist: ${addIntoHist}, shift: ${shift}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"oldGh   =${Binary(oldGh.predHist)}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"updateGh=${Binary(updatedGh.predHist)}\n")
+
   }
 
   if(debug) {

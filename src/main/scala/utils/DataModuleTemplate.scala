@@ -59,7 +59,8 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val data = Mem(numEntries, gen)
+  // val data = Mem(numEntries, gen)
+  val data = RegInit(0.U.asTypeOf(Vec(numEntries, gen)))
 
   // read ports
   val raddr = if (isSync) (RegNext(io.raddr)) else io.raddr

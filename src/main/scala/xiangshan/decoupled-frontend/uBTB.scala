@@ -232,6 +232,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
   // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
+  XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, hit=${read_resps.hit}\n")
 
   // io.in.ready := !io.flush.valid
 
@@ -252,6 +253,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // io.out.bits.resp.s1.preds.is_ret := read_resps.jmpValid && read_resps.isRet
   // io.out.bits.resp.s1.preds.call_is_rvc := read_resps.last_is_rvc
   io.out.resp.s1.ftb_entry := DontCare
+  io.out.resp.s1.ftb_entry.valid := read_resps.valid
   io.out.resp.s1.ftb_entry.brValids := read_resps.brValids
   io.out.s3_meta := RegEnable(RegEnable(read_resps.asUInt, io.s1_fire), io.s2_fire)
 

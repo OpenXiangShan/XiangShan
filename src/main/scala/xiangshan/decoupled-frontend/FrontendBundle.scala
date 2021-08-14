@@ -50,12 +50,25 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
 }
 
 // Move from BPU
-class GlobalHistory(implicit p: Parameters) extends XSBundle {
+class GlobalHistory(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val predHist = UInt(HistoryLength.W)
-  def update(sawNTBr: Bool, takenOnBr: Bool, hist: UInt = predHist): GlobalHistory = {
+  // def update(sawNTBr: Bool, takenOnBr: Bool, hist: UInt = predHist): GlobalHistory = {
+  //   val g = Wire(new GlobalHistory)
+  //   val shifted = takenOnBr || sawNTBr
+  //   g.predHist := Mux(shifted, (hist << 1) | takenOnBr.asUInt, hist)
+  //   g
+  // }
+
+  // def update(brValids: UInt, taken_mask: UInt, hist: UInt = predHist): GlobalHistory = {
+  //   val shift = PopCount(brValids & Mux(taken_mask =/= 0.U, LowerMask(taken_mask), ((1.U<<numBr) - 1.U)))
+  //   val g = Wire(new GlobalHistory)
+  //   g.predHist := (hist << shift) | (taken_mask =/= 0.U)
+  //   g
+  // }
+
+  def update(shift: UInt, taken: Bool, hist: UInt = predHist): GlobalHistory = {
     val g = Wire(new GlobalHistory)
-    val shifted = takenOnBr || sawNTBr
-    g.predHist := Mux(shifted, (hist << 1) | takenOnBr.asUInt, hist)
+    g.predHist := (hist << shift) | taken
     g
   }
 
@@ -135,8 +148,8 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
       VecInit(preds.taken_mask.zip(ftb_entry.brValids).map{ case(m, b) => m && b }),
       VecInit(Seq.fill(numBr)(false.B)))
   }
-  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall
-  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet
+  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall && ftb_entry.jmpValid
+  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet && ftb_entry.jmpValid
 
   // override def toPrintable: Printable = {
   //   p"-----------BranchPredictionBundle----------- " +
@@ -229,8 +242,12 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
     XSDebug(cond, p"-----------BranchPredictionRedirect----------- \n")
     XSDebug(cond, p"-----------cfiUpdate----------- \n")
     XSDebug(cond, p"[pc] ${Hexadecimal(cfiUpdate.pc)}\n")
+    XSDebug(cond, p"[hist] ${Binary(cfiUpdate.hist.predHist)}\n")
+    XSDebug(cond, p"[predHist] ${Binary(cfiUpdate.predHist.predHist)}\n")
+    XSDebug(cond, p"[br_hit] ${cfiUpdate.br_hit} [isMisPred] ${cfiUpdate.isMisPred}\n")
     XSDebug(cond, p"[pred_taken] ${cfiUpdate.predTaken} [taken] ${cfiUpdate.taken} [isMisPred] ${cfiUpdate.isMisPred}\n")
     XSDebug(cond, p"[target] ${Hexadecimal(cfiUpdate.target)} \n")
+    XSDebug(cond, p"[shift] ${cfiUpdate.shift}\n")
     XSDebug(cond, p"------------------------------- \n")
     XSDebug(cond, p"[roqPtr] f=${roqIdx.flag} v=${roqIdx.value}\n")
     XSDebug(cond, p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} \n")
