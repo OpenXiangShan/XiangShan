@@ -248,8 +248,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_ghist = RegEnable(s1_ghist, 0.U.asTypeOf(new GlobalHistory), s1_fire)
   val s3_ghist = RegEnable(s2_ghist, 0.U.asTypeOf(new GlobalHistory), s2_fire)
 
-  val s0_phist = WireInit(0.U(HistoryLength.W))
-  val s0_phist_reg = RegNext(s0_phist, init=0.U(HistoryLength.W))
+  val s0_phist = WireInit(0.U(PathHistoryLength.W))
+  val s0_phist_reg = RegNext(s0_phist, init=0.U(PathHistoryLength.W))
   val s1_phist = RegEnable(s0_phist, 0.U, s0_fire)
   val s2_phist = RegEnable(s1_phist, 0.U, s1_fire)
   val s3_phist = RegEnable(s2_phist, 0.U, s2_fire)
@@ -378,7 +378,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     }
   }
 
+  val s2_redirect_target = s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target
+  val s2_saw_s1_hit = RegEnable(resp.s1.preds.hit, s1_fire)
+  val s2_redirect_target_both_hit = s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit
   XSPerfAccumulate("s2_redirect_because_s1_not_valid", s2_fire && !s1_valid)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
+  XSPerfAccumulate("s2_redirect_target_diff_s1_nhit_s2_hit", s2_redirect_target && !s2_saw_s1_hit &&  resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_target_diff_s1_hit_s2_nhit", s2_redirect_target &&  s2_saw_s1_hit && !resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_target_diff_both_hit",  s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_br_direction_diff",
+    s2_redirect_target_both_hit &&
+    RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
   XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
   XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
