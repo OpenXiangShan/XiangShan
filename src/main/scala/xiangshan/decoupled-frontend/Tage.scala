@@ -15,7 +15,6 @@
 
 package xiangshan.frontend
 
-import bus.tilelink.TLUtilities.data
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
@@ -32,12 +31,12 @@ import scala.util.matching.Regex
 
 trait TageParams extends HasXSParameter with HasBPUParameter {
   //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 128,    2,    7),
-                      ( 128,    4,    7),
-                      ( 256,    8,    8),
-                      ( 256,   16,    8),
-                      ( 128,   32,    9),
-                      ( 128,   64,    9))
+  val TableInfo = Seq(( 128*8,    2,    7),
+                      ( 128*8,    4,    7),
+                      ( 256*8,    8,    8),
+                      ( 256*8,   16,    8),
+                      ( 128*8,   32,    9),
+                      ( 128*8,   64,    9))
                       // (  64,   64,   11),
                       // (  64,  101,   12),
                       // (  64,  160,   12),
@@ -179,7 +178,6 @@ class TageTable
 
   val hi_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
   val lo_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
-  // TODO: Way=1 have bug
   val tables  = Seq.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false)))
 
 
@@ -288,8 +286,13 @@ class TageTable
     io.ctrs.bits := ctrs(hit_idx)
     
     when (io.wen) {
-      ctrs(enq_idx) := io.update_ctrs.bits
-      ctr_valids(enq_idx) := io.update_ctrs.valid
+      when (hit) {
+        ctrs(hit_idx) := io.update_ctrs.bits
+        ctr_valids(hit_idx) := io.update_ctrs.valid
+      }.otherwise {
+        ctrs(enq_idx) := io.update_ctrs.bits
+        ctr_valids(enq_idx) := io.update_ctrs.valid
+      }
     }
     
     when(io.wen && !hit) {
