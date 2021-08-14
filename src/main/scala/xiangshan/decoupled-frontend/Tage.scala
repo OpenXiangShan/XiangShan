@@ -215,13 +215,13 @@ class TageTable
 
 
   // uBitPeriod = 2048, nRows = 128
-  val clear_u_ctr = RegInit(0.U((log2Ceil(uBitPeriod) + log2Ceil(nRows) + 1).W))
-  clear_u_ctr := clear_u_ctr + 1.U
+  val clear_u_ctr = Seq.fill(TageBanks)(RegInit(0.U((log2Ceil(uBitPeriod) + log2Ceil(nRows) + 1).W)))
+  clear_u_ctr.foreach(c => c := c + 1.U)
 
-  val doing_clear_u = clear_u_ctr(log2Ceil(uBitPeriod)-1,0) === 0.U
-  val doing_clear_u_hi = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 1.U
-  val doing_clear_u_lo = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 0.U
-  val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
+  val doing_clear_u = clear_u_ctr.map(_(log2Ceil(uBitPeriod)-1,0) === 0.U)
+  val doing_clear_u_hi = doing_clear_u.zip(clear_u_ctr).map{case (d, ctr) => d && ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 1.U}
+  val doing_clear_u_lo = doing_clear_u.zip(clear_u_ctr).map{case (d, ctr) => d && ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 0.U}
+  val clear_u_idx = clear_u_ctr.map(_ >> log2Ceil(uBitPeriod))
 
   // Use fetchpc to compute hash
   val update_idxes  = Wire(Vec(TageBanks, UInt(log2Ceil(nRows).W)))
@@ -246,19 +246,17 @@ class TageTable
   val update_lo_wdata = Wire(Vec(TageBanks, Bool()))
   
   for (b <- 0 until TageBanks) {
-    val hi_wen = io.update.uMask(b) || doing_clear_u_hi
-    val hi_mask = Mux(doing_clear_u_hi, true.B, io.update.uMask(b))
+    val hi_wen = io.update.uMask(b) || doing_clear_u_hi(b)
 
-    hi_us(b).io.wen(0) := hi_wen && hi_mask
-    hi_us(b).io.wdata(0) := Mux(doing_clear_u_hi, false.B, update_hi_wdata(b))
-    hi_us(b).io.waddr(0) := Mux(doing_clear_u_hi, clear_u_idx, update_idxes(b))
+    hi_us(b).io.wen(0) := hi_wen
+    hi_us(b).io.wdata(0) := Mux(doing_clear_u_hi(b), false.B, update_hi_wdata(b))
+    hi_us(b).io.waddr(0) := Mux(doing_clear_u_hi(b), clear_u_idx(b), update_idxes(b))
 
-    val lo_wen = io.update.uMask(b) || doing_clear_u_lo
-    val lo_mask = Mux(doing_clear_u_lo, true.B, io.update.uMask(b))
+    val lo_wen = io.update.uMask(b) || doing_clear_u_lo(b)
 
-    lo_us(b).io.wen(0) := lo_wen && lo_mask
-    lo_us(b).io.wdata(0) := Mux(doing_clear_u_lo, false.B, update_lo_wdata(b))
-    lo_us(b).io.waddr(0) := Mux(doing_clear_u_lo, clear_u_idx, update_idxes(b)),
+    lo_us(b).io.wen(0) := lo_wen
+    lo_us(b).io.wdata(0) := Mux(doing_clear_u_lo(b), false.B, update_lo_wdata(b))
+    lo_us(b).io.waddr(0) := Mux(doing_clear_u_lo(b), clear_u_idx(b), update_idxes(b)),
   }
   
   class WrBypass extends XSModule {
