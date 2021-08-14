@@ -116,7 +116,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val preds = new BranchPrediction
 
   val ghist = new GlobalHistory()
-  val phist = UInt(HistoryLength.W)
+  val phist = UInt(PathHistoryLength.W)
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))

@@ -53,6 +53,7 @@ case class XSCoreParameters
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
+  PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
@@ -229,6 +230,7 @@ trait HasXSParameter {
   val EnableSC = coreParams.EnableSC
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
+  val PathHistoryLength = coreParams.PathHistoryLength
   val BtbSize = coreParams.BtbSize
   // val BtbWays = 4
   val BtbBanks = PredictWidth

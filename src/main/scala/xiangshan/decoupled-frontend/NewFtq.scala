@@ -130,7 +130,7 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   val rasEntry = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))
   val ghist = new GlobalHistory
-  val phist = UInt(32.W)
+  val phist = UInt(PathHistoryLength.W)
   val phNewBit = UInt(1.W)
 }
 

@@ -57,7 +57,8 @@ trait TageParams extends HasXSParameter with HasBPUParameter {
 
 trait HasFoldedHistory {
   val histLen: Int
-  def compute_folded_hist(hist: UInt, l: Int) = {
+  val phistLen: Int
+  def compute_folded_hist(hist: UInt, l: Int)(histLen: Int) = {
     if (histLen > 0) {
       val nChunks = (histLen + l - 1) / l
       val hist_chunks = (0 until nChunks) map {i =>
@@ -67,6 +68,8 @@ trait HasFoldedHistory {
     }
     else 0.U
   }
+  val compute_folded_ghist = compute_folded_hist(_: UInt, _: Int)(histLen)
+  val compute_folded_phist = compute_folded_hist(_: UInt, _: Int)(phistLen)
 }
 
 abstract class TageBundle(implicit p: Parameters)
@@ -80,7 +83,7 @@ abstract class TageModule(implicit p: Parameters)
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
-  val phist = UInt(HistoryLength.W)
+  val phist = UInt(PathHistoryLength.W)
   val mask = UInt(numBr.W)
 }
 
@@ -92,7 +95,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
-  val phist = UInt(HistoryLength.W)
+  val phist = UInt(PathHistoryLength.W)
   // update tag and ctr
   val mask = Vec(TageBanks, Bool())
   val taken = Vec(TageBanks, Bool())
@@ -145,11 +148,12 @@ class TageTable
 
   // bypass entries for tage update
   val wrBypassEntries = 4
+  val phistLen = PathHistoryLength
 
   def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
-    val idx_history = compute_folded_hist(hist, log2Ceil(nRows))
+    val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
     val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
-    val tag_history = compute_folded_hist(hist, tagLen)
+    val tag_history = compute_folded_ghist(hist, tagLen) ^ compute_folded_phist(phist, tagLen)
     // Use another part of pc to make tags
     val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history) (tagLen - 1, 0)
     (idx, tag)

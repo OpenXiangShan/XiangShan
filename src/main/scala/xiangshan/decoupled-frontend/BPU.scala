@@ -26,7 +26,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val MaxMetaLength = 1024 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
-  val numBr = 2
+  val numBr = 1
   val useBPD = true
   val useLHist = true
 
@@ -126,7 +126,7 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   val s0_pc = UInt(VAddrBits.W)
 
   val ghist = UInt(HistoryLength.W)
-  val phist = UInt(HistoryLength.W)
+  val phist = UInt(PathHistoryLength.W)
 
   val resp_in = Vec(nInputs, new BranchPredictionResp)
   // val toFtq_fire = Bool()
