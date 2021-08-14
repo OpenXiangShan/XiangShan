@@ -48,7 +48,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
-  EnableSC: Boolean = true,
+  EnableSC: Boolean = false,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
@@ -99,7 +99,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
-  FtqSize: Int = 48,
+  FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,

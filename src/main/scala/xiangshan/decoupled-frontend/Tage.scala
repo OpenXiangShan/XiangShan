@@ -31,12 +31,12 @@ import scala.util.matching.Regex
 
 trait TageParams extends HasXSParameter with HasBPUParameter {
   //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 128,    2,    7),
-                      ( 128,    4,    7),
-                      ( 256,    8,    8),
-                      ( 256,   16,    8),
-                      ( 128,   32,    9),
-                      ( 128,   64,    9))
+  val TableInfo = Seq(( 128*8,    2,    7),
+                      ( 128*8,    4,    7),
+                      ( 256*8,    8,    8),
+                      ( 256*8,   16,    8),
+                      ( 128*8,   32,    9),
+                      ( 128*8,   64,    9))
                       // (  64,   64,   11),
                       // (  64,  101,   12),
                       // (  64,  160,   12),
@@ -80,6 +80,7 @@ abstract class TageModule(implicit p: Parameters)
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
+  val phist = UInt(HistoryLength.W)
   val mask = UInt(numBr.W)
 }
 
@@ -91,6 +92,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
+  val phist = UInt(HistoryLength.W)
   // update tag and ctr
   val mask = Vec(TageBanks, Bool())
   val taken = Vec(TageBanks, Bool())
@@ -144,9 +146,9 @@ class TageTable
   // bypass entries for tage update
   val wrBypassEntries = 4
 
-  def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt) = {
+  def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
     val idx_history = compute_folded_hist(hist, log2Ceil(nRows))
-    val idx = (unhashed_idx ^ idx_history) (log2Ceil(nRows) - 1, 0)
+    val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
     val tag_history = compute_folded_hist(hist, tagLen)
     // Use another part of pc to make tags
     val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history) (tagLen - 1, 0)
@@ -172,7 +174,7 @@ class TageTable
   val s1_pc = io.req.bits.pc
   val s1_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val (s1_idx, s1_tag) = compute_tag_and_hash(s1_unhashed_idx, io.req.bits.hist)
+  val (s1_idx, s1_tag) = compute_tag_and_hash(s1_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
   val (s2_idx, s2_tag) = (RegEnable(s1_idx, io.req.valid), RegEnable(s1_tag, io.req.valid))
 
   val hi_us = Module(new SRAMTemplate(Bool(), set=nRows, way=TageBanks, shouldReset=true, holdRead=true, singlePort=false))
@@ -214,7 +216,7 @@ class TageTable
   val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
 
   // Use fetchpc to compute hash
-  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist)
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
 
   val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 
@@ -362,6 +364,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       t.io.req.valid := io.s1_fire
       t.io.req.bits.pc := s1_pc
       t.io.req.bits.hist := io.in.bits.ghist
+      t.io.req.bits.phist := io.in.bits.phist
       t.io.req.bits.mask := VecInit(Seq.fill(numBr)(1.U(1.W))).asUInt()
       t
   }
@@ -411,6 +414,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val update = io.update.bits
   val updateValids = VecInit(update.ftb_entry.brValids.map(_ && u_valid))
   val updateHist = update.ghist
+  val updatePhist = update.phist
 
   val updateMetas = update.meta.asTypeOf(Vec(TageBanks, new TageMeta))
 
@@ -542,6 +546,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
     // use fetch pc instead of instruction pc
     tables(i).io.update.hist := RegNext(updateHist.predHist)
+    tables(i).io.update.phist := RegNext(updatePhist)
   }
 
   // Debug and perf info

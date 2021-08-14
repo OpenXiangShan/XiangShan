@@ -126,6 +126,7 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   val s0_pc = UInt(VAddrBits.W)
 
   val ghist = UInt(HistoryLength.W)
+  val phist = UInt(HistoryLength.W)
 
   val resp_in = Vec(nInputs, new BranchPredictionResp)
   // val toFtq_fire = Bool()
@@ -236,16 +237,22 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_components_ready, s2_components_ready, s3_components_ready = Wire(Bool())
 
   val s0_pc = WireInit(resetVector.U)
-  val s0_pc_reg = RegInit(resetVector.U)
+  val s0_pc_reg = RegNext(s0_pc, init=resetVector.U)
   val s1_pc = RegEnable(s0_pc, s0_fire)
   val s2_pc = RegEnable(s1_pc, s1_fire)
   val s3_pc = RegEnable(s2_pc, s2_fire)
 
   val s0_ghist = WireInit(0.U.asTypeOf(new GlobalHistory))
-  val s0_ghist_reg = RegInit(0.U.asTypeOf(new GlobalHistory))
+  val s0_ghist_reg = RegNext(s0_ghist, init=0.U.asTypeOf(new GlobalHistory))
   val s1_ghist = RegEnable(s0_ghist, 0.U.asTypeOf(new GlobalHistory), s0_fire)
   val s2_ghist = RegEnable(s1_ghist, 0.U.asTypeOf(new GlobalHistory), s1_fire)
   val s3_ghist = RegEnable(s2_ghist, 0.U.asTypeOf(new GlobalHistory), s2_fire)
+
+  val s0_phist = WireInit(0.U(HistoryLength.W))
+  val s0_phist_reg = RegNext(s0_phist, init=0.U(HistoryLength.W))
+  val s1_phist = RegEnable(s0_phist, 0.U, s0_fire)
+  val s2_phist = RegEnable(s1_phist, 0.U, s1_fire)
+  val s3_phist = RegEnable(s2_phist, 0.U, s2_fire)
 
   val resp = predictors.io.out.resp
 
@@ -254,6 +261,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   when(RegNext(reset.asBool) && !reset.asBool) {
     s0_ghist := 0.U.asTypeOf(new GlobalHistory)
+    s0_phist := 0.U
     s0_pc := resetVector.U
   }
 
@@ -273,6 +281,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   predictors.io.in.valid := s0_fire
   predictors.io.in.bits.s0_pc := s0_pc
   predictors.io.in.bits.ghist := s1_ghist.predHist
+  predictors.io.in.bits.phist := s1_phist
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   // predictors.io.in.bits.toFtq_fire := toFtq_fire
@@ -324,9 +333,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp.s3)
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
   io.bpu_to_ftq.resp.bits.ghist  := s3_ghist
+  io.bpu_to_ftq.resp.bits.phist  := s3_phist
 
   s0_pc := s0_pc_reg
   s0_ghist := s0_ghist_reg
+  s0_phist := s0_phist_reg
 
   // History manage
   // s1
@@ -347,6 +358,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   when(s1_valid) {
     s0_pc := resp.s1.preds.target
     s0_ghist := s1_predicted_ghist
+    s0_phist := (s1_phist << 1) | s1_pc(instOffsetBits)
   }
 
   // s2
@@ -362,6 +374,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
       s0_pc := resp.s2.preds.target
+      s0_phist := (s2_phist << 1) | s2_pc(instOffsetBits)
       XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.preds.target)}\n")
       XSDebug(p"s2_correct_s1_ghist=$s2_correct_s1_ghist\n")
       XSDebug(p"s1_ghist=${Binary(s1_ghist.predHist)}\n")
@@ -390,6 +403,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       s0_ghist := s3_predicted_ghist
       s3_redirect := true.B
       s0_pc := resp.s3.preds.target
+      s0_phist := (s3_phist << 1) | s3_pc(instOffsetBits)
     }
   }
 
@@ -406,10 +420,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val updatedGh = oldGh.update(sawNTBr || (isBr && taken), isBr && taken)
     s0_ghist := updatedGh // TODO: History fix logic
     s0_pc := redirect.cfiUpdate.target
+    val oldPh = redirect.cfiUpdate.phist
+    val phNewBit = redirect.cfiUpdate.phNewBit
+    s0_phist := (oldPh << 1) | phNewBit
   }
-
-  s0_pc_reg := s0_pc
-  s0_ghist_reg := s0_ghist
 
   if(debug) {
     XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")

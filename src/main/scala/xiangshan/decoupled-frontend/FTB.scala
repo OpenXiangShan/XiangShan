@@ -192,11 +192,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
 
   io.out.resp.s2.preds.taken_mask    := io.in.bits.resp_in(0).s2.preds.taken_mask
-  // io.out.resp.s2.preds.is_br         := ftb_entry.brValids
-  // io.out.resp.s2.preds.is_jal        := ftb_entry.jmpValid && !ftb_entry.isJalr
-  // io.out.resp.s2.preds.is_jalr       := ftb_entry.isJalr
-  // io.out.resp.s2.preds.is_call       := ftb_entry.isCall
-  // io.out.resp.s2.preds.is_ret        := ftb_entry.isRet
 
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.preds.target        := s2_target

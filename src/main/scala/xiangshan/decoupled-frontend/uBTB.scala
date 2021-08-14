@@ -25,7 +25,7 @@ import chisel3.experimental.chiselName
 import scala.math.min
 
 trait MicroBTBParams extends HasXSParameter {
-  val numWays = 16
+  val numWays = 128
   val tagSize = 20
   val lowerBitSize = 20
   val untaggedBits = instOffsetBits
@@ -85,10 +85,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val target = UInt(VAddrBits.W)
     val brValids = Vec(numBr, Bool())
     val jmpValid = Bool()
-    // val isCall = Bool()
-    // val isRet = Bool()
-    // val isJalr = Bool()
-    // val last_is_rvc = Bool()
     val pred        = Vec(numBr, UInt(2.W))
 
     val hit = Bool()
@@ -117,28 +113,39 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     })
 
     val meta = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays*2, 1))
+    val bims = Module(new AsyncDataModuleTemplate(Vec(numBr, UInt(2.W)), nWays, nWays*2, 1))
     val data = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays,   nWays, 1))
+
 
     for (w <- 0 until nWays) {
       meta.io.raddr(w) := w.U
+      bims.io.raddr(w) := w.U
       meta.io.raddr(w+nWays) := w.U
+      bims.io.raddr(w+nWays) := w.U
       data.io.raddr(w) := w.U
     }
 
     val rmetas = meta.io.rdata.take(nWays)
+    val rbims = bims.io.rdata.take(nWays)
     val rdatas = data.io.rdata
+    
 
     val read_pc = io.read_pc.bits
     val read_tag = getTag(read_pc)
 
+    val br_taken_masks = VecInit(rbims.map(m => VecInit(m.map(p => p(1)))))
+    val jmp_takens = VecInit(rmetas.map(m => m.jmpValid))
+    val real_taken_masks = VecInit(rmetas.zip(br_taken_masks).map{
+      case (m, br_taken_mask) => VecInit(m.brValids.zip(br_taken_mask).map{case (v, t) => v && t} :+ m.jmpValid)
+    })
+  
     val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
-    val taken_masks = VecInit(rmetas.map(m => m.taken_mask))
-    val reaL_taken_masks = VecInit(rmetas.map(m => m.real_taken_mask))
     val hit_oh = hits.asUInt
     val hit_meta = ParallelMux(hits zip rmetas)
     val hit_data = ParallelMux(hits zip rdatas)
-    val hit_and_taken_mask = ParallelMux(hits zip taken_masks)
-    val hit_and_real_taken_mask = ParallelMux(hits zip reaL_taken_masks)
+    val hit_preds = ParallelMux(hits zip rbims)
+    val hit_and_taken_mask = ParallelMux(hits zip br_taken_masks)
+    val hit_and_real_taken_mask = ParallelMux(hits zip real_taken_masks)
 
     val target = Wire(UInt(VAddrBits.W))
     target := read_pc + (FetchWidth*4).U
@@ -153,11 +160,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     val ren = io.read_pc.valid
     io.read_resp.valid := ren
-    io.read_resp.taken_mask := Mux(ren, hit_and_taken_mask, VecInit(Seq.fill(numBr)(false.B)))
+    io.read_resp.taken_mask := hit_and_taken_mask
     io.read_resp.target := target
     io.read_resp.brValids := hit_meta.brValids
     io.read_resp.jmpValid := hit_meta.jmpValid
-    io.read_resp.pred := hit_meta.pred
+    io.read_resp.pred := hit_preds
     io.read_resp.hit := hit_oh.orR
     io.read_hit := hit_oh.orR
 
@@ -171,15 +178,21 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     when (reset_way === (nWays-1).U) { do_reset := false.B }
 
     val update_rmetas = meta.io.rdata.drop(nWays)
+    val update_rbims = bims.io.rdata.drop(nWays)
     val update_tag = io.update_write_meta.bits.tag
     val update_hits = VecInit(update_rmetas.map(m => m.valid && m.tag === update_tag))
     val update_hit = update_hits.asUInt.orR
     val update_hit_way = OHToUInt(update_hits.asUInt)
     val update_hit_meta = ParallelMux(update_hits zip update_rmetas)
-    val update_old_pred = update_hit_meta.pred
+    val update_hit_bim = ParallelMux(update_hits zip update_rbims)
+    val bim_write_valids = VecInit((0 until numBr).map(i => !(PriorityEncoder(io.update_taken_mask) < i.U)))
+    val update_old_pred = update_hit_bim
     val update_new_pred = VecInit(
       (0 until numBr).map { i =>
-        Mux(update_hit && io.update_mask(i), satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
+        Mux(update_hit, 
+          Mux(bim_write_valids(i), 
+            satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
+            update_old_pred(i)),
           Mux(io.update_taken_mask(i), 3.U, 0.U))
       })
 
@@ -202,7 +215,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     meta.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBMeta),
       RegNext(io.update_write_meta.bits))
-    meta.io.wdata(0).pred := Mux(do_reset, VecInit(Seq.fill(numBr)(0.U(2.W))), RegNext(update_new_pred))
+    bims.io.wen(0) := do_reset || RegNext(io.update_write_meta.bits.brValids.reduce(_||_))
+    bims.io.wdata(0) := Mux(do_reset, VecInit(Seq.fill(numBr)(0.U(2.W))), RegNext(update_new_pred))
+    bims.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     data.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     data.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
     data.io.wdata(0) := Mux(do_reset,
@@ -216,7 +231,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val read_resps = banks.read_resp
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
-  XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
+  // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
 
   // io.in.ready := !io.flush.valid
 
@@ -267,7 +282,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // isJalr
   // isCall
   // isRet
-  update_write_metas.pred := DontCare
   update_write_metas.carry := update.ftb_entry.carry
 
   // update_write_datas.lower := u_target_lower
@@ -284,7 +298,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   if (debug) {
     XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, banks.read_hit)
-    XSDebug("target=%x, taken_mask=%b\n", io.out.resp.s1.preds.target, read_resps.taken_mask.asUInt)
+    XSDebug("target=%x, taken_mask=%b, brValids=%b\n",
+      io.out.resp.s1.preds.target, read_resps.taken_mask.asUInt, read_resps.brValids.asUInt)
 
     XSDebug(u_valid, "Update from ftq\n")
     XSDebug(u_valid, "update_pc=%x, tag=%x\n", u_pc, getTag(u_pc))

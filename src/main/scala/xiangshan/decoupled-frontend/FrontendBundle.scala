@@ -116,6 +116,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val preds = new BranchPrediction
 
   val ghist = new GlobalHistory()
+  val phist = UInt(HistoryLength.W)
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasTop = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))
@@ -170,6 +171,7 @@ object BpuToFtqBundle {
     e.pc := resp.pc
     e.preds := resp.preds
     e.ghist := resp.ghist
+    e.phist := resp.phist
     e.rasSp := resp.rasSp
     e.rasTop := resp.rasTop
     e.specCnt := resp.specCnt

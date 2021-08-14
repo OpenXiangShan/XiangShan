@@ -213,6 +213,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       req.valid := io.s1_fire
       req.bits.pc := s1_pc
       req.bits.hist := io.in.bits.ghist
+      req.bits.phist := DontCare
       req.bits.mask := VecInit(Seq.fill(numBr)(1.U(1.W))).asUInt()
       if (!EnableSC) {t.io.update := DontCare}
       t
