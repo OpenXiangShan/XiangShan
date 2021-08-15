@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.rename.refcnt
+package xiangshan.backend.rename
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._

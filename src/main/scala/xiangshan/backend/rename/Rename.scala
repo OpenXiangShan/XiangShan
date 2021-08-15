@@ -23,7 +23,6 @@ import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
-import refcnt._
 
 class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
