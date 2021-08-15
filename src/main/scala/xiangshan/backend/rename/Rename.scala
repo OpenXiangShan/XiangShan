@@ -395,6 +395,4 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && !intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && io.roqCommits.isWalk)
-  // TODO add counter for ME
-
 }

@@ -48,7 +48,7 @@ class Regfile
     val readPorts = Vec(numReadPorts, new RfReadPort(len))
     val writePorts = Vec(numWirtePorts, new RfWritePort(len))
     val debug_rports = Vec(32, new RfReadPort(len))
-    val debug_prf = Output(Vec(NRPhyRegs, UInt(len.W)))
+    val debug_prf = Output(Vec(NRPhyRegs, UInt(len.W))) // FIXME remove this
   })
 
   println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWirtePorts)
