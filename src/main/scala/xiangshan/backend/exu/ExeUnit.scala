@@ -96,6 +96,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
 class AluExeUnit(implicit p: Parameters) extends ExeUnit(AluExeUnitCfg)
 class JumpCSRExeUnit(implicit p: Parameters) extends ExeUnit(JumpCSRExeUnitCfg)
 class JumpExeUnit(implicit p: Parameters) extends ExeUnit(JumpExeUnitCfg)
+class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 
 object ExeUnit {
   def apply(cfg: ExuConfig)(implicit p: Parameters): ExeUnit = {
@@ -106,7 +107,11 @@ object ExeUnit {
       case JumpCSRExeUnitCfg => Module(new JumpCSRExeUnit)
       case FmacExeUnitCfg => Module(new FmacExeUnit)
       case FmiscExeUnitCfg => Module(new FmiscExeUnit)
-      case _ => null
+      case StdExeUnitCfg => Module(new StdExeUnit)
+      case _ => {
+        println(s"cannot generate exeUnit from $cfg")
+        null
+      }
     }
   }
 }

@@ -188,6 +188,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val allWriteback = exuBlocks.map(_.io.fuWriteback).fold(Seq())(_ ++ _) ++ memBlock.io.writeback
 
   val intWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
+  require(exuConfigs.length == allWriteback.length)
   // set default value for ready
   exuBlocks.foreach(_.io.fuWriteback.foreach(_.ready := true.B))
   memBlock.io.writeback.foreach(_.ready := true.B)
@@ -314,12 +315,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.replay <> memScheduler.io.extra.feedback.get.map(_.replay)
   memBlock.io.rsIdx <> memScheduler.io.extra.feedback.get.map(_.rsIdx)
   memBlock.io.isFirstIssue <> memScheduler.io.extra.feedback.get.map(_.isFirstIssue)
-  memBlock.io.stData.zip(memScheduler.io.issue.drop(4)).foreach{ case (s, iss) =>
-    s.valid := iss.valid
-    iss.ready := true.B
-    s.bits.data := iss.bits.src(0)
-    s.bits.uop := iss.bits.uop
-  }
+  val stData = exuBlocks.map(_.io.fuExtra.stData.getOrElse(Seq())).reduce(_ ++ _)
+  memBlock.io.stData := stData
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq

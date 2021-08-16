@@ -120,7 +120,7 @@ class Scheduler(
     require(memRsEntries.isEmpty || memRsEntries.max == memRsEntries.min, "different indexes not supported")
     if (memRsEntries.isEmpty) 0 else memRsEntries.max
   }
-  val numSTDPorts = 0//reservationStations.filter(_.params.isStore == true).map(_.params.numDeq).sum
+  val numSTDPorts = reservationStations.filter(_.params.exuCfg.get == StdExeUnitCfg).map(_.params.numDeq).sum
 
   lazy val module = new SchedulerImp(this)
 

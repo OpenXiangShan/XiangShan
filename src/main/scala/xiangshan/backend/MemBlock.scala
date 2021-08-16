@@ -31,6 +31,7 @@ import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
 
 class Std(implicit p: Parameters) extends FunctionUnit {
+  io.in.ready := true.B
   io.out.valid := io.in.valid
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.data := io.in.bits.src(0)

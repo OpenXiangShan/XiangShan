@@ -116,9 +116,12 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   })
 
   val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
-
+  println(exeUnits)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
-  val fpExeUnits = exeUnits.filter(_.config.readFpRf)
+  // TODO: deal with Std units
+  val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
+  val stdExeUnits = exeUnits.filter(_.config.readIntRf).filter(_.config.readFpRf)
+  stdExeUnits.foreach(_.io.fromFp := DontCare)
   io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
@@ -165,6 +168,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   }
 
   if (io.extra.stData.isDefined) {
-    io.extra.stData.get := exeUnits.map(_.stData.getOrElse(Seq())).reduce(_ ++ _)
+    io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
   }
 }
