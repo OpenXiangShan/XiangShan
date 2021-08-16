@@ -60,7 +60,6 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   })
 
   val data = Mem(numEntries, gen)
-  // val data = RegInit(0.U.asTypeOf(Vec(numEntries, gen)))
 
   // read ports
   val raddr = if (isSync) (RegNext(io.raddr)) else io.raddr
@@ -117,7 +116,6 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
   
   val waddr = io.waddr >> log2Ceil(width)
   val wmask = UIntToOH(io.waddr(log2Ceil(width)-1, 0))
-  // val wdata = VecInit(Seq.fill(width)(io.wdata))
   val wdata = VecInit(Seq.fill(width)(io.wdata))
 
   when(doing_reset) {
@@ -125,7 +123,4 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
   }.elsewhen(io.wen) {
     data.write(waddr, wdata, wmask.asBools)
   }
-  
-  printf("[Folded1WDataModuleTemplate] reset=%d, resetRow=%d, raddr=%x, rdata=%d, wen=%d, waddr=%x, wdata=%d, wmask=%b\n",
-    doing_reset, resetRow, raddr(0), io.rdata(0).asUInt, io.wen, io.waddr, io.wdata.asUInt, wmask)
 }

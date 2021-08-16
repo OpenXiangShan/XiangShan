@@ -178,12 +178,9 @@ class TageTable
   val s1_pc = io.req.bits.pc
   val s1_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  // val (s1_idx, s1_tag) = compute_tag_and_hash(s1_unhashed_idx, io.req.bits.hist)
   val s1_idxes, s2_idxes  = Wire(Vec(TageBanks, UInt(log2Ceil(nRows).W)))
   val s1_tags,  s2_tags   = Wire(Vec(TageBanks, UInt(tagLen.W)))
 
-  // val hi_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
-  // val lo_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
   val hi_us   = Seq.fill(TageBanks)(Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8)))
   val lo_us   = Seq.fill(TageBanks)(Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8)))
   val tables  = Seq.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false)))
@@ -207,10 +204,6 @@ class TageTable
 
   val s2_hi_us_r = hi_us.map(_.io.rdata(0))
   val s2_lo_us_r = lo_us.map(_.io.rdata(0))
-  
-  for (i <- 0 until TageBanks) {
-    XSDebug(p"hi_us$i: ${hi_us(i).io.rdata(0)}, lo_us$i: ${lo_us(i).io.rdata(0)}\n")
-  }
   
   val s2_table_r = tables.map(_.io.r.resp.data(0))
 
