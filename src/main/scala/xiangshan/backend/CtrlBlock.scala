@@ -288,7 +288,10 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   flushRedirect.bits.interrupt := true.B
   flushRedirect.bits.cfiUpdate.target := Mux(io.roqio.toCSR.isXRet || roq.io.exception.valid,
     io.roqio.toCSR.trapTarget,
-    flushPC + 4.U // flush pipe
+    Mux(RegEnable(roq.io.flushOut.bits.replayInst, flush),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    )
   )
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
