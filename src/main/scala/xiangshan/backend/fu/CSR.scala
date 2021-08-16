@@ -270,11 +270,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val dcsr = RegInit(UInt(32.W), 0x4000b010.U)
   val dpc = Reg(UInt(64.W))
   val dscratch = Reg(UInt(64.W))
+  val dscratch1 = Reg(UInt(64.W))
   val debugMode = RegInit(false.B)
   val debugIntrEnable = RegInit(true.B)
   csrio.debugMode := debugMode
 
-  val dpcPrev = RegInit(dpc)
+  val dpcPrev = RegNext(dpc)
   XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x.", dpc, dpcPrev)
 
 // dcsr value table
@@ -625,6 +626,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
     MaskedRegMap(Dscratch, dscratch),
+    MaskedRegMap(Dscratch1, dscratch1)
   )
 
   // PMP is unimplemented yet
@@ -793,7 +795,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     mstatus := mstatusNew.asUInt
     priviledgeMode := dcsrNew.prv
     retTarget := dpc(VAddrBits-1, 0)
-    debugModeNew := true.B
+    debugModeNew := false.B
     debugIntrEnable := true.B
     debugMode := debugModeNew
     XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
@@ -940,7 +942,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall
+  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)

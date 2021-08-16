@@ -102,7 +102,8 @@ object XSDebugModuleParams {
       nAbstractDataWords   = (if (xlen == 32) 1 else if (xlen == 64) 2 else 4),
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
-      baseAddress = BigInt(0x38020000)
+      baseAddress = BigInt(0x38020000),
+      nScratch = 2
     )
   }
 }
@@ -128,7 +129,9 @@ class debugIOTop(implicit val p: Parameters) extends Bundle {
   val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
 }
 
-class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam(tickDelay)))
+case object EnableJtag extends Field[Bool]
+
+class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends BlackBox(Map("TICK_DELAY" -> IntParam(tickDelay)))
   with HasBlackBoxResource {
   val io = IO(new Bundle { 
     val clock = Input(Clock())
@@ -148,7 +151,7 @@ class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam
     io.clock := tbclock
     io.reset := tbreset
 
-    io.enable    := PlusArg("jtag_rbb_enable", 0, "Enable SimJTAG for JTAG Connections. Simulation will pause until connection is made.")
+    io.enable    := p(EnableJtag)
     io.init_done := init_done
 
     // Success is determined by the gdbserver
@@ -161,7 +164,7 @@ class SimJTAG(tickDelay: Int = 50) extends BlackBox(Map("TICK_DELAY" -> IntParam
   }
 
 //  addResource("/vsrc/SimJTAG.v")
-//  addResource("/csrc/SimJTAG.cc")
+//  addResource("/csrc/SimJTAG.cpp")
 //  addResource("/csrc/remote_bitbang.h")
-//  addResource("/csrc/remote_bitbang.cc")
+//  addResource("/csrc/remote_bitbang.cpp")
 }

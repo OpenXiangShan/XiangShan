@@ -28,7 +28,7 @@ import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParamete
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import device.XSDebugModuleParams
+import device.{XSDebugModuleParams, EnableJtag}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -40,6 +40,7 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
+  case EnableJtag => false.B
 })
 
 // Synthesizable minimal XiangShan
