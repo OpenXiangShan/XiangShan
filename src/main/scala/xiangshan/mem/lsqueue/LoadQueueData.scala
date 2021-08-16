@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -21,7 +22,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
@@ -61,7 +62,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
       data(io.waddr(i)) := io.wdata(i)
     }
   }
-  
+
   // content addressed match
   for (i <- 0 until 2) {
     for (j <- 0 until numEntries) {
@@ -105,7 +106,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Param
       data(io.waddr(i)) := io.wdata(i)
     }
   }
-  
+
   // content addressed match
   for (i <- 0 until 2) {
     for (j <- 0 until numEntries) {
@@ -180,7 +181,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: P
     // masked write
     val mwmask = Input(Vec(numEntries, Bool()))
     val refillData = Input(UInt((cfg.blockBytes * 8).W))
-    
+
     // fwdMask io
     val fwdMaskWdata = Input(Vec(numWrite, UInt(8.W)))
     val fwdMaskWen = Input(Vec(numWrite, Bool()))
@@ -318,7 +319,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
     io.wb.rdata(i).data := coredataModule.io.rdata(i)
     io.wb.rdata(i).fwdMask := DontCare
   })
-  
+
   // read port wbNumRead
   paddrModule.io.raddr(wbNumRead) := io.uncache.raddr
   maskModule.io.raddr(wbNumRead) := io.uncache.raddr
@@ -328,7 +329,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
   io.uncache.rdata.mask := maskModule.io.rdata(wbNumRead)
   io.uncache.rdata.data := coredataModule.io.rdata(wbNumRead)
   io.uncache.rdata.fwdMask := DontCare
-  
+
   // write data
   // write port 0 -> wbNumWrite-1
   (0 until wbNumWrite).map(i => {
@@ -356,7 +357,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
       coredataModule.io.paddrWen(i) := true.B
     }
   })
-  
+
   // write port wbNumWrite
   // exceptionModule.io.wen(wbNumWrite) := false.B
   coredataModule.io.wen(wbNumWrite) := io.uncache.wen
@@ -380,7 +381,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
       // Cat(violationVec).orR() && addrMatch
     // }))
   })
-  
+
   // refill missed load
   def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
     val res = Wire(Vec(8, UInt(8.W)))
@@ -396,7 +397,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
     io.refill.matchMask := paddrModule.io.refillMmask
     // io.refill.matchMask(i) := get_block_addr(data(i).paddr) === get_block_addr(io.refill.paddr)
   })
-  
+
   // refill data according to matchMask, refillMask and refill.valid
   coredataModule.io.refillData := io.refill.data
   (0 until size).map(i => {

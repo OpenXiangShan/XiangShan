@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -165,7 +166,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   io.mispredict := (io.pred_taken ^ taken) && io.isBranch
 }
 
-class Alu(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
+class Alu(implicit p: Parameters) extends FUWithRedirect {
 
   val (src1, src2, func, pc, uop) = (
     io.in.bits.src(0),

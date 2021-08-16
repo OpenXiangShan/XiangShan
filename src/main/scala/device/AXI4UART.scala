@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,17 +21,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
-
-class UARTIO extends Bundle {
-  val out = new Bundle {
-    val valid = Output(Bool())
-    val ch = Output(UInt(8.W))
-  }
-  val in = new Bundle {
-    val valid = Output(Bool())
-    val ch = Input(UInt(8.W))
-  }
-}
+import difftest._
 
 class AXI4UART
 (

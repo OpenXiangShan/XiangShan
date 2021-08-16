@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -502,8 +503,9 @@ package object xiangshan {
     UncertainLatency()
   )
 
+  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
-  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
+  val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(

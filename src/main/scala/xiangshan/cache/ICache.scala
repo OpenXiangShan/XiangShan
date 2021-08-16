@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,6 +21,7 @@ import chisel3.util._
 import device._
 import xiangshan._
 import xiangshan.frontend._
+import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbResp, TlbCmd}
 import utils._
 import bus.tilelink.TLParameters
 import chipsalliance.rocketchip.config.Parameters
@@ -404,11 +406,11 @@ class ICache(implicit p: Parameters) extends ICacheModule
   val victimWayMask = UIntToOH(replacer.way(s2_idx))
 
   val (touch_sets, touch_ways) = ( Wire(Vec(plruAccessNum, UInt(log2Ceil(nSets).W))),  Wire(Vec(plruAccessNum, Valid(UInt(log2Ceil(nWays).W)))) )
-  
-  touch_sets(0)       := s2_idx  
+
+  touch_sets(0)       := s2_idx
   touch_ways(0).valid := s2_hit
-  touch_ways(0).bits  := OHToUInt(hitVec) 
-  
+  touch_ways(0).bits  := OHToUInt(hitVec)
+
   replacer.access(touch_sets, touch_ways)
 
   //deal with icache exception
@@ -489,7 +491,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
 
 
   /* icache miss
-   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking  
+   * send a miss req to ICache Miss Queue, excluding exception/flush/blocking
    * block the pipeline until refill finishes
    */
   val icacheMissQueue = Module(new IcacheMissQueue)
@@ -525,11 +527,11 @@ class ICache(implicit p: Parameters) extends ICacheModule
 
   val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
 
-  touch_sets(1)       := metaWriteReq.meta_write_idx  
+  touch_sets(1)       := metaWriteReq.meta_write_idx
   touch_ways(1).valid := icacheMissQueue.io.meta_write.valid
   touch_ways(1).bits  := wayNum
 
-  (0 until nWays).map{ w => 
+  (0 until nWays).map{ w =>
     XSPerfAccumulate("hit_way_" + Integer.toString(w, 10),  s2_hit && OHToUInt(hitVec)  === w.U)
     XSPerfAccumulate("refill_way_" + Integer.toString(w, 10), icacheMissQueue.io.meta_write.valid && wayNum === w.U)
     XSPerfAccumulate("access_way_" + Integer.toString(w, 10), (icacheMissQueue.io.meta_write.valid && wayNum === w.U) || (s2_hit && OHToUInt(hitVec)  === w.U))
@@ -572,7 +574,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
   val refillDataVecReg = RegEnable(next=refillDataVec, enable= (is_same_cacheline && icacheMissQueue.io.resp.fire()))
 
   s3_miss := s3_valid && !s3_hit && !s3_mmio && !exception && !s3_sec_miss
-  s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss ) 
+  s3_passdown := s3_valid && (s3_hit || exception || s3_sec_miss )
 
 
   val mmio_packet  = io.mmio_grant.bits.data//cutHelperMMIO(mmioDataVec, s3_req_pc, mmioMask)
@@ -613,7 +615,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := DontCare
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
-  io.resp.bits.acf := s3_exception_vec(accessFault) 
+  io.resp.bits.acf := s3_exception_vec(accessFault)
   io.resp.bits.mmio := s3_mmio
 
   //to itlb
@@ -635,7 +637,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
   io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
   //To icache Uncache
-  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking 
+  io.mmio_acquire.valid := s3_mmio && s3_valid && !s3_has_exception && !s3_flush && !blocking
   io.mmio_acquire.bits.addr := mmioBusAligned(s3_tlb_resp.paddr)
   io.mmio_acquire.bits.id := cacheID.U
 
@@ -690,7 +692,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
     val fromMMMIO = io.mmio_grant
     XSDebug(toMMIO.fire(),"[mmio_acquire] valid:%d  ready:%d\n",toMMIO.valid,toMMIO.ready)
     XSDebug(fromMMMIO.fire(),"[mmio_grant] valid:%d  ready:%d  data:%x id:%d \n",fromMMMIO.valid,fromMMMIO.ready,fromMMMIO.bits.data,fromMMMIO.bits.id)
-  } 
+  }
 
   def dump_pipe_info(){
     dump_s1_info()

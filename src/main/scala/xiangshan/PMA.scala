@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,7 +21,8 @@ import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, Uncache}
+import xiangshan.cache.mmu.PTW
 
 object MemMap {
   def apply (base: String, top: String, width: String, description: String, mode: String): ((String, String), Map[String, String]) = {

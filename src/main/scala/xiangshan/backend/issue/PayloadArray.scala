@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -21,30 +22,30 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class PayloadArrayReadIO[T <: Data](gen: T, config: RSConfig) extends Bundle {
-  val addr = Input(UInt(config.numEntries.W))
+class PayloadArrayReadIO[T <: Data](gen: T, params: RSParams) extends Bundle {
+  val addr = Input(UInt(params.numEntries.W))
   val data = Output(gen)
 
   override def cloneType: PayloadArrayReadIO.this.type =
-    new PayloadArrayReadIO(gen, config).asInstanceOf[this.type]
+    new PayloadArrayReadIO(gen, params).asInstanceOf[this.type]
 }
 
-class PayloadArrayWriteIO[T <: Data](gen: T, config: RSConfig) extends Bundle {
+class PayloadArrayWriteIO[T <: Data](gen: T, params: RSParams) extends Bundle {
   val enable = Input(Bool())
-  val addr   = Input(UInt(config.numEntries.W))
+  val addr   = Input(UInt(params.numEntries.W))
   val data   = Input(gen)
 
   override def cloneType: PayloadArrayWriteIO.this.type =
-    new PayloadArrayWriteIO(gen, config).asInstanceOf[this.type]
+    new PayloadArrayWriteIO(gen, params).asInstanceOf[this.type]
 }
 
-class PayloadArray[T <: Data](gen: T, config: RSConfig)(implicit p: Parameters) extends XSModule {
+class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val read = Vec(config.numDeq, new PayloadArrayReadIO(gen, config))
-    val write = Vec(config.numEnq, new PayloadArrayWriteIO(gen, config))
+    val read = Vec(params.numDeq, new PayloadArrayReadIO(gen, params))
+    val write = Vec(params.numEnq, new PayloadArrayWriteIO(gen, params))
   })
 
-  val payload = Reg(Vec(config.numEntries, gen))
+  val payload = Reg(Vec(params.numEntries, gen))
 
   // read ports
   io.read.map(_.data).zip(io.read.map(_.addr)).map {
@@ -53,7 +54,7 @@ class PayloadArray[T <: Data](gen: T, config: RSConfig)(implicit p: Parameters) 
   }
 
   // write ports
-  for (i <- 0 until config.numEntries) {
+  for (i <- 0 until params.numEntries) {
     val wenVec = VecInit(io.write.map(w => w.enable && w.addr(i)))
     val wen = wenVec.asUInt.orR
     val wdata = Mux1H(wenVec, io.write.map(_.data))
