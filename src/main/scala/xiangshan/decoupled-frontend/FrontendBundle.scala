@@ -119,7 +119,6 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   // val is_call = Bool()
   // val is_ret = Bool()
   // val call_is_rvc = Bool()
-  val target = UInt(VAddrBits.W)
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
@@ -165,14 +164,13 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall && ftb_entry.jmpValid
   def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet && ftb_entry.jmpValid
 
+  def fallThroughAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
   def target(): UInt = {
-    val fallThruAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
-    
     Mux(preds.hit,
       // when hit
       Mux((real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
         PriorityMux(real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-        Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr)),
+        Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThroughAddr)),
       //otherwise
       pc + (FetchWidth*4).U
     )

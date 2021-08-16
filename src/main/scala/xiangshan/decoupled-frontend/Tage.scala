@@ -511,10 +511,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
     s2_providerUs(w)     := s2_resps(s2_provider)(w).bits.u
     s2_providerCtrs(w)   := s2_resps(s2_provider)(w).bits.ctr
 
-    when(ftb_hit) {
-      resp_s3.preds.taken_mask(w) := s3_tageTakens(w) // && ctrl.tage_enable
-    }
-
     resp_meta(w).provider.valid := s3_provideds(w)
     resp_meta(w).provider.bits  := s3_providers(w)
     resp_meta(w).altDiffers     := s3_finalAltPreds(w) =/= s3_tageTakens(w)
@@ -578,14 +574,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
 
-  val fallThruAddr = getFallThroughAddr(s3_pc, ftb_entry.carry, ftb_entry.pftAddr)
-
-  // when(ftb_hit) {
-  //   io.out.resp.s3.preds.target := Mux((resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-  //     PriorityMux(resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-  //     Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
-  // }
-
+  resp_s3.preds.taken_mask := s3_tageTakens
 
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {

@@ -849,13 +849,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   val preds = update.preds
-  // preds.is_br := update_ftb_entry.brValids
-  // preds.is_jal := update_ftb_entry.jmpValid && !update_ftb_entry.isJalr
-  // preds.is_jalr := update_ftb_entry.jmpValid && update_ftb_entry.isJalr
-  // preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
-  // preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
-  // preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
-  preds.target := commit_target // TODO: BPU need?
   preds.taken_mask := ftbEntryGen.taken_mask
 
 
