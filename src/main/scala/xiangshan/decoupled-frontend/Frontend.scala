@@ -44,7 +44,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val icacheMemGrant = Flipped(DecoupledIO(new L1plusCacheResp))
     val l1plusFlush = Output(Bool())
     val fencei = Input(Bool())
-    val ptw = new TlbPtwIO
+    val ptw = new TlbPtwIO(2)
     val backend = new FrontendToCtrlIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
@@ -59,15 +59,19 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     }
   })
 
-  val bpu = Module(new Predictor)
-  val ifu = Module(new NewIFU)
+  //decouped-frontend modules
+  val bpu     = Module(new Predictor)
+  val ifu     = Module(new NewIFU)
   val ibuffer =  Module(new Ibuffer)
-  val l1plusPrefetcher = Module(new L1plusPrefetcher)
-  val icacheMeta = Module(new ICacheMetaArray)
-  val icacheData = Module(new ICacheDataArray)
-  val icacheMissQueue = Module(new ICacheMissQueue)
-  val instrUncache = outer.instrUncache.module
   val ftq = Module(new Ftq)
+  //icache
+  val icacheMeta      = Module(new ICacheMetaArray)
+  val icacheData      = Module(new ICacheDataArray)
+  val icacheMissQueue = Module(new ICacheMissQueue)
+  val itlb            = Module(new TLB(Width = 2, isDtlb = false))         
+  //TODO: modules need to be removed
+  val instrUncache = outer.instrUncache.module
+  val l1plusPrefetcher = Module(new L1plusPrefetcher)
 
   val needFlush = io.backend.redirect_cfiUpdate.valid
 
@@ -77,10 +81,16 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   bpu.io.ftq_to_bpu       <> ftq.io.toBpu
   ftq.io.fromBpu          <> bpu.io.bpu_to_ftq
   //IFU-ICache
-  ifu.io.icacheInter.toIMeta      <> icacheMeta.io.read
-  ifu.io.icacheInter.fromIMeta    <> icacheMeta.io.readResp
-  ifu.io.icacheInter.toIData      <> icacheData.io.read
-  ifu.io.icacheInter.fromIData    <> icacheData.io.readResp
+  ifu.io.icacheInter.toIMeta    <>      icacheMeta.io.read
+  ifu.io.icacheInter.fromIMeta  <>      icacheMeta.io.readResp
+  ifu.io.icacheInter.toIData    <>      icacheData.io.read
+  ifu.io.icacheInter.fromIData  <>      icacheData.io.readResp
+  //IFU-ITLB
+  ifu.io.iTLBInter              <>      itlb.io.requestor
+  io.ptw                        <>      itlb.io.ptw
+  io.sfence                     <>      itlb.io.sfence
+  io.tlbCsr                     <>      itlb.io.csr
+
 
   for(i <- 0 until 2){
     ifu.io.icacheInter.fromMissQueue(i) <> icacheMissQueue.io.resp(i) 
@@ -89,9 +99,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   icacheMissQueue.io.flush := ifu.io.ftqInter.fromFtq.redirect.valid
 
-  ifu.io.iTLBInter.resp <> DontCare
-  ifu.io.iTLBInter.req.ready := true.B 
-
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in
 
@@ -99,10 +106,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icacheMeta.io.write <> icacheMissQueue.io.meta_write
   icacheData.io.write <> icacheMissQueue.io.data_write
 
-  // to icache
+  //L1plus Prefetcher
   val grantClientId = clientId(io.icacheMemGrant.bits.id)
   val grantEntryId = entryId(io.icacheMemGrant.bits.id)
-
   l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
   l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
   l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
@@ -118,11 +124,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-
   instrUncache.io.req   <> DontCare
   instrUncache.io.resp  <> DontCare
   instrUncache.io.flush <> DontCare
-  // to tlb
 
 
   // from icache and l1plus prefetcher
@@ -139,7 +143,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     entryId(l1plusPrefetcher.io.mem_acquire.bits.id))
   io.icacheMemAcq <> memAcquireArb.io.out
   // itlb to ptw
-  io.ptw <> DontCare
   // backend to ibuffer
   ibuffer.io.flush := needFlush
   // ibuffer to backend
