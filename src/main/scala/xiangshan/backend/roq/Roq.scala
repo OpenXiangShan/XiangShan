@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -747,10 +748,11 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   }
 
   // TODO: don't hard code these idxes
-  def csr_wb_idx = 6
-  def atomic_wb_idx = 4
-  def load_wb_idxes = Seq(5)
-  def store_wb_idxes = Seq(16, 17)
+  // CSR is after Alu and Load
+  def csr_wb_idx = exuParameters.AluCnt + exuParameters.LduCnt
+  def atomic_wb_idx = exuParameters.AluCnt // first port for load
+  def load_wb_idxes = Seq(exuParameters.AluCnt + 1) // second port for load
+  def store_wb_idxes = (0 until 2).map(_ + NRIntWritePorts + NRFpWritePorts)
   val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
   all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
@@ -769,8 +771,11 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
+  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + NRIntWritePorts)
+  val fmiscWb = (0 until exuParameters.FmacCnt).map(_ + NRIntWritePorts + exuParameters.FmacCnt + 2)
+  val i2fWb = Seq(NRIntWritePorts - 1) // last port in int
   val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
-    (Seq(8, 9, 10, 11) ++ Seq(14, 15) ++ Seq(7)).contains(w._2)
+    (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
   }).map(_._1)
   val fflagsDataModule = Module(new SyncDataModuleTemplate(
     UInt(5.W), RoqSize, CommitWidth, fflags_wb.size)

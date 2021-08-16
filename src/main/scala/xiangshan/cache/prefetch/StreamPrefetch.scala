@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
 
 case object StreamParamsKey extends Field[StreamPrefetchParameters]
@@ -51,7 +53,7 @@ class StreamPrefetchReq(implicit p: Parameters) extends PrefetchReq {
 
 class StreamPrefetchResp(implicit p: Parameters) extends PrefetchResp {
   val id = UInt(streamParams.totalWidth.W)
-  
+
   def stream = id(streamParams.totalWidth - 1, streamParams.totalWidth - streamParams.streamWidth)
   def idx = id(streamParams.idxWidth - 1, 0)
 
@@ -152,7 +154,7 @@ class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbCon
     when (hitIdxBeforeHead) {
       (0 until streamSize).foreach(i => deqLater(i) := Mux(i.U >= head || i.U <= hitIdx, true.B, deqLater(i)))
     }
-    
+
     XSDebug(io.update.valid && !empty && (isPrefetching(hitIdx) || valid(hitIdx)), p"hitIdx=${hitIdx} headBeforehitIdx=${headBeforehitIdx} hitIdxBeforeHead=${hitIdxBeforeHead}\n")
   }
 
@@ -247,7 +249,7 @@ class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbCon
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
   io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) => r.ready}).asUInt.orR
-  
+
   // realloc this stream buffer for a newly-found stream
   when (io.alloc.valid) {
     needRealloc := true.B
@@ -307,7 +309,7 @@ class StreamPrefetch(implicit p: Parameters) extends PrefetchModule {
   val io = IO(new StreamPrefetchIO)
 
   require(streamParams.blockBytes > 0)
-  
+
   // TODO: implement this
   def streamCnt = streamParams.streamCnt
   def streamSize = streamParams.streamSize
@@ -392,7 +394,7 @@ class StreamPrefetch(implicit p: Parameters) extends PrefetchModule {
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
   io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>  buf.io.resp.ready}).asUInt.orR
-  
+
   // debug info
   XSDebug(s"${streamParams.cacheName} " + p"io: ${io}\n")
   XSDebug(s"${streamParams.cacheName} " + p"bufValids: ${Binary(bufValids.asUInt)} hit: ${hit} ages: ")

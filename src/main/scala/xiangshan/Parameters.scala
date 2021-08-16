@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -142,10 +143,8 @@ case class XSCoreParameters
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
 
-  val intExuConfigs = JumpExeUnitCfg +: (
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) ++
-      Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg)
-    )
+  val intExuConfigs = Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
@@ -228,11 +227,11 @@ trait HasXSParameter {
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
-  val NRIntReadPorts = coreParams.NRIntReadPorts
-  val NRIntWritePorts = coreParams.NRIntWritePorts
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
-  val NRFpReadPorts = coreParams.NRFpReadPorts
-  val NRFpWritePorts = coreParams.NRFpWritePorts
+  val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
+  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
+  val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
+  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize

@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -183,6 +184,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  // to Fence to disable sfence
+  val disableSfence = Output(Bool())
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
@@ -689,11 +692,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
+  // csr access check, special case
+  val tvmNotPermit = (priviledgeMode === ModeS && mstatusStruct.tvm.asBool)
+  val accessPermitted = !(addr === Satp.U && tvmNotPermit)
+  csrio.disableSfence := tvmNotPermit
+
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
   val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
-  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted)
+  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
+
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)

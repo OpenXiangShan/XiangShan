@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -42,6 +43,8 @@ case class ExuParameters
   def LsExuCnt = LduCnt + StuCnt
 
   def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
+
+  def CriticalExuCnt = AluCnt + FmacCnt + LsExuCnt
 }
 
 case class ExuConfig
@@ -77,6 +80,8 @@ case class ExuConfig
   // NOTE: dirty code for MulDivExeUnit
   val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
   val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
+  val wakeupFromRS = hasCertainLatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
+  val wakeupFromExu = !wakeupFromRS
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
@@ -98,6 +103,9 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
     val flush = Input(Bool())
     val out = DecoupledIO(new ExuOutput)
   })
+  val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
+  val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
+  val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
 
   for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
 
