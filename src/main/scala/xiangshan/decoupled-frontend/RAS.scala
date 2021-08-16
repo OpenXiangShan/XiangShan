@@ -163,7 +163,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_pop  := io.s3_fire && io.in.bits.resp_in(0).s3.hit_taken_on_ret
   
   when (spec_pop) {
-    io.out.resp.s3.preds.target := spec_top_addr
+    // io.out.resp.s3.preds.target := spec_top_addr
+    io.out.resp.s3.ftb_entry.jmpTarget := spec_top_addr
   }
 
   io.out.resp.s3.rasSp  := spec_ras.sp
@@ -200,7 +201,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
       XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
           spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-      XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s3.preds.target)
+      XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s3.target)
       val redirectUpdate = redirect.bits.cfiUpdate
       XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
           do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)

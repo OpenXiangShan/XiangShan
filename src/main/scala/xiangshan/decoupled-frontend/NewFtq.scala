@@ -460,7 +460,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
                          Fill(log2Ceil(PredictWidth), (!io.fromBpu.resp.bits.real_taken_mask.asUInt.orR).asUInt)
     cfiIndex_vec(enqIdx) := enq_cfiIndex
     mispredict_vec(enqIdx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
-    update_target(enqIdx) := preds.target
+    update_target(enqIdx) := io.fromBpu.resp.bits.target
   }
   
   bpuPtr := bpuPtr + enq_fire
@@ -855,7 +855,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // preds.is_call := update_ftb_entry.jmpValid && update_ftb_entry.isCall
   // preds.is_ret  := update_ftb_entry.jmpValid && update_ftb_entry.isRet
   // preds.call_is_rvc := update_ftb_entry.jmpValid && update_ftb_entry.isCall && update_ftb_entry.last_is_rvc
-  preds.target := commit_target
+  preds.target := commit_target // TODO: BPU need?
   preds.taken_mask := ftbEntryGen.taken_mask
 
 

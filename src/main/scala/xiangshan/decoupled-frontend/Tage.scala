@@ -148,7 +148,7 @@ class TageTable
   })
 
   // bypass entries for tage update
-  val wrBypassEntries = 4
+  val wrBypassEntries = 32
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
   def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
@@ -580,11 +580,11 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val fallThruAddr = getFallThroughAddr(s3_pc, ftb_entry.carry, ftb_entry.pftAddr)
 
-  when(ftb_hit) {
-    io.out.resp.s3.preds.target := Mux((resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-      PriorityMux(resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-      Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
-  }
+  // when(ftb_hit) {
+  //   io.out.resp.s3.preds.target := Mux((resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+  //     PriorityMux(resp_s3.real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+  //     Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr))
+  // }
 
 
   for (i <- 0 until TageNTables) {
@@ -653,7 +653,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s1_fire, s1_pc, io.in.bits.ghist)
     XSDebug("s2_fire:%d, resp: pc=%x, hist=%b\n", io.s2_fire, debug_pc_s2, debug_hist_s2)
     XSDebug("s3_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
-      debug_pc_s3, io.out.resp.s3.preds.target, debug_hist_s3, s3_provideds.asUInt, s3_tageTakens.asUInt)
+      debug_pc_s3, io.out.resp.s3.target, debug_hist_s3, s3_provideds.asUInt, s3_tageTakens.asUInt)
     for (i <- 0 until TageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n",
         i.U, VecInit(s3_resps(i).map(_.valid)).asUInt, Cat(s3_resps(i).map(_.bits.ctr)),

@@ -223,7 +223,6 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.bits := 0.U.asTypeOf(new BranchPredictionBundle)
   io.bpu_to_ftq.resp.bits.pc := s0_pc
   io.bpu_to_ftq.resp.bits.ftb_entry.pftAddr := s0_pc + 32.U
-  io.bpu_to_ftq.resp.bits.preds.target := s0_pc + 32.U
 }
 
 @chiselName
@@ -352,7 +351,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
 
   when(s1_valid) {
-    s0_pc := resp.s1.preds.target
+    s0_pc := resp.s1.target
     s0_ghist := s1_predicted_ghist
     s0_phist := (s1_phist << 1) | s1_pc(instOffsetBits)
   }
@@ -367,31 +366,31 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
 
   when(s2_fire) {
-    when((s1_valid && (s1_pc =/= resp.s2.preds.target || s2_correct_s1_ghist)) || !s1_valid) {
+    when((s1_valid && (s1_pc =/= resp.s2.target || s2_correct_s1_ghist)) || !s1_valid) {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
-      s0_pc := resp.s2.preds.target
+      s0_pc := resp.s2.target
       s0_phist := (s2_phist << 1) | s2_pc(instOffsetBits)
-      XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.preds.target)}\n")
+      XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.target)}\n")
       XSDebug(p"s2_correct_s1_ghist=$s2_correct_s1_ghist\n")
       XSDebug(p"s1_ghist=${Binary(s1_ghist.predHist)}\n")
       XSDebug(p"s2_predicted_ghist=${Binary(s2_predicted_ghist.predHist)}\n")
     }
   }
 
-  val s2_redirect_target = s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target
+  val s2_redirect_target = s2_fire && s1_valid && s1_pc =/= resp.s2.target
   val s2_saw_s1_hit = RegEnable(resp.s1.preds.hit, s1_fire)
   val s2_redirect_target_both_hit = s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit
   XSPerfAccumulate("s2_redirect_because_s1_not_valid", s2_fire && !s1_valid)
-  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
   XSPerfAccumulate("s2_redirect_target_diff_s1_nhit_s2_hit", s2_redirect_target && !s2_saw_s1_hit &&  resp.s2.preds.hit)
   XSPerfAccumulate("s2_redirect_target_diff_s1_hit_s2_nhit", s2_redirect_target &&  s2_saw_s1_hit && !resp.s2.preds.hit)
   XSPerfAccumulate("s2_redirect_target_diff_both_hit",  s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit)
   XSPerfAccumulate("s2_redirect_br_direction_diff",
     s2_redirect_target_both_hit &&
     RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
-  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
-  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.preds.target)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
   XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
   // s3
@@ -405,13 +404,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist
 
   when(s3_fire) {
-    when((s2_valid && (s2_pc =/= resp.s3.preds.target || s3_correct_s2_ghist)) ||
-      (!s2_valid && s1_valid && (s1_pc =/= resp.s3.preds.target || s3_correct_s1_ghist)) ||
+    when((s2_valid && (s2_pc =/= resp.s3.target || s3_correct_s2_ghist)) ||
+      (!s2_valid && s1_valid && (s1_pc =/= resp.s3.target || s3_correct_s1_ghist)) ||
       (!s2_valid && !s1_valid)) {
 
       s0_ghist := s3_predicted_ghist
       s3_redirect := true.B
-      s0_pc := resp.s3.preds.target
+      s0_pc := resp.s3.target
       s0_phist := (s3_phist << 1) | s3_pc(instOffsetBits)
     }
   }
@@ -458,8 +457,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     XSDebug("[BP3] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
     s3_valid, s3_ready, s3_components_ready, s3_fire, s3_redirect, s3_flush, s3_pc)
     XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
-    XSDebug("resp.s1.preds.target=%x\n", resp.s1.preds.target)
-    XSDebug("resp.s2.preds.target=%x\n", resp.s2.preds.target)
+    XSDebug("resp.s1.target=%x\n", resp.s1.target)
+    XSDebug("resp.s2.target=%x\n", resp.s2.target)
     XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
     XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
     XSDebug("s2_ghist: %b\n", s2_ghist.predHist)

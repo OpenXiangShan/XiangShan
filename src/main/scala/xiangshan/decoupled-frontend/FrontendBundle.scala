@@ -133,12 +133,11 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   // }
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[taken_mask] ${Binary(taken_mask.asUInt)}\n")
-    XSDebug(cond, p"[hit] $hit [target] ${Hexadecimal(target)}\n")
+    XSDebug(cond, p"[taken_mask] ${Binary(taken_mask.asUInt)} [hit] $hit\n")
   }
 }
 
-class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst {
+class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils{
   val pc = UInt(VAddrBits.W)
   // val hit = Bool()
   val preds = new BranchPrediction
@@ -165,6 +164,20 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   }
   def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall && ftb_entry.jmpValid
   def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet && ftb_entry.jmpValid
+
+  def target(): UInt = {
+    val fallThruAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
+    
+    Mux(preds.hit,
+      // when hit
+      Mux((real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
+        PriorityMux(real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
+        Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThruAddr)),
+      //otherwise
+      pc + (FetchWidth*4).U
+    )
+  }
+
 
   // override def toPrintable: Printable = {
   //   p"-----------BranchPredictionBundle----------- " +
