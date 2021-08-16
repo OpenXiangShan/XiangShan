@@ -420,6 +420,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
   io.mmioStout.bits.fflags := DontCare
+  // Remove MMIO inst from store queue after MMIO request is being sent
+  // That inst will be traced by uncache state machine
   when (io.mmioStout.fire()) {
     allocated(deqPtr) := false.B
   }
@@ -430,8 +432,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * (1) When store commits, mark it as commited.
     * (2) They will not be cancelled and can be sent to lower level.
     */
+  XSError(uncacheState === s_wait && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
+  XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
+   "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
-    when (commitCount > i.U) {
+    when (commitCount > i.U && uncacheState === s_idle) { // MMIO inst is not in progress
       commited(cmtPtrExt(i).value) := true.B
     }
   }

@@ -96,8 +96,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 4,
           nStoreReplayEntries = 4,
         ),
-        L2Size = 128 * 1024, // 128KB
-        L2NWays = 8,
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
         TlbEntrySize = 4,
@@ -106,9 +104,9 @@ class MinimalConfig(n: Int = 1) extends Config(
         PtwL2EntrySize = 64,
         PtwL3EntrySize = 128,
         PtwSPEntrySize = 2,
-        useFakeL2Cache = true,
+        useFakeL2Cache = true, // disable L2 Cache
       )),
-      L3Size = 32 * 1024, // 32KB
+      L3Size = 256 * 1024, // 256KB L3 Cache
     )
   })
 )
