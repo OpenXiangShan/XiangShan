@@ -24,8 +24,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, Tage}
-import xiangshan.frontend.RAS
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -49,11 +48,12 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = true,
-  EnableSC: Boolean = true,
+  EnableSC: Boolean = false,
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
+  PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
@@ -61,8 +61,8 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
-  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters) => {
+  branchPredictor: Function3[BranchPredictionResp, Parameters, Boolean, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) => {
       // val loop = Module(new LoopPredictor)
       // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
       //                             else          Module(new Tage) }
@@ -70,13 +70,13 @@ case class XSCoreParameters
       val ftb = Module(new FTB()(p))
       val ubtb = Module(new MicroBTB()(p))
       val bim = Module(new BIM()(p))
-      val tage = Module(new Tage()(p))
+      val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
       val ras = Module(new RAS()(p))
       // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(ubtb, bim, ftb, tage, ras)
+      val preds = Seq(bim, ubtb, ftb, tage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -84,9 +84,9 @@ case class XSCoreParameters
       // btb.io.resp_in(0)   := bim.io.resp
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
-      ubtb.io.in.bits.resp_in(0)  := resp_in
-      bim.io.in.bits.resp_in(0)   := ubtb.io.out.resp
-      ftb.io.in.bits.resp_in(0)   := bim.io.out.resp
+      bim.io.in.bits.resp_in(0)  := resp_in
+      ubtb.io.in.bits.resp_in(0)   := bim.io.out.resp
+      ftb.io.in.bits.resp_in(0)   := ubtb.io.out.resp
       tage.io.in.bits.resp_in(0)  := ftb.io.out.resp
       ras.io.in.bits.resp_in(0)   := tage.io.out.resp
       
@@ -100,7 +100,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
-  FtqSize: Int = 48,
+  FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
@@ -230,6 +230,7 @@ trait HasXSParameter {
   val EnableSC = coreParams.EnableSC
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
+  val PathHistoryLength = coreParams.PathHistoryLength
   val BtbSize = coreParams.BtbSize
   // val BtbWays = 4
   val BtbBanks = PredictWidth
@@ -238,8 +239,8 @@ trait HasXSParameter {
   val JbtacBanks = coreParams.JbtacBanks
   val RasSize = coreParams.RasSize
 
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
-    coreParams.branchPredictor(resp_in, p)
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) = {
+    coreParams.branchPredictor(resp_in, p, enableSC)
   }
 
   val CacheLineSize = coreParams.CacheLineSize

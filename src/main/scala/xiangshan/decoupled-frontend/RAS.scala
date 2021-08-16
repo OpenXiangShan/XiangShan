@@ -158,8 +158,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   val spec_top_addr = spec_ras.top.retAddr
 
   // confirm that the call/ret is the taken cfi
-  spec_push := io.s3_fire && io.in.bits.resp_in(0).s3.preds.hit_taken_on_call
-  spec_pop  := io.s3_fire && io.in.bits.resp_in(0).s3.preds.hit_taken_on_ret
+  spec_push := io.s3_fire && io.in.bits.resp_in(0).s3.hit_taken_on_call
+  spec_pop  := io.s3_fire && io.in.bits.resp_in(0).s3.hit_taken_on_ret
   
   when (spec_pop) {
     io.out.resp.s3.preds.target := spec_top_addr

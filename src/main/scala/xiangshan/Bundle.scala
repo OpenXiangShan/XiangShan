@@ -139,14 +139,18 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
+  val phist = UInt(PathHistoryLength.W)
   val predHist = new GlobalHistory
   val specCnt = Vec(numBr, UInt(10.W))
+  val phNewBit = Bool()
   // need pipeline update
   val br_hit = Bool()
   val predTaken = Bool()
   val target = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
+  val shift = UInt((log2Ceil(numBr)+1).W)
+  val addIntoHist = Bool()
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

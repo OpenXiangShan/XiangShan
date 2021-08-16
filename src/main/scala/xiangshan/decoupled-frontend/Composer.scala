@@ -22,7 +22,7 @@ import xiangshan._
 import utils._
 
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, EnableSC)
   io.out.resp := resp
 
   var metas = 0.U(1.W)
@@ -31,7 +31,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.in.valid           := io.in.valid
     c.io.in.bits.s0_pc      := io.in.bits.s0_pc
     c.io.in.bits.ghist      := io.in.bits.ghist
-    c.io.in.bits.toFtq_fire := io.in.bits.toFtq_fire
+    c.io.in.bits.phist      := io.in.bits.phist
 
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire
@@ -55,23 +55,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   require(meta_sz < MaxMetaLength)
   io.out.s3_meta := metas
 
-  // var meta_start_idx: Seq[Int] = Nil
-  // var meta_end_idx:   Seq[Int] = Nil
-
-  // for (i <- 0 until components.length) {
-  //   if(i == 0) {
-  //     meta_start_idx = meta_start_idx :+ 0
-  //     meta_end_idx = meta_end_idx :+ (components(i).meta_size - 1)
-  //   } else {
-  //     meta_start_idx = meta_start_idx :+ (meta_end_idx(i-1) + 1)
-  //     meta_end_idx = meta_end_idx :+ (meta_start_idx(i) + components(i).meta_size - 1)
-  //   }
-  // }
-
-  // def extractMeta(meta: UInt, cpt_idx: Int) = {
-  //   Reverse(meta)(meta_end_idx(cpt_idx), meta_start_idx(cpt_idx))
-  // }
-
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {
     c.io.update := io.update
@@ -79,8 +62,13 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     update_meta = update_meta >> c.meta_size
   }
 
-  // for(i <- 0 until components.length) {
-  //   components(i).io.update := io.update
-  //   components(i).io.update.bits.meta := extractMeta(io.update.bits.meta, i)
-  // }
+  def extractMeta(meta: UInt, idx: Int): UInt = {
+    var update_meta = meta
+    var metas: Seq[UInt] = Nil
+    for (c <- components.reverse) {
+      metas = metas :+ update_meta
+      update_meta = update_meta >> c.meta_size
+    }
+    metas(idx)
+  }
 }

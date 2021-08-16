@@ -33,8 +33,8 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
     SignExt(Mux(rvc, SignExt(rvc_offset, max_width), SignExt(rvi_offset, max_width)), XLEN)
   }
   def getBasicBlockIdx( pc: UInt, start:  UInt ): UInt = {
-    val byteOffset = pc - start 
-    byteOffset(4,1) - 1.U
+    val byteOffset = pc - start
+    (byteOffset - instBytes.U)(log2Ceil(PredictWidth),instOffsetBits)
   }
 
   def NOP = "h4501".U(16.W)
@@ -71,8 +71,8 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val instrs      = Vec(PredictWidth, UInt(32.W))
   val pd          = Vec(PredictWidth, (new PreDecodeInfo))
   val takens      = Vec(PredictWidth, Bool())
-  val misOffset    = ValidUndirectioned(UInt(4.W))
-  val cfiOffset    = ValidUndirectioned(UInt(4.W))
+  val misOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val cfiOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val hasLastHalf  = Bool()
@@ -89,7 +89,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   })
 
   val instValid = io.in.instValid 
-  val startRange = io.in.startRange
   val data      = io.in.data
   val pcStart   = io.in.startAddr
   val pcEnd     = io.in.fallThruAddr
@@ -131,7 +130,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
     val lastIsValidEnd =  if (i == 0) { !io.in.lastHalfMatch } else { validEnd(i-1) || isFirstInBlock || !HasCExtension.B }
     
-    validStart(i)   := (lastIsValidEnd || !HasCExtension.B) && startRange(i)
+    validStart(i)   := (lastIsValidEnd || !HasCExtension.B)
     validEnd(i)     := validStart(i) && currentIsRVC || !validStart(i) || !HasCExtension.B
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -184,8 +183,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
 
-  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) & startRange(i) &&  takeRange(i)))
-  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, if(HasCExtension) pcStart + (PredictWidth * 2).U else pcStart + (PredictWidth * 4).U), pcEnd)
+  instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
+  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, pcStart + (FetchWidth * 4).U), pcEnd)
+
 
   io.out.misOffset.valid  := ParallelOR(realMissPred)
   io.out.misOffset.bits   := PriorityEncoder(realMissPred)

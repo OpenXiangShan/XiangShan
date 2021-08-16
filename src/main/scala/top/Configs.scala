@@ -131,7 +131,8 @@ class MinimalSimConfigForFetch(n: Int = 1) extends Config(
   new MinimalSimConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
-        FetchWidth = 8
+        FetchWidth = 8,
+        EnableSC = false
       ))
     )
   })
