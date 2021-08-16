@@ -112,8 +112,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val realHasLastHalf   = Wire(Vec(PredictWidth, Bool()))
   val realMissPred      = Wire(Vec(PredictWidth, Bool()))
   val realTakens        = Wire(Vec(PredictWidth, Bool()))
-  val isInFirst         = Wire(Vec(PredictWidth, Bool()))
-  val isInSecond        = Wire(Vec(PredictWidth, Bool()))
 
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until PredictWidth).map(i => data(i)))
