@@ -25,7 +25,7 @@ import chisel3.experimental.chiselName
 import scala.math.min
 
 trait MicroBTBParams extends HasXSParameter {
-  val numWays = 128
+  val numWays = 32
   val tagSize = 20
   val lowerBitSize = 20
   val untaggedBits = instOffsetBits
@@ -231,8 +231,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val read_resps = banks.read_resp
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
-  // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
-  XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, hit=${read_resps.hit}\n")
+  XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
+  // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, hit=${read_resps.hit}\n")
 
   // io.in.ready := !io.flush.valid
 

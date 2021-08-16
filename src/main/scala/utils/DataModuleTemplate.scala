@@ -59,8 +59,8 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  // val data = Mem(numEntries, gen)
-  val data = RegInit(0.U.asTypeOf(Vec(numEntries, gen)))
+  val data = Mem(numEntries, gen)
+  // val data = RegInit(0.U.asTypeOf(Vec(numEntries, gen)))
 
   // read ports
   val raddr = if (isSync) (RegNext(io.raddr)) else io.raddr
@@ -85,3 +85,47 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
 
 class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, true)
 class AsyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, false)
+
+class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, isSync: Boolean, width: Int) extends Module {
+  val io = IO(new Bundle {
+    val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
+    val rdata = Vec(numRead,  Output(gen))
+    val wen   = Input(Bool())
+    val waddr = Input(UInt(log2Up(numEntries).W))
+    val wdata = Input(gen)
+  })
+
+  require(width > 0 && isPow2(width))
+  require(numEntries % width == 0)
+
+  val nRows = numEntries / width
+
+  val data = Mem(nRows, Vec(width, gen))
+  
+  val doing_reset = RegInit(true.B)
+  val resetRow = RegInit(0.U(log2Ceil(nRows).W))
+  resetRow := resetRow + doing_reset
+  when (resetRow === (nRows-1).U) { doing_reset := false.B }
+
+  val raddr = if (isSync) RegNext(io.raddr) else io.raddr
+  
+  for (i <- 0 until numRead) {
+    val addr = raddr(i) >> log2Ceil(width)
+    val idx = raddr(i)(log2Ceil(width)-1, 0)
+    io.rdata(i) := Mux(doing_reset, 0.U.asTypeOf(gen), data(addr)(idx))
+  }
+  
+  val waddr = io.waddr >> log2Ceil(width)
+  val wmask = UIntToOH(io.waddr(log2Ceil(width)-1, 0))
+  // val wdata = VecInit(Seq.fill(width)(io.wdata))
+  val wdata = VecInit(Seq.fill(width)(io.wdata))
+
+  when(doing_reset) {
+    data.write(resetRow, 0.U.asTypeOf(Vec(width, gen)))
+  }.elsewhen(io.wen) {
+    data.write(waddr, wdata, wmask.asBools)
+  }
+  
+  printf("[Folded1WDataModuleTemplate] reset=%d, resetRow=%d, raddr=%x, rdata=%d, wen=%d, waddr=%x, wdata=%d, wmask=%b\n",
+    doing_reset, resetRow, raddr(0), io.rdata(0).asUInt, io.wen, io.waddr, io.wdata.asUInt, wmask)
+}

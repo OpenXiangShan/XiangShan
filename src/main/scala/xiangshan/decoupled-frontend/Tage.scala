@@ -182,8 +182,10 @@ class TageTable
   val s1_idxes, s2_idxes  = Wire(Vec(TageBanks, UInt(log2Ceil(nRows).W)))
   val s1_tags,  s2_tags   = Wire(Vec(TageBanks, UInt(tagLen.W)))
 
-  val hi_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
-  val lo_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
+  // val hi_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
+  // val lo_us   = Seq.fill(TageBanks)(Module(new SyncDataModuleTemplate(Bool(), nRows, numRead=1, numWrite=1)))
+  val hi_us   = Seq.fill(TageBanks)(Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8)))
+  val lo_us   = Seq.fill(TageBanks)(Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8)))
   val tables  = Seq.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false)))
 
 
@@ -205,6 +207,11 @@ class TageTable
 
   val s2_hi_us_r = hi_us.map(_.io.rdata(0))
   val s2_lo_us_r = lo_us.map(_.io.rdata(0))
+  
+  for (i <- 0 until TageBanks) {
+    XSDebug(p"hi_us$i: ${hi_us(i).io.rdata(0)}, lo_us$i: ${lo_us(i).io.rdata(0)}\n")
+  }
+  
   val s2_table_r = tables.map(_.io.r.resp.data(0))
 
   val s2_req_rhits = VecInit((0 until TageBanks).map(b => {
@@ -252,15 +259,15 @@ class TageTable
   for (b <- 0 until TageBanks) {
     val hi_wen = io.update.uMask(b) || doing_clear_u_hi(b)
 
-    hi_us(b).io.wen(0) := hi_wen
-    hi_us(b).io.wdata(0) := Mux(doing_clear_u_hi(b), false.B, update_hi_wdata(b))
-    hi_us(b).io.waddr(0) := Mux(doing_clear_u_hi(b), clear_u_idx(b), update_idxes(b))
+    hi_us(b).io.wen := hi_wen
+    hi_us(b).io.wdata := Mux(doing_clear_u_hi(b), false.B, update_hi_wdata(b))
+    hi_us(b).io.waddr := Mux(doing_clear_u_hi(b), clear_u_idx(b), update_idxes(b))
 
     val lo_wen = io.update.uMask(b) || doing_clear_u_lo(b)
 
-    lo_us(b).io.wen(0) := lo_wen
-    lo_us(b).io.wdata(0) := Mux(doing_clear_u_lo(b), false.B, update_lo_wdata(b))
-    lo_us(b).io.waddr(0) := Mux(doing_clear_u_lo(b), clear_u_idx(b), update_idxes(b)),
+    lo_us(b).io.wen := lo_wen
+    lo_us(b).io.wdata := Mux(doing_clear_u_lo(b), false.B, update_lo_wdata(b))
+    lo_us(b).io.waddr := Mux(doing_clear_u_lo(b), clear_u_idx(b), update_idxes(b)),
   }
   
   class WrBypass extends XSModule {
