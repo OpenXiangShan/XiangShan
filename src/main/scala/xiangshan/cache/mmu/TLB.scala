@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -13,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.cache
+package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
@@ -23,284 +24,6 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
-trait HasTlbConst extends HasXSParameter {
-  val Level = 3
-
-  val offLen  = 12
-  val ppnLen  = PAddrBits - offLen
-  val vpnnLen = 9
-  val vpnLen  = VAddrBits - offLen
-  val flagLen = 8
-  val pteResLen = XLEN - ppnLen - 2 - flagLen
-  val asidLen = 16
-
-  def vaBundle = new Bundle {
-    val vpn  = UInt(vpnLen.W)
-    val off  = UInt(offLen.W)
-  }
-  def pteBundle = new Bundle {
-    val reserved  = UInt(pteResLen.W)
-    val ppn  = UInt(ppnLen.W)
-    val rsw  = UInt(2.W)
-    val perm = new Bundle {
-      val d    = Bool()
-      val a    = Bool()
-      val g    = Bool()
-      val u    = Bool()
-      val x    = Bool()
-      val w    = Bool()
-      val r    = Bool()
-      val v    = Bool()
-    }
-  }
-
-  def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
-    val width = v.getWidth
-    val emptyIdx = ParallelPriorityMux((0 until width).map( i => (!v(i), i.U)))
-    val full = Cat(v).andR
-    Mux(full, lruIdx, emptyIdx)
-  }
-
-  def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
-    replaceWrapper(VecInit(v).asUInt, lruIdx)
-  }
-}
-
-abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
-abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
-
-class PtePermBundle(implicit p: Parameters) extends TlbBundle {
-  val d = Bool()
-  val a = Bool()
-  val g = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
-
-  override def toPrintable: Printable = {
-    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
-    //(if(hasV) (p"v:${v}") else p"")
-  }
-}
-
-class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
-  val pf = Bool() // NOTE: if this is true, just raise pf
-  // pagetable perm (software defined)
-  val d = Bool()
-  val a = Bool()
-  val g = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
-  // pma perm (hardwired)
-  val pr = Bool() //readable
-  val pw = Bool() //writeable
-  val pe = Bool() //executable
-  val pa = Bool() //atom op permitted
-  val pi = Bool() //icacheable
-  val pd = Bool() //dcacheable
-
-  override def toPrintable: Printable = {
-    p"pf:${pf} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
-  }
-}
-
-class comBundle(implicit p: Parameters) extends TlbBundle with HasCircularQueuePtrHelper{
-  val roqIdx = new RoqPtr
-  val valid = Bool()
-  val bits = new PtwReq
-  def isPrior(that: comBundle): Bool = {
-    (this.valid && !that.valid) || (this.valid && that.valid && isAfter(that.roqIdx, this.roqIdx))
-  }
-}
-object Compare {
-  def apply[T<:Data](xs: Seq[comBundle]): comBundle = {
-    ParallelOperation(xs, (a: comBundle, b: comBundle) => Mux(a isPrior b, a, b))
-  }
-}
-
-// multi-read && single-write
-// input is data, output is hot-code(not one-hot)
-class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
-  val io = IO(new Bundle {
-    val r = new Bundle {
-      val req = Input(Vec(readWidth, gen))
-      val resp = Output(Vec(readWidth, Vec(set, Bool())))
-    }
-    val w = Input(new Bundle {
-      val valid = Bool()
-      val bits = new Bundle {
-        val index = UInt(log2Up(set).W)
-        val data = gen
-      }
-    })
-  })
-
-  val wordType = UInt(gen.getWidth.W)
-  val array = Reg(Vec(set, wordType))
-
-  io.r.resp.zipWithIndex.map{ case (a,i) =>
-    a := array.map(io.r.req(i).asUInt === _)
-  }
-
-  when (io.w.valid) {
-    array(io.w.bits.index) := io.w.bits.data
-  }
-}
-
-class TlbSPMeta(implicit p: Parameters) extends TlbBundle {
-  val tag = UInt(vpnLen.W) // tag is vpn
-  val level = UInt(1.W) // 1 for 2MB, 0 for 1GB
-
-  def hit(vpn: UInt): Bool = {
-    val a = tag(vpnnLen*3-1, vpnnLen*2) === vpn(vpnnLen*3-1, vpnnLen*2)
-    val b = tag(vpnnLen*2-1, vpnnLen*1) === vpn(vpnnLen*2-1, vpnnLen*1)
-    XSDebug(Mux(level.asBool, a&b, a), p"Hit superpage: hit:${Mux(level.asBool, a&b, a)} tag:${Hexadecimal(tag)} level:${level} a:${a} b:${b} vpn:${Hexadecimal(vpn)}\n")
-    Mux(level.asBool, a&b, a)
-  }
-
-  def apply(vpn: UInt, level: UInt) = {
-    this.tag := vpn
-    this.level := level(0)
-
-    this
-  }
-
-}
-
-class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBundle {
-  val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
-  val ppn = UInt(ppnLen.W)
-  val perm = new TlbPermBundle
-
-  def genPPN(vpn: UInt): UInt = {
-    if (superpage) {
-      val insideLevel = level.getOrElse(0.U)
-      Mux(insideLevel.asBool, Cat(ppn(ppn.getWidth-1, vpnnLen*1), vpn(vpnnLen*1-1, 0)),
-                              Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)))
-    } else {
-      ppn
-    }
-  }
-
-  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool) = {
-    this.level.map(_ := level(0))
-    this.ppn := ppn
-    // refill pagetable perm
-    val ptePerm = perm.asTypeOf(new PtePermBundle)
-    this.perm.pf:= pf
-    this.perm.d := ptePerm.d
-    this.perm.a := ptePerm.a
-    this.perm.g := ptePerm.g
-    this.perm.u := ptePerm.u
-    this.perm.x := ptePerm.x
-    this.perm.w := ptePerm.w
-    this.perm.r := ptePerm.r
-
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
-    this
-  }
-
-  override def toPrintable: Printable = {
-    val insideLevel = level.getOrElse(0.U)
-    p"level:${insideLevel} ppn:${Hexadecimal(ppn)} perm:${perm}"
-  }
-
-  override def cloneType: this.type = (new TlbData(superpage)).asInstanceOf[this.type]
-}
-
-object TlbCmd {
-  def read  = "b00".U
-  def write = "b01".U
-  def exec  = "b10".U
-
-  def atom_read  = "b100".U // lr
-  def atom_write = "b101".U // sc / amo
-
-  def apply() = UInt(3.W)
-  def isRead(a: UInt) = a(1,0)===read
-  def isWrite(a: UInt) = a(1,0)===write
-  def isExec(a: UInt) = a(1,0)===exec
-
-  def isAtom(a: UInt) = a(2)
-}
-
-class TlbReq(implicit p: Parameters) extends TlbBundle {
-  val vaddr = UInt(VAddrBits.W)
-  val cmd = TlbCmd()
-  val roqIdx = new RoqPtr
-  val debug = new Bundle {
-    val pc = UInt(XLEN.W)
-    val isFirstIssue = Bool()
-  }
-
-  override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx}"
-  }
-}
-
-class TlbResp(implicit p: Parameters) extends TlbBundle {
-  val paddr = UInt(PAddrBits.W)
-  val miss = Bool()
-  val mmio = Bool()
-  val excp = new Bundle {
-    val pf = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
-    val af = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
-  }
-  val ptwBack = Bool() // when ptw back, wake up replay rs's state
-
-  override def toPrintable: Printable = {
-    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
-  }
-}
-
-class TlbRequestIO()(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new TlbReq)
-  val resp = Flipped(DecoupledIO(new TlbResp))
-}
-
-class BlockTlbRequestIO()(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new TlbReq)
-  val resp = Flipped(DecoupledIO(new TlbResp))
-}
-
-class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
-  val req = Vec(Width, DecoupledIO(new PtwReq))
-  val resp = Flipped(DecoupledIO(new PtwResp))
-
-  override def cloneType: this.type = (new TlbPtwIO(Width)).asInstanceOf[this.type]
-
-  override def toPrintable: Printable = {
-    p"req(0):${req(0).valid} ${req(0).ready} ${req(0).bits} | resp:${resp.valid} ${resp.ready} ${resp.bits}"
-  }
-}
-
-class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
-  val requestor = Vec(Width, Flipped(new TlbRequestIO))
-  val ptw = new TlbPtwIO(Width)
-  val sfence = Input(new SfenceBundle)
-  val csr = Input(new TlbCsrBundle)
-
-  override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
-}
 
 
 class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule with HasCSRConst{
@@ -536,10 +259,12 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
 
   if (isDtlb) {
     for (i <- 0 until Width) {
-      XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("first_access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable)
     }
     for (i <- 0 until Width) {
-      XSPerfAccumulate("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("first_miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
+      XSPerfAccumulate("miss" + Integer.toString(i, 10), validRegVec(i) && vmEnable && missVec(i))
     }
   } else {
     // NOTE: ITLB is blocked, so every resp will be valid only when hit

@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -24,6 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import utils._
@@ -56,7 +58,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt, DecoupledIO(new ExuOutput))
-    val otherFastWakeup = Vec(exuParameters.LduCnt, ValidIO(new MicroOp))
+    val otherFastWakeup = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
@@ -103,7 +105,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
   io.writeback <> exeWbReqs ++ VecInit(storeUnits.map(_.io.stout))
-  io.otherFastWakeup <> loadUnits.map(_.io.fastUop)
+  io.otherFastWakeup := DontCare
+  io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
   // TODO: fast load wakeup
 

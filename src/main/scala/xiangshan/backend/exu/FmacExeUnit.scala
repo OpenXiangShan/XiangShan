@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,9 +21,8 @@ import chisel3._
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
-class FmacExeUnit(implicit p: Parameters) extends Exu(FmacExeUnitCfg)
+class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 {
-  val frm = IO(Input(UInt(3.W)))
 
   val fma = supportedFunctionUnits.head.asInstanceOf[FMA]
 
@@ -31,7 +31,7 @@ class FmacExeUnit(implicit p: Parameters) extends Exu(FmacExeUnitCfg)
   val isRVD = !io.fromFp.bits.uop.ctrl.isRVF
   fma.io.in.bits.src := VecInit(Seq(input.src(0), input.src(1), input.src(2)))
   val instr_rm = io.fromFp.bits.uop.ctrl.fpu.rm
-  fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
+  fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
 
   fma.io.redirectIn := io.redirect
   fma.io.flushIn := io.flush

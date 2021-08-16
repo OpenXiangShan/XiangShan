@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -22,7 +23,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.fu._
 
-class MulDivExeUnit(implicit p: Parameters) extends Exu(MulDivExeUnitCfg) {
+class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
 
   val func = io.fromInt.bits.uop.ctrl.fuOpType
   val (src1, src2) = (

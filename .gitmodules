@@ -13,7 +13,9 @@
 [submodule "berkeley-hardfloat"]
 	path = berkeley-hardfloat
 	url = https://github.com/OpenXiangShan/berkeley-hardfloat.git
-
+[submodule "difftest"]
+	path = difftest
+	url = https://github.com/OpenXiangShan/difftest.git
 [submodule "ready-to-run"]
 	path = ready-to-run
 	url = https://github.com/OpenXiangShan/ready-to-run
