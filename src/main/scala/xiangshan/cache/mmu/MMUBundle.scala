@@ -239,13 +239,22 @@ class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
-  val requestor = Vec(Width, Flipped(new TlbRequestIO))
-  val ptw = new TlbPtwIO(Width)
+class TlbBaseBundle(implicit p: Parameters) extends TlbBundle {
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
+}
+
+class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBaseBundle {
+  val requestor = Vec(Width, Flipped(new TlbRequestIO))
+  val ptw = new TlbPtwIO(Width)
 
   override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
+}
+/****************************  Bridge TLB *******************************/
+
+class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends TlbBaseBundle {
+  val requestor = Vec(Width, Flipped(new TlbPtwIO()))
+  val ptw = new TlbPtwIO(Width)
 }
 
 
