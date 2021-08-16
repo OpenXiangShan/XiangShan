@@ -193,7 +193,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
-  assert(!s2_forward_fail)
+  // assert(!s2_forward_fail)
 
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
@@ -259,8 +259,9 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
   io.out.bits.miss := s2_cache_miss && !s2_exception
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
+  io.out.bits.uop.cf.replayInst := s2_forward_fail // if forward fail, repaly this inst
   io.out.bits.mmio := s2_mmio
-
+  
   // For timing reasons, we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
   // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
