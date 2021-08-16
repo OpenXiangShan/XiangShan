@@ -76,7 +76,7 @@ case class XSCoreParameters
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(ubtb, bim, ftb, tage, ras)
+      val preds = Seq(bim, ubtb, ftb, tage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -84,9 +84,9 @@ case class XSCoreParameters
       // btb.io.resp_in(0)   := bim.io.resp
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
-      ubtb.io.in.bits.resp_in(0)  := resp_in
-      bim.io.in.bits.resp_in(0)   := ubtb.io.out.resp
-      ftb.io.in.bits.resp_in(0)   := bim.io.out.resp
+      bim.io.in.bits.resp_in(0)  := resp_in
+      ubtb.io.in.bits.resp_in(0)   := bim.io.out.resp
+      ftb.io.in.bits.resp_in(0)   := ubtb.io.out.resp
       tage.io.in.bits.resp_in(0)  := ftb.io.out.resp
       ras.io.in.bits.resp_in(0)   := tage.io.out.resp
       

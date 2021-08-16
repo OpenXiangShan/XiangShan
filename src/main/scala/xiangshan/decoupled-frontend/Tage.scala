@@ -137,7 +137,7 @@ class FakeTageTable()(implicit p: Parameters) extends TageModule {
 @chiselName
 class TageTable
 (
-  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int
+  val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int
 )(implicit p: Parameters)
   extends TageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
@@ -148,14 +148,28 @@ class TageTable
 
   // bypass entries for tage update
   val wrBypassEntries = 4
-  val phistLen = PathHistoryLength
+  val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
   def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
+    def F(phist: UInt, len: Int) = {
+      val lenMask = Fill(len, 1.U(1.W))
+      val rowMask = Fill(log2Ceil(nRows), 1.U(1.W))
+      val masked = phist & lenMask
+      val a1 = masked & rowMask
+      val a2 = masked >> log2Ceil(nRows)
+      val a3 = ((a2 << tableIdx) & rowMask) + (a2 >> (log2Ceil(nRows) - tableIdx))
+      val a4 = a1 ^ a3
+      val res = ((a3 << tableIdx) & rowMask) + (a3 >> (log2Ceil(nRows) - tableIdx))
+      res
+    }
     val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
+    val idx_phist = F(phist, (if (PathHistoryLength > histLen) histLen else PathHistoryLength))
+    // val idx = (unhashed_idx ^ (unhashed_idx >> (log2Ceil(nRows)-tableIdx+1)) ^ idx_history ^ idx_phist)(log2Ceil(nRows) - 1, 0)
     val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
-    val tag_history = compute_folded_ghist(hist, tagLen) ^ compute_folded_phist(phist, tagLen)
+    val tag_history = compute_folded_ghist(hist, tagLen)
+    val alt_tag_history = compute_folded_ghist(hist, tagLen-1)
     // Use another part of pc to make tags
-    val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history) (tagLen - 1, 0)
+    val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history ^ (alt_tag_history << 1)) (tagLen - 1, 0)
     (idx, tag)
   }
 
@@ -397,9 +411,9 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 class Tage(implicit p: Parameters) extends BaseTage {
   override val meta_size = 0.U.asTypeOf(Vec(TageBanks, new TageMeta)).getWidth
 
-  val tables = TableInfo.map {
-    case (nRows, histLen, tagLen) =>
-      val t = Module(new TageTable(nRows, histLen, tagLen, UBitPeriod))
+  val tables = TableInfo.zipWithIndex.map {
+    case ((nRows, histLen, tagLen), i) =>
+      val t = Module(new TageTable(nRows, histLen, tagLen, UBitPeriod, i))
       t.io.req.valid := io.s1_fire
       t.io.req.bits.pc := s1_pc
       t.io.req.bits.hist := io.in.bits.ghist
