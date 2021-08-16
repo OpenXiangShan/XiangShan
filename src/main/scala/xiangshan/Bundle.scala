@@ -379,7 +379,6 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val fromFtq = new FtqToCtrlIO
   // from backend
-  val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 

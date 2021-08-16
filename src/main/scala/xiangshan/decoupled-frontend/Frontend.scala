@@ -80,7 +80,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val instrUncache = outer.instrUncache.module
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
 
-  val needFlush = io.backend.redirect_cfiUpdate.valid
+  val needFlush = io.backend.toFtq.stage3Redirect.valid
 
   //IFU-Ftq
   ifu.io.ftqInter.fromFtq <> ftq.io.toIfu
