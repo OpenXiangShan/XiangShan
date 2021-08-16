@@ -716,7 +716,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   roqRedirect.valid := roqFlush.valid
   roqRedirect.bits.ftqIdx := roqFlush.bits.ftqIdx
   roqRedirect.bits.ftqOffset := roqFlush.bits.ftqOffset
-  roqRedirect.bits.level := RedirectLevel.flushAfter
+  roqRedirect.bits.level := RedirectLevel.flush
 
   redirectVec.zip(Seq(roqRedirect, stage2Redirect, fromIfuRedirect)).map {
     case (ve, r) => ve(r)
