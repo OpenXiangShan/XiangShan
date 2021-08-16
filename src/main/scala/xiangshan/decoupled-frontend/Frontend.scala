@@ -68,7 +68,14 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val icacheMeta      = Module(new ICacheMetaArray)
   val icacheData      = Module(new ICacheDataArray)
   val icacheMissQueue = Module(new ICacheMissQueue)
-  val itlb            = Module(new TLB(Width = 2, isDtlb = false))         
+  io.ptw <> TLB(
+    in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
+    sfence = io.sfence,
+    csr = io.tlbCsr,
+    width = 2,
+    isDtlb = false,
+    shouldBlock = true
+  )  
   //TODO: modules need to be removed
   val instrUncache = outer.instrUncache.module
   val l1plusPrefetcher = Module(new L1plusPrefetcher)
@@ -85,11 +92,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.icacheInter.fromIMeta  <>      icacheMeta.io.readResp
   ifu.io.icacheInter.toIData    <>      icacheData.io.read
   ifu.io.icacheInter.fromIData  <>      icacheData.io.readResp
-  //IFU-ITLB
-  ifu.io.iTLBInter              <>      itlb.io.requestor
-  io.ptw                        <>      itlb.io.ptw
-  io.sfence                     <>      itlb.io.sfence
-  io.tlbCsr                     <>      itlb.io.csr
 
 
   for(i <- 0 until 2){

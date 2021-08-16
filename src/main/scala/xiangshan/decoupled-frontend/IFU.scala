@@ -44,7 +44,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface  
   val icacheInter     = new ICacheInterface 
   val toIbuffer       = Decoupled(new FetchToIBuffer)
-  val iTLBInter       = Vec(2, new TlbRequestIO) 
+  val iTLBInter       = Vec(2, new BlockTlbRequestIO) 
 }
 
 // record the situation in which fallThruAddr falls into
@@ -60,7 +60,6 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val startAddr     = UInt(VAddrBits.W)
   val fallThruAddr  = UInt(VAddrBits.W)
   val ftqOffset     = Valid(UInt(log2Ceil(PredictWidth).W))
-  val startRange    = Vec(PredictWidth, Bool())
   val target        = UInt(VAddrBits.W)
   val pageFault     = Vec(2, Bool())
   val accessFault   = Vec(2, Bool())
@@ -374,12 +373,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.oversize      :=  f2_ftq_req.oversize
   preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-<<<<<<< HEAD
-  preDecoderIn.startRange    :=  f2_ldreplay_valids.asTypeOf( Vec(PredictWidth, Bool()) )
   preDecoderIn.pageFault     :=  f2_except_pf  
   preDecoderIn.accessFault   :=  f2_except_af
-=======
->>>>>>> decoupled-frontend
 
   predecodeOutValid          :=  fetchFinish
 

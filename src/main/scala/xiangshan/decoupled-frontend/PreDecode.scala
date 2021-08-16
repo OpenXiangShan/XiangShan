@@ -114,13 +114,15 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))  
                        else         VecInit((0 until PredictWidth).map(i => data(i)))
+  
+  val nextLinePC =  align(pcStart, 64) + 64.U
 
   for (i <- 0 until PredictWidth) {
     //TODO: Terrible timing for pc comparing
-    val hasPageFault   = instRange(i) && validStart(i) && ((io.out.pc(i) < align(realEndPC, 64) && pageFault(0))   || (io.out.pc(i) > align(realEndPC, 64) && pageFault(1)))
-    val hasAccessFault = instRange(i) && validStart(i) && ((io.out.pc(i) < align(realEndPC, 64) && accessFault(0)) || (io.out.pc(i) > align(realEndPC, 64) && accessFault(1)))
+    val hasPageFault   = validStart(i) && ((io.out.pc(i) < nextLinePC && pageFault(0))   || (io.out.pc(i) > nextLinePC && pageFault(1)))
+    val hasAccessFault = validStart(i) && ((io.out.pc(i) < nextLinePC && accessFault(0)) || (io.out.pc(i) > nextLinePC && accessFault(1)))
     val exception      = hasPageFault || hasAccessFault
-    val inst           = Mux(exception,NOP,WireInit(rawInsts(i)))
+    val inst           = Mux(exception, NOP, WireInit(rawInsts(i)))
     val expander       = Module(new RVCExpander)
 
     val isFirstInBlock = i.U === 0.U
