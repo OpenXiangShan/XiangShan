@@ -26,7 +26,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val MaxMetaLength = 1024 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
-  val numBr = 1
+  val numBr = 2
   val useBPD = true
   val useLHist = true
 
