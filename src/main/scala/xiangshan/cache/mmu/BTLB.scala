@@ -102,4 +102,13 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
       }
     }
   }
+
+  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  for (i <- 0 until BTlbEntrySize) {
+    XSPerfAccumulate(s"RefillIndex${i}", ptw.resp.valid && i.U === refillIdx)
+  }
+  XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 2.U)
+  XSPerfAccumulate(s"Refill2MBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 1.U)
+  XSPerfAccumulate(s"Refill1GBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 0.U)
 }
