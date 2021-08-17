@@ -413,7 +413,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     f2_lastHalf.valid := false.B
   }.elsewhen (io.toIbuffer.fire()) {
     f2_lastHalf.valid := preDecoderOut.hasLastHalf
-    f2_lastHalf.middlePC := f2_ftq_req.fallThruAddr
+    f2_lastHalf.middlePC := preDecoderOut.realEndPC
   }
 
   val f2_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt

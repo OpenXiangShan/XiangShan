@@ -76,6 +76,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val hasLastHalf  = Bool()
+  val realEndPC    = UInt(VAddrBits.W)
   val instrRange   = Vec(PredictWidth, Bool())
   val pageFault    = Vec(PredictWidth, Bool())
   val accessFault  = Vec(PredictWidth, Bool())
@@ -202,6 +203,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   io.out.jalTarget        :=  targets(jumpOffset)
 
   io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
+  io.out.realEndPC        := realEndPC
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
