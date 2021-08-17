@@ -251,15 +251,15 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   ))
   val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
 
-  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid && !s2_forward_fail
+  io.out.valid := io.in.valid && !s2_tlb_miss && !s2_data_invalid
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
-  io.out.bits.miss := s2_cache_miss && !s2_exception
+  io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
-  io.out.bits.uop.cf.replayInst := s2_forward_fail // if forward fail, repaly this inst
+  io.out.bits.uop.cf.replayInst := s2_forward_fail && !s2_mmio // if forward fail, repaly this inst
   io.out.bits.mmio := s2_mmio
   
   // For timing reasons, we can not let
