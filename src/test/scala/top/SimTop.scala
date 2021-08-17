@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -18,15 +19,11 @@ package top
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
-import device.{AXI4RAMWrapper, UARTIO}
+import device.AXI4RAMWrapper
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.GTimer
-import xiangshan.{DebugOptions, DebugOptionsKey, PerfInfoIO}
-
-class LogCtrlIO extends Bundle {
-  val log_begin, log_end = Input(UInt(64.W))
-  val log_level = Input(UInt(64.W)) // a cpp uint
-}
+import xiangshan.{DebugOptions, DebugOptionsKey}
+import difftest._
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)

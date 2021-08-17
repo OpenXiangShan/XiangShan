@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -508,11 +509,6 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   // by default, ldpc/stpc should be xor folded
   val ldpc = UInt(MemPredPCWidth.W)
   val stpc = UInt(MemPredPCWidth.W)
-}
-
-class PerfInfoIO extends Bundle {
-  val clean = Input(Bool())
-  val dump = Input(Bool())
 }
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {

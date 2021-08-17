@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -22,9 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
-class FmiscExeUnit(implicit p: Parameters) extends Exu(FmiscExeUnitCfg) {
-
-  val frm = IO(Input(UInt(3.W)))
+class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
 
   val fus = supportedFunctionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
 
@@ -36,7 +35,7 @@ class FmiscExeUnit(implicit p: Parameters) extends Exu(FmiscExeUnitCfg) {
   supportedFunctionUnits.foreach { module =>
     module.io.in.bits.src(0) := src1
     module.io.in.bits.src(1) := src2
-    module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
+    module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
   }
 
   io.out.bits.fflags := MuxCase(

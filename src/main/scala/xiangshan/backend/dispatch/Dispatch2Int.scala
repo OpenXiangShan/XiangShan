@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -35,6 +36,10 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
   io.enqIQCtrl <> DontCare
   for (i <- 0 until exuParameters.AluCnt) {
     io.enqIQCtrl(i) <> io.fromDq(i)
+    if (i > 0) {
+      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+    }
     io.readRf(2*i) := io.enqIQCtrl(i).bits.psrc(0)
     io.readRf(2*i + 1) := io.enqIQCtrl(i).bits.psrc(1)
 

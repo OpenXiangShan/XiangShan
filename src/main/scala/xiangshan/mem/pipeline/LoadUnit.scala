@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -297,7 +298,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
-    val fastUop = ValidIO(new MicroOp) // early wakup signal generated in load_s1
+    val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
   })
 
   val load_s0 = Module(new LoadUnit_S0)
