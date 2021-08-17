@@ -118,15 +118,15 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
     io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
     //TODO: Frontend Exception
-    io.out(i).bits.exceptionVec(instrPageFault) := false.B
-    io.out(i).bits.exceptionVec(instrAccessFault) := false.B
+    io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+    io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
     // io.out(i).bits.brUpdate := outWire.brInfo
     io.out(i).bits.pd := outWire.pd
     io.out(i).bits.pred_taken := outWire.pred_taken
     io.out(i).bits.ftqPtr := outWire.ftqPtr
     io.out(i).bits.ftqOffset := outWire.ftqOffset
     //TODO: Frontend Exception
-    io.out(i).bits.crossPageIPFFix := false.B
+    io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
     io.out(i).bits.storeSetHit := DontCare
