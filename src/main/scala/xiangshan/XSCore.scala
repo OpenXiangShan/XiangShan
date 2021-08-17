@@ -143,11 +143,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   )
   val dispatchPorts = Seq(intDpPorts, int1DpPorts, fpDpPorts, lsDpPorts)
 
-  val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).reverse.drop(1).reverseMap { case ((sche, disp), other) =>
-    LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other))
+  val outFpRfReadPorts = Seq(0, 0, 2, 0)
+  val exuBlocks = schedulePorts.zip(dispatchPorts).zip(otherFastPorts).zip(outFpRfReadPorts).reverse.drop(1).reverseMap { case (((sche, disp), other), ofp) =>
+    LazyModule(new ExuBlock(sche, disp, intWbPorts, fpWbPorts, other, ofp))
   }
 
-  val memScheduler = LazyModule(new Scheduler(schedulePorts.last, dispatchPorts.last, intWbPorts, fpWbPorts, otherFastPorts.last))
+  val memScheduler = LazyModule(new Scheduler(schedulePorts.last, dispatchPorts.last, intWbPorts, fpWbPorts, otherFastPorts.last, outFpRfReadPorts.last))
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
       IssQueSize = memScheduler.memRsEntries.max
@@ -264,6 +265,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sch.bits.srcState(0) := enq.bits.srcState(1)
     XSError(sch.valid && !sch.ready && memScheduler.io.allocate(i+2).ready, "std not ready but sta ready")
   }
+  exuBlocks(1).io.scheExtra.fpRfReadIn.get <> exuBlocks(2).io.scheExtra.fpRfReadOut.get
 
   memScheduler.io.redirect <> ctrlBlock.io.redirect
   memScheduler.io.flush <> ctrlBlock.io.flush

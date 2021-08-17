@@ -25,7 +25,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.regfile.{Regfile, RfWritePort}
+import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
 import scala.collection.mutable.ArrayBuffer
@@ -75,16 +75,13 @@ class Scheduler(
   val dpPorts: Seq[Seq[(Int, Int)]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
-  val outFastPorts: Seq[Seq[Int]]
+  val outFastPorts: Seq[Seq[Int]],
+  val outFpRfReadPorts: Int
 )(implicit p: Parameters) extends LazyModule with HasXSParameter with HasExuWbMappingHelper {
   val numDpPorts = dpPorts.length
 
   // regfile parameters: overall read and write ports
-  val numDpPortIntRead = dpPorts.map(_.map(_._1).map(configs(_)._1.intSrcCnt).max)
-  val numIntRfReadPorts = numDpPortIntRead.sum
   val numIntRfWritePorts = intRfWbPorts.length
-  val numDpPortFpRead = dpPorts.map(_.map(_._1).map(configs(_)._1.fpSrcCnt).max)
-  val numFpRfReadPorts = numDpPortFpRead.sum
   val numFpRfWritePorts = fpRfWbPorts.length
 
   // reservation station parameters: dispatch, regfile, issue, wakeup, fastWakeup
@@ -121,6 +118,11 @@ class Scheduler(
     if (memRsEntries.isEmpty) 0 else memRsEntries.max
   }
   val numSTDPorts = reservationStations.filter(_.params.exuCfg.get == StdExeUnitCfg).map(_.params.numDeq).sum
+
+  val numDpPortIntRead = dpPorts.map(_.map(_._1).map(configs(_)._1.intSrcCnt).max)
+  val numIntRfReadPorts = numDpPortIntRead.sum
+  val numDpPortFpRead = dpPorts.map(_.map(_._1).map(configs(_)._1.fpSrcCnt).max)
+  val numFpRfReadPorts = numDpPortFpRead.sum - numSTDPorts + outFpRfReadPorts
 
   lazy val module = new SchedulerImp(this)
 
@@ -172,6 +174,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     })) else None
     // special ports for store
     val stData = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))) else None
+    val fpRfReadIn = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, Flipped(new RfReadPort(XLEN)))) else None
+    val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -210,7 +214,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }.fold(Seq())(_ ++ _)
   }
   def readIntRf: Seq[UInt] = extraReadRf(outer.numDpPortIntRead)
-  def readFpRf: Seq[UInt] = extraReadRf(outer.numDpPortFpRead)
+  def readFpRf: Seq[UInt] = extraReadRf(outer.numDpPortFpRead) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
   def stData: Seq[ValidIO[StoreDataBundle]] = io.extra.stData.getOrElse(Seq())
 
   def regfile(raddr: Seq[UInt], numWrite: Int, hasZero: Boolean, len: Int): Option[Regfile] = {
@@ -227,9 +231,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   val intRf = regfile(readIntRf, intRfWritePorts, true, XLEN)
-  val fpRf = regfile(readFpRf, fpRfWritePorts, false, XLEN)
+  val fpRf = if (outer.numFpRfReadPorts > 0) regfile(readFpRf, fpRfWritePorts, false, XLEN) else None
   val intRfReadData = if (intRf.isDefined) intRf.get.io.readPorts.map(_.data) else Seq()
-  val fpRfReadData = if (fpRf.isDefined) fpRf.get.io.readPorts.map(_.data) else Seq()
+  val fpRfReadData = if (fpRf.isDefined) fpRf.get.io.readPorts.map(_.data) else io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)
 
   // write ports: 0-3 ALU, 4-5 MUL, 6-7 LOAD
   // regfile write ports
@@ -250,6 +254,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
+  if (io.extra.fpRfReadIn.isDefined) {
+    io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+  }
+
+  if (io.extra.fpRfReadOut.isDefined) {
+    io.extra.fpRfReadOut.get.map(_.data).zip(fpRfReadData.takeRight(outer.outFpRfReadPorts)).foreach{ case (a, b) => a := b}
+  }
   var issueIdx = 0
   var feedbackIdx = 0
   var stDataIdx = 0
