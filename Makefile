@@ -45,7 +45,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                       \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
 		--disable-all --remove-assert --infer-rw                     \
 		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS) \
@@ -77,7 +77,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)       \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)

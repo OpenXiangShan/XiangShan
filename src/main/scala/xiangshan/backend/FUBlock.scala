@@ -22,10 +22,8 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.ReservationStation
-import xiangshan.backend.fu.{FenceToSbuffer, CSRFileIO, FunctionUnit}
-import xiangshan.backend.regfile.Regfile
-import difftest._
+import xiangshan.backend.fu.CSRFileIO
+
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -33,7 +31,6 @@ class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends X
   val slow = Vec(numSlow, Flipped(DecoupledIO(new ExuOutput)))
 
   override def cloneType = (new WakeUpBundle(numFast, numSlow)).asInstanceOf[this.type]
-
 }
 
 trait HasExeBlockHelper {
@@ -85,49 +82,82 @@ trait HasExeBlockHelper {
   }
 }
 
-class IntegerBlock()(implicit p: Parameters) extends XSModule with HasExeBlockHelper {
+class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSBundle {
+  val hasCSR = configs.map(_._1).contains(JumpCSRExeUnitCfg)
+  val hasFence = configs.map(_._1).contains(JumpCSRExeUnitCfg)
+  val hasFrm = configs.map(_._1).contains(FmacExeUnitCfg) || configs.map(_._1).contains(FmiscExeUnitCfg)
+  val numRedirectOut = configs.filter(_._1.hasRedirect).map(_._2).sum
+
+  val exuRedirect = Vec(numRedirectOut, ValidIO(new ExuOutput))
+  val csrio = if (hasCSR) Some(new CSRFileIO) else None
+  val fenceio = if (hasFence) Some(new FenceIO) else None
+  val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
+
+  override def cloneType: FUBlockExtraIO.this.type =
+    new FUBlockExtraIO(configs).asInstanceOf[this.type]
+}
+
+class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {
+  val numIn = configs.map(_._2).sum
+
+
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // in
-    val issue = Vec(exuParameters.IntExuCnt, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput)))
     // out
-    val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, ValidIO(new ExuOutput))
-    val writeback = Vec(exuParameters.IntExuCnt, DecoupledIO(new ExuOutput))
+    val writeback = Vec(numIn, DecoupledIO(new ExuOutput))
     // misc
-    val csrio = new CSRFileIO
-    val fenceio = new Bundle {
-      val sfence = Output(new SfenceBundle) // to front,mem
-      val fencei = Output(Bool()) // to icache
-      val sbuffer = new FenceToSbuffer // to mem
-    }
+    val extra = new FUBlockExtraIO(configs)
   })
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
-  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-  val jmpExeUnit = Module(new JumpExeUnit)
 
-  val exeUnits = aluExeUnits ++ mduExeUnits :+ jmpExeUnit
+  val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
+
+  val intExeUnits = exeUnits.filter(_.config.readIntRf)
+  val fpExeUnits = exeUnits.filter(_.config.readFpRf)
+  io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
-  for ((exe, i) <- exeUnits.zipWithIndex) {
-    exe.io.redirect <> io.redirect
-    exe.io.flush <> io.flush
-    io.issue(i) <> exe.io.fromInt
-  }
-
-  // send misprediction to brq
-  io.exuRedirect.zip(
-    (jmpExeUnit +: aluExeUnits).map(_.io.out)
-  ).foreach {
+  // to please redirectGen
+  io.extra.exuRedirect.zip(exeUnits.reverse.filter(_.config.hasRedirect).map(_.io.out)).foreach {
     case (x, y) =>
       x.valid := y.fire() && y.bits.redirectValid
       x.bits := y.bits
   }
 
-  jmpExeUnit.csrio <> io.csrio
-  jmpExeUnit.csrio.perf <> RegNext(io.csrio.perf)
-  // RegNext customCtrl for better timing
-  io.csrio.customCtrl := RegNext(jmpExeUnit.csrio.customCtrl)
-  jmpExeUnit.fenceio <> io.fenceio
+  for ((exu, i) <- exeUnits.zipWithIndex) {
+    exu.io.redirect <> io.redirect
+    exu.io.flush <> io.flush
 
+    if (exu.csrio.isDefined) {
+      exu.csrio.get <> io.extra.csrio.get
+      exu.csrio.get.perf <> RegNext(io.extra.csrio.get.perf)
+      // RegNext customCtrl for better timing
+      io.extra.csrio.get.customCtrl := RegNext(exu.csrio.get.customCtrl)
+    }
+
+    if (exu.fenceio.isDefined) {
+      exu.fenceio.get <> io.extra.fenceio.get
+    }
+
+    if (exu.frm.isDefined) {
+      // fp instructions have three operands
+      for (j <- 0 until 3) {
+        // when one of the higher bits is zero, then it's not a legal single-precision number
+        val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR
+        val single = recode(io.issue(i).bits.src(j)(31, 0), S)
+        val double = recode(io.issue(i).bits.src(j)(63, 0), D)
+        exu.io.fromFp.bits.src(j) := Mux(isLegalSingle, single, double)
+      }
+
+      // out
+      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
+        ieee(exu.io.out.bits.data),
+        exu.io.out.bits.data
+      )
+
+      exu.frm.get := io.extra.frm.get
+    }
+  }
 }

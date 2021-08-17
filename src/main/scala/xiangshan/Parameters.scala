@@ -143,7 +143,7 @@ case class XSCoreParameters
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
 
   val intExuConfigs = Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpExeUnitCfg
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++

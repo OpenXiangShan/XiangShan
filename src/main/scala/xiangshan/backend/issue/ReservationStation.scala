@@ -67,14 +67,14 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     params.numSrc = max(params.numSrc, max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt))
     params.exuCfg = Some(exuCfg)
     exuCfg match {
-      case JumpExeUnitCfg => params.isJump = true
+      case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
       case StExeUnitCfg => params.isStore = true
       case MulDivExeUnitCfg => params.isMul = true
       case _ =>
     }
     // TODO: why jump needs two sources?
-    if (exuCfg == JumpExeUnitCfg) {
+    if (exuCfg == JumpCSRExeUnitCfg) {
       params.numSrc = 2
     }
     if (exuCfg == StExeUnitCfg || exuCfg == LdExeUnitCfg) {
@@ -349,22 +349,8 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       }
     }
     val fastWakeupMatchRegVec = RegNext(fastWakeupMatchVec)
-    for (i <- 0 until params.numDeq) {
-      val targetFastWakeupMatch = Mux1H(select.io.grant(i).bits, fastWakeupMatchRegVec)
-      val wakeupBypassMask = Wire(Vec(params.numFastWakeup, Vec(params.numSrc, Bool())))
-      for (j <- 0 until params.numFastWakeup) {
-        wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_ (j)))
-      }
-      // data: send to bypass network
-      // TODO: these should be done outside RS
-      val bypassNetwork = Module(new BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf))
-      bypassNetwork.io.hold := !io.deq(i).ready
-      bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
-      bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).map { case (by, (m, d)) =>
-        by.valid := m
-        by.data := d
-      }
 
+    for (i <- 0 until params.numDeq) {
       /**
         * S2: to function units
         */
@@ -377,8 +363,23 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
         io_feedback.get.isFirstIssue(i) := RegEnable(statusArray.io.isFirstIssue(i), pipeline_fire)
       }
 
-      for (j <- 0 until params.numSrc) {
-        io.deq(i).bits.src(j) := bypassNetwork.io.target(j)
+      // data: send to bypass network
+      // TODO: these should be done outside RS
+      if (params.numFastWakeup > 0) {
+        val targetFastWakeupMatch = Mux1H(select.io.grant(i).bits, fastWakeupMatchRegVec)
+        val wakeupBypassMask = Wire(Vec(params.numFastWakeup, Vec(params.numSrc, Bool())))
+        for (j <- 0 until params.numFastWakeup) {
+          wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_ (j)))
+        }
+
+        val bypassNetwork = Module(new BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf))
+        bypassNetwork.io.hold := !io.deq(i).ready
+        bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
+        bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
+          by.valid := m
+          by.data := d
+        }
+        bypassNetwork.io.target <> io.deq(i).bits.src.take(params.numSrc)
       }
 
       if (io_store.isDefined) {
