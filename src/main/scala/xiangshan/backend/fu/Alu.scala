@@ -71,39 +71,6 @@ class RotateShiftModule(implicit p: Parameters) extends XSModule {
   io.ror_w := (io.roSrc>>io.shamt | io.roSrc << (32.U-io.shamt))(31,0)
 }
 
-// class CountModule(implicit p: Parameters) extends XSModule {
-//   val io = IO(new Bundle() {
-//     val src = Input(UInt(XLEN.W))
-//     val zeroRes, cpopRes = Output(UInt(XLEN.W))
-//   })
-
-//   def encode(bits: UInt): UInt = {
-//     LookupTreeDefault(bits, 0.U, List(0.U -> 2.U(2.W), 1.U -> 1.U(2.W)))
-//   }
-//   def clzi(msb: Int, left: UInt, right: UInt): UInt = {
-//     Mux(left(msb),
-//       Cat(left(msb) & right(msb), !right(msb), if(msb==1)right(0) else right(msb-1, 0)),
-//       left)
-//   }
-  
-//   val c0 = Wire(Vec(32, UInt(2.W)))
-//   val c1 = Wire(Vec(16, UInt(3.W)))
-//   val c2 = Wire(Vec(8, UInt(4.W)))
-//   val c3 = Wire(Vec(4, UInt(5.W)))
-//   val c4 = Wire(Vec(2, UInt(6.W)))
-
-//   for(i <- 0 until 32){ c0(i) := encode(io.src(2*i+1, 2*i)) }
-//   for(i <- 0 until 16){ c1(i) := clzi(1, c0(i*2+1), c0(i*2)) }
-//   for(i <- 0 until 8){ c2(i) := clzi(2, c1(i*2+1), c1(i*2)) }
-//   for(i <- 0 until 4){ c3(i) := clzi(3, c2(i*2+1), c2(i*2)) }
-//   for(i <- 0 until 2){ c4(i) := clzi(4, c3(i*2+1), c3(i*2)) }
-//   val zeroRes = clzi(5, c4(1), c4(0))
-
-//   val cpopRes = PopCount(io.src)
-//   io.zeroRes := zeroRes
-//   io.cpopRes := cpopRes
-// }
-
 class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
@@ -171,7 +138,6 @@ class AluResSel(implicit p: Parameters) extends XSModule {
   })
   
   val res = Mux(io.func(6),
-    // Mux(io.func(5), io.countRes, io.shiftRes),
     io.shiftRes,
     Mux(io.func(5), io.addSubRes, io.miscRes)
   )
@@ -264,15 +230,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val rol = Mux(isW, rotateShiftModule.io.rol_w, rotateShiftModule.io.rol_l)
   val ror = Mux(isW, rotateShiftModule.io.ror_w, rotateShiftModule.io.ror_l)
 
-  // val countModule = Module(new CountModule)
-  // countModule.io.src := ParallelMux(List(
-  //   "b00".U -> Mux(isW, Cat(src1(31,0),Fill(32, 1.U(1.W))), src1),
-  //   "b01".U -> Mux(isW, Cat(Reverse(src1(31,0)), Fill(32, 1.U(1.W))), Reverse(src1)),
-  //   "b10".U -> Mux(isW, Cat(0.U(32.W), src1(32, 0)), src1)
-  // ).map(x => (x._1 === func(1,0), x._2)))
-  // val countRes = Mux(func(1), countModule.io.cpopRes, countModule.io.zeroRes)
-
-
   val miscResSel = Module(new MiscResultSelect)
   miscResSel.io.func    := func(4, 0)
   miscResSel.io.andn    := andn
@@ -309,7 +266,6 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   val aluResSel = Module(new AluResSel)
   aluResSel.io.func := func
-  // aluResSel.io.countRes := countRes
   aluResSel.io.addSubRes := addSubRes
   aluResSel.io.shiftRes := shiftRes
   aluResSel.io.miscRes := miscRes
