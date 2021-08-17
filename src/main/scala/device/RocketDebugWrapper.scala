@@ -36,7 +36,7 @@ import freechips.rocketchip.devices.debug._
 
 // this file uses code from rocketchip Periphery.scala
 // to simplify the code we remove options for apb, cjtag and dmi
-// this module creates wrapped dm, dtm, sba, and pulls out intr lines 
+// this module creates wrapped dm and dtm 
 
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
@@ -109,27 +109,6 @@ object XSDebugModuleParams {
   }
 }
 
-// debug module related IO in Top
-class debugIOTop(implicit val p: Parameters) extends Bundle {
-//  val clock = Input(Bool()) 
-//  val reset = Input(Bool())
-  val clockeddmi = p(ExportDebug).dmi.option(Flipped(new ClockedDMIIO())) // TODO: remove unecessary options
-  val systemjtag = new Bundle {
-    val jtag = Flipped(new JTAGIO(hasTRSTn = false))
-    val reset = Input(Bool()) // No reset allowed on top
-    val mfr_id = Input(UInt(11.W))
-    val part_number = Input(UInt(16.W))
-    val version = Input(UInt(4.W))
-  }
-  val apb = p(ExportDebug).apb.option(Flipped(new ClockedAPBBundle(APBBundleParameters(addrBits=12, dataBits=32))))
-  //------------------------------
-  // val ndreset    = Output(Bool())
-  // val dmactive   = Output(Bool())
-  // val dmactiveAck = Input(Bool())
-  val extTrigger = (p(DebugModuleKey).get.nExtTriggers > 0).option(new DebugExtTriggerIO())
-  val disableDebug = p(ExportDebug).externalDisable.option(Input(Bool()))
-}
-
 case object EnableJtag extends Field[Bool]
 
 class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends BlackBox(Map("TICK_DELAY" -> IntParam(tickDelay)))
@@ -163,9 +142,4 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends BlackBox(
       stop(1)
     }
   }
-
-//  addResource("/vsrc/SimJTAG.v")
-//  addResource("/csrc/SimJTAG.cpp")
-//  addResource("/csrc/remote_bitbang.h")
-//  addResource("/csrc/remote_bitbang.cpp")
 }
