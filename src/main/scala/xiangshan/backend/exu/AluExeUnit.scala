@@ -21,15 +21,12 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.fu.{Alu,Bmu}
+import xiangshan.backend.fu.Alu
 
 class AluExeUnit(implicit p: Parameters) extends Exu(AluExeUnitCfg)
 {
   val alu = supportedFunctionUnits.collectFirst{
     case a: Alu => a
-  }.get
-  val bmu = supportedFunctionUnits.collectFirst{
-    case b: Bmu => b
   }.get
 
   io.out.bits.redirectValid := alu.redirectOutValid
