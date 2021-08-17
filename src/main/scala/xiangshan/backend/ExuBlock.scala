@@ -56,8 +56,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     // extra
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
-    // directly from reg file
-    val debug_prf = scheduler.io.debug_prf.cloneType
   })
 
   scheduler.io.redirect <> io.redirect
@@ -69,8 +67,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.extra <> io.scheExtra
 
   scheduler.io.issue <> fuBlock.io.issue
-
-  scheduler.io.debug_prf <> io.debug_prf
 
   fuBlock.io.redirect <> io.redirect
   fuBlock.io.flush <> io.flush
