@@ -85,7 +85,21 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   }
   io.ptw.resp.ready := true.B
 
+  val sfence_hit = entries.map(_.entry.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn))
   when (sfence.valid) {
-    entries_v := 0.U.asTypeOf(entries_v.cloneType)
+    // entries_v := 0.U.asTypeOf(entries_v.cloneType)
+    when (sfence.bits.rs1) {
+      when (sfence.bits.rs2) {
+        entries_v := 0.U.asTypeOf(entries_v.cloneType)
+      }.otherwise {
+        entries_v.zipWithIndex.map{a => a._1 := a._1 & entries(a._2).entry.perm.get.g}
+      }
+    }.otherwise {
+      when (sfence.bits.rs2) {
+        entries_v := (entries_v.zip(sfence_hit).map(a => a._1 & !a._2))
+      }.otherwise {
+        entries_v := (entries_v.zipWithIndex.map(a => a._1 & !(sfence_hit(a._2) && !entries(a._2).entry.perm.get.g)))
+      }
+    }
   }
 }
