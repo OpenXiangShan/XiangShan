@@ -260,7 +260,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
         v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) }
       }.otherwise {
         // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) && !g(i) }
+        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
       }
     }
   }
