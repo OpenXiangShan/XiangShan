@@ -50,7 +50,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // create free list and rat
   val intFreeList = Module(new AlternativeFreeList)
   val fpFreeList = Module(new FreeList)
-  
+
   val intRat = Module(new RenameTable(float = false))
   val fpRat = Module(new RenameTable(float = true))
 
@@ -91,8 +91,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   fpFreeList.io.req.doAlloc := intFreeList.io.inc.canInc && io.out(0).ready
   intFreeList.io.inc.doInc := fpFreeList.io.req.canAlloc && io.out(0).ready
 
-  
-  
+
+
   // speculatively assign the instruction with an roqIdx
   val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter roq (from decode)
   val roqIdxHead = RegInit(0.U.asTypeOf(new RoqPtr))
@@ -154,13 +154,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     //   fl.cpReqs(i).bits := io.in(i).bits.brTag
     // }
 
-    
+
     uops(i).roqIdx := roqIdxHead + i.U
-    
+
     io.out(i).valid := io.in(i).valid && intFreeList.io.inc.canInc && fpFreeList.io.req.canAlloc && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)
-    
-    
+
+
     // read rename table
     def readRat(lsrcList: List[UInt], ldest: UInt, fp: Boolean) = {
       val rat = if(fp) fpRat else intRat
@@ -196,7 +196,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       psrc_cmp(i-1) := Cat((0 until i).map(j => {
         uops(i).psrc(0) === uops(j).psrc(0)
       }) /* reverse is not necessary here */)
-      
+
       // calculate meEnable
       meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(uops(i).psrc(0)))
     }
@@ -212,19 +212,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       intFreeList.io.inc.psrcOfMove(i).bits := DontCare
       XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
     }
-    
+
     // update pdest
     uops(i).pdest := Mux(meEnable(i), uops(i).psrc(0), // move eliminated
                      Mux(needIntDest(i), intFreeList.io.inc.pdests(i), // normal int inst
                      Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
                      /* default */, fpFreeList.io.req.pdests(i)))) // normal fp inst
-    
+
     // write speculative rename table
     intSpecWen(i) := intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
     // intRat.io.specWritePorts(i).wen := intSpecWen
     // intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
     // intRat.io.specWritePorts(i).wdata := Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i))
-    
+
     fpSpecWen(i) := fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
     // fpRat.io.specWritePorts(i).wen := fpSpecWen
     // fpRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
@@ -255,7 +255,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
     }).reverse)
   }
-  
+
   // calculate lsq space requirement
   val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
   val isStore = VecInit(uops.map(uop => FuType.isStoreExu(uop.ctrl.fuType)))
@@ -285,7 +285,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       /*
       I. RAT Update
        */
-      
+
       // walk back write - restore spec state : ldest => old_pdest
       if (fp && i < RenameWidth) {
         rat.io.specWritePorts(i).wen := (commitDestValid && io.roqCommits.isWalk) || fpSpecWen(i)
@@ -319,8 +319,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         {if(fp) p"[fp" else p"[int"} + p" arch rat update] ldest:${rat.io.archWritePorts(i).addr} ->" +
         p" pdest:${rat.io.archWritePorts(i).wdata}\n"
       )
-      
-      
+
+
       /*
       II. Free List Update
        */
@@ -329,7 +329,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         fpFreeList.io.deallocReqs(i)  := commitDestValid && !io.roqCommits.isWalk
         fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
       } else { // Integer free list
-        
+
         // during walk process:
         // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
         // 2. for ME inst, free pdest(commit counter++) + revert rat
@@ -381,7 +381,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
   XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc} dispatch1ready:${io.out(0).ready}, isWalk:${io.roqCommits.isWalk}\n")
   XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
-  
+
   intRat.io.debug_rdata <> io.debug_int_rat
   fpRat.io.debug_rdata <> io.debug_fp_rat
 

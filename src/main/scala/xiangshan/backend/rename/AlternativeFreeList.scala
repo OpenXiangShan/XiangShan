@@ -47,12 +47,12 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     val inc = new Bundle {
       // need to increase reference count (not actually do the increment)
       val req = Vec(RenameWidth, Input(Bool()))
-      
+
       // have enough free registers (>= RenameWidth)
       val canInc = Output(Bool())
       // prepared pdest according to req
       val pdests = Vec(RenameWidth, Output(UInt(PhyRegIdxWidth.W)))
-      
+
       // actually do the increment
       val doInc = Input(Bool())
       // psrc of move instructions ready for elimination
@@ -91,7 +91,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   specRefCounterNext.foreach(_ := DontCare)
   val updateSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // update with xxxNext
   val clearSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // reset to zero
-  
+
   val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
   cmtCounterNext.foreach(_ := DontCare)
   val updateCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
@@ -105,13 +105,13 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
 
   // number of free registers
   val freeRegCnt = Wire(UInt())
-  
+
   // free list as circular buffer
   val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE){
     case n if (n >= 0 && n < NRPhyRegs - 32) => (n + 32).U
     case _ => DontCare
   }))
-  
+
   // head and tail pointer
   val headPtr = RegInit(IntFreeListPtr(false.B, 0.U))
 
@@ -176,10 +176,10 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     oldPdestNotUniqueButLast(i) := old_pdests_is_last(i) && old_pdests_has_same_before(i)
 
     XSDebug(io.dec.req(i), p"port[$i]:old_pdest:${io.dec.old_pdests(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
-    
+
     pdestIsUnique(i) := pdests_is_last(i) && !pdests_has_same_before(i)
     pdestNotUniqueButLast(i) := pdests_is_last(i) && pdests_has_same_before(i)
-    
+
     XSDebug(io.dec.req(i) && io.dec.eliminatedMove(i), p"port[$i]:pdest:${io.dec.pdests(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
 
     freeVec(i) := ((oldPdestIsUnique(i) && (cmtCounter(preg) === Mux(updateSpecRefCounter(preg), specRefCounterNext(preg), specRefCounter(preg)))) 
@@ -190,8 +190,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
 
     XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
     XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(io.dec.req(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${io.dec.req(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
-    
-  
+
+
     updateArchRefCounterVec(i) := io.dec.req(i) && io.dec.eliminatedMove(i) && (pdestIsUnique(i) || pdestNotUniqueButLast(i)) && !io.walk
 
     XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
@@ -201,7 +201,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     decreaseSpecRefCounterVec(i) := io.dec.req(i) && io.dec.eliminatedMove(i) && io.walk && (pdestIsUnique(i) || pdestNotUniqueButLast(i))
     decreaseSpecRefCounterValueVec(i) := pdests_times(i) + 1.U
 
-    
+
     // write freed preg into free list at tail ptr
     val offset = i match {
       case 0 => 0.U
@@ -261,14 +261,14 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     io.inc.pdests(i) := DontCare
     // enqueue instr, isn't move elimination
     needAllocatingVec(i) := io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && !io.inc.psrcOfMove(i).valid && !io.redirect && !io.walk
-    
+
     // enqueue instr, is move elimination
     when (io.inc.req(i) && io.inc.canInc && io.inc.doInc && !io.flush && io.inc.psrcOfMove(i).valid && !io.redirect && !io.walk) {
       // specRefCounterNext(io.inc.psrcOfMove(i).bits) := specRefCounter(io.inc.psrcOfMove(i).bits) + 1.U
       // updateSpecRefCounter(io.inc.psrcOfMove(i).bits) := true.B
       increaseSpecRefCounterVec(i) := true.B
     }
-    
+
     val offset = i match {
       case 0 => 0.U
       case n => PopCount(needAllocatingVec.take(n))
@@ -291,7 +291,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     updateSpecRefCounter(preg) := doIncrease || doDecrease
     specRefCounterNext(preg) := specRefCounter(preg) + doIncrease.asUInt - Mux(doDecrease, decreaseSpecRefCounterValueVec(OHToUInt(decreaseCmpVec)), 0.U)
   }
-    
+
 
   /*
   Flush: directly flush reference counter according to arch-rat
@@ -305,7 +305,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val headPtrNext = Mux(io.flush, tailPtr - (NRPhyRegs-32).U - archRefCounter.reduceTree(_ + _), // FIXME Maybe this is too complicated?
                       Mux(io.walk, headPtr - PopCount(io.dec.req.zip(io.dec.eliminatedMove).map{ case (rq, em) => rq && !em }), 
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
-                                               
+
   freeRegCnt := distanceBetween(tailPtrNext, headPtrNext)
   io.inc.canInc := RegNext(freeRegCnt >= RenameWidth.U)
 
@@ -335,16 +335,16 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
       p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
     XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
       p"preg[$i] specRefCounterNext:${specRefCounterNext(i)} archRefCounterNext:${archRefCounterNext(i)} cmtCounterNext:${cmtCounterNext(i)}\n")
-    
+
     // specRefCounter(i) must >= cmtCounter(i)
     XSError(specRefCounter(i) < cmtCounter(i), p"Commits Overflow of preg${i}")
   }
 
   XSDebug(Array.range(0, FL_SIZE).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
   XSDebug(p"Free List (val): " + Array.range(0, FL_SIZE).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
-  
+
   XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext tailPtrNext:$tailPtrNext freeRegCnt:$freeRegCnt\n")
-  
+
   XSDebug(p"io.flush ${io.flush} io.redirect ${io.redirect} io.walk ${io.walk}\n")
 
   XSDebug(PopCount(io.dec.req) =/= PopCount(freeVec), p"WARNING: Please check DEC requirement\n")
