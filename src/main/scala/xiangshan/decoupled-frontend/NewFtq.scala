@@ -941,6 +941,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val ftb_modified_entry_len_map = (1 to PredictWidth+1).map(i =>
       f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_modified_entry)
     ).foldLeft(Map[String, UInt]())(_+_)
+    
+    val ftq_occupancy_map = (0 to FtqSize).map(i =>
+      f"ftq_has_entry_$i" ->( validEntries === i.U)
+    ).foldLeft(Map[String, UInt]())(_+_)
 
     val perfCountsMap = Map(
       "BpInstr" -> PopCount(mbpInstrs),
@@ -981,7 +985,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
       "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full)
     ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ enq_entry_len_map ++
-    to_ifu_entry_len_map ++ commit_num_inst_map
+    to_ifu_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map
 
     for((key, value) <- perfCountsMap) {
       XSPerfAccumulate(key, value)
