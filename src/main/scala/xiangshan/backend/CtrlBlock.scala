@@ -337,6 +337,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.flush := flushReg
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.enqLsq
+  dispatch.io.singleStep := false.B
   dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
     intBusyTable.io.allocPregs(i).valid := preg.isInt
     fpBusyTable.io.allocPregs(i).valid := preg.isFp
@@ -346,7 +347,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.enqIQCtrl := DontCare
   io.enqIQ <> dispatch.io.enqIQCtrl
   dispatch.io.csrCtrl <> io.csrCtrl
-  dispatch.io.storeIssue <> io.fromLsBlock.stIn
   dispatch.io.storeIssue <> io.stIn
   dispatch.io.readIntRf <> io.readIntRf
   dispatch.io.readFpRf <> io.readFpRf

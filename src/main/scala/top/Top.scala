@@ -24,7 +24,7 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, TLTimer, debugModule}
+import device.{AXI4Plic, TLTimer, DebugModule}
 import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -359,7 +359,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
-  val debugModule = LazyModule(new debugModule(NumCores)(p))
+  val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
   debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode

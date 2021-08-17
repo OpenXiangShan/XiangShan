@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -37,7 +38,7 @@ import freechips.rocketchip.devices.debug._
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm, dtm, sba, and pulls out intr lines 
 
-class debugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
+class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
   val debug = LazyModule(new TLDebugModule(8)(p))
 
