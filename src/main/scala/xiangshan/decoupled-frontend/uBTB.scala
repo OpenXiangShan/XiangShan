@@ -71,10 +71,12 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   {
     val valid = Bool()
     // val taken_mask = Vec(numBr, Bool())
-    val brValids = Vec(numBr, Bool())
-    val jmpValid = Bool()
+    val brValids  = Vec(numBr, Bool())
+    val jmpValid  = Bool()
     val brTargets = Vec(numBr, UInt(VAddrBits.W))
     val jmpTarget = UInt(VAddrBits.W)
+    val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
+    val carry     = Bool()
     // val pred        = Vec(numBr, UInt(2.W))
 
     val hit = Bool()
@@ -154,8 +156,10 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // io.read_resp.taken_mask := hit_and_taken_mask
     io.read_resp.brValids := hit_meta.brValids
     io.read_resp.jmpValid := hit_meta.jmpValid
+    io.read_resp.carry := hit_meta.carry
     io.read_resp.brTargets := hit_data.brTargets
     io.read_resp.jmpTarget := hit_data.jmpTarget
+    io.read_resp.pftAddr := hit_data.pftAddr
     // io.read_resp.pred := hit_preds
     io.read_resp.hit := hit_oh.orR
     io.read_hit := hit_oh.orR
@@ -253,6 +257,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.ftb_entry.jmpValid := read_resps.jmpValid
   io.out.resp.s1.ftb_entry.brTargets := read_resps.brTargets
   io.out.resp.s1.ftb_entry.jmpTarget := read_resps.jmpTarget
+  io.out.resp.s1.ftb_entry.pftAddr := read_resps.pftAddr
+  io.out.resp.s1.ftb_entry.carry := read_resps.carry
   io.out.s3_meta := RegEnable(RegEnable(read_resps.asUInt, io.s1_fire), io.s2_fire)
 
   // Update logic
