@@ -62,7 +62,8 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
   
-  val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
+  val table = Seq.fill(TageBanks)(Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2, shouldReset=true, holdRead=true, singlePort=false)))
 
   val phistLen = PathHistoryLength
   def getIdx(hist: UInt, pc: UInt) = {
@@ -71,35 +72,59 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
+  val s1_idxes, s2_idxes  = Wire(Vec(TageBanks, UInt(log2Ceil(nRows).W)))
+
   val s1_idx = getIdx(io.req.bits.hist, io.req.bits.pc)
   val s2_idx = RegEnable(s1_idx, enable=io.req.valid)
+  
+  for (b <- 0 until TageBanks) {
+    val idx = getIdx(io.req.bits.hist << b, io.req.bits.pc)
+    s1_idxes(b) := idx
+
+    table(b).io.r.req.valid := io.req.valid
+    table(b).io.r.req.bits.setIdx := s1_idxes(b)
+  }
+
+  s2_idxes := RegEnable(s1_idxes, io.req.valid)
 
   val table_r =
-    VecInit((0 until TageBanks).map(b => VecInit((0 to 1).map(i => table.io.r.resp.data(b*2+i)))))
+    VecInit((0 until TageBanks).map(b => VecInit((0 until 2).map(i => table(b).io.r.resp.data(i)))))
 
+  // val s1_mask = io.req.bits.mask // TODO: Delete it
+  // val s2_mask = RegEnable(s1_mask, enable=io.req.valid)
 
-  val s1_mask = io.req.bits.mask
-  val s2_mask = RegEnable(s1_mask, enable=io.req.valid)
+  val update_idxes  = Wire(Vec(TageBanks, UInt(log2Ceil(nRows).W)))
+  // val update_idx = getIdx(io.update.hist, io.update.pc)
+  
 
-  val update_idx = getIdx(io.update.hist, io.update.pc)
   val update_wdatas =
     VecInit((0 until TageBanks).map(w =>
       ctrUpdate(io.update.oldCtrs(w), io.update.takens(w))))
 
-  table.io.r.req.valid := io.req.valid
-  table.io.r.req.bits.setIdx := s1_idx
 
   val updateWayMask =
     VecInit((0 until TageBanks).map(b =>
       VecInit((0 to 1).map(i =>
         (io.update.mask(b) && i.U === io.update.tagePreds(b).asUInt))))).asUInt
 
-  table.io.w.apply(
-    valid = io.update.mask.asUInt.orR,
-    data = VecInit((0 until TageBanks*2).map(i => update_wdatas(i/2))),
-    setIdx = update_idx,
-    waymask = updateWayMask
-  )
+  for (b <- 0 until TageBanks) {
+    val idx = getIdx(io.update.hist << b, io.update.pc)
+    update_idxes(b) := idx
+    
+    table(b).io.w.apply(
+      valid = io.update.mask(b),
+      data = VecInit(update_wdatas(b), update_wdatas(b)),
+      setIdx = update_idxes(b),
+      waymask = updateWayMask(b)
+    )
+  }
+
+  // table.io.w.apply(
+  //   valid = io.update.mask.asUInt.orR,
+  //   data = VecInit((0 until TageBanks*2).map(i => update_wdatas(i/2))),
+  //   setIdx = update_idx,
+  //   waymask = updateWayMask
+  // )
 
   (0 until TageBanks).map(b => {
     io.resp(b).ctr := table_r(b)
@@ -107,48 +132,109 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
 
   val wrBypassEntries = 4
 
-  val wrbypass_idxs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
-  val wrbypass_ctrs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, SInt(ctrBits.W)))))
-  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool()))))
-  val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
-
-  when (reset.asBool) {
-    wrbypass_ctr_valids := 0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool())))
-  }
-
-  val wrbypass_hits = VecInit((0 until wrBypassEntries) map (i => wrbypass_idxs(i) === update_idx))
-  val wrbypass_hit = wrbypass_hits.asUInt.orR
-  val wrbypass_hit_idx = ParallelPriorityEncoder(wrbypass_hits)
-
-  for (w <- 0 until TageBanks) {
-    val ctrPos = (w << 1).U | io.update.tagePreds(w).asUInt
-    val altPos = (w << 1).U | ~io.update.tagePreds(w).asUInt
-    val bypass_ctr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
-    val hit_and_valid = wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos)
-    val oldCtr = Mux(hit_and_valid, wrbypass_ctrs(wrbypass_hit_idx)(ctrPos), io.update.oldCtrs(w))
-    update_wdatas(w) := ctrUpdate(oldCtr, io.update.takens(w))
-
-    when (io.update.mask.reduce(_||_)) {
-      when (wrbypass_hit) {
-        when (io.update.mask(w)) {
-          wrbypass_ctrs(wrbypass_hit_idx)(ctrPos) := update_wdatas(w)
-          wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos) := true.B
-        }
+  class SCWrBypass extends XSModule {
+    val io = IO(new Bundle {
+      val wen = Input(Bool())
+      val update_idx  = Input(UInt(log2Ceil(nRows).W))
+      val update_ctrs  = Flipped(ValidIO(SInt(ctrBits.W)))
+      val update_ctrPos = Input(UInt(log2Ceil(2).W))
+      val update_altPos = Input(UInt(log2Ceil(2).W))
+      
+      val hit   = Output(Bool())
+      val ctrs  = Vec(2, ValidIO(SInt(ctrBits.W)))
+    })
+    
+    val idxes       = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
+    val ctrs        = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2, SInt(ctrBits.W)))))
+    val ctr_valids  = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2, Bool()))))
+    val enq_idx     = RegInit(0.U(log2Ceil(wrBypassEntries).W))
+    
+    val hits = VecInit((0 until wrBypassEntries).map { i => idxes(i) === io.update_idx })
+    
+    val hit = hits.reduce(_||_)
+    val hit_idx = ParallelPriorityEncoder(hits)
+    
+    io.hit := hit
+    
+    for (i <- 0 until 2) {
+      io.ctrs(i).valid := ctr_valids(hit_idx)(i)
+      io.ctrs(i).bits := ctrs(hit_idx)(i)
+    }
+    
+    when (io.wen) {
+      when (hit) {
+        ctrs(hit_idx)(io.update_ctrPos) := io.update_ctrs.bits
+        ctr_valids(hit_idx)(io.update_ctrPos) := io.update_ctrs.valid
       }.otherwise {
-        // reset valid bit first
-        wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := false.B
-        wrbypass_ctr_valids(wrbypass_enq_idx)(altPos) := false.B
-        when (io.update.mask(w)) {
-          wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := true.B
-          wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdatas(w)
-        }
+        ctr_valids(enq_idx)(io.update_altPos) := false.B
+        ctr_valids(enq_idx)(io.update_ctrPos) := io.update_ctrs.valid
+        ctrs(enq_idx)(io.update_ctrPos) := io.update_ctrs.bits
       }
+    }
+    
+    when(io.wen && !hit) {
+      idxes(enq_idx) := io.update_idx
+      enq_idx := (enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1, 0)
     }
   }
 
-  when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
-    wrbypass_idxs(wrbypass_enq_idx) := update_idx
-    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+  val wrbypass = Seq.fill(TageBanks)(Module(new SCWrBypass))
+
+  // val wrbypass_idxs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
+  // val wrbypass_ctrs = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, SInt(ctrBits.W)))))
+  // val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, Vec(2*TageBanks, Bool()))))
+  // val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
+
+  // val wrbypass_hits = VecInit((0 until wrBypassEntries) map (i => wrbypass_idxs(i) === update_idx))
+  // val wrbypass_hit = wrbypass_hits.asUInt.orR
+  // val wrbypass_hit_idx = ParallelPriorityEncoder(wrbypass_hits)
+
+  // for (w <- 0 until TageBanks) {
+  //   val ctrPos = (w << 1).U | io.update.tagePreds(w).asUInt
+  //   val altPos = (w << 1).U | ~io.update.tagePreds(w).asUInt
+  //   val bypass_ctr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
+  //   val hit_and_valid = wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos)
+  //   val oldCtr = Mux(hit_and_valid, wrbypass_ctrs(wrbypass_hit_idx)(ctrPos), io.update.oldCtrs(w))
+  //   update_wdatas(w) := ctrUpdate(oldCtr, io.update.takens(w))
+
+  //   when (io.update.mask.reduce(_||_)) {
+  //     when (wrbypass_hit) {
+  //       when (io.update.mask(w)) {
+  //         wrbypass_ctrs(wrbypass_hit_idx)(ctrPos) := update_wdatas(w)
+  //         wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos) := true.B
+  //       }
+  //     }.otherwise {
+  //       // reset valid bit first
+  //       wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := false.B
+  //       wrbypass_ctr_valids(wrbypass_enq_idx)(altPos) := false.B
+  //       when (io.update.mask(w)) {
+  //         wrbypass_ctr_valids(wrbypass_enq_idx)(ctrPos) := true.B
+  //         wrbypass_ctrs(wrbypass_enq_idx)(w) := update_wdatas(w)
+  //       }
+  //     }
+  //   }
+  // }
+
+  // when (io.update.mask.reduce(_||_) && !wrbypass_hit) {
+  //   wrbypass_idxs(wrbypass_enq_idx) := update_idx
+  //   wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+  // }
+  
+  for (b <- 0 until TageBanks) {
+    val ctrPos = io.update.tagePreds(b)
+    val altPos = !io.update.tagePreds(b)
+    val bypass_ctr = wrbypass(b).io.ctrs(ctrPos)
+    val hit_and_valid = wrbypass(b).io.hit && wrbypass(b).io.ctrs(ctrPos).valid
+    val oldCtr = Mux(hit_and_valid, wrbypass(b).io.ctrs(ctrPos).bits, io.update.oldCtrs(b))
+    update_wdatas(b) := ctrUpdate(oldCtr, io.update.takens(b))
+
+    wrbypass(b).io.wen := io.update.mask(b)
+    wrbypass(b).io.update_ctrs.valid := io.update.mask(b)
+    wrbypass(b).io.update_ctrs.bits := update_wdatas(b)
+    wrbypass(b).io.update_idx := update_idxes(b)
+    wrbypass(b).io.update_ctrPos := ctrPos
+    wrbypass(b).io.update_altPos := altPos
+
   }
 
 
@@ -156,19 +242,19 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     val u = io.update
     XSDebug(io.req.valid,
       p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-      p"if2_idx=${s1_idx}, hist=${Hexadecimal(io.req.bits.hist)}, " +
-      p"if2_mask=${Binary(s1_mask)}\n")
+      p"if2_idx=${s1_idx}, hist=${Hexadecimal(io.req.bits.hist)}\n")
     for (i <- 0 until TageBanks) {
       XSDebug(RegNext(io.req.valid),
         p"scTableResp[${i.U}]: s2_idx=${s2_idx}," +
-        p"ctr:${io.resp(i).ctr}, s2_mask=${Binary(s2_mask)}\n")
+        p"ctr:${io.resp(i).ctr}\n")
       XSDebug(io.update.mask(i),
-        p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+        p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist << i)}, " +
         p"bank:${i}, tageTaken:${u.tagePreds(i)}, taken:${u.takens(i)}, oldCtr:${u.oldCtrs(i)}\n")
-      val ctrPos = (i << 1).U | io.update.tagePreds(i).asUInt
-      val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
-      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(ctrPos) && io.update.mask(i),
-        p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, ctr:$hitCtr" +
+      val ctrPos = io.update.tagePreds(i)
+      // val hitCtr = wrbypass_ctrs(wrbypass_hit_idx)(ctrPos)
+      val hitCtr = wrbypass(i).io.ctrs(ctrPos).bits
+      XSDebug(wrbypass(i).io.hit && wrbypass(i).io.ctrs(ctrPos).valid && io.update.mask(i),
+        p"bank $i wrbypass hit idx:${update_idxes(i)}, ctr:$hitCtr, " +
         p"taken:${io.update.takens(i)} newCtr:${update_wdatas(i)}\n")
     }
   }
