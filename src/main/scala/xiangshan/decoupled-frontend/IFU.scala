@@ -467,7 +467,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   f2_redirect := !predecodeFlushReg && predecodeFlush
 
-  // Performance Counter
-  XSPerfAccumulate("req",   io.toIbuffer.fire() )
-  XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f2_hit )
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    // Performance Counter
+    XSPerfAccumulate("req",   io.toIbuffer.fire() )
+    XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f2_hit )
+  }
 }

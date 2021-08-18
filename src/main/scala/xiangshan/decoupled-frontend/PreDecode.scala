@@ -221,17 +221,19 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   io.out.hasLastHalf      := realHasLastHalf.reduce(_||_)
   io.out.realEndPC        := realEndPC
 
-  for (i <- 0 until PredictWidth) {
-    XSDebug(true.B,
-      p"instr ${Hexadecimal(io.out.instrs(i))}, " +
-      p"validStart ${Binary(validStart(i))}, " +
-      p"validEnd ${Binary(validEnd(i))}, " +
-      p"pc ${Hexadecimal(io.out.pc(i))}, " +
-      p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
-      p"brType ${Binary(io.out.pd(i).brType)}, " +
-      p"isRet ${Binary(io.out.pd(i).isRet)}, " +
-      p"isCall ${Binary(io.out.pd(i).isCall)}\n"
-    )
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    for (i <- 0 until PredictWidth) {
+      XSDebug(true.B,
+        p"instr ${Hexadecimal(io.out.instrs(i))}, " +
+        p"validStart ${Binary(validStart(i))}, " +
+        p"validEnd ${Binary(validEnd(i))}, " +
+        p"pc ${Hexadecimal(io.out.pc(i))}, " +
+        p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
+        p"brType ${Binary(io.out.pd(i).brType)}, " +
+        p"isRet ${Binary(io.out.pd(i).isRet)}, " +
+        p"isCall ${Binary(io.out.pd(i).isCall)}\n"
+      )
+    }
   }
 }
 

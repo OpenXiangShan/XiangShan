@@ -302,7 +302,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_taken_mask := u_taken_mask
   banks.update_mask := LowerMaskFromLowest(u_taken_mask.asUInt)
 
-  if (debug) {
+  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
     XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, banks.read_hit)
     XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
       io.out.resp.s1.target, io.out.resp.s1.real_taken_mask.asUInt, io.out.resp.s1.preds.taken_mask.asUInt, read_resps.brValids.asUInt, read_resps.jmpValid.asUInt)

@@ -351,14 +351,15 @@ class TageTable
     wrbypass(b).io.update_tag := update_tags(b)
   }
 
-  for (b <- 0 until TageBanks) {
-    XSPerfAccumulate(f"tage_table_wrbypass(${b})_hit", io.update.mask(b) && wrbypass(b).io.hit)
-    XSPerfAccumulate(f"tage_table_wrbypass(${b})_enq", io.update.mask(b) && !wrbypass(b).io.hit)
-  }
   
-  XSPerfAccumulate("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
-
   if (BPUDebug && debug) {
+    for (b <- 0 until TageBanks) {
+      XSPerfAccumulate(f"tage_table_wrbypass(${b})_hit", io.update.mask(b) && wrbypass(b).io.hit)
+      XSPerfAccumulate(f"tage_table_wrbypass(${b})_enq", io.update.mask(b) && !wrbypass(b).io.hit)
+    }
+    
+    XSPerfAccumulate("tage_table_hits", PopCount(VecInit(io.resp.map(_.valid))))
+
     val u = io.update
     val b = PriorityEncoder(u.mask)
     val ub = PriorityEncoder(u.uMask)
@@ -592,44 +593,45 @@ class Tage(implicit p: Parameters) extends BaseTage {
     tables(i).io.update.phist := RegNext(updatePhist)
   }
 
-  // Debug and perf info
-
   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
   def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
   def tage_perf(name: String, pred_cnt: UInt, commit_cnt: UInt) = {
     pred_perf(name, pred_cnt)
     commit_perf(name, commit_cnt)
   }
-  for (i <- 0 until TageNTables) {
-    val pred_i_provided =
-      VecInit(updateMetas map (m => m.provider.valid && m.provider.bits === i.U))
-    val commit_i_provided =
-      VecInit(updateMetas zip updateValids map {
-        case (m, v) => m.provider.valid && m.provider.bits === i.U && v
-      })
-    tage_perf(s"tage_table_${i}_provided",
-      PopCount(pred_i_provided),
-      PopCount(commit_i_provided))
-  }
-  tage_perf("tage_use_bim",
-    PopCount(VecInit(updateMetas map (!_.provider.valid))),
-    PopCount(VecInit(updateMetas zip updateValids map {
-        case (m, v) => !m.provider.valid && v}))
-    )
-  def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
-  tage_perf("tage_use_altpred",
-    PopCount(VecInit(updateMetas map (
-      m => m.provider.valid && unconf(m.providerCtr)))),
-    PopCount(VecInit(updateMetas zip updateValids map {
-      case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
-    })))
-  tage_perf("tage_provided",
-    PopCount(updateMetas.map(_.provider.valid)),
-    PopCount(VecInit(updateMetas zip updateValids map {
-      case (m, v) => m.provider.valid && v
-    })))
-
-  if (debug) {
+  
+  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
+    // Debug and perf info
+  
+    for (i <- 0 until TageNTables) {
+      val pred_i_provided =
+        VecInit(updateMetas map (m => m.provider.valid && m.provider.bits === i.U))
+      val commit_i_provided =
+        VecInit(updateMetas zip updateValids map {
+          case (m, v) => m.provider.valid && m.provider.bits === i.U && v
+        })
+      tage_perf(s"tage_table_${i}_provided",
+        PopCount(pred_i_provided),
+        PopCount(commit_i_provided))
+    }
+    tage_perf("tage_use_bim",
+      PopCount(VecInit(updateMetas map (!_.provider.valid))),
+      PopCount(VecInit(updateMetas zip updateValids map {
+          case (m, v) => !m.provider.valid && v}))
+      )
+    def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
+    tage_perf("tage_use_altpred",
+      PopCount(VecInit(updateMetas map (
+        m => m.provider.valid && unconf(m.providerCtr)))),
+      PopCount(VecInit(updateMetas zip updateValids map {
+        case (m, v) => m.provider.valid && unconf(m.providerCtr) && v
+      })))
+    tage_perf("tage_provided",
+      PopCount(updateMetas.map(_.provider.valid)),
+      PopCount(VecInit(updateMetas zip updateValids map {
+        case (m, v) => m.provider.valid && v
+      })))
+    
     for (b <- 0 until TageBanks) {
       val m = updateMetas(b)
       // val bri = u.metas(b)

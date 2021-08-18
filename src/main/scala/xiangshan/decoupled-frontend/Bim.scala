@@ -121,7 +121,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
   )
 
-  if (debug) {
+  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
     val latch_s0_fire = RegNext(io.s0_fire)
 
     XSDebug(doing_reset, "Doing reset...\n")

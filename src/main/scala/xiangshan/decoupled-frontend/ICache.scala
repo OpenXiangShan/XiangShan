@@ -309,13 +309,15 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     //resp to icache
     io.resp.valid := (state === s_wait_resp) && !needFlush
 
-    XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
-    XSDebug("[ICache MSHR %d] (Info)state:%d  needFlush:%d\n",io.id.asUInt,state,needFlush)
-    XSDebug("[ICache MSHR %d] (mem_acquire) valid%d ready:%d\n",io.id.asUInt,io.mem_acquire.valid,io.mem_acquire.ready)
-    XSDebug("[ICache MSHR %d] (mem_grant)   valid%d ready:%d data:%x \n",io.id.asUInt,io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data)
-    XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.phyTag)
-    XSDebug("[ICache MSHR %d] (refill)  valid%d ready:%d  data:%x \n",io.id.asUInt,io.data_write.valid,io.data_write.ready,io.data_write.bits.data.asUInt())
-    XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
+      XSDebug("[ICache MSHR %d] (Info)state:%d  needFlush:%d\n",io.id.asUInt,state,needFlush)
+      XSDebug("[ICache MSHR %d] (mem_acquire) valid%d ready:%d\n",io.id.asUInt,io.mem_acquire.valid,io.mem_acquire.ready)
+      XSDebug("[ICache MSHR %d] (mem_grant)   valid%d ready:%d data:%x \n",io.id.asUInt,io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data)
+      XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.phyTag)
+      XSDebug("[ICache MSHR %d] (refill)  valid%d ready:%d  data:%x \n",io.id.asUInt,io.data_write.valid,io.data_write.ready,io.data_write.bits.data.asUInt())
+      XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
+    }
 
 
 }
@@ -367,14 +369,16 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 
     io.resp(i) <> entry.io.resp
 
-    XSPerfAccumulate(
-      "entryPenalty" + Integer.toString(i, 10),
-      BoolStopWatch(
-        start = entry.io.req.fire(),
-        stop = entry.io.resp.fire() || entry.io.flush,
-        startHighPriority = true)
-    )
-    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+    if (!env.FPGAPlatform && env.EnablePerfDebug) {
+      XSPerfAccumulate(
+        "entryPenalty" + Integer.toString(i, 10),
+        BoolStopWatch(
+          start = entry.io.req.fire(),
+          stop = entry.io.resp.fire() || entry.io.flush,
+          startHighPriority = true)
+      )
+      XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+    }
 
     entry
   }

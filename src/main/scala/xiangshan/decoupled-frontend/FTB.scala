@@ -248,7 +248,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     has_update_ptr := has_update_ptr + !u_updated
   }
 
-  if (debug) {
+  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
     XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.read_pc.ready)
     XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
     XSDebug("s2_taken_mask=%b, s2_real_taken_mask=%b\n",

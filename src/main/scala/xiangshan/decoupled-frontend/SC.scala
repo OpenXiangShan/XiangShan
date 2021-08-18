@@ -368,14 +368,18 @@ trait HasSC extends HasSCParameter { this: Tage =>
       s3_sc_used(w) := true.B
       s3_unconf(w) := s3_sumBelowThresholds(s3_chooseBit)
       s3_conf(w) := !s3_sumBelowThresholds(s3_chooseBit)
-      // Use prediction from Statistical Corrector
-      XSDebug(p"---------tage${w} provided so that sc used---------\n")
-      XSDebug(p"scCtrs:$s3_scCtrs, prdrCtr:${s3_providerCtrs(w)}, sumAbs:$s3_sumAbs, tageTaken:${s3_chooseBit}\n")
+      if (!env.FPGAPlatform && env.EnablePerfDebug) {
+        // Use prediction from Statistical Corrector
+        XSDebug(p"---------tage${w} provided so that sc used---------\n")
+        XSDebug(p"scCtrs:$s3_scCtrs, prdrCtr:${s3_providerCtrs(w)}, sumAbs:$s3_sumAbs, tageTaken:${s3_chooseBit}\n")
+      }
       when (!s3_sumBelowThresholds(s3_chooseBit)) {
         // when (ctrl.sc_enable) {
         val pred = s3_scPreds(s3_chooseBit)
         val debug_pc = Cat(debug_pc_s3, w.U, 0.U(instOffsetBits.W))
-        XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
+        if (!env.FPGAPlatform && env.EnablePerfDebug) {
+          XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
+        }
         s3_agree(w) := s3_tageTakens(w) === pred
         s3_disagree(w) := s3_tageTakens(w) =/= pred
         // io.resp.takens(w) := pred
@@ -409,36 +413,43 @@ trait HasSC extends HasSCParameter { this: Tage =>
       when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
-        XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
+        if (!env.FPGAPlatform && env.EnablePerfDebug) {
+          XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
+        }
       }
 
       val updateThres = updateThresholds(w)
       when (scPred =/= taken || sumAbs < updateThres) {
         scUpdateMask.foreach(t => t(w) := true.B)
-        XSDebug(sum < 0.S,
-        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-        p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-        )
-        XSDebug(sum >= 0.S,
-        p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-        p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-        )
-        XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
+        if (!env.FPGAPlatform && env.EnablePerfDebug) {
+          XSDebug(sum < 0.S,
+            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+          )
+          XSDebug(sum >= 0.S,
+            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+          )
+          XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
+        }
         update_on_mispred(w) := scPred =/= taken
         update_on_unconf(w) := scPred === taken
       }
     }
   }
 
-  tage_perf("sc_conf", PopCount(s3_conf), PopCount(update_conf))
-  tage_perf("sc_unconf", PopCount(s3_unconf), PopCount(update_unconf))
-  tage_perf("sc_agree", PopCount(s3_agree), PopCount(update_agree))
-  tage_perf("sc_disagree", PopCount(s3_disagree), PopCount(update_disagree))
-  tage_perf("sc_used", PopCount(s3_sc_used), PopCount(update_sc_used))
-  XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
-  XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
-  XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
-  XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+  if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    tage_perf("sc_conf", PopCount(s3_conf), PopCount(update_conf))
+    tage_perf("sc_unconf", PopCount(s3_unconf), PopCount(update_unconf))
+    tage_perf("sc_agree", PopCount(s3_agree), PopCount(update_agree))
+    tage_perf("sc_disagree", PopCount(s3_disagree), PopCount(update_disagree))
+    tage_perf("sc_used", PopCount(s3_sc_used), PopCount(update_sc_used))
+    XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
+    XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
+    XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
+    XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+  }
+
 
   for (i <- 0 until SCNTables) {
     scTables(i).io.update.mask := RegNext(scUpdateMask(i))

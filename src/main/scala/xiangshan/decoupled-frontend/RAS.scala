@@ -186,7 +186,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // TODO: back-up stack for ras
   // use checkpoint to recover RAS
 
-  if (debug) {
+  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
       val spec_debug = spec.debugIO
       XSDebug("----------------RAS----------------\n")
       XSDebug(" TopRegister: 0x%x   %d \n",spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
