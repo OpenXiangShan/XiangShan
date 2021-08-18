@@ -83,6 +83,9 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   def getFallThrough() = {
     getFallThroughAddr(this.startAddr, this.carry, this.pftAddr)
   }
+  def fallThroughError() = {
+    !carry && startAddr(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits) > pftAddr
+  }
   override def toPrintable: Printable = {
     p"startAddr:${Hexadecimal(startAddr)}, fallThru:${Hexadecimal(getFallThrough())}"
   }
@@ -546,6 +549,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     io.toIfu.req.bits.startAddr    := bpu_enq_bypass_buf.startAddr
     io.toIfu.req.bits.fallThruAddr := bpu_enq_bypass_buf.getFallThrough()
     io.toIfu.req.bits.oversize     := bpu_enq_bypass_buf.oversize
+    when (bpu_enq_bypass_buf.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
+      entry_hit_status(ifuPtr.value) === h_false_hit
+    }
   }
   when (io.toIfu.req.fire) {
     entry_fetch_status(ifuPtr.value) := f_sent
