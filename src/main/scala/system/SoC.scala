@@ -36,7 +36,7 @@ case class SoCParameters
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
-  val L3NBanks = 1
+  val L3NBanks = 4
   val L3NWays = 4
 
   // on chip network configurations
