@@ -265,8 +265,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sta.valid := enq.valid && std.ready
     std.bits := enq.bits
     sta.bits := enq.bits
+    std.bits.ctrl.lsrc(0) := enq.bits.ctrl.lsrc(1)
     std.bits.psrc(0) := enq.bits.psrc(1)
     std.bits.srcState(0) := enq.bits.srcState(1)
+    std.bits.ctrl.srcType(0) := enq.bits.ctrl.srcType(1)
     enq.ready := sta.ready && std.ready
     XSPerfAccumulate(s"st_not_ready_$i", enq.valid && !enq.ready)
     XSPerfAccumulate(s"sta_not_ready_$i", sta.valid && !sta.ready)
