@@ -382,8 +382,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.fromBpu.resp.ready := validEntries < FtqSize.U
   val enq_fire = io.fromBpu.resp.fire() && allowBpuIn
 
-  // read ports:                            jumpPc + redirects + loadPred + roqFlush + ifuReq + commitUpdate
-  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1+1, 1))
+  // read ports:                            jumpPc + redirects + loadPred + roqFlush + ifuReq1 + ifuReq2 + commitUpdate
+  val ftq_pc_mem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, 1+numRedirect+2+1+1+1, 1))
   ftq_pc_mem.io.wen(0) := enq_fire
   ftq_pc_mem.io.waddr(0) := bpuPtr.value
   ftq_pc_mem.io.wdata(0).startAddr := io.fromBpu.resp.bits.pc
@@ -533,26 +533,41 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_enq_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=enq_fire)
   val bpu_enq_bypass_ptr = RegNext(bpuPtr)
   val last_cycle_bpu_enq = RegNext(enq_fire)
+  val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
 
   // read pc and target
-  ftq_pc_mem.io.raddr.init.last := ifuPtr.value
+  ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
+  ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
   
-  io.toIfu.req.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
-  io.toIfu.req.bits.ftqIdx := ifuPtr
-  io.toIfu.req.bits.target := update_target(ifuPtr.value)
-  io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-  io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-  io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
-  io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
+  val toIfuReq = Wire(chiselTypeOf(io.toIfu.req))
 
+  toIfuReq.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  toIfuReq.bits.ftqIdx := ifuPtr
+  toIfuReq.bits.target := update_target(ifuPtr.value)
+  toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
+  
   when (last_cycle_bpu_enq && bpu_enq_bypass_ptr === ifuPtr) {
-    io.toIfu.req.bits.startAddr    := bpu_enq_bypass_buf.startAddr
-    io.toIfu.req.bits.fallThruAddr := bpu_enq_bypass_buf.getFallThrough()
-    io.toIfu.req.bits.oversize     := bpu_enq_bypass_buf.oversize
-    when (bpu_enq_bypass_buf.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
-      entry_hit_status(ifuPtr.value) === h_false_hit
-    }
+    toIfuReq.bits.startAddr    := bpu_enq_bypass_buf.startAddr
+    toIfuReq.bits.fallThruAddr := bpu_enq_bypass_buf.getFallThrough()
+    toIfuReq.bits.oversize     := bpu_enq_bypass_buf.oversize
+  }.elsewhen (last_cycle_to_ifu_fire) {
+    toIfuReq.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
+    toIfuReq.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
+    toIfuReq.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
+  }.otherwise {
+    toIfuReq.bits.startAddr    := ftq_pc_mem.io.rdata.init.init.last.startAddr
+    toIfuReq.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.init.last.getFallThrough()
+    toIfuReq.bits.oversize     := ftq_pc_mem.io.rdata.init.init.last.oversize
   }
+
+  io.toIfu.req <> toIfuReq
+
+  // when fall through is smaller in value than start address, there must be a false hit
+  when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
+    entry_hit_status(ifuPtr.value) === h_false_hit
+    io.toIfu.req.bits.fallThruAddr := toIfuReq.bits.startAddr + (FetchWidth*4).U
+  }
+
   when (io.toIfu.req.fire) {
     entry_fetch_status(ifuPtr.value) := f_sent
   }

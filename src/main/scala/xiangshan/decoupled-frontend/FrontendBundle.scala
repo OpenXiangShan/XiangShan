@@ -29,6 +29,12 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val target       = UInt(VAddrBits.W)
   val oversize     = Bool()
 
+  def fallThroughError() = {
+    def carryPos = instOffsetBits+log2Ceil(PredictWidth)+1
+    def getLower(pc: UInt) = pc(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits)
+    val carry = startAddr(carryPos) =/= fallThruAddr(carryPos)
+    carry && getLower(startAddr) > getLower(fallThruAddr)
+  }
   override def toPrintable: Printable = {
     p"[start] ${Hexadecimal(startAddr)} [pft] ${Hexadecimal(fallThruAddr)}" +
       p"[tgt] ${Hexadecimal(target)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
