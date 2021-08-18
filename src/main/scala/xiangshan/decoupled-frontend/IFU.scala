@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.mmu.BlockTlbRequestIO
+import xiangshan.cache.mmu._
 import chisel3.experimental.verification
 import utils._
 
