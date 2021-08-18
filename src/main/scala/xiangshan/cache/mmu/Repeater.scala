@@ -98,8 +98,10 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val enqNum = PopCount(reqs.map(_.valid))
   val canEnqueue = counter +& enqNum <= Size.U
 
+  val trueHit = WireInit(false.B)
+
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
-  io.tlb.resp.valid := ptwResp_valid
+  io.tlb.resp.valid := ptwResp_valid && trueHit
   io.tlb.resp.bits := ptwResp
   io.ptw.req(0).valid := v(issPtr) && !isEmptyIss && !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn))
   io.ptw.req(0).bits.vpn := vpn(issPtr)
@@ -136,6 +138,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     vpn.zip(v).map{case (pi, vi) =>
       when (vi && ptwResp.entry.hit(pi, allType = true)) { vi := false.B }
     }
+    trueHit := Cat(vpn.zip(v).map{case (pi,vi) => 
+      (vi && ptwResp.entry.hit(pi, allType = true))
+    }).orR
   }
 
   counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)
