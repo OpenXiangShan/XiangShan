@@ -527,46 +527,31 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   // **************************** to ifu ****************************
   // ****************************************************************
-  val ifu_req_buf = RegInit(0.U.asTypeOf(ValidUndirectioned(new FetchRequestBundle)))
-  val to_buf_valid = entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
-  // ftqIdx and ftqOffset enq
-  val to_buf_fire = allowToIfu && to_buf_valid && (!ifu_req_buf.valid || io.toIfu.req.ready)
-  when (to_buf_fire) {
-    entry_fetch_status(ifuPtr.value) := f_sent
-  }
-  ifuPtr := ifuPtr + to_buf_fire
-  
-  when (flushToIfu) {
-    ifu_req_buf.valid := false.B
-  }.elsewhen (to_buf_fire) {
-    ifu_req_buf.valid := true.B
-  }.elsewhen (io.toIfu.req.fire()) {
-    ifu_req_buf.valid := false.B
-  }
-  
+  val bpu_enq_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=enq_fire)
+  val bpu_enq_bypass_ptr = RegNext(bpuPtr)
+  val last_cycle_bpu_enq = RegNext(enq_fire)
+
   // read pc and target
   ftq_pc_mem.io.raddr.init.last := ifuPtr.value
-
-  when (to_buf_fire) {
-    ifu_req_buf.bits.ftqIdx := ifuPtr
-    ifu_req_buf.bits.target := update_target(ifuPtr.value)
-    ifu_req_buf.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-  }
-
-  when (RegNext(to_buf_fire)) {
-    ifu_req_buf.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    ifu_req_buf.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
-    ifu_req_buf.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
-  }
   
-  val last_cycle_to_buf_fire = RegNext(to_buf_fire)
-  io.toIfu.req.valid := ifu_req_buf.valid
-  io.toIfu.req.bits  := ifu_req_buf.bits
-  when (last_cycle_to_buf_fire) {
-    io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
-    io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
-    io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
+  io.toIfu.req.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  io.toIfu.req.bits.ftqIdx := ifuPtr
+  io.toIfu.req.bits.target := update_target(ifuPtr.value)
+  io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
+  io.toIfu.req.bits.startAddr    := ftq_pc_mem.io.rdata.init.last.startAddr
+  io.toIfu.req.bits.fallThruAddr := ftq_pc_mem.io.rdata.init.last.getFallThrough()
+  io.toIfu.req.bits.oversize     := ftq_pc_mem.io.rdata.init.last.oversize
+
+  when (last_cycle_bpu_enq && bpu_enq_bypass_ptr === ifuPtr) {
+    io.toIfu.req.bits.startAddr    := bpu_enq_bypass_buf.startAddr
+    io.toIfu.req.bits.fallThruAddr := bpu_enq_bypass_buf.getFallThrough()
+    io.toIfu.req.bits.oversize     := bpu_enq_bypass_buf.oversize
   }
+  when (io.toIfu.req.fire) {
+    entry_fetch_status(ifuPtr.value) := f_sent
+  }
+
+  ifuPtr := ifuPtr + io.toIfu.req.fire
         
 
   // **********************************************************************
@@ -862,7 +847,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
     
     XSPerfAccumulate("to_ifu_bubble", io.toIfu.req.ready && !io.toIfu.req.valid)
-    XSPerfAccumulate("to_ifu_real_bubble", allowToIfu && (!ifu_req_buf.valid || io.toIfu.req.ready) && !to_buf_valid && io.fromBpu.resp.ready)
 
     XSPerfAccumulate("to_ifu_stall", io.toIfu.req.valid && !io.toIfu.req.ready)
     XSPerfAccumulate("from_bpu_real_bubble", !enq.valid && enq.ready && allowBpuIn)
