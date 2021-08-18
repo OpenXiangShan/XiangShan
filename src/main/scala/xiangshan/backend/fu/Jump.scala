@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -57,7 +58,7 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
   io.isAuipc := isAuipc
 }
 
-class Jump(implicit p: Parameters) extends FunctionUnit with HasRedirectOut {
+class Jump(implicit p: Parameters) extends FUWithRedirect {
 
   val (src1, jalr_target, pc, immMin, func, uop) = (
     io.in.bits.src(0),

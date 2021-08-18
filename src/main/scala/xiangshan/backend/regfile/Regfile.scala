@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -48,7 +49,7 @@ class Regfile
     val debug_rports = Vec(32, new RfReadPort(len))
   })
 
-  println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + "write: " + numWirtePorts)
+  println("Regfile: size:" + NRPhyRegs + " read: " + numReadPorts + " write: " + numWirtePorts)
 
   val useBlackBox = false
   if (!useBlackBox) {
@@ -66,6 +67,9 @@ class Regfile
     for (rport <- io.debug_rports) {
       val zero_rdata = Mux(rport.addr === 0.U, 0.U, mem(rport.addr))
       rport.data := (if (hasZero) zero_rdata else mem(rport.addr))
+    }
+    when (reset.asBool()) {
+      mem.map(_ := 0.U)
     }
   } else {
 

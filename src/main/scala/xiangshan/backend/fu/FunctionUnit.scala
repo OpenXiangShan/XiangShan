@@ -1,5 +1,6 @@
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
 * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -73,6 +74,8 @@ abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSMod
   val io = IO(new FunctionUnitIO(len))
 
 }
+
+abstract class FUWithRedirect(len: Int = 64)(implicit p: Parameters) extends FunctionUnit(len: Int) with HasRedirectOut
 
 trait HasPipelineReg {
   this: FunctionUnit =>

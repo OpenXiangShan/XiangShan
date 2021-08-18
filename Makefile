@@ -1,5 +1,6 @@
 #***************************************************************************************
 # Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -37,9 +38,6 @@ endif
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -a -o $(TIMELOG)
 
-# remote machine with more cores to speedup c++ build
-REMOTE ?= localhost
-
 .DEFAULT_GOAL = verilog
 
 help:
@@ -47,7 +45,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                       \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
 		--disable-all --remove-assert --infer-rw                     \
 		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS) \
@@ -79,7 +77,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)       \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
 		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)
@@ -95,30 +93,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 
 sim-verilog: $(SIM_TOP_V)
 
-SIM_CSRC_DIR = $(abspath ./src/test/csrc/common)
-SIM_CXXFILES = $(shell find $(SIM_CSRC_DIR) -name "*.cpp")
-
-DIFFTEST_CSRC_DIR = $(abspath ./src/test/csrc/difftest)
-DIFFTEST_CXXFILES = $(shell find $(DIFFTEST_CSRC_DIR) -name "*.cpp")
-
-SIM_VSRC = $(shell find ./src/test/vsrc/common -name "*.v" -or -name "*.sv")
-
-include verilator.mk
-include vcs.mk
-
-ifndef NEMU_HOME
-$(error NEMU_HOME is not set)
-endif
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-$(REF_SO):
-	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
-
-SEED ?= $(shell shuf -i 1-10000 -n 1)
-
-release-lock:
-	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
-
-clean: vcs-clean
+clean:
+	$(MAKE) -C ./difftest clean
 	rm -rf ./build
 
 init:
@@ -129,6 +105,17 @@ bump:
 
 bsp:
 	mill -i mill.bsp.BSP/install
+
+# verilator simulation
+emu:
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+emu-run:
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+# vcs simulation
+simv:
+	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
