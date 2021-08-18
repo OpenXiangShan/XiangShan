@@ -154,6 +154,9 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     val hitppn  = ParallelMux(hitVec zip data.map(_.genPPN(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip data.map(_.perm))
 
+    // check for TLB multi-hit
+    assert(PopCount(hitVec) === 1.U || PopCount(hitVec) === 0.U,"TLB can only hit one entry")
+
     hitVec.suggestName(s"hitVec_${i}")
     pfHitVec.suggestName(s"pfHitVec_${i}")
     hit.suggestName(s"hit_${i}")
@@ -225,7 +228,10 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
 
   for (i <- 0 until Width) {
     io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
-    io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
+    if(isDtlb)
+      io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
+    else
+      io.ptw.req(i).bits.vpn := reqAddr(i).vpn
   }
   io.ptw.resp.ready := true.B
 
