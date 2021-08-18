@@ -258,12 +258,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
     rsIn <> arbiterOut
   }
-  exuBlocks(1).io.allocate.takeRight(2).zip(ctrlBlock.io.enqIQ.takeRight(2)).zipWithIndex.foreach{ case ((sch, enq), i) =>
-    sch.valid := enq.valid
-    sch.bits := enq.bits
-    sch.bits.psrc(0) := enq.bits.psrc(1)
-    sch.bits.srcState(0) := enq.bits.srcState(1)
-    XSError(sch.valid && !sch.ready && memScheduler.io.allocate(i+2).ready, "std not ready but sta ready")
+  val stdAllocate = exuBlocks(1).io.allocate.takeRight(2)
+  val staAllocate = memScheduler.io.allocate.takeRight(2)
+  stdAllocate.zip(staAllocate).zip(ctrlBlock.io.enqIQ.takeRight(2)).zipWithIndex.foreach{ case (((std, sta), enq), i) =>
+    std.valid := enq.valid && sta.ready
+    sta.valid := enq.valid && std.ready
+    std.bits := enq.bits
+    sta.bits := enq.bits
+    std.bits.psrc(0) := enq.bits.psrc(1)
+    std.bits.srcState(0) := enq.bits.srcState(1)
+    enq.ready := sta.ready && std.ready
+    XSPerfAccumulate(s"st_not_ready_$i", enq.valid && !enq.ready)
+    XSPerfAccumulate(s"sta_not_ready_$i", sta.valid && !sta.ready)
+    XSPerfAccumulate(s"std_not_ready_$i", std.valid && !std.ready)
   }
   exuBlocks(1).io.scheExtra.fpRfReadIn.get <> exuBlocks(2).io.scheExtra.fpRfReadOut.get
 
