@@ -46,6 +46,9 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val pred_taken = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(log2Ceil(16).W) // TODO: fix it
+    val ipf = Bool()
+    val acf = Bool()
+    val crossPageIPFFix = Bool()
   }
 
   for(out <- io.out) {
@@ -91,6 +94,9 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     inWire.pred_taken := io.in.bits.ftqOffset(i).valid
     inWire.ftqPtr := io.in.bits.ftqPtr
     inWire.ftqOffset := io.in.bits.ftqOffset(i).bits
+    inWire.ipf := io.in.bits.ipf(i)
+    inWire.acf := io.in.bits.acf(i)
+    inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
 
     ibuf.io.waddr(i) := tail_vec(offset(i)).value
     ibuf.io.wdata(i) := inWire
@@ -113,15 +119,15 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
     io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
     //TODO: Frontend Exception
-    io.out(i).bits.exceptionVec(instrPageFault) := false.B
-    io.out(i).bits.exceptionVec(instrAccessFault) := false.B
+    io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+    io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
     // io.out(i).bits.brUpdate := outWire.brInfo
     io.out(i).bits.pd := outWire.pd
     io.out(i).bits.pred_taken := outWire.pred_taken
     io.out(i).bits.ftqPtr := outWire.ftqPtr
     io.out(i).bits.ftqOffset := outWire.ftqOffset
     //TODO: Frontend Exception
-    io.out(i).bits.crossPageIPFFix := false.B
+    io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
     io.out(i).bits.storeSetHit := DontCare

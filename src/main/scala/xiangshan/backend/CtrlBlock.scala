@@ -249,7 +249,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   }
   io.frontend.toFtq.stage2Redirect <> stage2Redirect
   io.frontend.toFtq.roqFlush <> RegNext(roq.io.flushOut)
-  io.frontend.toFtq.stage3Redirect <> stage3Redirect
   io.frontend.toFtq.loadReplay <> loadReplay
 
   val roqPcRead = io.frontend.fromFtq.getRoqFlushPcRead
@@ -268,7 +267,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
 
-  io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, stage3Redirect)
+  io.frontend.toFtq.stage3Redirect := Mux(flushRedirectReg.valid, flushRedirectReg, stage3Redirect)
 
   decode.io.in <> io.frontend.cfVec
   // currently, we only update wait table when isReplay
@@ -288,7 +287,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      flushReg || io.frontend.redirect_cfiUpdate.valid)
+      flushReg || io.frontend.toFtq.stage3Redirect.valid)
   }
 
   rename.io.redirect <> stage2Redirect

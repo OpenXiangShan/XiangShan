@@ -61,7 +61,9 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   //val exception = new Exception
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-
+  val ipf          = Vec(PredictWidth, Bool())
+  val acf          = Vec(PredictWidth, Bool())
+  val crossPageIPFFix = Vec(PredictWidth, Bool())
 }
 
 // Move from BPU
