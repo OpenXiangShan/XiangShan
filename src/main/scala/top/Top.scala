@@ -129,6 +129,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
   lazy val dts = DTS(bindingTree)
+  lazy val json = JSON(bindingTree)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -357,6 +358,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   lazy val module = new LazyRawModuleImp(this) {
     ElaborationArtefacts.add("dts", dts)
+    ElaborationArtefacts.add("graphml", graphML)
+    ElaborationArtefacts.add("json", json)
+    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
