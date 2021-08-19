@@ -86,7 +86,7 @@ object difftest extends SbtModule with CommonModule {
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx64G")
+  override def forkArgs = Seq("-Xmx64G", "-Xss256m")
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(

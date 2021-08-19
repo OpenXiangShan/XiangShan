@@ -354,7 +354,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   /*
   Assertions
    */
-  val enableFreeListCheck = true
+  val enableFreeListCheck = false
 
   if (enableFreeListCheck) {
 
