@@ -16,10 +16,11 @@
 
 # Simple version of xiangshan python wrapper
 
-import os
 import argparse
-import sys
+import os
+import random
 import subprocess
+import sys
 
 
 class XSArgs(object):
@@ -53,6 +54,7 @@ class XSArgs(object):
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
+        self.seed = random.randint(0, 9999)
         self.numa = args.numa
 
     def get_env_variables(self):
@@ -86,7 +88,8 @@ class XSArgs(object):
 
     def get_emu_args(self):
         emu_args = [
-            (self.max_instr, "max-instr")
+            (self.max_instr, "max-instr"),
+            (self.seed,      "seed")
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
         return args
