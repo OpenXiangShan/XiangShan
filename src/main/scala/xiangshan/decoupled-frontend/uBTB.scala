@@ -38,59 +38,63 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 {
   def getTag(pc: UInt)  = (pc >> untaggedBits)(tagSize-1, 0)
 
-  class MicroBTBMeta extends XSBundle
+  class MicroBTBMeta extends FTBEntry
   {
-    val valid       = Bool()
-    val tag         = UInt(tagSize.W)
+    // val valid       = Bool()
+    // val tag         = UInt(tagSize.W)
 
-    val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
-    val brValids    = Vec(numBr, Bool())
+    // val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
+    // val brValids    = Vec(numBr, Bool())
 
-    val jmpValid    = Bool() // include jal and jalr
+    // val jmpValid    = Bool() // include jal and jalr
 
-    val carry       = Bool()
+    // val carry       = Bool()
 
-    val isCall      = Bool()
-    val isRet       = Bool()
-    val isJalr      = Bool()
+    // val isCall      = Bool()
+    // val isRet       = Bool()
+    // val isJalr      = Bool()
 
-    val oversize    = Bool()
+    // val oversize    = Bool()
 
-    val last_is_rvc = Bool()
+    // val last_is_rvc = Bool()
 
   }
 
-  class MicroBTBData extends XSBundle
-  {
+  class MicroBTBData extends XSBundle {
     val brTargets = Vec(numBr, UInt(VAddrBits.W))
     val jmpTarget = UInt(VAddrBits.W)
     val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
   }
 
-  class ReadResp extends XSBundle
-  {
-    val valid = Bool()
-    // val taken_mask = Vec(numBr, Bool())
-    val brValids  = Vec(numBr, Bool())
-    val jmpValid  = Bool()
-    val brTargets = Vec(numBr, UInt(VAddrBits.W))
-    val jmpTarget = UInt(VAddrBits.W)
-    val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
-    val carry     = Bool()
-    // val pred        = Vec(numBr, UInt(2.W))
-
+  class ReadResp extends FTBEntry {
     val hit = Bool()
-
-    // def real_taken_mask(): Vec[Bool] = {
-    //   VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b } :+ jmpValid)
-    // }
-
-    // def real_br_taken_mask(): Vec[Bool] = {
-    //   VecInit(taken_mask.zip(brValids).map{ case(m, b) => m && b })
-    // }
   }
+  
+  // object ReadResp {
+  //   def apply(entry: MicroBTBMeta, hit: Bool)(implicit p: Parameters): ReadResp = {
+  //     val e = Wire(new ReadResp())
+  //     
+  //     e.valid := entry.valid
+  //     e.brOffset := entry.brOffset
+  //     e.brTargets := entry.brTargets
+  //     e.brValids := entry.brValids
 
-  override val meta_size = WireInit(0.U.asTypeOf(new ReadResp)).getWidth
+  //     e.jmpOffset := entry.jmpOffset
+  //     e.jmpTarget := entry.jmpTarget
+  //     e.jmpValid := entry.jmpValid
+  //     
+  //     e.pftAddr := entry.pftAddr
+  //     e.carry := entry.carry
+  //     e.oversize := entry.oversize
+  //     e.last_is_rvc := entry.last_is_rvc
+  //     
+  //     e.hit := hit
+  //     
+  //     e
+  //   }
+  // }
+
+  override val meta_size = WireInit(0.U.asTypeOf(new ReadResp)).getWidth // TODO: ReadResp shouldn't save useless members
 
   class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
@@ -152,17 +156,31 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     // }
 
     val ren = io.read_pc.valid
+
+    io.read_resp := DontCare
     io.read_resp.valid := ren
     // io.read_resp.taken_mask := hit_and_taken_mask
-    io.read_resp.brValids := hit_meta.brValids
-    io.read_resp.jmpValid := hit_meta.jmpValid
-    io.read_resp.carry := hit_meta.carry
-    io.read_resp.brTargets := hit_data.brTargets
-    io.read_resp.jmpTarget := hit_data.jmpTarget
-    io.read_resp.pftAddr := hit_data.pftAddr
+    io.read_resp.tag          := hit_meta.tag
+    io.read_resp.brOffset     := hit_meta.brOffset
+    io.read_resp.brTargets    := hit_data.brTargets
+    io.read_resp.brValids     := hit_meta.brValids
+
+    io.read_resp.jmpOffset    := hit_meta.jmpOffset
+    io.read_resp.jmpTarget    := hit_data.jmpTarget
+    io.read_resp.jmpValid     := hit_meta.jmpValid
+
+    io.read_resp.pftAddr      := hit_data.pftAddr
+    io.read_resp.carry        := hit_meta.carry
+
+    io.read_resp.isCall       := hit_meta.isCall
+    io.read_resp.isRet        := hit_meta.isRet
+    io.read_resp.isJalr       := hit_meta.isJalr
+
+    io.read_resp.oversize     := hit_meta.oversize
+    io.read_resp.last_is_rvc  := hit_meta.last_is_rvc
     // io.read_resp.pred := hit_preds
-    io.read_resp.hit := hit_oh.orR
-    io.read_hit := hit_oh.orR
+    io.read_resp.hit          := hit_oh.orR
+    io.read_hit               := hit_oh.orR
 
     val do_reset = RegInit(true.B)
     val reset_way = RegInit(0.U(log2Ceil(nWays).W))
@@ -253,12 +271,21 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // io.out.bits.resp.s1.preds.call_is_rvc := read_resps.last_is_rvc
   io.out.resp.s1.ftb_entry := DontCare
   io.out.resp.s1.ftb_entry.valid := read_resps.valid
-  io.out.resp.s1.ftb_entry.brValids := read_resps.brValids
-  io.out.resp.s1.ftb_entry.jmpValid := read_resps.jmpValid
-  io.out.resp.s1.ftb_entry.brTargets := read_resps.brTargets
-  io.out.resp.s1.ftb_entry.jmpTarget := read_resps.jmpTarget
-  io.out.resp.s1.ftb_entry.pftAddr := read_resps.pftAddr
-  io.out.resp.s1.ftb_entry.carry := read_resps.carry
+
+  io.out.resp.s1.ftb_entry.brOffset     := read_resps.brOffset
+  io.out.resp.s1.ftb_entry.brTargets    := read_resps.brTargets
+  io.out.resp.s1.ftb_entry.brValids     := read_resps.brValids
+
+  io.out.resp.s1.ftb_entry.jmpOffset    := read_resps.jmpOffset
+  io.out.resp.s1.ftb_entry.jmpTarget    := read_resps.jmpTarget
+  io.out.resp.s1.ftb_entry.jmpValid     := read_resps.jmpValid
+
+  io.out.resp.s1.ftb_entry.pftAddr      := read_resps.pftAddr
+  io.out.resp.s1.ftb_entry.carry        := read_resps.carry
+
+  io.out.resp.s1.ftb_entry.oversize     := read_resps.oversize
+  io.out.resp.s1.ftb_entry.last_is_rvc  := read_resps.last_is_rvc
+
   io.out.s3_meta := RegEnable(RegEnable(read_resps.asUInt, io.s1_fire), io.s2_fire)
 
   // Update logic
@@ -280,15 +307,18 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   update_write_metas := DontCare
 
-  update_write_metas.valid := true.B
-  update_write_metas.tag := u_tag
-  // brOffset
-  update_write_metas.brValids := update.ftb_entry.brValids
-  update_write_metas.jmpValid := update.ftb_entry.jmpValid
-  // isJalr
-  // isCall
-  // isRet
-  update_write_metas.carry := update.ftb_entry.carry
+  update_write_metas.valid        := true.B
+  update_write_metas.tag          := u_tag
+  update_write_metas.brOffset     := update.ftb_entry.brOffset
+  update_write_metas.brValids     := update.ftb_entry.brValids
+  update_write_metas.jmpOffset    := update.ftb_entry.jmpOffset
+  update_write_metas.jmpValid     := update.ftb_entry.jmpValid
+  update_write_metas.isCall       := update.ftb_entry.isCall
+  update_write_metas.isRet        := update.ftb_entry.isRet
+  update_write_metas.isJalr       := update.ftb_entry.isJalr
+  update_write_metas.carry        := update.ftb_entry.carry
+  update_write_metas.oversize     := update.ftb_entry.oversize
+  update_write_metas.last_is_rvc  := update.ftb_entry.last_is_rvc
 
   // update_write_datas.lower := u_target_lower
   update_write_datas.jmpTarget := update.ftb_entry.jmpTarget
