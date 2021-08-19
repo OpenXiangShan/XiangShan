@@ -457,6 +457,9 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     val selectedInflightMask = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
     val selectedInflightData = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
 
+    val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+
     forward.dataInvalid := false.B // data in store line merge buffer is always ready
     forward.matchInvalid := tag_mismatch // paddr / vaddr cam result does not match
     for (j <- 0 until DataBytes) {
@@ -472,6 +475,8 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
         forward.forwardMask(j) := true.B
         forward.forwardData(j) := selectedValidData(j)
       }
+
+      forward.forwardMaskFast(j) := selectedInflightMaskFast(j) || selectedValidMaskFast(j)
     }
   }
 

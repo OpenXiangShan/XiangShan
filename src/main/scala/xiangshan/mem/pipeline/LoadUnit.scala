@@ -115,6 +115,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
+    val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
   })
@@ -151,6 +152,11 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
+
+  // Generate forwardMaskFast to wake up insts earlier
+  val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
+  io.fullForwardFast := (~forwardMaskFast & s1_mask) === 0.U
+
 
   io.out.valid := io.in.valid// && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
@@ -192,7 +198,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
+
+  // val cnt = RegInit(127.U)
+  // cnt := cnt + io.in.valid.asUInt
+  // val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid || cnt === 0.U
+
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
+
   // assert(!s2_forward_fail)
 
   io.dcacheResp.ready := true.B
@@ -257,12 +269,16 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
-  io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
+  if (EnableFastForward) {
+    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
+  } else {
+    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
+  }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   io.out.bits.uop.cf.replayInst := s2_forward_fail && !s2_mmio // if forward fail, repaly this inst
   io.out.bits.mmio := s2_mmio
   
-  // For timing reasons, we can not let
+  // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
   // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
   // and dcache query is no longer needed.
@@ -329,10 +345,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
+  load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2
   load_s2.io.lsq.dataInvalid <> io.lsq.forward.dataInvalid
   load_s2.io.lsq.matchInvalid <> io.lsq.forward.matchInvalid
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
+  load_s2.io.sbuffer.forwardMaskFast <> io.sbuffer.forwardMaskFast // should not be used in load_s2
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
@@ -348,8 +366,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
   // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
-  io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid &&
-    !load_s1.io.dcacheKill && !io.lsq.forward.dataInvalidFast
+  if (EnableFastForward) {
+    io.fastUop.valid := (io.dcache.s1_hit_way.orR || load_s1.io.fullForwardFast) && // dcache hit || full forward
+      !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
+      load_s1.io.in.valid && // valid laod request
+      !load_s1.io.dcacheKill && // not mmio or tlb miss
+      !io.lsq.forward.dataInvalidFast // forward failed
+  } else {
+    io.fastUop.valid := io.dcache.s1_hit_way.orR && // dcache hit
+      !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
+      load_s1.io.in.valid && // valid laod request
+      !load_s1.io.dcacheKill && // not mmio or tlb miss
+      !io.lsq.forward.dataInvalidFast // forward failed
+  }
   io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,

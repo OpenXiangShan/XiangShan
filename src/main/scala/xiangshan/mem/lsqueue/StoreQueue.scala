@@ -283,9 +283,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     */
   // check over all lq entries and forward data from the first matched store
   for (i <- 0 until LoadPipelineWidth) {
-    io.forward(i).forwardMask := 0.U(8.W).asBools
-    io.forward(i).forwardData := DontCare
-
     // Compare deqPtr (deqPtr) and forward.sqIdx, we have two cases:
     // (1) if they have the same flag, we need to check range(tail, sqIdx)
     // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
@@ -328,6 +325,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
     XSPerfAccumulate("vaddr_match_failed", vpmaskNotEqual)
     XSPerfAccumulate("vaddr_match_really_failed", vaddrMatchFailed)
+
+    // Fast forward mask will be generated immediately (load_s1)
+    io.forward(i).forwardMaskFast := dataModule.io.forwardMaskFast(i)
 
     // Forward result will be generated 1 cycle later (load_s2)
     io.forward(i).forwardMask := dataModule.io.forwardMask(i)

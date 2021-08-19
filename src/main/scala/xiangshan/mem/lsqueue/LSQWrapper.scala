@@ -34,8 +34,9 @@ class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FwdEntry extends Bundle {
-  val valid = Bool()
-  val data = UInt(8.W)
+  val validFast = Bool() // validFast is generated the same cycle with query
+  val valid = Bool() // valid is generated 1 cycle after query request
+  val data = UInt(8.W) // data is generated 1 cycle after query request
 }
 
 // inflight miss block reqs

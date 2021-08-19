@@ -101,6 +101,7 @@ case class XSCoreParameters
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
+  EnableFastForward: Boolean = true,
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
@@ -235,6 +236,7 @@ trait HasXSParameter {
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
+  val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
   val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val TlbEntrySize = coreParams.TlbEntrySize

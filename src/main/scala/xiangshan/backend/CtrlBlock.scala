@@ -293,6 +293,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
       flushPC + 4.U // flush pipe
     )
   )
+  when (flushRedirect.valid && RegEnable(roq.io.flushOut.bits.replayInst, flush)) {
+    XSDebug("replay inst (%x) from rob\n", flushPC);
+  }
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
