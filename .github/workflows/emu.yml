@@ -36,6 +36,7 @@ jobs:
   emu-basics:
     runs-on: self-hosted
     continue-on-error: false
+    timeout-minutes: 720
     name: EMU - Basics
     steps:
       - uses: actions/checkout@v2
@@ -75,6 +76,7 @@ jobs:
   emu-performance:
     runs-on: self-hosted
     continue-on-error: false
+    timeout-minutes: 720
     name: EMU - Performance
     steps:
       - uses: actions/checkout@v2
