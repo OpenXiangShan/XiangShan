@@ -166,9 +166,11 @@ object XDecode extends DecodeConstants {
     CSRRCI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.clri, Y, N, N, Y, Y, N, N, SelImm.IMM_Z),
 
     SFENCE_VMA->List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, Y, Y, Y, N, SelImm.IMM_X),
+    EBREAK  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
     ECALL   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
     SRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
     MRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    DRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
 
     WFI     -> List(SrcType.pc, SrcType.imm, SrcType.DC, FuType.alu, ALUOpType.sll, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
@@ -495,6 +497,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // output
   cf_ctrl.cf := ctrl_flow
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
+  cs.singleStep := false.B
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr

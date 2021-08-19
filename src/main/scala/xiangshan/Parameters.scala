@@ -25,6 +25,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
