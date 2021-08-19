@@ -78,6 +78,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
+      val resptype = RSFeedbackType() // update credit if needs replay
     })))
     val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
   })
@@ -101,11 +102,12 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     XSError(PopCount(matchVec) > 1.U, p"matchVec ${Binary(matchVec.asUInt)} should be one-hot\n")
     matchVec.asUInt
   }
-  def deqRespSel(i: Int) : (Bool, Bool) = {
+  def deqRespSel(i: Int) : (Bool, Bool, UInt) = {
     val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i)))
     XSError(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
     val successVec = io.deqResp.map(_.bits.success)
-    (mask.asUInt.orR, Mux1H(mask, successVec))
+    val respTypeVec = io.deqResp.map(_.bits.resptype)
+    (mask.asUInt.orR, Mux1H(mask, successVec), Mux1H(mask, respTypeVec))
   }
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     val selVec = VecInit(io.update.map(u => u.enable && u.addr(i)))
@@ -135,7 +137,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       XSError(status.valid, p"should not update a valid entry $i\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
-      val (deqResp, deqGrant) = deqRespSel(i)
+      val (deqResp, deqGrant, deqRespType) = deqRespSel(i)
       XSError(deqResp && !status.valid, p"should not deq an invalid entry $i\n")
       if (params.hasFeedback) {
         XSError(deqResp && !status.scheduled, p"should not deq an un-scheduled entry $i\n")
@@ -150,6 +152,9 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.blocked := false.B
       if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
+        when(deqResp && !deqGrant && deqRespType === RSFeedbackType.dataInvalid) {
+          statusNext.blocked := true.B
+        }
       }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
