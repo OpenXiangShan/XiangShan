@@ -152,8 +152,10 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.blocked := false.B
       if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
-        when(deqResp && !deqGrant && deqRespType === RSFeedbackType.dataInvalid) {
+        when (deqResp && !deqGrant && deqRespType === RSFeedbackType.dataInvalid) {
           statusNext.blocked := true.B
+          XSError(status.valid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
+            "Previous store instructions are all issued. Should not trigger dataInvalid.\n")
         }
       }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
