@@ -138,6 +138,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
 
+    // laod to load fast forward
+    for (j <- 0 until exuParameters.LduCnt) {
+      loadUnits(i).io.fastpathIn(j)  <> loadUnits(j).io.fastpathOut
+    }
+
     // Lsq to load unit's rs
 
     // passdown to lsq
