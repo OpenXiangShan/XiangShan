@@ -22,12 +22,13 @@ import xiangshan._
 import utils._
 
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
-  val startAddr    = UInt(VAddrBits.W)
-  val fallThruAddr = UInt(VAddrBits.W)
-  val ftqIdx       = new FtqPtr
-  val ftqOffset    = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target       = UInt(VAddrBits.W)
-  val oversize     = Bool()
+  val startAddr       = UInt(VAddrBits.W)
+  val fallThruAddr    = UInt(VAddrBits.W)
+  val fallThruError   = Bool()
+  val ftqIdx          = new FtqPtr
+  val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val target          = UInt(VAddrBits.W)
+  val oversize        = Bool()
 
   def fallThroughError() = {
     def carryPos = instOffsetBits+log2Ceil(PredictWidth)+1

@@ -545,6 +545,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   toIfuReq.bits.ftqIdx := ifuPtr
   toIfuReq.bits.target := update_target(ifuPtr.value)
   toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
+  toIfuReq.bits.fallThruError  := false.B
   
   when (last_cycle_bpu_enq && bpu_enq_bypass_ptr === ifuPtr) {
     toIfuReq.bits.startAddr    := bpu_enq_bypass_buf.startAddr
@@ -565,7 +566,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // when fall through is smaller in value than start address, there must be a false hit
   when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
     entry_hit_status(ifuPtr.value) === h_false_hit
-    io.toIfu.req.bits.fallThruAddr := toIfuReq.bits.startAddr + (FetchWidth*4).U
+    io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
+    io.toIfu.req.bits.fallThruError  := true.B
   }
 
   when (io.toIfu.req.fire) {

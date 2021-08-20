@@ -76,6 +76,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data          = if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))  
   val startAddr     = UInt(VAddrBits.W)
   val fallThruAddr  = UInt(VAddrBits.W)
+  val fallThruError = Bool()
   val isDoubleLine  = Bool()
   val ftqOffset     = Valid(UInt(log2Ceil(PredictWidth).W))
   val target        = UInt(VAddrBits.W)
@@ -387,6 +388,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   preDecoderIn.data          :=  cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
   preDecoderIn.startAddr     :=  f2_ftq_req.startAddr
   preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
+  preDecoderIn.fallThruError :=  f2_ftq_req.fallThruError
   preDecoderIn.isDoubleLine  :=  f2_doubleLine
   preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
   preDecoderIn.target        :=  f2_ftq_req.target
