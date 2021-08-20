@@ -264,6 +264,14 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val meta = UInt(MaxMetaLength.W)
   // val ghist = new GlobalHistory() This in spec_meta
 
+  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+    ghist := entry.ghist
+    phist := entry.phist
+    rasSp := entry.rasSp
+    rasTop := entry.rasEntry
+    specCnt := entry.specCnt
+    this
+  }
   // override def toPrintable: Printable = {
   //   p"-----------BranchPredictionUpdate----------- " +
   //     p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] ${Binary(false_hit)} " +

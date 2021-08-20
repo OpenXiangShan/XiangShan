@@ -491,7 +491,59 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   XSError(isBefore(bpuPtr, ifuPtr) && !isFull(bpuPtr, ifuPtr), "\nifuPtr is before bpuPtr!\n")
+
+  // ****************************************************************
+  // **************************** to ifu ****************************
+  // ****************************************************************
+  val bpu_enq_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=ftq_pc_mem.io.wen(0))
+  val bpu_enq_bypass_ptr = RegNext(bpuPtr)
+  val last_cycle_bpu_enq = RegNext(ftq_pc_mem.io.wen(0))
   
+  val bpu_s2_resp_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(1), enable=ftq_pc_mem.io.wen(1))
+  val bpu_s2_resp_bypass_ptr = RegNext(io.fromBpu.resp.bits.s2.ftq_idx)
+  val last_cycle_bpu_s2_resp = RegNext(ftq_pc_mem.io.wen(1))
+  
+  val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
+
+  // read pc and target
+  ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
+  ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
+  
+  val toIfuReq = Wire(chiselTypeOf(io.toIfu.req))
+
+  toIfuReq.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  toIfuReq.bits.ftqIdx := ifuPtr
+  toIfuReq.bits.target := update_target(ifuPtr.value)
+  toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
+  toIfuReq.bits.fallThruError  := false.B
+  
+  when (bpu_s2_resp.valid && bpu_s2_resp.ftq_idx === ifuPtr) { // redirect bypass
+    toIfuReq.bits.fromBpuResp(bpu_s2_resp)
+  }.elsewhen (last_cycle_bpu_enq && bpu_enq_bypass_ptr === ifuPtr) { // enq bypass
+    toIfuReq.bits.fromFtqPcBundle(bpu_enq_bypass_buf)
+  }.elsewhen (last_cycle_bpu_s2_resp && bpu_s2_resp_bypass_ptr === ifuPtr) { // s2 correction bypass
+    toIfuReq.bits.fromFtqPcBundle(bpu_s2_resp_bypass_buf)
+  }.elsewhen (last_cycle_to_ifu_fire) {
+    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
+  }.otherwise {
+    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
+  }
+
+  io.toIfu.req <> toIfuReq
+
+  // when fall through is smaller in value than start address, there must be a false hit
+  when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
+    entry_hit_status(ifuPtr.value) === h_false_hit
+    io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
+    io.toIfu.req.bits.fallThruError  := true.B
+  }
+
+  when (io.toIfu.req.fire) {
+    entry_fetch_status(ifuPtr.value) := f_sent
+  }
+
+  ifuPtr := ifuPtr + io.toIfu.req.fire
+
   // *********************************************************************
   // **************************** wb from ifu ****************************
   // *********************************************************************
@@ -550,60 +602,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
 
-  // ****************************************************************
-  // **************************** to ifu ****************************
-  // ****************************************************************
-  val bpu_enq_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(0), enable=ftq_pc_mem.io.wen(0))
-  val bpu_enq_bypass_ptr = RegNext(bpuPtr)
-  val last_cycle_bpu_enq = RegNext(ftq_pc_mem.io.wen(0))
-  
-  val bpu_s2_resp_bypass_buf = RegEnable(ftq_pc_mem.io.wdata(1), enable=ftq_pc_mem.io.wen(1))
-  val bpu_s2_resp_bypass_ptr = RegNext(io.fromBpu.resp.bits.s2.ftq_idx)
-  val last_cycle_bpu_s2_resp = RegNext(ftq_pc_mem.io.wen(1))
-  
-  val last_cycle_to_ifu_fire = RegNext(io.toIfu.req.fire)
-
-  // read pc and target
-  ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
-  ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
-  
-  val toIfuReq = Wire(chiselTypeOf(io.toIfu.req))
-
-  toIfuReq.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
-  toIfuReq.bits.ftqIdx := ifuPtr
-  toIfuReq.bits.target := update_target(ifuPtr.value)
-  toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-  toIfuReq.bits.fallThruError  := false.B
-  
-  when (bpu_s2_resp.valid && bpu_s2_resp.ftq_idx === ifuPtr) { // redirect bypass
-    toIfuReq.bits.fromBpuResp(bpu_s2_resp)
-  }.elsewhen (last_cycle_bpu_enq && bpu_enq_bypass_ptr === ifuPtr) { // enq bypass
-    toIfuReq.bits.fromFtqPcBundle(bpu_enq_bypass_buf)
-  }.elsewhen (last_cycle_bpu_s2_resp && bpu_s2_resp_bypass_ptr === ifuPtr) { // s2 correction bypass
-    toIfuReq.bits.fromFtqPcBundle(bpu_s2_resp_bypass_buf)
-  }.elsewhen (last_cycle_to_ifu_fire) {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
-  }.otherwise {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
-  }
-
-  io.toIfu.req <> toIfuReq
-
-  // when fall through is smaller in value than start address, there must be a false hit
-  // TODO: ensure ifu sends a redirect back in such case
-  when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
-    entry_hit_status(ifuPtr.value) === h_false_hit
-    io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
-    io.toIfu.req.bits.fallThruError  := true.B
-  }
-
-  when (io.toIfu.req.fire) {
-    entry_fetch_status(ifuPtr.value) := f_sent
-  }
-
-  ifuPtr := ifuPtr + io.toIfu.req.fire
-        
-
   // **********************************************************************
   // **************************** backend read ****************************
   // **********************************************************************
@@ -654,7 +652,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   fromIfuRedirect.valid := pdWb.valid && pdWb.bits.misOffset.valid && !backendFlush
   fromIfuRedirect.bits.ftqIdx := pdWb.bits.ftqIdx
   fromIfuRedirect.bits.ftqOffset := pdWb.bits.misOffset.bits
-  fromIfuRedirect.bits.level := RedirectLevel.flushAfter // TODO: is this right?
+  fromIfuRedirect.bits.level := RedirectLevel.flushAfter
 
   val ifuRedirectCfiUpdate = fromIfuRedirect.bits.cfiUpdate
   ifuRedirectCfiUpdate.pc := pdWb.bits.pc(pdWb.bits.misOffset.bits)
@@ -678,7 +676,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   when (ifuRedirectReg.bits.cfiUpdate.pd.isRet) {
     toBpuCfi.target := toBpuCfi.rasEntry.retAddr
   }
-  // TODO: sawNotTakenBranch
 
   // *********************************************************************                                  
   // **************************** wb from exu ****************************
@@ -824,35 +821,31 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
   update.false_hit := commit_hit === h_false_hit
-  update.pc := commit_pc_bundle.startAddr
+  update.pc        := commit_pc_bundle.startAddr
   update.preds.hit := commit_hit === h_hit || commit_hit === h_false_hit
-  update.ghist := commit_spec_meta.ghist
-  update.phist := commit_spec_meta.phist
-  update.rasSp := commit_spec_meta.rasSp
-  update.rasTop := commit_spec_meta.rasEntry
-  update.specCnt := commit_spec_meta.specCnt
-  update.meta := commit_meta.meta
+  update.meta      := commit_meta.meta
+  update.fromFtqRedirectSram(commit_spec_meta)
 
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
   
   val ftbEntryGen = Module(new FTBEntryGen).io
-  ftbEntryGen.start_addr := commit_pc_bundle.startAddr
-  ftbEntryGen.old_entry := commit_ftb_entry
-  ftbEntryGen.pd := commit_pd
-  ftbEntryGen.cfiIndex := commit_cfi
-  ftbEntryGen.target := commit_target
-  ftbEntryGen.hit := commit_real_hit
+  ftbEntryGen.start_addr     := commit_pc_bundle.startAddr
+  ftbEntryGen.old_entry      := commit_ftb_entry
+  ftbEntryGen.pd             := commit_pd
+  ftbEntryGen.cfiIndex       := commit_cfi
+  ftbEntryGen.target         := commit_target
+  ftbEntryGen.hit            := commit_real_hit
   ftbEntryGen.mispredict_vec := commit_mispredict
   
-  update_ftb_entry := ftbEntryGen.new_entry
+  update_ftb_entry         := ftbEntryGen.new_entry
   update.new_br_insert_pos := ftbEntryGen.new_br_insert_pos
-  update.mispred_mask := ftbEntryGen.mispred_mask
-  update.old_entry := ftbEntryGen.is_old_entry
-
-
-  // Cfi Info
+  update.mispred_mask      := ftbEntryGen.mispred_mask
+  update.old_entry         := ftbEntryGen.is_old_entry
+  update.preds.taken_mask  := ftbEntryGen.taken_mask
+  
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
+    // Cfi Info
     for (i <- 0 until PredictWidth) {
       val pc = commit_pc_bundle.startAddr + (i * instBytes).U
       val v = commit_state(i) === c_commited
@@ -863,7 +856,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       val misPred = commit_mispredict(i)
       val ghist = commit_spec_meta.ghist.predHist
       val predCycle = commit_meta.meta(63, 0)
-
+      
       val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
       val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
       val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
@@ -871,16 +864,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
       p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) brInEntry(${inFtbEntry}) brIdx(${brIdx})\n")
     }
-  }
 
-  val preds = update.preds
-  preds.taken_mask := ftbEntryGen.taken_mask
+    val enq = io.fromBpu.resp
+    val perf_redirect = io.fromBackend.stage2Redirect
 
-
-  val enq = io.fromBpu.resp
-  val perf_redirect = io.fromBackend.stage2Redirect
-  
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
     XSPerfAccumulate("entry", validEntries)
     XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
     XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)

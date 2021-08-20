@@ -32,13 +32,11 @@ import xiangshan.mem.LsqEnqIO
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val roq_commits = Vec(CommitWidth, Valid(new RoqCommitInfo))
   val stage2Redirect = Valid(new Redirect)
+  val stage3Redirect = ValidIO(new Redirect)
   val roqFlush = Valid(new Bundle {
     val ftqIdx = Output(new FtqPtr)
     val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
   })
-
-  val loadReplay = Valid(new Redirect)
-  val stage3Redirect = ValidIO(new Redirect)
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -249,7 +247,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   }
   io.frontend.toFtq.stage2Redirect <> stage2Redirect
   io.frontend.toFtq.roqFlush <> RegNext(roq.io.flushOut)
-  io.frontend.toFtq.loadReplay <> loadReplay
 
   val roqPcRead = io.frontend.fromFtq.getRoqFlushPcRead
   val flushPC = roqPcRead(roq.io.flushOut.bits.ftqIdx, roq.io.flushOut.bits.ftqOffset)
