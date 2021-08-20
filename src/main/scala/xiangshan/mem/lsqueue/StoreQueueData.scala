@@ -151,8 +151,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
         val r = b.asTypeOf(new FwdEntry)
         val res = Wire(new FwdEntry)
         res.validFast := l.validFast || r.validFast
-        // res.valid := l.valid || r.valid
-        res.valid := RegNext(res.validFast)
+        res.valid := l.valid || r.valid
+        // res.valid := RegNext(res.validFast)
         res.data := Mux(r.valid, r.data, l.data)
         res
       })

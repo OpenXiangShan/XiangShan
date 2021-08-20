@@ -211,21 +211,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
 
-  // feedback tlb result to RS
-  io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
-  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
-  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
-    Mux(io.lsq.dataInvalid,
-      RSFeedbackType.dataInvalid,
-      RSFeedbackType.mshrFull
-    )
-  )
-
-  // s2_cache_replay is quite slow to generate, send it separately to LQ
-  io.needReplayFromRS := s2_cache_replay
-
   // merge forward result
   // lsq has higher priority than sbuffer
   val forwardMask = Wire(Vec(8, Bool()))
@@ -290,6 +275,21 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits.forwardData := rdataVec
 
   io.in.ready := io.out.ready || !io.in.valid
+
+  // feedback tlb result to RS
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
+    Mux(io.lsq.dataInvalid,
+      RSFeedbackType.dataInvalid,
+      RSFeedbackType.mshrFull
+    )
+  )
+
+  // s2_cache_replay is quite slow to generate, send it separately to LQ
+  io.needReplayFromRS := s2_cache_replay
 
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
@@ -366,19 +366,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
   // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
-  if (EnableFastForward) {
-    io.fastUop.valid := (io.dcache.s1_hit_way.orR || load_s1.io.fullForwardFast) && // dcache hit || full forward
-      !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
-      load_s1.io.in.valid && // valid laod request
-      !load_s1.io.dcacheKill && // not mmio or tlb miss
-      !io.lsq.forward.dataInvalidFast // forward failed
-  } else {
-    io.fastUop.valid := io.dcache.s1_hit_way.orR && // dcache hit
-      !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
-      load_s1.io.in.valid && // valid laod request
-      !load_s1.io.dcacheKill && // not mmio or tlb miss
-      !io.lsq.forward.dataInvalidFast // forward failed
-  }
+  io.fastUop.valid := io.dcache.s1_hit_way.orR && // dcache hit
+    !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
+    load_s1.io.in.valid && // valid laod request
+    !load_s1.io.dcacheKill && // not mmio or tlb miss
+    !io.lsq.forward.dataInvalidFast // forward failed
   io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
