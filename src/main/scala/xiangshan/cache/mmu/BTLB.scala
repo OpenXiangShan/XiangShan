@@ -79,6 +79,10 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
     XSPerfAccumulate("hit" + Integer.toString(i, 10), !(RegNext(req(i)(0).valid) && !hit))
   }
 
+  when (Cat(io.ptw.req.map(_.valid)).orR) {
+    replace.miss
+  }
+
   when (io.ptw.resp.valid) {
     entries_v(refillIdx) := true.B
     entries(refillIdx) := io.ptw.resp.bits
