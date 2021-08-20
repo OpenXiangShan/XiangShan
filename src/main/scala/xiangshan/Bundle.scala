@@ -37,6 +37,7 @@ import utils._
 import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
+import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket(implicit p: Parameters) extends XSBundle {
@@ -152,6 +153,16 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val isMisPred = Bool()
   val shift = UInt((log2Ceil(numBr)+1).W)
   val addIntoHist = Bool()
+
+  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+    this.hist := entry.ghist
+    this.phist := entry.phist
+    this.phNewBit := entry.phNewBit
+    this.rasSp := entry.rasSp
+    this.rasEntry := entry.rasEntry
+    this.specCnt := entry.specCnt
+    this
+  }
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

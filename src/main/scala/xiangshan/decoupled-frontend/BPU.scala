@@ -221,8 +221,8 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
   io.bpu_to_ftq.resp.valid := !reset.asBool() && !io.ftq_to_bpu.redirect.valid
 
   io.bpu_to_ftq.resp.bits := 0.U.asTypeOf(new BranchPredictionBundle)
-  io.bpu_to_ftq.resp.bits.pc := s0_pc
-  io.bpu_to_ftq.resp.bits.ftb_entry.pftAddr := s0_pc + 32.U
+  io.bpu_to_ftq.resp.bits.s1.pc := s0_pc
+  io.bpu_to_ftq.resp.bits.s1.ftb_entry.pftAddr := s0_pc + 32.U
 }
 
 @chiselName
@@ -280,8 +280,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // predictors.io := DontCare
   predictors.io.in.valid := s0_fire
   predictors.io.in.bits.s0_pc := s0_pc
-  predictors.io.in.bits.ghist := s1_ghist.predHist
-  predictors.io.in.bits.phist := s1_phist
+  predictors.io.in.bits.ghist := s0_ghist.predHist
+  predictors.io.in.bits.phist := s0_phist
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   // predictors.io.in.bits.toFtq_fire := toFtq_fire
@@ -303,7 +303,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   s2_components_ready := predictors.io.s2_ready
   s2_ready := s2_fire || !s2_valid
-  s1_fire := s1_valid && s2_components_ready && s2_ready
+  s1_fire := s1_valid && s2_components_ready && s2_ready && io.bpu_to_ftq.resp.ready
 
   when(s0_fire)         { s1_valid := true.B  }
     .elsewhen(s1_flush) { s1_valid := false.B }
@@ -321,7 +321,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   predictors.io.s2_fire := s2_fire
 
-  s3_fire := s3_valid && io.bpu_to_ftq.resp.ready
+  // s3_fire := s3_valid && io.bpu_to_ftq.resp.ready
+  s3_fire := s3_valid
 
   when(s3_flush)                    { s3_valid := false.B }
     .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B  }
@@ -329,11 +330,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   predictors.io.s3_fire := s3_fire
 
-  io.bpu_to_ftq.resp.valid := s3_valid && !io.ftq_to_bpu.redirect.valid
-  io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp.s3)
+  io.bpu_to_ftq.resp.valid := s1_valid && !io.ftq_to_bpu.redirect.valid
+  io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp)
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
-  io.bpu_to_ftq.resp.bits.ghist  := s3_ghist
-  io.bpu_to_ftq.resp.bits.phist  := s3_phist
+  io.bpu_to_ftq.resp.bits.s3.ghist  := s3_ghist
+  io.bpu_to_ftq.resp.bits.s3.phist  := s3_phist
 
   s0_pc := s0_pc_reg
   s0_ghist := s0_ghist_reg
@@ -366,9 +367,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_predicted_ghist = s2_ghist.update(s2_shift, s2_taken)
 
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
+  val s2_correct_s0_ghist_reg = s0_ghist_reg =/= s2_predicted_ghist
 
   when(s2_fire) {
-    when((s1_valid && (s1_pc =/= resp.s2.target || s2_correct_s1_ghist)) || !s1_valid) {
+    when((s1_valid && (s1_pc =/= resp.s2.target || s2_correct_s1_ghist)) ||
+      !s1_valid && (s0_pc_reg =/= resp.s2.target || s2_correct_s0_ghist_reg)) {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
       s0_pc := resp.s2.target
@@ -395,8 +398,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     XSPerfAccumulate("s2_redirect_br_direction_diff",
       s2_redirect_target_both_hit &&
       RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
-    XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
-    XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
     XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
   }
 
@@ -409,11 +410,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   val s3_correct_s2_ghist = s2_ghist =/= s3_predicted_ghist
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist
+  val s3_correct_s0_ghist_reg = s0_ghist_reg =/= s3_predicted_ghist
 
   when(s3_fire) {
     when((s2_valid && (s2_pc =/= resp.s3.target || s3_correct_s2_ghist)) ||
       (!s2_valid && s1_valid && (s1_pc =/= resp.s3.target || s3_correct_s1_ghist)) ||
-      (!s2_valid && !s1_valid)) {
+      (!s2_valid && !s1_valid && (s0_pc_reg =/= resp.s3.target || s3_correct_s0_ghist_reg))) {
 
       s0_ghist := s3_predicted_ghist
       s3_redirect := true.B
@@ -421,6 +423,20 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       s0_phist := (s3_phist << 1) | s3_pc(instOffsetBits)
     }
   }
+
+  // Send signal tell Ftq override
+  val s2_ftq_idx = RegEnable(io.ftq_to_bpu.enq_ptr, s1_fire)
+  val s3_ftq_idx = RegEnable(s2_ftq_idx, s2_fire)
+
+  io.bpu_to_ftq.resp.bits.s1.valid := s1_fire && !s1_flush
+  io.bpu_to_ftq.resp.bits.s1.hasRedirect := false.B
+  io.bpu_to_ftq.resp.bits.s1.ftq_idx := DontCare
+  io.bpu_to_ftq.resp.bits.s2.valid := s2_fire && !s2_flush
+  io.bpu_to_ftq.resp.bits.s2.hasRedirect := s2_redirect
+  io.bpu_to_ftq.resp.bits.s2.ftq_idx := s2_ftq_idx
+  io.bpu_to_ftq.resp.bits.s3.valid := s3_fire && !s3_flush
+  io.bpu_to_ftq.resp.bits.s3.hasRedirect := s3_redirect
+  io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
   val redirect = io.ftq_to_bpu.redirect.bits
 

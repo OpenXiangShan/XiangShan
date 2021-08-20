@@ -217,7 +217,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.out.resp.s2.ftb_entry.carry := s2_pc(instOffsetBits + log2Ceil(PredictWidth)).asBool
   }
 
-  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
+  // io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   // Update logic
   val has_update = RegInit(VecInit(Seq.fill(64)(0.U(VAddrBits.W))))

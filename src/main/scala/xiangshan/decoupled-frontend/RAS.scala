@@ -150,22 +150,24 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // val jump_is_first = io.callIdx.bits === 0.U
   // val call_is_last_half = io.isLastHalfRVI && jump_is_first
   // val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
-  val spec_new_addr = io.in.bits.resp_in(0).s3.fallThroughAddr
+  val spec_new_addr = io.in.bits.resp_in(0).s2.fallThroughAddr
   spec_ras.push_valid := spec_push
   spec_ras.pop_valid  := spec_pop
   spec_ras.spec_new_addr := spec_new_addr
   val spec_top_addr = spec_ras.top.retAddr
 
   // confirm that the call/ret is the taken cfi
-  spec_push := io.s3_fire && io.in.bits.resp_in(0).s3.hit_taken_on_call
-  spec_pop  := io.s3_fire && io.in.bits.resp_in(0).s3.hit_taken_on_ret
+  spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_call
+  spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
   
   when (spec_pop) {
-    io.out.resp.s3.ftb_entry.jmpTarget := spec_top_addr
+    io.out.resp.s2.ftb_entry.jmpTarget := spec_top_addr
   }
 
-  io.out.resp.s3.rasSp  := spec_ras.sp
-  io.out.resp.s3.rasTop := spec_ras.top
+  io.out.resp.s2.rasSp  := spec_ras.sp
+  io.out.resp.s2.rasTop := spec_ras.top
+  
+  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   val redirect = RegNext(io.redirect)
   val do_recover = redirect.valid
@@ -198,7 +200,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
       XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
           spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-      XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s3.target)
+      XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.target)
       val redirectUpdate = redirect.bits.cfiUpdate
       XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
           do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)

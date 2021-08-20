@@ -36,6 +36,21 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
     val carry = startAddr(carryPos) =/= fallThruAddr(carryPos)
     !carry && getLower(startAddr) > getLower(fallThruAddr)
   }
+  def fromFtqPcBundle(b: Ftq_RF_Components) = {
+    this.startAddr := b.startAddr
+    this.fallThruAddr := b.getFallThrough()
+    this.oversize := b.oversize
+    this
+  }
+  def fromBpuResp(resp: BranchPredictionBundle) = {
+    // only used to bypass, so some fields remains unchanged
+    this.startAddr := resp.pc
+    this.target := resp.target
+    this.ftqOffset := resp.genCfiIndex
+    this.fallThruAddr := resp.fallThroughAddr
+    this.oversize := resp.ftb_entry.oversize
+    this
+  }
   override def toPrintable: Printable = {
     p"[start] ${Hexadecimal(startAddr)} [pft] ${Hexadecimal(fallThruAddr)}" +
       p"[tgt] ${Hexadecimal(target)} [ftqIdx] $ftqIdx [jmp] v:${ftqOffset.valid}" +
@@ -147,6 +162,11 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
 
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils{
   val pc = UInt(VAddrBits.W)
+  
+  val valid = Bool()
+  
+  val hasRedirect = Bool()
+  val ftq_idx = new FtqPtr
   // val hit = Bool()
   val preds = new BranchPrediction
 
@@ -184,6 +204,15 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
       pc + (FetchWidth*4).U
     )
   }
+  def genCfiIndex = {
+    val cfiIndex = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+    cfiIndex.valid := real_taken_mask.asUInt.orR
+    // when no takens, set cfiIndex to PredictWidth-1
+    cfiIndex.bits :=
+      ParallelPriorityMux(real_taken_mask, ftb_entry.getOffsetVec) |
+      Fill(log2Ceil(PredictWidth), (!real_taken_mask.asUInt.orR).asUInt)
+    cfiIndex
+  }
 
 
   // override def toPrintable: Printable = {
@@ -206,24 +235,21 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle()
   val s2 = new BranchPredictionBundle()
-  val s3 = new BranchPredictionBundle()
+  val s3 = new BranchPredictionBundle() 
+  
+  def lastStage = s3
 }
 
-class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionBundle with HasBPUConst {
+class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp with HasBPUConst {
   val meta = UInt(MaxMetaLength.W)
 }
 
 object BpuToFtqBundle {
-  def apply(resp: BranchPredictionBundle)(implicit p: Parameters): BpuToFtqBundle = {
+  def apply(resp: BranchPredictionResp)(implicit p: Parameters): BpuToFtqBundle = {
     val e = Wire(new BpuToFtqBundle())
-    e.pc := resp.pc
-    e.preds := resp.preds
-    e.ghist := resp.ghist
-    e.phist := resp.phist
-    e.rasSp := resp.rasSp
-    e.rasTop := resp.rasTop
-    e.specCnt := resp.specCnt
-    e.ftb_entry := resp.ftb_entry
+    e.s1 := resp.s1
+    e.s2 := resp.s2
+    e.s3 := resp.s3
 
     e.meta := DontCare
     e
