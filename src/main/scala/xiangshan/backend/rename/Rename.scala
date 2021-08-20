@@ -394,4 +394,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && !intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && io.roqCommits.isWalk)
+  XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
+  XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
+  XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
+  XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
+  XSPerfAccumulate("move_elim_cancelled_cnt_limit", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)))))
+  XSPerfAccumulate("move_elim_cancelled_inc_more_than_one", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR })))
 }
