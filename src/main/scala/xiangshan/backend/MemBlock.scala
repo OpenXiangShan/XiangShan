@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, TlbPtwIO, BridgeTLB}
+import xiangshan.cache.mmu.{TLB, BTlbPtwIO, BridgeTLB}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
 import utils._
@@ -63,7 +63,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new TlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
+    val ptw = new BTlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)

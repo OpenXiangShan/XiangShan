@@ -68,8 +68,9 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
     hitEntry.suggestName("hitEntry")
     hit.suggestName("hit")
 
-    resp(i).bits := hitEntry
-    resp(i).valid := RegNext(req(i)(0).valid) && hit
+    resp(i).valid := (RegNext(req(i)(0).valid) && hit) ||
+      (io.ptw.resp.valid && io.ptw.resp.bits.vector(i))
+    resp(i).bits := Mux(RegNext(req(i)(0).valid) && hit, hitEntry, io.ptw.resp.bits.data)
 
     req(i)(0).ready := true.B // TODO: handle the ready
     io.ptw.req(i).valid := RegNext(req(i)(0).valid) && !hit
@@ -85,7 +86,7 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
 
   when (io.ptw.resp.valid) {
     entries_v(refillIdx) := true.B
-    entries(refillIdx) := io.ptw.resp.bits
+    entries(refillIdx) := io.ptw.resp.bits.data
   }
   io.ptw.resp.ready := true.B
 
@@ -108,11 +109,11 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   }
 
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.data.pf)
   for (i <- 0 until BTlbEntrySize) {
     XSPerfAccumulate(s"RefillIndex${i}", ptw.resp.valid && i.U === refillIdx)
   }
-  XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 2.U)
-  XSPerfAccumulate(s"Refill2MBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 1.U)
-  XSPerfAccumulate(s"Refill1GBPage", ptw.resp.valid && ptw.resp.bits.entry.level.get === 0.U)
+  XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 2.U)
+  XSPerfAccumulate(s"Refill2MBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 1.U)
+  XSPerfAccumulate(s"Refill1GBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 0.U)
 }
