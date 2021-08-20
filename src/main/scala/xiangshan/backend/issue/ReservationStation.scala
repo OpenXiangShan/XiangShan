@@ -241,6 +241,9 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   val store = if (params.isStore) Some(new Bundle {
     val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
   }) else None
+
+  override def cloneType: ReservationStationIO.this.type =
+    new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule {
