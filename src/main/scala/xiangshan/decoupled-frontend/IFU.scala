@@ -350,14 +350,14 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val reservedRefillData = Reg(Vec(2, UInt(blockBits.W)))
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire) 
   val f2_datas        = Wire(Vec(2, UInt(blockBits.W)))
+
   f2_datas.zipWithIndex.map{case(bank,i) =>  
     if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(2),reservedRefillData(1),Mux(sec_miss_reg(0),reservedRefillData(0), f2_mq_datas(i))))
     else bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(sec_miss_reg(3),reservedRefillData(1),Mux(sec_miss_reg(1),reservedRefillData(0), f2_mq_datas(i))))
   }
-  
+
   val f2_jump_valids          = Fill(PredictWidth, !preDecoderOut.cfiOffset.valid)   | Fill(PredictWidth, 1.U(1.W)) >> (~preDecoderOut.cfiOffset.bits)
   val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
-
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     if(HasCExtension){
@@ -416,11 +416,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     hasSecMiss := false.B
   }
 
-  when(f2_0_f1_0 || f2_0_f1_1){
+  when((f2_0_f1_0 || f2_0_f1_1) && io.toIbuffer.fire()){
     reservedRefillData(0) := f2_mq_datas(0)
   }
 
-  when(f2_1_f1_0 || f2_1_f1_1){
+  when((f2_1_f1_0 || f2_1_f1_1) && io.toIbuffer.fire()){
     reservedRefillData(1) := f2_mq_datas(1)
   }
 
