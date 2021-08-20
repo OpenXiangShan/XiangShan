@@ -98,7 +98,7 @@ object XiangShan extends CommonModule with SbtModule {
 
   object test extends Tests {
 
-    override def forkArgs = Seq("-Xmx64G")
+    override def forkArgs = Seq("-Xmx64G", "-Xss256m")
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.0"
