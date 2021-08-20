@@ -76,6 +76,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data          = if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))  
   val startAddr     = UInt(VAddrBits.W)
   val fallThruAddr  = UInt(VAddrBits.W)
+  val isDoubleLine  = Bool()
   val ftqOffset     = Valid(UInt(log2Ceil(PredictWidth).W))
   val target        = UInt(VAddrBits.W)
   val pageFault     = Vec(2, Bool())
@@ -243,15 +244,15 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (miss0_resp, miss1_resp) = (fromMissQueue(0).fire(), fromMissQueue(1).fire())
   val (bank0_fix, bank1_fix)   = (miss0_resp  && !f2_bank_hit(0), miss1_resp && f2_doubleLine && !f2_bank_hit(1))
 
-  val  only_0_miss = f2_valid && !f2_hit && !f2_doubleLine
-  val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine ),
-                                                          (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine ),
-                                                          (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine),
+  val  only_0_miss = f2_valid && !f2_hit && !f2_doubleLine && !f2_has_except
+  val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine  && !f2_has_except),
+                                                          (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine  && !f2_has_except),
+                                                          (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine && !f2_has_except),
                                                        )
 
   val  hit_0_except_1  = f2_valid && f2_doubleLine &&  !f2_except(0) && f2_except(1)  &&  f2_bank_hit(0)                                               
   val  miss_0_except_1 = f2_valid && f2_doubleLine &&  !f2_except(0) && f2_except(1)  && !f2_bank_hit(0)   
-  val  fetch0_except_1 = hit_0_except_1 || miss_0_except_1
+  //val  fetch0_except_1 = hit_0_except_1 || miss_0_except_1
   val  except_0        = f2_valid && f2_except(0)                                                   
 
   val f2_mq_datas     = Reg(Vec(2, UInt(blockBits.W)))   
@@ -386,6 +387,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   preDecoderIn.data          :=  cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
   preDecoderIn.startAddr     :=  f2_ftq_req.startAddr
   preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
+  preDecoderIn.isDoubleLine  :=  f2_doubleLine
   preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
   preDecoderIn.target        :=  f2_ftq_req.target
   preDecoderIn.oversize      :=  f2_ftq_req.oversize
