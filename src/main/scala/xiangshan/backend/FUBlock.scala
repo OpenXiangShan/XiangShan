@@ -23,6 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
+import xiangshan.mem.StoreDataBundle
 
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
@@ -87,11 +88,13 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
   val hasFence = configs.map(_._1).contains(JumpCSRExeUnitCfg)
   val hasFrm = configs.map(_._1).contains(FmacExeUnitCfg) || configs.map(_._1).contains(FmiscExeUnitCfg)
   val numRedirectOut = configs.filter(_._1.hasRedirect).map(_._2).sum
+  val numStd = configs.filter(_._1 == StdExeUnitCfg).map(_._2).sum
 
   val exuRedirect = Vec(numRedirectOut, ValidIO(new ExuOutput))
   val csrio = if (hasCSR) Some(new CSRFileIO) else None
   val fenceio = if (hasFence) Some(new FenceIO) else None
   val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
+  val stData = if (numStd > 0) Some(Vec(numStd, ValidIO(new StoreDataBundle))) else None
 
   override def cloneType: FUBlockExtraIO.this.type =
     new FUBlockExtraIO(configs).asInstanceOf[this.type]
@@ -113,9 +116,12 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   })
 
   val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
-
+  println(exeUnits)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
-  val fpExeUnits = exeUnits.filter(_.config.readFpRf)
+  // TODO: deal with Std units
+  val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
+  val stdExeUnits = exeUnits.filter(_.config.readIntRf).filter(_.config.readFpRf)
+  stdExeUnits.foreach(_.io.fromFp := DontCare)
   io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
@@ -159,5 +165,9 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
 
       exu.frm.get := io.extra.frm.get
     }
+  }
+
+  if (io.extra.stData.isDefined) {
+    io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
   }
 }

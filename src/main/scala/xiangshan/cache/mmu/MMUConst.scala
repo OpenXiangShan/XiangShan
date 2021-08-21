@@ -96,7 +96,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val ptwl2Replacer = Some("setplru")
 
   // ptwl3: 16-way group-associated
-  val PtwL3WayNum = 16
+  val PtwL3WayNum = 8
   val PtwL3WaySize = PtwL3EntrySize / PtwL3WayNum
   val PtwL3SectorSize = MemBandWidth / XLEN
   val PtwL3LineSize = PtwL3SectorSize * PtwL3WayNum
