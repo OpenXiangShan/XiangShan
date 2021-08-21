@@ -30,6 +30,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     // select for issue
     val request = Input(UInt(params.numEntries.W))
     val grant = Vec(params.numDeq, DecoupledIO(UInt(params.numEntries.W))) //TODO: optimize it
+    val best = Input(UInt(params.numEntries.W))
   })
 
   val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq > 2) "circ" else "naive"
@@ -46,11 +47,15 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
+  val debugGrantValid = Wire(Vec(params.numDeq, Bool()))
+  val debugGrantBits  = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   // a better one: select from both directions
   val request = io.request.asBools
   val select = SelectOne(policy, request, params.numDeq)
   for (i <- 0 until params.numDeq) {
     val sel = select.getNthOH(i + 1)
+    debugGrantValid(i) := sel._1
+    debugGrantBits(i) := sel._2.asUInt
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
 
@@ -59,4 +64,63 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
   }
 
+  // override the last grant if not selected
+  val inGrant = debugGrantValid.zip(debugGrantBits).map{ case (v, b) => v && b === io.best }
+  val best_not_selected = (io.request & io.best).orR && !VecInit(inGrant).asUInt.orR
+  when (best_not_selected) {
+    io.grant.last.valid := true.B
+    io.grant.last.bits := io.best
+  }
+}
+
+class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val enq = Vec(numEnq, Input(UInt(numEntries.W)))
+    val deq = Input(UInt(numEntries.W))
+    val out = Output(UInt(numEntries.W))
+  })
+
+  // age(i)(j): entry i enters queue before entry j
+  val validVec = RegInit(VecInit(Seq.fill(numEntries)(false.B)))
+  val age = Seq.fill(numEntries)(Seq.fill(numEntries)(RegInit(false.B)))
+
+  for ((row, i) <- age.zipWithIndex) {
+    // (1) when entry i is flushed or dequeues, set row(i) to false.B
+    val thisFlushed = io.deq(i)
+    val thisEnqueue = VecInit(io.enq.map(_(i))).asUInt.orR
+    val thisValid = validVec(i) || thisEnqueue
+    for ((elem, j) <- row.zipWithIndex) {
+      // (2) when entry j is flushed or dequeues, set column(j) to validVec
+      val otherFlushed = io.deq(j)
+      when (thisFlushed) {
+        elem := false.B
+      }.elsewhen (otherFlushed) {
+        elem := thisValid
+      }.otherwise {
+        elem := elem
+        for (k <- 0 until numEnq) {
+          when (io.enq(k)(i)) {
+            // (3) when enqueue, set age to ~validVec or enqueueFromPreviousPorts
+            elem := !validVec(j) && (if (k > 0) !VecInit(io.enq.take(k).map(_(j))).asUInt.orR else true.B)
+          }
+        }
+      }
+    }
+    when (thisFlushed) {
+      validVec(i) := false.B
+    }.elsewhen (thisEnqueue) {
+      validVec(i) := true.B
+    }
+  }
+
+  io.out := VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt
+}
+
+object AgeDetector {
+  def apply(numEntries: Int, enq: Vec[UInt], deq: UInt)(implicit p: Parameters): UInt = {
+    val age = Module(new AgeDetector(numEntries, enq.length))
+    age.io.enq := enq
+    age.io.deq := deq
+    age.io.out
+  }
 }

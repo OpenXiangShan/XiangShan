@@ -226,6 +226,8 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       statusArray.io.wakeup(i).valid := wakeupValid(i)
       statusArray.io.wakeup(i).bits := wakeupDest(i)
     }
+    val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
+    select.io.best := AgeDetector(params.numEntries, enqVec, statusArray.io.flushed)
 
     /**
       * S1: scheduler (and regfile read)
