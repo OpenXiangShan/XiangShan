@@ -22,20 +22,19 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class FreeListPtr(implicit val p: Parameters) extends CircularQueuePtr[FreeListPtr](
-  p => p(XSCoreParamsKey).NRPhyRegs - 32
-)
-
-object FreeListPtr {
-  def apply(f: Bool, v:UInt)(implicit p: Parameters): FreeListPtr = {
-    val ptr = Wire(new FreeListPtr)
-    ptr.flag := f
-    ptr.value := v
-    ptr
-  }
-}
-
 class FreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper{
+
+  class FreeListPtr extends CircularQueuePtr[FreeListPtr](StdFreeListSize)
+
+  object FreeListPtr {
+    def apply(f: Bool, v:UInt): FreeListPtr = {
+      val ptr = Wire(new FreeListPtr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
+
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
     val flush = Input(Bool())
@@ -60,10 +59,8 @@ class FreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtr
     val deallocPregs = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
   })
 
-  val FL_SIZE = NRPhyRegs - 32
-
   // init: [32, 127]
-  val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i+32).U(PhyRegIdxWidth.W))))
+  val freeList = RegInit(VecInit(Seq.tabulate(StdFreeListSize)(i => (i+32).U(PhyRegIdxWidth.W))))
   val headPtr = RegInit(FreeListPtr(false.B, 0.U))
   val tailPtr = RegInit(FreeListPtr(true.B, 0.U))
 
@@ -118,9 +115,9 @@ class FreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtr
 
   val enableFreelistCheck = false
   if (enableFreelistCheck) {
-    for (i <- 0 until FL_SIZE) {
-      for (j <- i+1 until FL_SIZE) {
-        XSError(freeList(i) === freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+    for (i <- 0 until StdFreeListSize) {
+      for (j <- i+1 until StdFreeListSize) {
+        XSError(freeList(i) === freeList(j), s"Found same entry in freelist! (i=$i j=$j)\n")
       }
     }
   }

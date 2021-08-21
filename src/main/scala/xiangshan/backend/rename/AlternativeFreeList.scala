@@ -23,20 +23,19 @@ import xiangshan._
 import xiangshan.backend.rename._
 import utils._
 
-class IntFreeListPtr(implicit val p: Parameters) extends CircularQueuePtr[IntFreeListPtr](
-  p => p(XSCoreParamsKey).NRPhyRegs // TODO depends on size of free list
-)
-
-object IntFreeListPtr {
-  def apply(f: Bool, v:UInt)(implicit p: Parameters): IntFreeListPtr = {
-    val ptr = Wire(new IntFreeListPtr)
-    ptr.flag := f
-    ptr.value := v
-    ptr
-  }
-}
-
 class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+
+  class IntFreeListPtr extends CircularQueuePtr[IntFreeListPtr](AltFreeListSize)
+
+  object IntFreeListPtr {
+    def apply(f: Bool, v:UInt): IntFreeListPtr = {
+      val ptr = Wire(new IntFreeListPtr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
+
   val io = IO(new Bundle() {
 
     val flush = Input(Bool())
@@ -75,25 +74,22 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     val maxVec = Vec(NRPhyRegs, Output(Bool()))
   })
 
-  val FL_SIZE = NRPhyRegs // TODO calculate max number of free list using NRPhyRegs and width of counter
-  val COUNTER_WIDTH = 2.W // width of reference counters below
-
   // recording referenced times of each physical registers
-  val archRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
-  val specRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
-  val cmtCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
+  val archRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(IntRefCounterWidth.W))))
+  val specRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(IntRefCounterWidth.W))))
+  val cmtCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(IntRefCounterWidth.W))))
 
-  val archRefCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
+  val archRefCounterNext = Wire(Vec(NRPhyRegs, UInt(IntRefCounterWidth.W)))
   archRefCounterNext.foreach(_ := DontCare)
   val updateArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
   val clearArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
 
-  val specRefCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
+  val specRefCounterNext = Wire(Vec(NRPhyRegs, UInt(IntRefCounterWidth.W)))
   specRefCounterNext.foreach(_ := DontCare)
   val updateSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // update with xxxNext
   val clearSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // reset to zero
 
-  val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
+  val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(IntRefCounterWidth.W)))
   cmtCounterNext.foreach(_ := DontCare)
   val updateCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
   val clearCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
@@ -108,7 +104,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   val freeRegCnt = Wire(UInt())
 
   // free list as circular buffer
-  val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE){
+  val freeList = RegInit(VecInit(Seq.tabulate(AltFreeListSize){
     case n if (n >= 0 && n < NRPhyRegs - 32) => (n + 32).U
     case _ => DontCare
   }))
@@ -116,7 +112,7 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   // head and tail pointer
   val headPtr = RegInit(IntFreeListPtr(false.B, 0.U))
 
-  val tailPtr = RegInit(IntFreeListPtr(false.B, (NRPhyRegs-32).U)) // TODO change 128 into parameters
+  val tailPtr = RegInit(IntFreeListPtr(false.B, (NRPhyRegs-32).U))
 
 
   /*
@@ -341,8 +337,8 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
     XSError(specRefCounter(i) < cmtCounter(i), p"Commits Overflow of preg${i}")
   }
 
-  XSDebug(Array.range(0, FL_SIZE).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
-  XSDebug(p"Free List (val): " + Array.range(0, FL_SIZE).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
+  XSDebug(Array.range(0, AltFreeListSize).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
+  XSDebug(p"Free List (val): " + Array.range(0, AltFreeListSize).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
 
   XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext tailPtrNext:$tailPtrNext freeRegCnt:$freeRegCnt\n")
 
