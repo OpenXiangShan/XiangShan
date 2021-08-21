@@ -97,6 +97,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
   val resp_vector = ParallelMux(ptwResp_oldMatchVec zip ports)
+  val resp_still_valid = ParallelOR(ptwResp_oldMatchVec).asBool
 
   def canMerge(index: Int) : Bool = {
     ptwResp_newMatchVec(index) ||
@@ -128,7 +129,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val canEnqueue = counter +& enqNum <= Size.U
 
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
-  io.tlb.resp.valid := ptwResp_valid
+  io.tlb.resp.valid := ptwResp_valid && resp_still_valid
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
   io.ptw.req(0).valid := v(issPtr) && !isEmptyIss && !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn))
