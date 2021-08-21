@@ -67,7 +67,7 @@ class FreeList(implicit p: Parameters) extends XSModule with HasCircularQueuePtr
   val headPtr = RegInit(FreeListPtr(false.B, 0.U))
   val tailPtr = RegInit(FreeListPtr(true.B, 0.U))
 
-  val checkPoints = Reg(Vec(BrqSize, new FreeListPtr()))
+  // val checkPoints = Reg(Vec(BrqSize, new FreeListPtr()))
 
   // dealloc: commited instructions's 'old_pdest' enqueue
   for(i <- 0 until CommitWidth){
