@@ -69,7 +69,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     exuCfg match {
       case JumpCSRExeUnitCfg => params.isJump = true
       case AluExeUnitCfg => params.isAlu = true
-      case StExeUnitCfg => params.isStore = true
+      case StaExeUnitCfg => params.isStore = true
       case MulDivExeUnitCfg => params.isMul = true
       case _ =>
     }
@@ -77,7 +77,7 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
     if (exuCfg == JumpCSRExeUnitCfg) {
       params.numSrc = 2
     }
-    if (exuCfg == StExeUnitCfg || exuCfg == LdExeUnitCfg) {
+    if (exuCfg == StaExeUnitCfg || exuCfg == LdExeUnitCfg) {
       params.hasFeedback = true
       params.checkWaitBit = true
     }
@@ -239,10 +239,12 @@ class ReservationStation(implicit p: Parameters) extends LazyModule with HasXSPa
       statusArray.io.deqResp(i).valid := select.io.grant(i).fire
       statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
       statusArray.io.deqResp(i).bits.success := io.deq(i).ready
+      statusArray.io.deqResp(i).bits.resptype := DontCare
       if (io_feedback.isDefined) {
         statusArray.io.deqResp(i).valid := io_feedback.get.memfeedback(i).valid
         statusArray.io.deqResp(i).bits.rsMask := UIntToOH(io_feedback.get.memfeedback(i).bits.rsIdx)
         statusArray.io.deqResp(i).bits.success := io_feedback.get.memfeedback(i).bits.hit
+        statusArray.io.deqResp(i).bits.resptype := io_feedback.get.memfeedback(i).bits.sourceType
       }
       payloadArray.io.read(i).addr := select.io.grant(i).bits
       if (io_fastWakeup.isDefined) {
