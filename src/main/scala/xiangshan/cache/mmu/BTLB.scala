@@ -54,10 +54,11 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   // val waiting_set = Reg(Vec(Width, Vec(WaitingSetSize, UInt(vpnLen.W))))
   // val waiting_set_v = RegInit(Vec(Width, Vec(WaitingSetSize, false.B)))
 
+  val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(BTlbEntrySize-1, 0), 0.U).asBools
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
-    val hitVec = VecInit(entries.zip(entries_v).map{ case (e, v) =>
-      e.entry.hit(vpn, allType = true) && v
+    val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
+      e.entry.hit(vpn, allType = true) && entries_v(i) && ~refillMask(i)
     })
 
     hitVec.suggestName("hitVec")
@@ -77,7 +78,10 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
     io.ptw.req(i).bits.vpn := RegNext(vpn)
 
     XSPerfAccumulate("access" + Integer.toString(i, 10), req(i)(0).valid)
-    XSPerfAccumulate("hit" + Integer.toString(i, 10), !(RegNext(req(i)(0).valid) && !hit))
+    XSPerfAccumulate("hit" + Integer.toString(i, 10), RegNext(req(i)(0).valid) && hit)
+    XSPerfAccumulate("hit_resp_conflit" + Integer.toString(i, 10), (RegNext(req(i)(0).valid) && hit) && (io.ptw.resp.valid && io.ptw.resp.bits.vector(i)))
+    XSPerfAccumulate("hit_out" + Integer.toString(i, 10), (RegNext(req(i)(0).valid) && hit) && !(io.ptw.resp.valid && io.ptw.resp.bits.vector(i)))
+    XSPerfAccumulate("resp_out" + Integer.toString(i, 10), !(RegNext(req(i)(0).valid) && hit) && (io.ptw.resp.valid && io.ptw.resp.bits.vector(i)))
   }
 
   when (Cat(io.ptw.req.map(_.valid)).orR) {
@@ -109,6 +113,7 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   }
 
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
+  XSPerfAccumulate("ptw_resp_vector_count", Mux(ptw.resp.fire(), PopCount(ptw.resp.bits.vector), 0.U))
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.data.pf)
   for (i <- 0 until BTlbEntrySize) {
     XSPerfAccumulate(s"RefillIndex${i}", ptw.resp.valid && i.U === refillIdx)
