@@ -48,7 +48,8 @@ object AddressSpace {
     MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
     MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
     MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
-    MemMap("h00_3802_0000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule",    "RWX"),
+    MemMap("h00_3802_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
     MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
     MemMap("h00_8000_0000", "h1F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
@@ -56,7 +57,8 @@ object AddressSpace {
 
   def FullMemMapList = List(
     //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
-    MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
+    MemMap("h00_0000_0000", "h00_0000_0FFF",   "h0", "DebugModule",    "RWX"),
+    MemMap("h00_0000_1000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
     MemMap("h00_2000_0000", "h00_2FFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_3000_0000", "h00_3000_FFFF",   "h0", "DMA",         "RW"),
