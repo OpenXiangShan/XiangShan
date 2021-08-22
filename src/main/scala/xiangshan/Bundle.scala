@@ -286,6 +286,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
+  val singleStep = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -304,8 +305,7 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 }
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
-  val src1MoveElim = Bool()
-  val src2MoveElim = Bool()
+  val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
   val renameTime = UInt(64.W)
   val dispatchTime = UInt(64.W)
@@ -330,6 +330,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
+  val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = true) : Bool = {
     (index, rfType) match {
@@ -406,6 +407,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val debug = Input(Bool())
 }
 
 class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
@@ -428,6 +430,7 @@ class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
+  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr

@@ -21,6 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import utils.{XSDebug, XSPerfAccumulate}
 import xiangshan._
+import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
@@ -70,6 +71,16 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
     i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr_frm)
   }
 
+  if (config.fuConfigs.contains(stdCfg)) {
+    val std = supportedFunctionUnits.collectFirst {
+      case s: Std => s
+    }.get
+    stData.get.valid := std.io.out.valid
+    stData.get.bits.uop := std.io.out.bits.uop
+    stData.get.bits.data := std.io.out.bits.data
+    io.out.valid := false.B
+    io.out.bits := DontCare
+  }
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out
@@ -85,6 +96,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
 class AluExeUnit(implicit p: Parameters) extends ExeUnit(AluExeUnitCfg)
 class JumpCSRExeUnit(implicit p: Parameters) extends ExeUnit(JumpCSRExeUnitCfg)
 class JumpExeUnit(implicit p: Parameters) extends ExeUnit(JumpExeUnitCfg)
+class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 
 object ExeUnit {
   def apply(cfg: ExuConfig)(implicit p: Parameters): ExeUnit = {
@@ -95,7 +107,11 @@ object ExeUnit {
       case JumpCSRExeUnitCfg => Module(new JumpCSRExeUnit)
       case FmacExeUnitCfg => Module(new FmacExeUnit)
       case FmiscExeUnitCfg => Module(new FmiscExeUnit)
-      case _ => null
+      case StdExeUnitCfg => Module(new StdExeUnit)
+      case _ => {
+        println(s"cannot generate exeUnit from $cfg")
+        null
+      }
     }
   }
 }
