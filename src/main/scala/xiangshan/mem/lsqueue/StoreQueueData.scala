@@ -29,20 +29,18 @@ import xiangshan.backend.roq.RoqPtr
 
 // Data module define
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
-class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class SQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
-    val rdata = Output(Vec(numRead, UInt(dataWidth.W)))
+    val rdata = Output(Vec(numRead, UInt((PAddrBits).W)))
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
-    val wdata = Input(Vec(numWrite, UInt(dataWidth.W)))
-    val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W)))
+    val wdata = Input(Vec(numWrite, UInt((PAddrBits).W)))
+    val forwardMdata = Input(Vec(numForward, UInt((PAddrBits).W)))
     val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool())))
-    val debug_data = Output(Vec(numEntries, UInt(dataWidth.W)))
   })
 
-  val data = Reg(Vec(numEntries, UInt(dataWidth.W)))
-  io.debug_data := data
+  val data = Reg(Vec(numEntries, UInt((PAddrBits).W)))
 
   // read ports
   for (i <- 0 until numRead) {
@@ -59,7 +57,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
   // content addressed match
   for (i <- 0 until numForward) {
     for (j <- 0 until numEntries) {
-      io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
+      io.forwardMmask(i)(j) := io.forwardMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
     }
   }
 
@@ -77,29 +75,29 @@ class SQData8Entry(implicit p: Parameters) extends XSBundle {
   val data = UInt((XLEN/8).W)
 }
 
-class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQData8Module(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
+    val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQData8Entry))
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
-      val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
       val wdata = Vec(numWrite, Input(UInt((XLEN/8).W)))
     }
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
-      val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
       val wdata = Vec(numWrite, Input(Bool()))
     }
 
-    val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
+    val needForward = Input(Vec(numForward, Vec(2, UInt(size.W))))
     val forwardValid = Vec(numForward, Output(Bool()))
     val forwardData = Vec(numForward, Output(UInt(8.W)))
   })
 
   io := DontCare
 
-  val data = Reg(Vec(numEntries, new SQData8Entry))
+  val data = Reg(Vec(size, new SQData8Entry))
 
   // writeback to sq
   (0 until numWrite).map(i => {
@@ -142,7 +140,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 
   (0 until numForward).map(i => {
     // parallel fwd logic
-    val matchResultVec = Wire(Vec(numEntries * 2, new FwdEntry))
+    val matchResultVec = Wire(Vec(size * 2, new FwdEntry))
 
     def parallelFwd(xs: Seq[Data]): Data = {
       ParallelOperation(xs, (a: Data, b: Data) => {
@@ -156,18 +154,18 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
     }
 
     // paddrMatch is now included in io.needForward
-    // for (j <- 0 until numEntries) {
+    // for (j <- 0 until size) {
     //   paddrMatch(j) := io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
     // }
 
-    for (j <- 0 until numEntries) {
+    for (j <- 0 until size) {
       val needCheck0 = RegNext(io.needForward(i)(0)(j))
       val needCheck1 = RegNext(io.needForward(i)(1)(j))
       (0 until XLEN / 8).foreach(k => {
         matchResultVec(j).valid := needCheck0 && data(j).valid
         matchResultVec(j).data := data(j).data
-        matchResultVec(numEntries + j).valid := needCheck1 && data(j).valid
-        matchResultVec(numEntries + j).data := data(j).data
+        matchResultVec(size + j).valid := needCheck1 && data(j).valid
+        matchResultVec(size + j).data := data(j).data
       })
     }
 
@@ -185,27 +183,27 @@ class SQDataEntry(implicit p: Parameters) extends XSBundle {
   val data = UInt(XLEN.W)
 }
 
-class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class SQDataModule(size: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
+    val raddr = Vec(numRead,  Input(UInt(log2Up(size).W)))
     val rdata = Vec(numRead,  Output(new SQDataEntry))
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
-      val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
       val wdata = Vec(numWrite, Input(UInt(XLEN.W)))
     }
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
-      val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
+      val waddr = Vec(numWrite, Input(UInt(log2Up(size).W)))
       val wdata = Vec(numWrite, Input(UInt(8.W)))
     }
 
-    val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
+    val needForward = Input(Vec(numForward, Vec(2, UInt(size.W))))
     val forwardMask = Vec(numForward, Output(Vec(8, Bool())))
     val forwardData = Vec(numForward, Output(Vec(8, UInt(8.W))))
   })
 
-  val data8 = Seq.fill(8)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
+  val data8 = Seq.fill(8)(Module(new SQData8Module(size, numRead, numWrite, numForward)))
 
   // writeback to lq/sq
   for (i <- 0 until numWrite) {
