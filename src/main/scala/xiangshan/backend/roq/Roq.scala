@@ -180,8 +180,9 @@ class RoqExceptionInfo(implicit p: Parameters) extends XSBundle {
   val exceptionVec = ExceptionVec()
   val flushPipe = Bool()
   val singleStep = Bool()
+  val replayInst = Bool() // redirect to that inst itself
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || replayInst || singleStep
   // only exceptions are allowed to writeback when enqueue
   def can_writeback = exceptionVec.asUInt.orR || singleStep
 }
@@ -242,6 +243,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
         current.bits.exceptionVec := (s1_out_bits.exceptionVec.asUInt | current.bits.exceptionVec.asUInt).asTypeOf(ExceptionVec())
         current.bits.flushPipe := s1_out_bits.flushPipe || current.bits.flushPipe
         current.bits.singleStep := s1_out_bits.singleStep || current.bits.singleStep
+        current.bits.replayInst := s1_out_bits.replayInst || current.bits.replayInst
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
@@ -261,6 +263,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
 class RoqFlushInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val replayInst = Bool()
 }
 
 class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -386,6 +389,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       val wbIdx = io.exeWbResults(i).bits.uop.roqIdx.value
       debug_microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       debug_microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
+      debug_microOp(wbIdx).cf.replayInst := io.exeWbResults(i).bits.uop.cf.replayInst
       debug_microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
       debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
@@ -418,12 +422,14 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.roqIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && exceptionDataRead.bits.exceptionVec.asUInt.orR
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
+  val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
-  val isFlushPipe = writebacked(deqPtr.value) && deqHasFlushPipe
+  val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
 
   io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
   io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
   io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
+  io.flushOut.bits.replayInst := deqHasReplayInst
 
   val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable)
   io.exception.valid := RegNext(exceptionHappen)
@@ -494,7 +500,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException
+    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying
     io.commits.info(i)  := dispatchDataRead(i)
 
@@ -695,7 +701,10 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   for (i <- 0 until numWbPorts) {
     when (io.exeWbResults(i).valid) {
       val wbIdx = io.exeWbResults(i).bits.uop.roqIdx.value
-      val block_wb = selectAll(io.exeWbResults(i).bits.uop.cf.exceptionVec, false, true).asUInt.orR || io.exeWbResults(i).bits.uop.ctrl.flushPipe
+      val block_wb = 
+        selectAll(io.exeWbResults(i).bits.uop.cf.exceptionVec, false, true).asUInt.orR || 
+        io.exeWbResults(i).bits.uop.ctrl.flushPipe ||
+        io.exeWbResults(i).bits.uop.cf.replayInst
       writebacked(wbIdx) := !block_wb
     }
   }
@@ -749,6 +758,8 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.enq(i).bits.exceptionVec := selectFrontend(io.enq.req(i).bits.cf.exceptionVec, false, true)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
+    exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.cf.replayInst
+    assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
   }
 
   // TODO: don't hard code these idxes
@@ -772,6 +783,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.wb(index).bits.exceptionVec := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
     exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
     exceptionGen.io.wb(index).bits.singleStep   := false.B
+    exceptionGen.io.wb(index).bits.replayInst    := io.exeWbResults(wb_index).bits.uop.cf.replayInst
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
