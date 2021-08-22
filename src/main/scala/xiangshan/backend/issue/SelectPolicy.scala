@@ -71,6 +71,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     io.grant.last.valid := true.B
     io.grant.last.bits := io.best
   }
+  XSPerfAccumulate("oldest_not_selected", best_not_selected)
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
