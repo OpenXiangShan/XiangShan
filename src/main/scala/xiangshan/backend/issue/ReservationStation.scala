@@ -467,7 +467,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
 
   // logs
-  for (dispatch <- io.fromDispatch) {
+  for ((dispatch, i) <- io.fromDispatch.zipWithIndex) {
     XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, roqIdx ${dispatch.bits.roqIdx}\n")
     XSDebug(dispatch.fire(), p"enq fire, roqIdx ${dispatch.bits.roqIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
     XSPerfAccumulate(s"allcoate_fire_$i", dispatch.fire())
@@ -477,13 +477,13 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       XSPerfAccumulate(s"load_wait_$i", dispatch.fire() && dispatch.bits.cf.loadWaitBit)
     }
   }
-  for (deq <- io.deq) {
+  for ((deq, i) <- io.deq.zipWithIndex) {
     XSDebug(deq.fire(), p"deq fire, roqIdx ${deq.bits.uop.roqIdx}\n")
     XSDebug(deq.valid && !deq.ready, p"deq blocked, roqIdx ${deq.bits.uop.roqIdx}\n")
     XSPerfAccumulate(s"deq_fire_$i", deq.fire())
     XSPerfAccumulate(s"deq_valid_$i", deq.valid)
     if (params.hasFeedback) {
-      XSPerfAccumulate(s"deq_not_first_issue_$i", deq.fire() && !io_feedback.get.isFirstIssue(i))
+      XSPerfAccumulate(s"deq_not_first_issue_$i", deq.fire() && !io.feedback.get(i).isFirstIssue)
     }
   }
 
