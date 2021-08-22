@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
-import xiangshan.backend.issue.ReservationStation
+import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
@@ -101,7 +101,7 @@ class Scheduler(
   println(s"inner fast: $innerFastPorts")
   val numAllFastPorts = innerFastPorts.zip(outFastPorts).map{ case (i, o) => i.length + o.length }
   val reservationStations = configs.zipWithIndex.map{ case ((config, numDeq, _, _), i) =>
-    val rs = LazyModule(new ReservationStation())
+    val rs = LazyModule(new ReservationStationWrapper())
     rs.addIssuePort(config, numDeq)
     rs.addWakeup(wakeupPorts(i))
     rs.addEarlyWakeup(numAllFastPorts(i))
@@ -275,30 +275,32 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
     val issueWidth = rs.io.deq.length
     rs.io.deq <> io.issue.slice(issueIdx, issueIdx + issueWidth)
-    if (rs.io_fastWakeup.isDefined) {
-      rs.io_fastWakeup.get <> io.fastUopOut.slice(issueIdx, issueIdx + issueWidth)
+    if (rs.io.fastWakeup.isDefined) {
+      rs.io.fastWakeup.get <> io.fastUopOut.slice(issueIdx, issueIdx + issueWidth)
     }
     issueIdx += issueWidth
 
-    if (rs.io_jump.isDefined) {
-      rs.io_jump.get.jumpPc := io.extra.jumpPc
-      rs.io_jump.get.jalr_target := io.extra.jalr_target
+    if (rs.io.jump.isDefined) {
+      rs.io.jump.get.jumpPc := io.extra.jumpPc
+      rs.io.jump.get.jalr_target := io.extra.jalr_target
     }
-    if (rs.io_checkwait.isDefined) {
-      rs.io_checkwait.get.stIssuePtr <> io.extra.stIssuePtr
+    if (rs.io.checkwait.isDefined) {
+      rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
     }
-    if (rs.io_feedback.isDefined) {
-      val width = rs.io_feedback.get.memfeedback.length
+    if (rs.io.feedback.isDefined) {
+      val width = rs.io.feedback.get.length
       val feedback = io.extra.feedback.get.slice(feedbackIdx, feedbackIdx + width)
-      require(feedback(0).rsIdx.getWidth == rs.io_feedback.get.rsIdx(0).getWidth)
-      rs.io_feedback.get.memfeedback <> feedback.map(_.replay)
-      rs.io_feedback.get.rsIdx <> feedback.map(_.rsIdx)
-      rs.io_feedback.get.isFirstIssue <> feedback.map(_.isFirstIssue)
+      require(feedback(0).rsIdx.getWidth == rs.io.feedback.get(0).rsIdx.getWidth)
+      rs.io.feedback.get.zip(feedback).foreach{ case (r, f) =>
+        r.memfeedback <> f.replay
+        r.rsIdx <> f.rsIdx
+        r.isFirstIssue <> f.isFirstIssue
+      }
       feedbackIdx += width
     }
-    if (false && rs.io_store.isDefined) {
-      val width = rs.io_store.get.stData.length
-      rs.io_store.get.stData <> stData.slice(stDataIdx, stDataIdx + width)
+    if (false && rs.io.store.isDefined) {
+      val width = rs.io.store.get.stData.length
+      rs.io.store.get.stData <> stData.slice(stDataIdx, stDataIdx + width)
       stDataIdx += width
     }
 
@@ -309,8 +311,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       case _ => throw new RuntimeException("unknown wakeup source")
     }
 
-    val innerIntUop = outer.innerIntFastSources(i).map(_._2).map(rs_all(_).module.io_fastWakeup.get).fold(Seq())(_ ++ _)
-    val innerFpUop = outer.innerFpFastSources(i).map(_._2).map(rs_all(_).module.io_fastWakeup.get).fold(Seq())(_ ++ _)
+    val innerIntUop = outer.innerIntFastSources(i).map(_._2).map(rs_all(_).module.io.fastWakeup.get).fold(Seq())(_ ++ _)
+    val innerFpUop = outer.innerFpFastSources(i).map(_._2).map(rs_all(_).module.io.fastWakeup.get).fold(Seq())(_ ++ _)
     val innerUop = innerIntUop ++ innerFpUop
     val innerData = outer.innerFastPorts(i).map(io.writeback(_).bits.data)
     node.connectFastWakeup(innerUop, innerData)
