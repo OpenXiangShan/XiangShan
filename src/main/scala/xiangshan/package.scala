@@ -22,6 +22,7 @@ import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -425,6 +426,7 @@ package object xiangshan {
   def f2iGen(p: Parameters) = new FPToInt()(p)
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
+  def stdGen(p: Parameters) = new Std()(p)
 
   def f2iSel(x: FunctionUnit): Bool = {
     x.io.in.bits.uop.ctrl.rfWen
@@ -563,17 +565,22 @@ package object xiangshan {
     UncertainLatency()
   )
 
-  val stuCfg = FuConfig(
+  val staCfg = FuConfig(
     null,
     null,
-    FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
+  )
+
+  val stdCfg = FuConfig(
+    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
   )
 
   val mouCfg = FuConfig(
     null,
     null,
-    FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
@@ -589,5 +596,6 @@ package object xiangshan {
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }
