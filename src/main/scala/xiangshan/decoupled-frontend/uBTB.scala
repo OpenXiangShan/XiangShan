@@ -38,32 +38,19 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 {
   def getTag(pc: UInt)  = (pc >> untaggedBits)(tagSize-1, 0)
 
-  class MicroBTBMeta extends FTBEntry
-  {
-    // val valid       = Bool()
-    // val tag         = UInt(tagSize.W)
-
-    // val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
-    // val brValids    = Vec(numBr, Bool())
-
-    // val jmpValid    = Bool() // include jal and jalr
-
-    // val carry       = Bool()
-
-    // val isCall      = Bool()
-    // val isRet       = Bool()
-    // val isJalr      = Bool()
-
-    // val oversize    = Bool()
-
-    // val last_is_rvc = Bool()
-
+  class MicroBTBMeta extends XSBundle {
+    val valid = Bool()
+    val tag = UInt(tagSize.W)
   }
 
-  class MicroBTBData extends XSBundle {
-    val brTargets = Vec(numBr, UInt(VAddrBits.W))
-    val jmpTarget = UInt(VAddrBits.W)
-    val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
+  class MicroBTBOutMeta extends XSBundle {
+    val hit = Bool()
+  }
+
+  class MicroBTBData extends FTBEntry {
+    // val brTargets = Vec(numBr, UInt(VAddrBits.W))
+    // val jmpTarget = UInt(VAddrBits.W)
+    // val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
   }
 
   class ReadResp extends FTBEntry {
@@ -94,14 +81,14 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   //   }
   // }
 
-  override val meta_size = WireInit(0.U.asTypeOf(new ReadResp)).getWidth // TODO: ReadResp shouldn't save useless members
+  override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBOutMeta)).getWidth // TODO: ReadResp shouldn't save useless members
 
   class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val read_pc = Flipped(Valid(UInt(VAddrBits.W)))
       // val read_taken_mask = Input(Vec(numBr, Bool()))
       val read_resp = Output(new ReadResp)
-      val read_hit = Output(Bool())
+      // val read_hit = Output(Bool())
 
       val update_write_meta = Flipped(Valid(new MicroBTBMeta))
       val update_write_data = Flipped(Valid(new MicroBTBData))
@@ -130,30 +117,10 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val read_pc = io.read_pc.bits
     val read_tag = getTag(read_pc)
 
-    // val br_taken_mask = io.read_taken_mask
-    // val jmp_takens = VecInit(rmetas.map(m => m.jmpValid))
-    // val real_taken_masks = VecInit(rmetas.map{ m =>
-    //   VecInit(m.brValids.zip(br_taken_mask).map{case (v, t) => v && t} :+ m.jmpValid)
-    // })
-  
     val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
     val hit_oh = hits.asUInt
     val hit_meta = ParallelMux(hits zip rmetas)
     val hit_data = ParallelMux(hits zip rdatas)
-    // val hit_preds = ParallelMux(hits zip rbims)
-    // val hit_and_taken_mask = VecInit(ParallelMux(hits zip real_taken_masks).init)
-    // val hit_and_real_taken_mask = ParallelMux(hits zip real_taken_masks)
-
-    // val target = Wire(UInt(VAddrBits.W))
-    // target := read_pc + (FetchWidth*4).U
-
-    // val fallThruAddr = getFallThroughAddr(read_pc, hit_meta.carry, hit_data.pftAddr)
-
-    // when(hit_oh =/= 0.U) {
-    //   target := Mux(hit_and_real_taken_mask.asUInt =/= 0.U,
-    //     PriorityMux(hit_and_real_taken_mask, hit_data.brTargets :+ hit_data.jmpTarget),
-    //     fallThruAddr)
-    // }
 
     val ren = io.read_pc.valid
 
@@ -161,26 +128,26 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     io.read_resp.valid := ren
     // io.read_resp.taken_mask := hit_and_taken_mask
     io.read_resp.tag          := hit_meta.tag
-    io.read_resp.brOffset     := hit_meta.brOffset
+    io.read_resp.brOffset     := hit_data.brOffset
     io.read_resp.brTargets    := hit_data.brTargets
-    io.read_resp.brValids     := hit_meta.brValids
+    io.read_resp.brValids     := hit_data.brValids
 
-    io.read_resp.jmpOffset    := hit_meta.jmpOffset
+    io.read_resp.jmpOffset    := hit_data.jmpOffset
     io.read_resp.jmpTarget    := hit_data.jmpTarget
-    io.read_resp.jmpValid     := hit_meta.jmpValid
+    io.read_resp.jmpValid     := hit_data.jmpValid
 
     io.read_resp.pftAddr      := hit_data.pftAddr
-    io.read_resp.carry        := hit_meta.carry
+    io.read_resp.carry        := hit_data.carry
 
-    io.read_resp.isCall       := hit_meta.isCall
-    io.read_resp.isRet        := hit_meta.isRet
-    io.read_resp.isJalr       := hit_meta.isJalr
+    io.read_resp.isCall       := hit_data.isCall
+    io.read_resp.isRet        := hit_data.isRet
+    io.read_resp.isJalr       := hit_data.isJalr
 
-    io.read_resp.oversize     := hit_meta.oversize
-    io.read_resp.last_is_rvc  := hit_meta.last_is_rvc
+    io.read_resp.oversize     := hit_data.oversize
+    io.read_resp.last_is_rvc  := hit_data.last_is_rvc
     // io.read_resp.pred := hit_preds
     io.read_resp.hit          := hit_oh.orR
-    io.read_hit               := hit_oh.orR
+    // io.read_hit               := hit_oh.orR
 
     val do_reset = RegInit(true.B)
     val reset_way = RegInit(0.U(log2Ceil(nWays).W))
@@ -192,23 +159,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     when (reset_way === (nWays-1).U) { do_reset := false.B }
 
     val update_rmetas = meta.io.rdata.drop(nWays)
-    // val update_rbims = bims.io.rdata.drop(nWays)
     val update_tag = io.update_write_meta.bits.tag
     val update_hits = VecInit(update_rmetas.map(m => m.valid && m.tag === update_tag))
     val update_hit = update_hits.asUInt.orR
     val update_hit_way = OHToUInt(update_hits.asUInt)
     val update_hit_meta = ParallelMux(update_hits zip update_rmetas)
-    // val update_hit_bim = ParallelMux(update_hits zip update_rbims)
-    // val bim_write_valids = VecInit((0 until numBr).map(i => !(PriorityEncoder(io.update_taken_mask) < i.U)))
-    // val update_old_pred = update_hit_bim
-    // val update_new_pred = VecInit(
-    //   (0 until numBr).map { i =>
-    //     Mux(update_hit, 
-    //       Mux(bim_write_valids(i), 
-    //         satUpdate(update_old_pred(i), 2, io.update_taken_mask(i)),
-    //         update_old_pred(i)),
-    //       Mux(io.update_taken_mask(i), 3.U, 0.U))
-    //   })
 
     val update_alloc_way = {
       val source = Cat(VecInit(update_rmetas.map(_.tag)).asUInt, update_tag)
@@ -229,9 +184,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     meta.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBMeta),
       RegNext(io.update_write_meta.bits))
-    // bims.io.wen(0) := do_reset || RegNext(io.update_write_meta.bits.brValids.reduce(_||_))
-    // bims.io.wdata(0) := Mux(do_reset, VecInit(Seq.fill(numBr)(0.U(2.W))), RegNext(update_new_pred))
-    // bims.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     data.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     data.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
     data.io.wdata(0) := Mux(do_reset,
@@ -243,32 +195,20 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val ubtbBanks = Module(new UBTBBank(numWays))
   val banks = ubtbBanks.io
   val read_resps = banks.read_resp
+  val outMeta = Wire(new MicroBTBOutMeta)
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
   //XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
   // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, pred1=${Binary(read_resps.pred(1).asUInt)}, hit=${read_resps.hit}\n")
   // XSDebug(p"v=${read_resps.valid}, brValids=${Binary(read_resps.brValids.asUInt)}, jmpValid=${read_resps.jmpValid}, pred0=${Binary(read_resps.pred(0).asUInt)}, hit=${read_resps.hit}\n")
 
-  // io.in.ready := !io.flush.valid
-
   banks.read_pc.valid := io.s1_fire
   banks.read_pc.bits := s1_pc
-  // banks.read_taken_mask := io.in.bits.resp_in(0).s1.preds.taken_mask
 
-  // io.out.valid := io.s1_fire && !io.redirect.valid
   io.out.resp := io.in.bits.resp_in(0)
-  // io.out.resp.valids(0) := io.out.valid
   io.out.resp.s1.pc := s1_pc
-  // io.out.resp.s1.preds.target := Mux(banks.read_hit, read_resps.target, s1_pc + (FetchWidth*4).U)
-  // io.out.resp.s1.preds.taken_mask := read_resps.taken_mask
   io.out.resp.s1.preds.taken_mask := io.in.bits.resp_in(0).s1.preds.taken_mask
-  // io.out.resp.s1.preds.is_br := read_resps.brValids
-  io.out.resp.s1.preds.hit := banks.read_hit
-  // io.out.bits.resp.s1.preds.is_jal := read_resps.jmpValid && !(read_resps.isCall || read_resps.isRet || read_resps.isJalr)
-  // io.out.bits.resp.s1.preds.is_jalr := read_resps.jmpValid && read_resps.isJalr
-  // io.out.bits.resp.s1.preds.is_call := read_resps.jmpValid && read_resps.isCall
-  // io.out.bits.resp.s1.preds.is_ret := read_resps.jmpValid && read_resps.isRet
-  // io.out.bits.resp.s1.preds.call_is_rvc := read_resps.last_is_rvc
+  io.out.resp.s1.preds.hit := read_resps.hit
   io.out.resp.s1.ftb_entry := DontCare
   io.out.resp.s1.ftb_entry.valid := read_resps.valid
 
@@ -286,7 +226,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.ftb_entry.oversize     := read_resps.oversize
   io.out.resp.s1.ftb_entry.last_is_rvc  := read_resps.last_is_rvc
 
-  io.out.s3_meta := RegEnable(RegEnable(read_resps.asUInt, io.s1_fire), io.s2_fire)
+  outMeta.hit := read_resps.hit
+  io.out.s3_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
 
   // Update logic
   val update = RegNext(io.update.bits)
@@ -294,7 +235,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_pc = update.pc
   val u_taken = update.preds.taken
   val u_taken_mask = update.preds.taken_mask
-  val u_meta = update.meta.asTypeOf(new ReadResp)
+  val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
 
   val u_tag = getTag(u_pc)
   // val u_target_lower = update.preds.target(lowerBitSize-1+instOffsetBits, instOffsetBits)
@@ -309,21 +250,21 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   update_write_metas.valid        := true.B
   update_write_metas.tag          := u_tag
-  update_write_metas.brOffset     := update.ftb_entry.brOffset
-  update_write_metas.brValids     := update.ftb_entry.brValids
-  update_write_metas.jmpOffset    := update.ftb_entry.jmpOffset
-  update_write_metas.jmpValid     := update.ftb_entry.jmpValid
-  update_write_metas.isCall       := update.ftb_entry.isCall
-  update_write_metas.isRet        := update.ftb_entry.isRet
-  update_write_metas.isJalr       := update.ftb_entry.isJalr
-  update_write_metas.carry        := update.ftb_entry.carry
-  update_write_metas.oversize     := update.ftb_entry.oversize
-  update_write_metas.last_is_rvc  := update.ftb_entry.last_is_rvc
 
-  // update_write_datas.lower := u_target_lower
-  update_write_datas.jmpTarget := update.ftb_entry.jmpTarget
-  update_write_datas.brTargets := update.ftb_entry.brTargets
-  update_write_datas.pftAddr := update.ftb_entry.pftAddr
+  update_write_datas              := DontCare
+  update_write_datas.brOffset     := update.ftb_entry.brOffset
+  update_write_datas.brValids     := update.ftb_entry.brValids
+  update_write_datas.jmpOffset    := update.ftb_entry.jmpOffset
+  update_write_datas.jmpValid     := update.ftb_entry.jmpValid
+  update_write_datas.isCall       := update.ftb_entry.isCall
+  update_write_datas.isRet        := update.ftb_entry.isRet
+  update_write_datas.isJalr       := update.ftb_entry.isJalr
+  update_write_datas.carry        := update.ftb_entry.carry
+  update_write_datas.oversize     := update.ftb_entry.oversize
+  update_write_datas.last_is_rvc  := update.ftb_entry.last_is_rvc
+  update_write_datas.jmpTarget    := update.ftb_entry.jmpTarget
+  update_write_datas.brTargets    := update.ftb_entry.brTargets
+  update_write_datas.pftAddr      := update.ftb_entry.pftAddr
 
   banks.update_write_meta.valid := meta_write_valid
   banks.update_write_meta.bits := update_write_metas
@@ -333,7 +274,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   banks.update_mask := LowerMaskFromLowest(u_taken_mask.asUInt)
 
   if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, banks.read_hit)
+    XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, read_resps.hit)
     XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
       io.out.resp.s1.target, io.out.resp.s1.real_taken_mask.asUInt, io.out.resp.s1.preds.taken_mask.asUInt, read_resps.brValids.asUInt, read_resps.jmpValid.asUInt)
 
@@ -342,8 +283,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     XSDebug(u_valid, "[update]taken_mask=%b, brValids=%b, jmpValid=%b\n",
       u_taken_mask.asUInt, update.ftb_entry.brValids.asUInt, update.ftb_entry.jmpValid)
 
-    XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && banks.read_hit)
-    XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !banks.read_hit)
+    XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && read_resps.hit)
+    XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !read_resps.hit)
 
     XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
     XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
