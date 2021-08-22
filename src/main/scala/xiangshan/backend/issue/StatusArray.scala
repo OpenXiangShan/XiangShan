@@ -192,7 +192,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
       XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
     }
-    val wakeup_j = io.wakeupMatch.map(m => PopCount(m.map(_(j)))).reduce(_ + _)
-    XSPerfHistogram(s"wakeup_$j", wakeup_j, true.B, 0, params.numEntries, 1)
+    // val wakeup_j = io.wakeupMatch.map(m => PopCount(m.map(_(j)))).reduce(_ +& _)
+    // XSPerfHistogram(s"wakeup_$j", wakeup_j, true.B, 0, params.numEntries, 1)
   }
 }
