@@ -225,12 +225,12 @@ package object xiangshan {
     def bltu        = "b0_00_10_110".U
     def bgeu        = "b0_00_10_111".U
 
-    def slt         = "b0_00_11_000".U
-    def sltu        = "b0_00_11_010".U
-    def max         = "b0_00_11_100".U
-    def min         = "b0_00_11_101".U
-    def maxu        = "b0_00_11_110".U
-    def minu        = "b0_00_11_111".U
+    // def slt         = "b0_00_11_000".U
+    // def sltu        = "b0_00_11_010".U
+    // def max         = "b0_00_11_100".U
+    // def min         = "b0_00_11_101".U
+    // def maxu        = "b0_00_11_110".U
+    // def minu        = "b0_00_11_111".U
 
     // add & sub optype
     def add         = "b0_01_00_000".U
@@ -250,19 +250,26 @@ package object xiangshan {
     def bclr        = "b0_10_00_100".U
     def binv        = "b0_10_00_101".U
     def bset        = "b0_10_00_110".U
-    def bext        = "b0_10_00_111".U
-
+    
     def srl         = "b0_10_01_010".U
     def sra         = "b0_10_01_011".U
+    def bext        = "b0_10_01_111".U
 
     def rol         = "b0_10_10_000".U
 
     def ror         = "b0_10_11_000".U
 
     // count optype
-    def clz         = "b0_11_00_000".U
-    def ctz         = "b0_11_00_001".U
-    def cpop        = "b0_11_00_010".U
+    // def clz         = "b0_11_00_000".U
+    // def ctz         = "b0_11_00_001".U
+    // def cpop        = "b0_11_00_010".U
+
+    def slt         = "b0_11_00_000".U
+    def sltu        = "b0_11_00_010".U
+    def max         = "b0_11_00_100".U
+    def min         = "b0_11_00_101".U
+    def maxu        = "b0_11_00_110".U
+    def minu        = "b0_11_00_111".U
 
     // RV64 32bit optype
     def addw        = "b1_01_00_000".U
@@ -272,9 +279,9 @@ package object xiangshan {
     def sraw        = "b1_10_01_011".U
     def rolw        = "b1_10_10_000".U
     def rorw        = "b1_10_11_000".U
-    def clzw        = "b1_11_00_000".U
-    def ctzw        = "b1_11_00_001".U
-    def cpopw       = "b1_11_00_010".U
+    // def clzw        = "b1_11_00_000".U
+    // def ctzw        = "b1_11_00_001".U
+    // def cpopw       = "b1_11_00_010".U
 
     def isWordOp(func: UInt) = func(7)
     def isBranch(func: UInt) = func(6, 3) === "b0010".U

@@ -60,27 +60,15 @@ class RightShiftModule(implicit p: Parameters) extends XSModule {
   io.sra_w := (Cat(Fill(32, io.sraSrc(31)), io.sraSrc(31, 0)).asSInt() >> io.shamt).asUInt()
 }
 
-// class RotateShiftModule(implicit p: Parameters) extends XSModule {
-//   val io = IO(new Bundle() {
-//     val shamt = Input(UInt(6.W))
-//     val roSrc = Input(UInt(XLEN.W))
-//     val rol_l, rol_w, ror_l, ror_w = Output(UInt(XLEN.W))
-//   })
-//   io.rol_l := io.roSrc << io.shamt | io.roSrc >> ((~io.shamt).asUInt()+&1.U)
-//   io.rol_w := (io.roSrc << io.shamt | io.roSrc >> (32.U-io.shamt))(5,0)
-//   io.ror_l := io.roSrc>>io.shamt | io.roSrc << ((~io.shamt).asUInt()+&1.U)
-//   io.ror_w := (io.roSrc>>io.shamt | io.roSrc << (32.U-io.shamt))(5,0)
-// }
-
 class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
-    val andn, orn, xnor, and, or, xor, sltu, slt, maxMin, maxMinU, sextb, sexth, zexth, rev8, orcb = Input(UInt(XLEN.W))
+    val andn, orn, xnor, and, or, xor, sextb, sexth, zexth, rev8, orcb = Input(UInt(XLEN.W))
     val miscRes = Output(UInt(XLEN.W))
   })
 
-  val (func, andn, orn, xnor, and, or, xor, sltu, slt, maxMin, maxMinU, sextb, sexth, zexth, rev8, orcb) =
-    (io.func, io.andn, io.orn, io.xnor, io.and, io.or, io.xor, io.sltu, io.slt, io.maxMin, io.maxMinU, io.sextb, io.sexth, io.zexth, io.rev8, io.orcb)
+  val (func, andn, orn, xnor, and, or, xor, sextb, sexth, zexth, rev8, orcb) =
+    (io.func, io.andn, io.orn, io.xnor, io.and, io.or, io.xor, io.sextb, io.sexth, io.zexth, io.rev8, io.orcb)
   
   val baseMisc = ParallelMux(List(
     ALUOpType.andn -> andn,
@@ -99,11 +87,7 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
     ALUOpType.rev8   -> rev8
   ).map(x => (x._1(2, 0) === io.func(2, 0), x._2)))
 
-  val compMisc = Mux(func(2), 
-    Mux(func(1), maxMinU, maxMin), 
-    Mux(func(1), sltu, slt))
-
-  io.miscRes := Mux(func(4), compMisc, Mux(func(3), bitMisc, baseMisc))
+  io.miscRes := Mux(func(3), bitMisc, baseMisc)
 }
 
 class ShiftResultSelect(implicit p: Parameters) extends XSModule {
@@ -124,22 +108,21 @@ class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   ).map(x => (x._1(1, 0) === io.func(1, 0), x._2)))
 
   val lrShiftRes = Mux(func(1), Mux(func(0), sra, srl), sll)
-  //val rotateShiftRes = Mux(func(3), ror, rol)
 
-  io.shiftRes := Mux(func(4), rot, Mux(func(2), singleBitRes, lrShiftRes))
+  // io.shiftRes := Mux(func(4), rot, Mux(func(2), singleBitRes, lrShiftRes))
+  io.shiftRes := Mux(func(2), singleBitRes, Mux(func(4), rot, lrShiftRes))
 }
 
 
 class AluResSel(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
-    // val addSubRes, shiftRes, miscRes, countRes = Input(UInt(XLEN.W))
-    val addSubRes, shiftRes, miscRes = Input(UInt(XLEN.W))
+    val addSubRes, shiftRes, miscRes, compareRes = Input(UInt(XLEN.W))
     val aluRes = Output(UInt(XLEN.W))
   })
   
   val res = Mux(io.func(6),
-    io.shiftRes,
+    Mux(io.func(5), io.compareRes, io.shiftRes),
     Mux(io.func(5), io.addSubRes, io.miscRes)
   )
   val h32 = Mux(io.func(7), Fill(32, res(31)), res(63, 32))
@@ -189,7 +172,8 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val and     = ~andn
   val or      = ~orn
   val xor     = ~xnor
-  val sltu    = !sub(XLEN)
+  val sgtu    = sub(XLEN)
+  val sltu    = !sgtu
   val slt     = xor(XLEN-1) ^ sltu
   val maxMin  = Mux(slt ^ func(0), src2, src1)
   val maxMinU = Mux(sltu^ func(0), src2, src1)
@@ -216,13 +200,14 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val revShamt = Cat(!isW && complement(5), complement(4, 0))
 
   val leftShiftModule = Module(new LeftShiftModule)
-  leftShiftModule.io.sllSrc := Mux(func(2), 1.U, Mux(func(0), src1(31,0), src1))
+  leftShiftModule.io.sllSrc := Mux(func(0), src1(31,0), src1)
   leftShiftModule.io.shamt := Mux(func(3), revShamt, shamt)
   val sll  = leftShiftModule.io.sll
-  val bset = src1 | sll
-  val bclr = src1 & ~sll
-  val binv = src1 ^ sll
 
+  val bitShift = 1.U << src2(5, 0)
+  val bset = src1 | bitShift
+  val bclr = src1 & ~bitShift
+  val binv = src1 ^ bitShift
 
   val rightShiftModule = Module(new RightShiftModule)
   rightShiftModule.io.shamt := Mux(func(3), shamt, revShamt)
@@ -249,10 +234,10 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   miscResSel.io.and     := and
   miscResSel.io.or      := or
   miscResSel.io.xor     := xor
-  miscResSel.io.sltu    := sltu
-  miscResSel.io.slt     := slt
-  miscResSel.io.maxMin  := maxMin
-  miscResSel.io.maxMinU := maxMinU
+  // miscResSel.io.sltu    := sltu
+  // miscResSel.io.slt     := slt
+  // miscResSel.io.maxMin  := maxMin
+  // miscResSel.io.maxMinU := maxMinU
   miscResSel.io.sextb   := sextb
   miscResSel.io.sexth   := sexth
   miscResSel.io.zexth   := zexth
@@ -261,6 +246,8 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val miscRes = miscResSel.io.miscRes
 
   val addSubRes = Mux(func(3), sub, add)
+
+  val compareRes = Mux(func(2), Mux(func(1), maxMinU, maxMin), Mux(func(1), sltu, slt))
 
   val shiftResSel = Module(new ShiftResultSelect)
   shiftResSel.io.func := func(4,0)
@@ -281,6 +268,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   aluResSel.io.addSubRes := addSubRes
   aluResSel.io.shiftRes := shiftRes
   aluResSel.io.miscRes := miscRes
+  aluResSel.io.compareRes := compareRes
   val aluRes = aluResSel.io.aluRes
   
   io.result := aluRes
