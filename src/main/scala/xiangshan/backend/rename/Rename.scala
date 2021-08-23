@@ -194,7 +194,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     } else {
       // compare psrc0
       psrc_cmp(i-1) := Cat((0 until i).map(j => {
-        uops(i).psrc(0) === uops(j).psrc(0)
+        uops(i).psrc(0) === uops(j).psrc(0) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
       }) /* reverse is not necessary here */)
 
       // calculate meEnable
@@ -397,4 +397,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   if (!env.FPGAPlatform) {
     ExcitingUtils.addSource(io.roqCommits.isWalk, "TMA_backendiswalk")
   }
+  XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
+  XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
+  XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
+  XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
+  XSPerfAccumulate("move_elim_cancelled_cnt_limit", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)))))
+  XSPerfAccumulate("move_elim_cancelled_inc_more_than_one", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR })))
+
+  // to make sure meEnable functions as expected
+  for (i <- 0 until RenameWidth) {
+    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)),
+      p"ME_CANCELLED: ref counter hits max value (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR },
+      p"ME_CANCELLED: RAW dependency (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR },
+      p"ME_CANCELLED: psrc duplicates with former instruction (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+  }
+  XSDebug(VecInit(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))).asUInt().orR,
+    p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
 }
