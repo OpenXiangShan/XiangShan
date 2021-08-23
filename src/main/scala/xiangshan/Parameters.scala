@@ -104,10 +104,9 @@ case class XSCoreParameters
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
   RefillSize: Int = 512,
-  TlbEntrySize: Int = 8,
-  TlbSPEntrySize: Int = 2,
-  BTlbEntrySize: Int = 64,
-  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
+  TlbEntrySize: Int = 32,
+  TlbSPEntrySize: Int = 4,
+  PtwL3EntrySize: Int = 4096, //(512 * 8) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256, //(256 * 8)
@@ -241,10 +240,9 @@ trait HasXSParameter {
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
-  val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val TlbEntrySize = coreParams.TlbEntrySize
   val TlbSPEntrySize = coreParams.TlbSPEntrySize
-  val BTlbEntrySize = coreParams.BTlbEntrySize
   val PtwL3EntrySize = coreParams.PtwL3EntrySize
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize
@@ -315,8 +313,8 @@ trait HasXSParameter {
       blockBytes = L2BlockSize,
       nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
     ),
-  )
-
+  )  
+  
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576
   val ResetTimeMin2Pow = 10 //1024

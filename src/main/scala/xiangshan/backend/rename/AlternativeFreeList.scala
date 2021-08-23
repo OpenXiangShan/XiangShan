@@ -76,23 +76,24 @@ class AlternativeFreeList(implicit p: Parameters) extends XSModule with HasCircu
   })
 
   val FL_SIZE = NRPhyRegs // TODO calculate max number of free list using NRPhyRegs and width of counter
+  val COUNTER_WIDTH = 2.W // width of reference counters below
 
   // recording referenced times of each physical registers
-  val archRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(2.W))))
-  val specRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(2.W))))
-  val cmtCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(2.W))))
+  val archRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
+  val specRefCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
+  val cmtCounter = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(COUNTER_WIDTH))))
 
-  val archRefCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
+  val archRefCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
   archRefCounterNext.foreach(_ := DontCare)
   val updateArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
   val clearArchRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
 
-  val specRefCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
+  val specRefCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
   specRefCounterNext.foreach(_ := DontCare)
   val updateSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // update with xxxNext
   val clearSpecRefCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B))) // reset to zero
 
-  val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(2.W)))
+  val cmtCounterNext = Wire(Vec(NRPhyRegs, UInt(COUNTER_WIDTH)))
   cmtCounterNext.foreach(_ := DontCare)
   val updateCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
   val clearCmtCounter = WireInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))

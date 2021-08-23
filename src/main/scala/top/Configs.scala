@@ -106,9 +106,8 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-        TlbEntrySize = 2,
-        TlbSPEntrySize = 2,
-        BTlbEntrySize = 8,
+        TlbEntrySize = 32,
+        TlbSPEntrySize = 4,
         PtwL1EntrySize = 2,
         PtwL2EntrySize = 64,
         PtwL3EntrySize = 128,
