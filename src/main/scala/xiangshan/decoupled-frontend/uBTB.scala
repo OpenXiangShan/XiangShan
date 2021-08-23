@@ -24,8 +24,6 @@ import xiangshan._
 import chisel3.experimental.chiselName
 import xiangshan.cache.mmu.CAMTemplate
 
-import scala.math.min
-
 trait MicroBTBParams extends HasXSParameter {
   val numWays = 32
   val tagSize = 20
@@ -98,7 +96,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     })
 
     val tagCam = Module(new CAMTemplate(UInt(tagSize.W), nWays, 2))
-    val metaMem = Module(new AsyncDataModuleTemplate(Bool(), nWays, nWays, 1))
+    val metaMem = Module(new AsyncDataModuleTemplate(Bool(), nWays, nWays, 1)) // valids
     val dataMem = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays, 1, 1))
 
 
@@ -164,12 +162,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val update_hitWay = OHToUInt(update_hits)
     
     require(tagSize % log2Ceil(nWays) == 0)
-    val foldNum = tagSize / log2Ceil(nWays)
 
     val update_alloc_way = RegInit(0.U(log2Ceil(nWays).W))
     
-    when (io.update_write_meta.valid) {
-      update_alloc_way := update_alloc_way ^ foldTag(update_tag, foldNum)
+    when (io.update_write_meta.valid && !update_hit) {
+      update_alloc_way := update_alloc_way ^ foldTag(update_tag, log2Ceil(nWays))
     }
 
     // val update_alloc_way = {
