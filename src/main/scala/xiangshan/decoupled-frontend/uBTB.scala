@@ -91,14 +91,14 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val read_resp = Output(new ReadResp)
       // val read_hit = Output(Bool())
 
-      val update_write_meta = Flipped(Valid(new MicroBTBMeta))
+      val update_write_meta = Input(new MicroBTBMeta)
       val update_write_data = Flipped(Valid(new MicroBTBData))
       val update_taken_mask = Input(Vec(numBr, Bool()))
       val update_mask = Input(UInt(numBr.W))
     })
 
     val tagCam = Module(new CAMTemplate(UInt(tagSize.W), nWays, 2))
-    val metaMem = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays, 1))
+    val metaMem = Module(new AsyncDataModuleTemplate(Bool(), nWays, nWays, 1))
     val dataMem = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays, 1, 1))
 
 
@@ -115,7 +115,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val read_tag = getTag(read_pc)
 
     // val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
-    val hits = VecInit((0 until nWays).map(i => meta(i).valid && tagCam.io.r.resp(0)(i)))
+    val hits = VecInit((0 until nWays).map(i => meta(i) && tagCam.io.r.resp(0)(i)))
     val hit = hits.reduce(_||_)
     val hitWay = OHToUInt(hits)
 
@@ -158,22 +158,32 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     when (do_reset) { reset_way := reset_way + 1.U }
     when (reset_way === (nWays-1).U) { do_reset := false.B }
 
-    val update_tag = io.update_write_meta.bits.tag
-    val update_hits = VecInit((0 until nWays).map(i => meta(i).valid && tagCam.io.r.resp(1)(i)))
+    val update_tag = io.update_write_meta.tag
+    val update_hits = VecInit((0 until nWays).map(i => meta(i) && tagCam.io.r.resp(1)(i)))
     val update_hit = update_hits.reduce(_||_)
     val update_hitWay = OHToUInt(update_hits)
     
+    require(tagSize % log2Ceil(nWays) == 0)
+    val foldNum = tagSize / log2Ceil(nWays)
 
-    val update_alloc_way = {
-      val source = Cat(VecInit(meta.map(_.tag)).asUInt, update_tag)
-      val l = log2Ceil(nWays)
-      val nChunks = (source.getWidth + l - 1) / l
-      val chunks = (0 until nChunks) map { i =>
-        source(min((i+1)*l, source.getWidth)-1, i*l)
-      }
-      ParallelXOR(chunks)
+    val update_alloc_way = RegInit(0.U(log2Ceil(nWays).W))
+    
+    when (io.update_write_meta.valid) {
+      update_alloc_way := update_alloc_way ^ foldTag(update_tag, foldNum)
     }
-    val update_emptys = meta.map(m => !m.valid)
+
+    // val update_alloc_way = {
+      // val source = Cat(VecInit(meta.map(_.tag)).asUInt, update_tag)
+      // val l = log2Ceil(nWays)
+      // val nChunks = (source.getWidth + l - 1) / l
+      // val chunks = (0 until nChunks) map { i =>
+      //   source(min((i+1)*l, source.getWidth)-1, i*l)
+      // }
+      // ParallelXOR(chunks)
+    
+    // }
+
+    val update_emptys = meta.map(m => !m)
     val update_has_empty_way = update_emptys.reduce(_||_)
     val update_empty_way = ParallelPriorityEncoder(update_emptys)
     val update_way = Mux(update_hit, update_hitWay, Mux(update_has_empty_way, update_empty_way, update_alloc_way))
@@ -184,13 +194,13 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     tagCam.io.w.bits.index  := Mux(do_reset, reset_way, RegNext(update_way))
     tagCam.io.w.bits.data   := Mux(do_reset,
       0.U(tagSize.W),
-      RegNext(io.update_write_meta.bits.tag))
+      RegNext(io.update_write_meta.tag))
 
     metaMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
     metaMem.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
     metaMem.io.wdata(0) := Mux(do_reset,
-      0.U.asTypeOf(new MicroBTBMeta),
-      RegNext(io.update_write_meta.bits))
+      false.B,
+      RegNext(io.update_write_meta.valid))
 
     
     dataMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
@@ -257,7 +267,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   update_write_metas := DontCare
 
-  update_write_metas.valid        := true.B
+  update_write_metas.valid        := meta_write_valid
   update_write_metas.tag          := u_tag
 
   update_write_datas              := DontCare
@@ -275,8 +285,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   update_write_datas.brTargets    := update.ftb_entry.brTargets
   update_write_datas.pftAddr      := update.ftb_entry.pftAddr
 
-  banks.update_write_meta.valid := meta_write_valid
-  banks.update_write_meta.bits := update_write_metas
+  banks.update_write_meta := update_write_metas
   banks.update_write_data.valid := data_write_valid
   banks.update_write_data.bits := update_write_datas
   banks.update_taken_mask := u_taken_mask

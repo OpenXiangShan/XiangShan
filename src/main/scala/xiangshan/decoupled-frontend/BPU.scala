@@ -93,6 +93,22 @@ trait BPUUtils extends HasXSParameter {
     val higher = start.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits-1)
     Cat(Mux(carry, higher+1.U, higher), pft, 0.U(instOffsetBits.W))
   }
+
+  def foldTag(tag: UInt, foldNum: Int): UInt = {
+    val tagLen = tag.getWidth
+    require(tagLen % foldNum == 0)
+    val tagSubLen = tagLen / foldNum
+    
+    if (foldNum == 1) {
+      tag
+    } else if (foldNum == 2) {
+      tag(tagLen-1, tagLen/2) ^ tag(tagLen/2-1, 0)
+    } else if (foldNum % 2 == 1) {
+      tag(tagSubLen-1, 0) ^ foldTag(tag(tagLen-1, tagSubLen), foldNum-1)
+    } else {
+      foldTag(tag(tagLen-1, tagLen/2), foldNum/2) ^ foldTag(tag(tagLen/2-1, 0), foldNum/2) 
+    }
+  }
 }
 
 // class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
