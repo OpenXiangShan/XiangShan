@@ -37,6 +37,7 @@ case class UncertainLatency() extends HasFuLatency {
 
 case class FuConfig
 (
+  name: String,
   fuGen: Parameters => FunctionUnit,
   fuSel: FunctionUnit => Bool,
   fuType: UInt,

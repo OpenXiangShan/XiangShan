@@ -24,7 +24,7 @@ import xiangshan.backend.fu.fpu._
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 {
 
-  val fma = supportedFunctionUnits.head.asInstanceOf[FMA]
+  val fma = functionUnits.head.asInstanceOf[FMA]
 
   val input = io.fromFp.bits
   val fmaOut = fma.io.out.bits

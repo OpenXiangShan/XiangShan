@@ -91,9 +91,13 @@ case class ExuConfig
 
 abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModule {
 
-  val supportedFunctionUnits = config.fuConfigs.map(_.fuGen).map(gen => Module(gen(p)))
+  val functionUnits = config.fuConfigs.map(cfg => {
+    val mod = Module(cfg.fuGen(p))
+    mod.suggestName(cfg.name)
+    mod
+  })
 
-  val fuSel = supportedFunctionUnits.zip(config.fuConfigs.map(_.fuSel)).map {
+  val fuSel = functionUnits.zip(config.fuConfigs.map(_.fuSel)).map {
     case (fu, sel) => sel(fu)
   }
 
@@ -109,7 +113,7 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
   val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
 
-  for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
+  for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(functionUnits.zip(fuSel))) {
 
     val in = if (fuCfg.numIntSrc > 0) {
       assert(fuCfg.numFpSrc == 0 || config == StdExeUnitCfg)
@@ -169,15 +173,15 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
     }
   }
 
-  val arb = writebackArb(supportedFunctionUnits.map(_.io.out), io.out)
+  val arb = writebackArb(functionUnits.map(_.io.out), io.out)
 
   val readIntFu = config.fuConfigs
-    .zip(supportedFunctionUnits.zip(fuSel))
+    .zip(functionUnits.zip(fuSel))
     .filter(_._1.numIntSrc > 0)
     .map(_._2)
 
   val readFpFu = config.fuConfigs
-    .zip(supportedFunctionUnits.zip(fuSel))
+    .zip(functionUnits.zip(fuSel))
     .filter(_._1.numFpSrc > 0)
     .map(_._2)
 

@@ -35,8 +35,8 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
   val disableSfence = WireInit(false.B)
   val csr_frm = WireInit(0.U(3.W))
 
-  val hasRedirect = config.fuConfigs.zip(supportedFunctionUnits).filter(_._1.hasRedirect).map(_._2)
-  println(s"${supportedFunctionUnits} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
+  val hasRedirect = config.fuConfigs.zip(functionUnits).filter(_._1.hasRedirect).map(_._2)
+  println(s"${functionUnits} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
   if (hasRedirect.nonEmpty) {
     require(hasRedirect.length <= 1)
     io.out.bits.redirectValid := hasRedirect.head.asInstanceOf[FUWithRedirect].redirectOutValid
@@ -44,7 +44,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
   }
 
   if (config.fuConfigs.contains(csrCfg)) {
-    val csr = supportedFunctionUnits.collectFirst{
+    val csr = functionUnits.collectFirst{
       case c: CSR => c
     }.get
     csr.csrio <> csrio.get
@@ -53,7 +53,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
   }
 
   if (config.fuConfigs.contains(fenceCfg)) {
-    val fence = supportedFunctionUnits.collectFirst{
+    val fence = functionUnits.collectFirst{
       case f: Fence => f
     }.get
     fenceio.get.sfence <> fence.sfence
@@ -64,7 +64,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
   }
 
   if (config.fuConfigs.contains(i2fCfg)) {
-    val i2f = supportedFunctionUnits.collectFirst {
+    val i2f = functionUnits.collectFirst {
       case i: IntToFP => i
     }.get
     val instr_rm = io.fromInt.bits.uop.ctrl.fpu.rm
@@ -72,7 +72,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
   }
 
   if (config.fuConfigs.contains(stdCfg)) {
-    val std = supportedFunctionUnits.collectFirst {
+    val std = functionUnits.collectFirst {
       case s: Std => s
     }.get
     stData.get.valid := std.io.out.valid
