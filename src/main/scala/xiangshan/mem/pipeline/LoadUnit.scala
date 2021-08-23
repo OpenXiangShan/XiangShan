@@ -319,7 +319,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   )
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
-  io.needReplayFromRS := s2_cache_replay
+  io.needReplayFromRS := s2_cache_replay && !fullForward
 
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
