@@ -817,7 +817,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     priviledgeMode := mstatusOld.mpp
     mstatusNew.pie.m := true.B
     mstatusNew.mpp := ModeU
-    mstatusNew.mprv := 0.U
+    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
     mstatus := mstatusNew.asUInt
     // lr := false.B
     retTarget := mepc(VAddrBits-1, 0)
