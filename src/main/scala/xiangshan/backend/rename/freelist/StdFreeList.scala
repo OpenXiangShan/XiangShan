@@ -75,7 +75,7 @@ class StdFreeList(implicit val p: config.Parameters) extends MultiIOModule with 
   // allocate new physical registers for instructions at rename stage
   //
   val freeRegCnt = Wire(UInt()) // number of free registers in free list
-  canAllocate := RegNext(freeRegCnt >= RenameWidth.U)
+  canAllocate := RegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
   val allocatePtr = (0 until RenameWidth).map(i => headPtr + i.U)

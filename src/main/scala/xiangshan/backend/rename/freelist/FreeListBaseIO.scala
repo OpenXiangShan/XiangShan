@@ -29,14 +29,14 @@ trait FreeListBaseIO {
   def walk: Bool
 
   // allocate physical registers (rename)
-  def allocateReq: Vec[Bool]
-  def allocatePhyReg: Vec[UInt]
-  def canAllocate: Bool
-  def doAllocate: Bool
+  def allocateReq: Vec[Bool] // need allocating phy reg (may be refused due to lacking of free reg)
+  def allocatePhyReg: Vec[UInt] // phy dest response according to allocateReq
+  def canAllocate: Bool // free list can allocate new phy registers
+  def doAllocate: Bool // actually do the allocation (given by rename)
 
   // free old physical registers (commit)
-  def freeReq: Vec[Bool]
-  def freePhyReg: Vec[UInt]
+  def freeReq: Vec[Bool] // need to free phy reg
+  def freePhyReg: Vec[UInt] // free old p_dest reg
 
   // walk recovery
   def stepBack: UInt
