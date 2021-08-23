@@ -22,6 +22,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import chisel3.experimental.chiselName
+import xiangshan.cache.mmu.CAMTemplate
 
 import scala.math.min
 
@@ -96,38 +97,38 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val update_mask = Input(UInt(numBr.W))
     })
 
-    val meta = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays*2, 1))
-    // val bims = Module(new AsyncDataModuleTemplate(Vec(numBr, UInt(2.W)), nWays, nWays*2, 1))
-    val data = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays,   nWays, 1))
+    val tagCam = Module(new CAMTemplate(UInt(tagSize.W), nWays, 2))
+    val metaMem = Module(new AsyncDataModuleTemplate(new MicroBTBMeta, nWays, nWays, 1))
+    val dataMem = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays, 1, 1))
 
 
     for (w <- 0 until nWays) {
-      meta.io.raddr(w) := w.U
-      // bims.io.raddr(w) := w.U
-      meta.io.raddr(w+nWays) := w.U
-      // bims.io.raddr(w+nWays) := w.U
-      data.io.raddr(w) := w.U
+      metaMem.io.raddr(w) := w.U
     }
 
-    val rmetas = meta.io.rdata.take(nWays)
+    val meta = metaMem.io.rdata
     // val rbims = bims.io.rdata.take(nWays)
-    val rdatas = data.io.rdata
+    // val rdatas = data.io.rdata
     
 
     val read_pc = io.read_pc.bits
     val read_tag = getTag(read_pc)
 
-    val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
-    val hit_oh = hits.asUInt
-    val hit_meta = ParallelMux(hits zip rmetas)
-    val hit_data = ParallelMux(hits zip rdatas)
+    // val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
+    val hits = VecInit((0 until nWays).map(i => meta(i).valid && tagCam.io.r.resp(0)(i)))
+    val hit = hits.reduce(_||_)
+    val hitWay = OHToUInt(hits)
 
-    val ren = io.read_pc.valid
+    dataMem.io.raddr(0) := hitWay
+    // val hit_meta = ParallelMux(hits zip rmetas)
+    // val hit_data = ParallelMux(hits zip rdatas)
+
+    val hit_data = Mux(hit, dataMem.io.rdata(0), 0.U.asTypeOf(new MicroBTBData))
 
     io.read_resp := DontCare
-    io.read_resp.valid := ren
-    // io.read_resp.taken_mask := hit_and_taken_mask
-    io.read_resp.tag          := hit_meta.tag
+    io.read_resp.valid := io.read_pc.valid
+
+    io.read_resp.tag          := read_tag
     io.read_resp.brOffset     := hit_data.brOffset
     io.read_resp.brTargets    := hit_data.brTargets
     io.read_resp.brValids     := hit_data.brValids
@@ -145,9 +146,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     io.read_resp.oversize     := hit_data.oversize
     io.read_resp.last_is_rvc  := hit_data.last_is_rvc
-    // io.read_resp.pred := hit_preds
-    io.read_resp.hit          := hit_oh.orR
-    // io.read_hit               := hit_oh.orR
+
+    io.read_resp.hit          := hit
 
     val do_reset = RegInit(true.B)
     val reset_way = RegInit(0.U(log2Ceil(nWays).W))
@@ -158,15 +158,14 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     when (do_reset) { reset_way := reset_way + 1.U }
     when (reset_way === (nWays-1).U) { do_reset := false.B }
 
-    val update_rmetas = meta.io.rdata.drop(nWays)
     val update_tag = io.update_write_meta.bits.tag
-    val update_hits = VecInit(update_rmetas.map(m => m.valid && m.tag === update_tag))
-    val update_hit = update_hits.asUInt.orR
-    val update_hit_way = OHToUInt(update_hits.asUInt)
-    val update_hit_meta = ParallelMux(update_hits zip update_rmetas)
+    val update_hits = VecInit((0 until nWays).map(i => meta(i).valid && tagCam.io.r.resp(1)(i)))
+    val update_hit = update_hits.reduce(_||_)
+    val update_hitWay = OHToUInt(update_hits)
+    
 
     val update_alloc_way = {
-      val source = Cat(VecInit(update_rmetas.map(_.tag)).asUInt, update_tag)
+      val source = Cat(VecInit(meta.map(_.tag)).asUInt, update_tag)
       val l = log2Ceil(nWays)
       val nChunks = (source.getWidth + l - 1) / l
       val chunks = (0 until nChunks) map { i =>
@@ -174,19 +173,29 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       }
       ParallelXOR(chunks)
     }
-    val update_emptys = update_rmetas.map(m => !m.valid)
+    val update_emptys = meta.map(m => !m.valid)
     val update_has_empty_way = update_emptys.reduce(_||_)
     val update_empty_way = ParallelPriorityEncoder(update_emptys)
-    val update_way = Mux(update_hit, update_hit_way, Mux(update_has_empty_way, update_empty_way, update_alloc_way))
+    val update_way = Mux(update_hit, update_hitWay, Mux(update_has_empty_way, update_empty_way, update_alloc_way))
 
-    meta.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
-    meta.io.wen(0)   := do_reset || RegNext(io.update_write_meta.valid)
-    meta.io.wdata(0) := Mux(do_reset,
+    tagCam.io.r.req := VecInit(Seq(read_tag, update_tag))
+    
+    tagCam.io.w.valid       := do_reset || RegNext(io.update_write_meta.valid)
+    tagCam.io.w.bits.index  := Mux(do_reset, reset_way, RegNext(update_way))
+    tagCam.io.w.bits.data   := Mux(do_reset,
+      0.U(tagSize.W),
+      RegNext(io.update_write_meta.bits.tag))
+
+    metaMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
+    metaMem.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
+    metaMem.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBMeta),
       RegNext(io.update_write_meta.bits))
-    data.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
-    data.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
-    data.io.wdata(0) := Mux(do_reset,
+
+    
+    dataMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
+    dataMem.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
+    dataMem.io.wdata(0) := Mux(do_reset,
       0.U.asTypeOf(new MicroBTBData),
       RegNext(io.update_write_data.bits))
 
