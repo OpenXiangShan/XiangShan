@@ -80,7 +80,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   )  
   //TODO: modules need to be removed
   val instrUncache = outer.instrUncache.module
-  val l1plusPrefetcher = Module(new L1plusPrefetcher)
 
   val needFlush = io.backend.toFtq.stage3Redirect.valid
 
@@ -110,17 +109,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icacheMeta.io.write <> icacheMissQueue.io.meta_write
   icacheData.io.write <> icacheMissQueue.io.data_write
 
-  //L1plus Prefetcher
-  val grantClientId = clientId(io.icacheMemGrant.bits.id)
-  val grantEntryId = entryId(io.icacheMemGrant.bits.id)
-  l1plusPrefetcher.io.mem_grant.valid := io.icacheMemGrant.valid && grantClientId === l1plusPrefetcherId.U
-  l1plusPrefetcher.io.mem_grant.bits := io.icacheMemGrant.bits
-  l1plusPrefetcher.io.mem_grant.bits.id := Cat(0.U(clientIdWidth.W), grantEntryId)
-  assert(RegNext(!l1plusPrefetcher.io.mem_grant.valid || (l1plusPrefetcher.io.mem_grant.ready && grantClientId === l1plusPrefetcherId.U)))
-  io.icacheMemGrant.ready := Mux(grantClientId === icacheMissQueueId.U,
-    icacheMissQueue.io.mem_grant.ready,
-    l1plusPrefetcher.io.mem_grant.ready)
-  //ifu.io.fencei := RegNext(io.fencei)
+  io.icacheMemGrant.ready := icacheMissQueue.io.mem_grant.ready
   icacheMissQueue.io.mem_grant.valid  :=  io.icacheMemGrant.valid 
   icacheMissQueue.io.mem_grant.bits   :=  io.icacheMemGrant.bits
 
@@ -128,30 +117,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
+  io.icacheMemAcq <> icacheMissQueue.io.mem_acquire
+  ibuffer.io.flush := needFlush
+  io.backend.cfVec <> ibuffer.io.out
+
   instrUncache.io.req   <> DontCare
   instrUncache.io.resp  <> DontCare
   instrUncache.io.flush <> DontCare
-
-
-  // from icache and l1plus prefetcher
-  io.l1plusFlush := DontCare
-  l1plusPrefetcher.io.in.valid := DontCare
-  l1plusPrefetcher.io.in.bits := DontCare
-  l1plusPrefetcher.io.enable := RegNext(io.csrCtrl.l1plus_pf_enable)
-  val memAcquireArb = Module(new Arbiter(new L1plusCacheReq, nClients))
-  memAcquireArb.io.in(icacheMissQueueId) <> icacheMissQueue.io.mem_acquire
-  memAcquireArb.io.in(icacheMissQueueId).bits.id := Cat(icacheMissQueueId.U(clientIdWidth.W),
-    entryId(icacheMissQueue.io.mem_acquire.bits.id))
-  memAcquireArb.io.in(l1plusPrefetcherId) <> l1plusPrefetcher.io.mem_acquire
-  memAcquireArb.io.in(l1plusPrefetcherId).bits.id := Cat(l1plusPrefetcherId.U(clientIdWidth.W),
-    entryId(l1plusPrefetcher.io.mem_acquire.bits.id))
-  io.icacheMemAcq <> memAcquireArb.io.out
-  // itlb to ptw
-  // backend to ibuffer
-  ibuffer.io.flush := needFlush
-  // ibuffer to backend
-  io.backend.cfVec <> ibuffer.io.out
-
   io.error <> DontCare
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))

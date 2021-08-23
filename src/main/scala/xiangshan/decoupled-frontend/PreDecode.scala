@@ -208,7 +208,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
   val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC) && !isDoubleLine
-  val boundPC                 =  Mux(fixCross, nextLinePC  ,pcStart + (FetchWidth * 4).U)
+  val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
 
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
   realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, boundPC), pcEnd)
@@ -221,7 +221,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   io.out.cfiOffset.valid  := ParallelOR(realTakens)
   io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
 
-  io.out.target           := Mux(pcEndError && !io.out.cfiOffset.valid, pcEnd ,targets(io.out.cfiOffset.bits))
+  io.out.target           := Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC)
   io.out.takens           := realTakens
 
   io.out.jalTarget        :=  targets(jumpOffset)

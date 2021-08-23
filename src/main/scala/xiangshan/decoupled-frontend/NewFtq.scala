@@ -658,7 +658,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ifuRedirectCfiUpdate.pc := pdWb.bits.pc(pdWb.bits.misOffset.bits)
   ifuRedirectCfiUpdate.pd := pdWb.bits.pd(pdWb.bits.misOffset.bits)
   ifuRedirectCfiUpdate.predTaken := cfiIndex_vec(pdWb.bits.ftqIdx.value).valid
-  ifuRedirectCfiUpdate.target := Mux(pdWb.bits.cfiOffset.valid, pdWb.bits.target, pdWb.bits.pc(0)+(FetchWidth*4).U)
+  ifuRedirectCfiUpdate.target := pdWb.bits.target
   ifuRedirectCfiUpdate.taken := pdWb.bits.cfiOffset.valid
   ifuRedirectCfiUpdate.isMisPred := pdWb.bits.misOffset.valid
 
