@@ -68,6 +68,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // current status
     val isValid = Output(UInt(params.numEntries.W))
     val canIssue = Output(UInt(params.numEntries.W))
+    val flushed = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
     val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
     val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
@@ -109,6 +110,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val respTypeVec = io.deqResp.map(_.bits.resptype)
     (mask.asUInt.orR, Mux1H(mask, successVec), Mux1H(mask, respTypeVec))
   }
+  val flushedVec = Wire(Vec(params.numEntries, Bool()))
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     val selVec = VecInit(io.update.map(u => u.enable && u.addr(i)))
     XSError(PopCount(selVec) > 1.U, "should not update the same entry\n")
@@ -120,6 +122,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       val wakeupEn = wakeupEnVec.map(_.orR)
       io.wakeupMatch(i) := wakeupEnVec
       statusNext.valid := true.B
+      flushedVec(i) := DontCare
       statusNext.srcState := VecInit(updateStatus.srcState.zip(wakeupEn).map {
         case (update, wakeup) => update || wakeup
       })
@@ -146,6 +149,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       val wakeupEn = wakeupEnVec.map(_.orR)
       io.wakeupMatch(i) := wakeupEnVec
       statusNext.valid := Mux(deqResp && deqGrant, false.B, status.valid && !status.roqIdx.needFlush(io.redirect, io.flush))
+      flushedVec(i) := (deqResp && deqGrant) || status.roqIdx.needFlush(io.redirect, io.flush)
       // (1) when deq is not granted, unset its scheduled bit; (2) set scheduled if issued
       statusNext.scheduled := Mux(deqResp && !deqGrant || status.credit === 1.U, false.B, status.scheduled || hasIssued)
       XSError(hasIssued && !status.valid, p"should not issue an invalid entry $i\n")
@@ -176,6 +180,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.canIssue := VecInit(statusArray.map(_.valid).zip(readyVec).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
+  io.flushed := flushedVec.asUInt
 
   val validEntries = PopCount(statusArray.map(_.valid))
   XSPerfHistogram("valid_entries", validEntries, true.B, 0, params.numEntries, 1)
