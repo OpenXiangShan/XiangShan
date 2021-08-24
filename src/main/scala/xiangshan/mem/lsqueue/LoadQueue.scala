@@ -116,6 +116,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
+  val refilling = WireInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
 
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
@@ -240,6 +241,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     when(dataModule.io.refill.valid && dataModule.io.refill.refillMask(i) && dataModule.io.refill.matchMask(i)) {
       datavalid(i) := true.B
       miss(i) := false.B
+      refilling(i) := true.B
     }
   })
 
@@ -262,7 +264,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && !writebacked(i) && datavalid(i)
+    allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
