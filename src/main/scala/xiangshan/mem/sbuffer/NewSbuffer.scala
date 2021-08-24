@@ -214,7 +214,8 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     firstCanInsert,
     Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
   )
-  val do_uarch_drain = WireInit(false.B)
+  val need_uarch_drain = WireInit(false.B)
+  val do_uarch_drain = RegNext(need_uarch_drain)
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
@@ -256,7 +257,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
         vtag(mergeIdx) << OffsetWidth, 
         ptag(mergeIdx) << OffsetWidth
       )
-      do_uarch_drain := true.B
+      need_uarch_drain := true.B
     }
   }
 
