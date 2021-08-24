@@ -44,10 +44,11 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          export HEAD_SHA=${{ github.event.pull_request.head.sha }}
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
-          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
+          echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
@@ -84,10 +85,11 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          export HEAD_SHA=${{ github.event.pull_request.head.sha }}
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
-          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
+          echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbPtwIO, TlbBaseBundle, TlbReq, TlbResp, TlbCmd, TLB}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbReq, TlbResp, TlbCmd}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
@@ -167,8 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val rsFeedback = ValidIO(new RSFeedback)
-    val ptw = new TlbPtwIO()
-    val tlbcsr = new TlbBaseBundle()
+    val dtlb = new TlbRequestIO()
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -179,17 +178,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val store_s1 = Module(new StoreUnit_S1)
   val store_s2 = Module(new StoreUnit_S2)
   val store_s3 = Module(new StoreUnit_S3)
-  val dtlb = Module(new TLB(Width = 1, isDtlb = true))
 
   store_s0.io.in <> io.stin
-  store_s0.io.dtlbReq <> dtlb.io.requestor(0).req
+  store_s0.io.dtlbReq <> io.dtlb.req
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
-  store_s1.io.dtlbResp <> dtlb.io.requestor(0).resp
+  store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.rsFeedback <> io.rsFeedback
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
@@ -197,10 +195,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout
-
-  dtlb.io.ptw <> io.ptw
-  dtlb.io.sfence <> io.tlbcsr.sfence
-  dtlb.io.csr <> io.tlbcsr.csr
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,

@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, BTlbPtwIO, BridgeTLB}
+import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
@@ -70,7 +70,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
+    val ptw = new TlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -117,7 +117,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // TODO: fast load wakeup
 
-  val btlb    = Module(new BridgeTLB(BTLBWidth))
+  val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
@@ -125,9 +125,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.stIssuePtr := lsq.io.issuePtrExt
 
   // dtlb
-  io.ptw         <> btlb.io.ptw
-  btlb.io.sfence <> RegNext(io.sfence)
-  btlb.io.csr    <> RegNext(io.tlbCsr)
+  io.ptw         <> dtlb.io.ptw
+  dtlb.io.sfence <> RegNext(io.sfence)
+  dtlb.io.csr    <> RegNext(io.tlbCsr)
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -136,6 +136,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.rsFeedback    <> io.replay(i)
     loadUnits(i).io.rsIdx         := io.rsIdx(i) // TODO: beautify it
     loadUnits(i).io.isFirstIssue  := io.isFirstIssue(i) // NOTE: just for dtlb's perf cnt
+    loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> io.issue(i)
     // dcache access
@@ -143,10 +144,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
-    // l0tlb
-    loadUnits(i).io.ptw       <> btlb.io.requestor(i)
-    loadUnits(i).io.tlbcsr.sfence    <> RegNext(io.sfence)
-    loadUnits(i).io.tlbcsr.csr       <> RegNext(io.tlbCsr)
+
     // Lsq to load unit's rs
 
     // passdown to lsq
@@ -163,7 +161,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
     val stu = storeUnits(i)
-    val dtlbReq = btlb.io.requestor(exuParameters.LduCnt + i)
+    val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
 
     stu.io.redirect    <> io.redirect
     stu.io.flush       <> io.flush
@@ -171,12 +169,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.rsIdx       <> io.rsIdx(exuParameters.LduCnt + i)
     // NOTE: just for dtlb's perf cnt
     stu.io.isFirstIssue <> io.isFirstIssue(exuParameters.LduCnt + i)
+    stu.io.dtlb        <> dtlbReq
     stu.io.stin        <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq         <> lsq.io.storeIn(i)
-    // l0tlb
-    stu.io.ptw     <> btlb.io.requestor(exuParameters.LduCnt + i)
-    stu.io.tlbcsr.sfence  <> RegNext(io.sfence)
-    stu.io.tlbcsr.csr     <> RegNext(io.tlbCsr)
 
     // Lsq to load unit's rs
     // rs.io.storeData <> lsq.io.storeDataIn(i)
@@ -271,21 +266,22 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
 
-  val amoTlb = loadUnits(0).io.amoTlb
-  loadUnits(1).io.amoTlb <> DontCare
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
-  atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready
+  atomicsUnit.io.dtlb.req.ready  := dtlb.io.requestor(0).req.ready
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
-  atomicsUnit.io.dtlb <> amoTlb
   when (state === s_atomics_0 || state === s_atomics_1) {
+    atomicsUnit.io.dtlb <> dtlb.io.requestor(0)
+
+    loadUnits(0).io.dtlb.resp.valid := false.B
     loadUnits(0).io.ldout.ready := false.B
 
     // make sure there's no in-flight uops in load unit
+    assert(!loadUnits(0).io.dtlb.req.valid)
     assert(!loadUnits(0).io.ldout.valid)
   }
 
