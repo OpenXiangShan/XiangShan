@@ -26,6 +26,80 @@ import freechips.rocketchip.tilelink._
 import system.L1CacheErrorInfo
 import device.RAMHelper
 
+// DCache specific parameters
+// L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
+// It's a virtually indexed, physically tagged cache.
+case class DCacheParameters
+(
+  nSets: Int = 64,
+  nWays: Int = 8,
+  rowBits: Int = 128,
+  nTLBEntries: Int = 32,
+  tagECC: Option[String] = None,
+  dataECC: Option[String] = None,
+  replacer: Option[String] = Some("random"),
+  nMissEntries: Int = 1,
+  nProbeEntries: Int = 1,
+  nReleaseEntries: Int = 1,
+  nStoreReplayEntries: Int = 1,
+  nMMIOEntries: Int = 1,
+  nMMIOs: Int = 1,
+  blockBytes: Int = 64
+) extends L1CacheParameters {
+
+  def tagCode: Code = Code.fromString(tagECC)
+
+  def dataCode: Code = Code.fromString(dataECC)
+}
+
+trait HasDCacheParameters extends HasL1CacheParameters {
+  val cacheParams = dcacheParameters
+  val cfg = cacheParams
+
+  def encWordBits = cacheParams.dataCode.width(wordBits)
+
+  def encRowBits = encWordBits * rowWords
+
+  def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
+  def lrscBackoff = 3 // disallow LRSC reacquisition briefly
+  def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
+  def nIOMSHRs = cacheParams.nMMIOs
+
+  def maxUncachedInFlight = cacheParams.nMMIOs
+
+  def nSourceType = 3
+
+  def sourceTypeWidth = log2Up(nSourceType)
+
+  def LOAD_SOURCE = 0
+
+  def STORE_SOURCE = 1
+
+  def AMO_SOURCE = 2
+
+  // each source use a id to distinguish its multiple reqs
+  def reqIdWidth = 64
+
+  require(isPow2(nSets), s"nSets($nSets) must be pow2")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
+  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+  // this is a VIPT L1 cache
+  require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
+  // require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
+}
+
+abstract class DCacheModule(implicit p: Parameters) extends L1CacheModule
+  with HasDCacheParameters
+
+abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
+  with HasDCacheParameters
+
+class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
+  val set = UInt(log2Up(nSets).W)
+  val way = UInt(log2Up(nWays).W)
+}
+
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 {
@@ -372,54 +446,6 @@ class AMOHelper() extends BlackBox {
     val mask   = Input(UInt(8.W))
     val rdata  = Output(UInt(64.W))
   })
-}
-
-class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
-  val io = IO(new DCacheIO)
-
-  io := DontCare
-  // to LoadUnit
-  for (i <- 0 until LoadPipelineWidth) {
-    val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-    fakeRAM.io.clk   := clock
-    fakeRAM.io.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.io.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
-    fakeRAM.io.wIdx  := 0.U
-    fakeRAM.io.wdata := 0.U
-    fakeRAM.io.wmask := 0.U
-    fakeRAM.io.wen   := false.B
-
-    io.lsu.load(i).req.ready := true.B
-    io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
-    io.lsu.load(i).resp.bits.data := fakeRAM.io.rdata
-    io.lsu.load(i).resp.bits.miss := false.B
-    io.lsu.load(i).resp.bits.replay := false.B
-    io.lsu.load(i).resp.bits.id := DontCare
-    io.lsu.load(i).s1_hit_way := 1.U
-    io.lsu.load(i).s1_disable_fast_wakeup := false.B
-  }
-  // to LSQ
-  io.lsu.lsq.valid := false.B
-  io.lsu.lsq.bits := DontCare
-  // to Store Buffer
-  io.lsu.store.req.ready := true.B
-  io.lsu.store.resp := DontCare
-  io.lsu.store.resp.valid := RegNext(io.lsu.store.req.valid)
-  io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
-  // to atomics
-  val amoHelper = Module(new AMOHelper)
-  amoHelper.io.clock := clock
-  amoHelper.io.enable := io.lsu.atomics.req.valid && !reset.asBool
-  amoHelper.io.cmd := io.lsu.atomics.req.bits.cmd
-  amoHelper.io.addr := io.lsu.atomics.req.bits.addr
-  amoHelper.io.wdata := io.lsu.atomics.req.bits.data
-  amoHelper.io.mask := io.lsu.atomics.req.bits.mask
-  io.lsu.atomics.req.ready := true.B
-  io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
-  assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
-  io.lsu.atomics.resp.bits.data := amoHelper.io.rdata
-  io.lsu.atomics.resp.bits.replay := false.B
-  io.lsu.atomics.resp.bits.id := 1.U
 }
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
