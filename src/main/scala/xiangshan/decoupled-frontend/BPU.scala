@@ -33,6 +33,11 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val useBPD = true
   val useLHist = true
 
+  def BP_S1 = 1.U(2.W)
+  def BP_S2 = 2.U(2.W)
+  def BP_S3 = 3.U(2.W)
+
+  
   val debug = true
   val resetVector = 0x80000000L//TODO: set reset vec
   // TODO: Replace log2Up by log2Ceil
@@ -340,7 +345,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   predictors.io.s3_fire := s3_fire
 
-  io.bpu_to_ftq.resp.valid := s1_valid && !io.ftq_to_bpu.redirect.valid
+  io.bpu_to_ftq.resp.valid :=
+    s1_valid && s2_components_ready && s2_ready ||
+    s2_fire && s2_redirect ||
+    s3_fire && s3_redirect
   io.bpu_to_ftq.resp.bits  := BpuToFtqBundle(predictors.io.out.resp)
   io.bpu_to_ftq.resp.bits.meta  := predictors.io.out.s3_meta
   io.bpu_to_ftq.resp.bits.s3.ghist  := s3_ghist

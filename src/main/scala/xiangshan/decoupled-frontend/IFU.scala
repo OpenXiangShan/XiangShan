@@ -115,11 +115,16 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f0_fire                              = fromFtq.req.fire()
   
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
+  val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
+  
+  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
+                       fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
+
   val f3_redirect = WireInit(false.B)
   f3_flush := fromFtq.redirect.valid
   f2_flush := f3_flush || f3_redirect
-  f1_flush := f2_flush
-  f0_flush := f1_flush
+  f1_flush := f2_flush || from_bpu_f1_flush
+  f0_flush := f1_flush || from_bpu_f0_flush
 
   val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
@@ -153,6 +158,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f1_fire       = f1_valid && tlbRespAllValid && f2_ready
 
   f1_ready := f2_ready && tlbRespAllValid || !f1_valid
+
+  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
 
   val preDecoder      = Module(new PreDecode)
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
@@ -208,6 +215,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     val bank_hit_data = Mux1H(f1_bank_hit_vec(i).asUInt, bank)
     bank_hit_data
   })
+
 
   //---------------------------------------------
   //  Fetch Stage 3 :
