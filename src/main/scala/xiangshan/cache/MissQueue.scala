@@ -308,9 +308,23 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // put should_refill_data out of RegNext
   // so that when load miss are merged at refill_done
   // we can still refill data back
-  io.refill.valid := RegNext(state === s_refill_resp && refill_done) && should_refill_data
-  io.refill.bits.addr := req.addr
-  io.refill.bits.data := refill_data.asUInt
+  //
+  // Now refill to load queue width l1BusDataWidth, to load queue refill req
+  // will be issued as soon as data is ready (stored in regs in miss queue)
+  val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
+    val data = refill_data.asUInt
+    data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
+  })))
+  // val refill_addr_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i =>
+  //   req.addr + (i << refillOffBits)
+  // )))
+  io.refill.valid := RegNext(state === s_refill_resp && io.mem_grant.fire()) && should_refill_data
+  io.refill.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
+  io.refill.bits.data := refill_data_splited(RegNext(refill_count))
+  when(io.refill.fire()){
+    io.refill.bits.dump()
+    XSDebug("refill_count %d\n", RegNext(refill_count));
+  }
 
   when (state === s_main_pipe_req) {
     io.pipe_req.valid := true.B
