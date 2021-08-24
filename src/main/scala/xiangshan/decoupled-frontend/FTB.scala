@@ -222,6 +222,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   }.otherwise {
     io.out.resp.s2.ftb_entry.pftAddr := s2_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U
     io.out.resp.s2.ftb_entry.carry := s2_pc(instOffsetBits + log2Ceil(PredictWidth)).asBool
+    io.out.resp.s2.ftb_entry.oversize := false.B
   }
 
   // io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)

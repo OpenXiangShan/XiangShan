@@ -236,10 +236,16 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.ftb_entry.jmpTarget    := read_resps.jmpTarget
   io.out.resp.s1.ftb_entry.jmpValid     := read_resps.jmpValid
 
-  io.out.resp.s1.ftb_entry.pftAddr      := read_resps.pftAddr
-  io.out.resp.s1.ftb_entry.carry        := read_resps.carry
+  when(read_resps.hit) {
+    io.out.resp.s1.ftb_entry.pftAddr  := read_resps.pftAddr
+    io.out.resp.s1.ftb_entry.carry    := read_resps.carry
+    io.out.resp.s1.ftb_entry.oversize := read_resps.oversize
+  }.otherwise {
+    io.out.resp.s1.ftb_entry.pftAddr := s1_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U
+    io.out.resp.s1.ftb_entry.carry := s1_pc(instOffsetBits + log2Ceil(PredictWidth)).asBool
+    io.out.resp.s1.ftb_entry.oversize := false.B
+  }
 
-  io.out.resp.s1.ftb_entry.oversize     := read_resps.oversize
   io.out.resp.s1.ftb_entry.last_is_rvc  := read_resps.last_is_rvc
 
   outMeta.hit := read_resps.hit
