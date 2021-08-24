@@ -33,6 +33,7 @@ import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTree
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
@@ -80,7 +81,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   }
   busPMU := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
-    memory_port := busPMU
+    memory_port := TLXbar() :=* busPMU
   }
   else {
     memory_port := l2cache.node := TLBuffer() := TLXbar() :=* busPMU
