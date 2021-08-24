@@ -23,7 +23,6 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.exu.{ExuConfig, Wb}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
-import xiangshan.cache.L1plusCacheWrapper
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -65,7 +64,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 {
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
-  val l1pluscache = LazyModule(new L1plusCacheWrapper())
   val ptw = LazyModule(new PTWWrapper())
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -179,7 +177,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
-  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val exuBlocks = outer.exuBlocks.map(_.module)
   val memScheduler = outer.memScheduler.module
@@ -212,7 +209,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val rfWriteback = VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  io.l1plus_error <> l1pluscache.io.error
+  io.l1plus_error <> DontCare
   io.icache_error <> frontend.io.error
   io.dcache_error <> memBlock.io.error
 
@@ -225,10 +222,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.sfence <> fenceio.sfence
   frontend.io.tlbCsr <> csrioIn.tlb
   frontend.io.csrCtrl <> csrioIn.customCtrl
-
-  frontend.io.icacheMemAcq <> l1pluscache.io.req
-  l1pluscache.io.resp <> frontend.io.icacheMemGrant
-  l1pluscache.io.flush := frontend.io.l1plusFlush
   frontend.io.fencei := fenceio.fencei
 
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
@@ -331,9 +324,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
-
-  val l1plus_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-  l1pluscache.reset := l1plus_reset_gen.io.out
 
   val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
   ptw.reset := ptw_reset_gen.io.out

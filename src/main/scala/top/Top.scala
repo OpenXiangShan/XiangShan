@@ -72,9 +72,9 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   if (!useFakeDCache) {
     l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
   }
-  if (!useFakeL1plusCache) {
-    l2xbar := TLBuffer() := core.l1pluscache.clientNode
-  }
+  //if (!useFakeL1plusCache) {
+    l2xbar := TLBuffer() := core.frontend.icache.clientNode
+  //}
   if (!useFakePTW) {
     l2xbar := TLBuffer() := core.ptw.node
   }

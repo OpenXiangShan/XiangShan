@@ -3,6 +3,8 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
+import freechips.rocketchip.tilelink._
 import xiangshan._
 import xiangshan.cache._
 import utils._
@@ -88,6 +90,18 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas = Vec(2,Vec(nWays,UInt(blockBits.W)))
+}
+
+class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
+{
+    val req     = Flipped(DecoupledIO(new ICacheReadBundle))
+    val resp = Output(new ICacheMetaRespBundle)
+}
+
+class ICacheCommonReadBundle(isMeta: Boolean)(implicit p: Parameters) extends ICacheBundle
+{
+    val req     = Flipped(DecoupledIO(new ICacheReadBundle))
+    val resp    = if(isMeta) Output(new ICacheMetaRespBundle) else Output(new ICacheDataRespBundle)
 }
 
 
@@ -208,7 +222,13 @@ class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
     val clientID = UInt(1.W)
 }
 
-class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
+class ICacheMissBundle(implicit p: Parameters) extends ICacheBundle{
+    val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
+    val resp        = Vec(2,DecoupledIO(new ICacheMissResp))
+    val flush       = Input(Bool())
+}
+
+class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
@@ -217,8 +237,8 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
         val req         = Flipped(DecoupledIO(new ICacheMissReq))
         val resp        = DecoupledIO(new ICacheMissResp)
         
-        val mem_acquire = DecoupledIO(new L1plusCacheReq)
-        val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
+        val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+        val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
         val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
         val data_write  = DecoupledIO(new ICacheDataWriteBundle)
@@ -235,10 +255,11 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     val req_tag = get_tag(req.addr)           //physical tag
     val req_waymask = req.waymask
 
+    val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
+
     //8 for 64 bits bus and 2 for 256 bits
-    val readBeatCnt = Counter(refillCycles)
-    //val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
-    val respDataReg = Reg(UInt(blockBits.W))
+    val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
+    val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
     //initial
     io.resp.bits := DontCare
@@ -259,6 +280,7 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     switch(state){
       is(s_idle){
         when(io.req.fire()){
+          readBeatCnt := 0.U
           state := s_memReadReq
           req := io.req.bits
         }
@@ -272,17 +294,20 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
       }
 
       is(s_memReadResp){
-        when (io.mem_grant.bits.id === io.id && io.mem_grant.fire()) {
-	        respDataReg := io.mem_grant.bits.data
-          state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
+        when (edge.hasData(io.mem_grant.bits)) {
+          when (io.mem_grant.fire()) {
+            readBeatCnt := readBeatCnt + 1.U
+            respDataReg(readBeatCnt) := io.mem_grant.bits.data
+            when (readBeatCnt === (refillCycles - 1).U) {
+              assert(refill_done, "refill not done!")
+              state := Mux(needFlush || io.flush, s_wait_resp, s_write_back)
+            }
+          }
         }
       }
 
-      //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
-        //when((io.data_write.fire() && io.meta_write.fire()) || needFlush){
           state := s_wait_resp
-        //}
       }
 
       is(s_wait_resp){
@@ -299,12 +324,14 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
     io.meta_write.bits.apply(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
     io.data_write.valid := (state === s_write_back) && !needFlush
-    io.data_write.bits.apply(data=respDataReg, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    io.data_write.bits.apply(data=respDataReg.asUInt, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     //mem request
-    io.mem_acquire.bits.cmd  := MemoryOpConstants.M_XRD
-    io.mem_acquire.bits.addr := Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W))
-    io.mem_acquire.bits.id   := io.id
+    io.mem_acquire.bits  := edge.Get(
+      fromSource      = io.id,
+      toAddress       = Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
+      lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
+
 
     //resp to icache
     io.resp.valid := (state === s_wait_resp) && !needFlush
@@ -323,14 +350,14 @@ class ICacheMissEntry(implicit p: Parameters) extends ICacheMissQueueModule
 }
 
 //TODO: This is a stupid missqueue that has only 2 entries
-class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
+class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
     val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
     val resp        = Vec(2, DecoupledIO(new ICacheMissResp))
     
-    val mem_acquire = DecoupledIO(new L1plusCacheReq)
-    val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
+    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
     val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
@@ -339,14 +366,16 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
 
   })
 
+  // assign default values to output signals
+  io.mem_grant.ready := false.B
+
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  2))
   val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  2))
-  val mem_acquire_arb= Module(new Arbiter(new L1plusCacheReq,   2))
 
   io.mem_grant.ready := true.B
 
   val entries = (0 until 2) map { i =>
-    val entry = Module(new ICacheMissEntry)
+    val entry = Module(new ICacheMissEntry(edge))
 
     entry.io.id := i.U(1.W)
     entry.io.flush := io.flush
@@ -359,11 +388,10 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
     // entry resp
     meta_write_arb.io.in(i)     <>  entry.io.meta_write
     refill_arb.io.in(i)         <>  entry.io.data_write
-    mem_acquire_arb.io.in(i)    <>  entry.io.mem_acquire
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
-    when (io.mem_grant.bits.id === i.U) {
+    when (io.mem_grant.bits.source === i.U) {
       entry.io.mem_grant <> io.mem_grant
     }
 
@@ -383,8 +411,64 @@ class ICacheMissQueue(implicit p: Parameters) extends ICacheMissQueueModule
     entry
   }
 
+  TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
+
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
-  io.mem_acquire    <> mem_acquire_arb.io.out
 
+}
+
+class ICacheIO(implicit p: Parameters) extends ICacheBundle
+{
+  val metaRead    = new ICacheCommonReadBundle(isMeta = true)
+  val dataRead    = new ICacheCommonReadBundle(isMeta = false)
+  val missQueue   = new ICacheMissBundle
+}
+
+class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+
+  val clientParameters = TLMasterPortParameters.v1(
+    Seq(TLMasterParameters.v1(
+      name = "icache",
+      sourceId = IdRange(0, cacheParams.nMissEntries)
+    ))
+  )
+
+  val clientNode = TLClientNode(Seq(clientParameters))
+
+  lazy val module = new ICacheImp(this)
+}
+
+class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParameters {
+  val io = IO(new ICacheIO)
+
+  val (bus, edge) = outer.clientNode.out.head
+  
+  val metaArray      = Module(new ICacheMetaArray)
+  val dataArray      = Module(new ICacheDataArray)
+  val missQueue      = Module(new ICacheMissQueue(edge))
+
+  metaArray.io.write <> missQueue.io.meta_write
+  dataArray.io.write <> missQueue.io.data_write
+
+  metaArray.io.read      <> io.metaRead.req 
+  metaArray.io.readResp  <> io.metaRead.resp
+
+  dataArray.io.read      <> io.dataRead.req 
+  dataArray.io.readResp  <> io.dataRead.resp
+
+  for(i <- 0 until 2){
+    missQueue.io.req(i)           <> io.missQueue.req(i)
+    missQueue.io.resp(i)          <> io.missQueue.resp(i)
+  }  
+
+  missQueue.io.flush := io.missQueue.flush
+  bus.a <> missQueue.io.mem_acquire  
+  missQueue.io.mem_grant      <> bus.d
+
+  bus.b.ready := false.B
+  bus.c.valid := false.B
+  bus.c.bits  := DontCare
+  bus.e.valid := false.B
+  bus.e.bits  := DontCare
 }
