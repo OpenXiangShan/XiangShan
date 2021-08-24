@@ -78,6 +78,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
+      val resptype = RSFeedbackType() // update credit if needs replay
     })))
     val stIssuePtr = if (params.checkWaitBit) Input(new SqPtr()) else null
   })
@@ -101,11 +102,12 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     XSError(PopCount(matchVec) > 1.U, p"matchVec ${Binary(matchVec.asUInt)} should be one-hot\n")
     matchVec.asUInt
   }
-  def deqRespSel(i: Int) : (Bool, Bool) = {
+  def deqRespSel(i: Int) : (Bool, Bool, UInt) = {
     val mask = VecInit(io.deqResp.map(resp => resp.valid && resp.bits.rsMask(i)))
     XSError(PopCount(mask) > 1.U, p"feedbackVec ${Binary(mask.asUInt)} should be one-hot\n")
     val successVec = io.deqResp.map(_.bits.success)
-    (mask.asUInt.orR, Mux1H(mask, successVec))
+    val respTypeVec = io.deqResp.map(_.bits.resptype)
+    (mask.asUInt.orR, Mux1H(mask, successVec), Mux1H(mask, respTypeVec))
   }
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     val selVec = VecInit(io.update.map(u => u.enable && u.addr(i)))
@@ -135,7 +137,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       XSError(status.valid, p"should not update a valid entry $i\n")
     }.otherwise {
       val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
-      val (deqResp, deqGrant) = deqRespSel(i)
+      val (deqResp, deqGrant, deqRespType) = deqRespSel(i)
       XSError(deqResp && !status.valid, p"should not deq an invalid entry $i\n")
       if (params.hasFeedback) {
         XSError(deqResp && !status.scheduled, p"should not deq an un-scheduled entry $i\n")
@@ -150,6 +152,11 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       statusNext.blocked := false.B
       if (params.checkWaitBit) {
         statusNext.blocked := status.blocked && isAfter(status.sqIdx, io.stIssuePtr)
+        when (deqResp && !deqGrant && deqRespType === RSFeedbackType.dataInvalid) {
+          statusNext.blocked := true.B
+          XSError(status.valid && !isAfter(status.sqIdx, RegNext(RegNext(io.stIssuePtr))),
+            "Previous store instructions are all issued. Should not trigger dataInvalid.\n")
+        }
       }
       statusNext.credit := Mux(status.credit > 0.U, status.credit - 1.U, status.credit)
       XSError(status.valid && status.credit > 0.U && !status.scheduled,
@@ -192,7 +199,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
       XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
     }
-    val wakeup_j = io.wakeupMatch.map(m => PopCount(m.map(_(j)))).reduce(_ + _)
-    XSPerfHistogram(s"wakeup_$j", wakeup_j, true.B, 0, params.numEntries, 1)
+    // val wakeup_j = io.wakeupMatch.map(m => PopCount(m.map(_(j)))).reduce(_ +& _)
+    // XSPerfHistogram(s"wakeup_$j", wakeup_j, true.B, 0, params.numEntries, 1)
   }
 }

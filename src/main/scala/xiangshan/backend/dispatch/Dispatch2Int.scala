@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{XSPerfHistogram, _}
+import utils._
 import xiangshan.backend.rename.BusyTableReadIO
 
 class Dispatch2Int(implicit p: Parameters) extends XSModule {

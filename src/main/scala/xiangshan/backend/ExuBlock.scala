@@ -29,9 +29,10 @@ class ExuBlock(
   val dpPorts: Seq[Seq[(Int, Int)]],
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
-  val outFastPorts: Seq[Seq[Int]]
+  val outFastPorts: Seq[Seq[Int]],
+  val outFpRfReadPorts: Int
 )(implicit p: Parameters) extends LazyModule {
-  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts))
+  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outFpRfReadPorts))
 
   lazy val module = new ExuBlockImp(this)
 }
