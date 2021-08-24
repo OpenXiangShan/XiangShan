@@ -120,6 +120,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
 
   val validStart        = Wire(Vec(PredictWidth, Bool()))
+  dontTouch(validStart)
   val validEnd          = Wire(Vec(PredictWidth, Bool()))
   val targets           = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
   val misPred           = Wire(Vec(PredictWidth, Bool()))

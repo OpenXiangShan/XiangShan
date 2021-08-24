@@ -107,18 +107,21 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   //  * Check whether need 2 line fetch
   //---------------------------------------------
   
-  val (f0_valid, f1_ready)                 = (fromFtq.req.valid, WireInit(false.B))
+  val f0_valid                             = fromFtq.req.valid
   val f0_ftq_req                           = fromFtq.req.bits
   val f0_situation                         = VecInit(Seq(isCrossLineReq(f0_ftq_req.startAddr, f0_ftq_req.fallThruAddr), isLastInCacheline(f0_ftq_req.fallThruAddr)))
   val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
   val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.fallThruAddr))
   val f0_fire                              = fromFtq.req.fire()
   
-  val f0_flush, f1_flush, f2_flush = WireInit(false.B)
-  val f2_redirect = WireInit(false.B)
-  f2_flush := fromFtq.redirect.valid
-  f1_flush := f2_flush || f2_redirect
+  val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
+  val f3_redirect = WireInit(false.B)
+  f3_flush := fromFtq.redirect.valid
+  f2_flush := f3_flush || f3_redirect
+  f1_flush := f2_flush
   f0_flush := f1_flush
+
+  val f1_ready, f2_ready, f3_ready         = WireInit(false.B)
 
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
@@ -140,7 +143,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   //TODO: handle fetch exceptions
 
-  val f2_ready = WireInit(false.B)
   val tlbRespAllValid = WireInit(false.B)
 
   val f1_valid      = RegInit(false.B)
@@ -214,15 +216,20 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   //  * cut cacheline(s) and send to PreDecode
   //  * check if prediction is right (branch target and type, jump direction and type , jal target )
   //---------------------------------------------
+  val f2_fetchFinish = Wire(Bool())
+
   val f2_valid        = RegInit(false.B)
   val f2_ftq_req      = RegEnable(next = f1_ftq_req,    enable = f1_fire)
   val f2_situation    = RegEnable(next = f1_situation,  enable=f1_fire)
   val f2_doubleLine   = RegEnable(next = f1_doubleLine, enable=f1_fire)
-  val f2_fire         = io.toIbuffer.fire()
+  val f2_fire         = f2_valid && f2_fetchFinish && f3_ready
+
+  f2_ready := (f3_ready && f2_fetchFinish) || !f2_valid
 
   when(f2_flush)                  {f2_valid := false.B}
   .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
-  .elsewhen(io.toIbuffer.fire())  {f2_valid := false.B}
+  .elsewhen(f2_fire)              {f2_valid := false.B}
+
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
   val f2_hit      = RegEnable(next = f1_hit   , enable = f1_fire)
@@ -318,11 +325,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     }
 
     is(wait_finish) {
-      when(io.toIbuffer.fire()) {wait_state := wait_idle }
+      when(f2_fire) {wait_state := wait_idle }
     }
   }
 
-  when(fromFtq.redirect.valid) { wait_state := wait_idle }
+  when(f2_flush) { wait_state := wait_idle }
 
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
@@ -334,9 +341,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   }
 
   val miss_all_fix       = (wait_state === wait_finish)
-  val fetchFinish        = ((f2_valid && f2_hit) || miss_all_fix || hit_0_except_1 || except_0)
+  
+  f2_fetchFinish         := ((f2_valid && f2_hit) || miss_all_fix || hit_0_except_1 || except_0)
 
-  f2_ready := (io.toIbuffer.ready && fetchFinish) || !f2_valid
 
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
@@ -381,24 +388,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     }
   }
 
-  val f2_lastHalf = RegInit(0.U.asTypeOf(new LastHalfInfo))
-  val f2_lastHalfMatch = f2_lastHalf.matchThisBlock(f2_ftq_req.startAddr)
+  val f2_cut_data = cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
   
-  preDecoderIn.instValid     :=  fetchFinish && !f2_has_except
-  preDecoderIn.data          :=  cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
-  preDecoderIn.startAddr     :=  f2_ftq_req.startAddr
-  preDecoderIn.fallThruAddr  :=  f2_ftq_req.fallThruAddr
-  preDecoderIn.fallThruError :=  f2_ftq_req.fallThruError
-  preDecoderIn.isDoubleLine  :=  f2_doubleLine
-  preDecoderIn.ftqOffset     :=  f2_ftq_req.ftqOffset
-  preDecoderIn.target        :=  f2_ftq_req.target
-  preDecoderIn.oversize      :=  f2_ftq_req.oversize
-  preDecoderIn.lastHalfMatch :=  f2_lastHalfMatch
-  preDecoderIn.pageFault     :=  f2_except_pf  
-  preDecoderIn.accessFault   :=  f2_except_af
-
-  predecodeOutValid          :=  fetchFinish
-
   // deal with secondary miss in f1 
   val f2_0_f1_0 =   ((f2_valid && !f2_bank_hit(0)) && f1_valid && (get_block_addr(f2_ftq_req.startAddr) === get_block_addr(f1_ftq_req.startAddr)))
   val f2_0_f1_1 =   ((f2_valid && !f2_bank_hit(0)) && f1_valid && f1_doubleLine && (get_block_addr(f2_ftq_req.startAddr) === get_block_addr(f1_ftq_req.startAddr + blockBytes.U)))
@@ -412,38 +403,82 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   when(f2_flush){
     sec_miss_reg.map(sig => sig := false.B)
     hasSecMiss := false.B
-  }.elsewhen(isSameLine && !f1_flush && io.toIbuffer.fire()){
+  }.elsewhen(isSameLine && !f1_flush && f2_fire){
     sec_miss_reg.zipWithIndex.map{case(sig, i) => sig := sec_miss_sit(i)}
     hasSecMiss := true.B
-  }.elsewhen((!isSameLine || f1_flush) && hasSecMiss && io.toIbuffer.fire()){
+  }.elsewhen((!isSameLine || f1_flush) && hasSecMiss && f2_fire){
     sec_miss_reg.map(sig => sig := false.B)
     hasSecMiss := false.B
   }
 
-  when((f2_0_f1_0 || f2_0_f1_1) && io.toIbuffer.fire()){
+  when((f2_0_f1_0 || f2_0_f1_1) && f2_fire){
     reservedRefillData(0) := f2_mq_datas(0)
   }
 
-  when((f2_1_f1_0 || f2_1_f1_1) && io.toIbuffer.fire()){
+  when((f2_1_f1_0 || f2_1_f1_1) && f2_fire){
     reservedRefillData(1) := f2_mq_datas(1)
   }
 
 
+  //---------------------------------------------
+  //  Fetch Stage 4 :
+  //  * get data from last stage (hit from f1_hit_data/miss from missQueue response)
+  //  * if at least one needed cacheline miss, wait for miss queue response (a wait_state machine) THIS IS TOO UGLY!!!
+  //  * cut cacheline(s) and send to PreDecode
+  //  * check if prediction is right (branch target and type, jump direction and type , jal target )
+  //---------------------------------------------
+  val f3_valid          = RegInit(false.B)
+  val f3_ftq_req        = RegEnable(next = f2_ftq_req,    enable=f2_fire)
+  val f3_situation      = RegEnable(next = f2_situation,  enable=f2_fire)
+  val f3_doubleLine     = RegEnable(next = f2_doubleLine, enable=f2_fire)
+  val f3_fire           = io.toIbuffer.fire()
+
+  when(f3_flush)                  {f3_valid := false.B}
+  .elsewhen(f2_fire && !f2_flush) {f3_valid := true.B }
+  .elsewhen(io.toIbuffer.fire())  {f3_valid := false.B}
+
+  f3_ready := io.toIbuffer.ready || !f2_valid
+
+  val f3_cut_data       = RegEnable(next = f2_cut_data, enable=f2_fire)
+  val f3_except_pf      = RegEnable(next = f2_except_pf, enable = f2_fire)
+  val f3_except_af      = RegEnable(next = f2_except_af, enable = f2_fire)
+  val f3_hit            = RegEnable(next = f2_hit   , enable = f2_fire)
+
+  val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
+  val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
+  val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
+  val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
+
+  
+  preDecoderIn.instValid     :=  f3_valid && !f3_has_except
+  preDecoderIn.data          :=  f3_cut_data
+  preDecoderIn.startAddr     :=  f3_ftq_req.startAddr
+  preDecoderIn.fallThruAddr  :=  f3_ftq_req.fallThruAddr
+  preDecoderIn.fallThruError :=  f3_ftq_req.fallThruError
+  preDecoderIn.isDoubleLine  :=  f3_doubleLine
+  preDecoderIn.ftqOffset     :=  f3_ftq_req.ftqOffset
+  preDecoderIn.target        :=  f3_ftq_req.target
+  preDecoderIn.oversize      :=  f3_ftq_req.oversize
+  preDecoderIn.lastHalfMatch :=  f3_lastHalfMatch
+  preDecoderIn.pageFault     :=  f3_except_pf  
+  preDecoderIn.accessFault   :=  f3_except_af
+
+
   // TODO: What if next packet does not match?
-  when (f2_flush) {
-    f2_lastHalf.valid := false.B
+  when (f3_flush) {
+    f3_lastHalf.valid := false.B
   }.elsewhen (io.toIbuffer.fire()) {
-    f2_lastHalf.valid := preDecoderOut.hasLastHalf
-    f2_lastHalf.middlePC := preDecoderOut.realEndPC
+    f3_lastHalf.valid := preDecoderOut.hasLastHalf
+    f3_lastHalf.middlePC := preDecoderOut.realEndPC
   }
 
-  val f2_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
+  val f3_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
 
-  io.toIbuffer.valid          := fetchFinish 
+  io.toIbuffer.valid          := f3_valid 
   io.toIbuffer.bits.instrs    := preDecoderOut.instrs
-  io.toIbuffer.bits.valid     := f2_predecode_range & preDecoderOut.instrRange.asUInt
+  io.toIbuffer.bits.valid     := f3_predecode_range & preDecoderOut.instrRange.asUInt
   io.toIbuffer.bits.pd        := preDecoderOut.pd
-  io.toIbuffer.bits.ftqPtr    := f2_ftq_req.ftqIdx
+  io.toIbuffer.bits.ftqPtr    := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i)}
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
@@ -452,28 +487,28 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   io.toIbuffer.bits.crossPageIPFFix := preDecoderOut.crossPageIPF
 
   //Write back to Ftq
-  val finishFetchMaskReg = RegNext(fetchFinish && !f1_fire)
+  val finishFetchMaskReg = RegNext(f3_valid && !(f2_fire && !f2_flush))
 
-  toFtq.pdWb.valid           := !finishFetchMaskReg && fetchFinish
+  toFtq.pdWb.valid           := !finishFetchMaskReg && f3_valid
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd 
-  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f2_predecode_range(i)}
-  toFtq.pdWb.bits.ftqIdx     := f2_ftq_req.ftqIdx
-  toFtq.pdWb.bits.ftqOffset  := f2_ftq_req.ftqOffset.bits 
+  toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f3_predecode_range(i)}
+  toFtq.pdWb.bits.ftqIdx     := f3_ftq_req.ftqIdx
+  toFtq.pdWb.bits.ftqOffset  := f3_ftq_req.ftqOffset.bits 
   toFtq.pdWb.bits.misOffset  := preDecoderOut.misOffset
   toFtq.pdWb.bits.cfiOffset  := preDecoderOut.cfiOffset
   toFtq.pdWb.bits.target     := preDecoderOut.target
   toFtq.pdWb.bits.jalTarget  := preDecoderOut.jalTarget
   toFtq.pdWb.bits.instrRange := preDecoderOut.instrRange
 
-  val predecodeFlush     = preDecoderOut.misOffset.valid && predecodeOutValid
-  val predecodeFlushReg  = RegNext(predecodeFlush && !f1_fire)
+  val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
+  val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
-  f2_redirect := !predecodeFlushReg && predecodeFlush
+  f3_redirect := !predecodeFlushReg && predecodeFlush
 
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     // Performance Counter
     XSPerfAccumulate("req",   io.toIbuffer.fire() )
-    XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f2_hit )
+    XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f3_hit )
   }
 }
