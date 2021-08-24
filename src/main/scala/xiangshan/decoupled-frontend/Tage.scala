@@ -439,7 +439,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val u_valid = io.update.valid
   val update = io.update.bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
-      update.ftb_entry.brValids(w) && u_valid && !(PriorityEncoder(update.preds.taken_mask) < w.U)))
+      update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
+      !(PriorityEncoder(update.preds.taken_mask) < w.U)))
   val updateHist = update.ghist
   val updatePhist = update.phist
 
@@ -551,7 +552,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
 
-  resp_s2.preds.taken_mask := s2_tageTakens
+  for (i <- 0 until numBr) {
+    resp_s2.preds.taken_mask(i) := s2_tageTakens(i) || ftb_entry.always_taken(i)
+  }
   // io.out.resp.s3 := RegEnable(resp_s2, io.s2_fire)
 
   for (w <- 0 until TageBanks) {
@@ -606,7 +609,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tage_perf(
         s"bank_${b}_tage_provided",
         PopCount(s2_provideds(b)),
-        PopCount(updateMetas(b).provider.valid)
+        PopCount(updateMetas(b).provider.valid && updateValids(b))
       )
     }
 
