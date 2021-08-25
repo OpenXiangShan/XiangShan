@@ -518,5 +518,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     // Performance Counter
     XSPerfAccumulate("req",   io.toIbuffer.fire() )
     XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f3_hit )
+    XSPerfAccumulate("frontendFlush",  f3_redirect )
+    XSPerfAccumulate("only_0_miss",   only_0_miss )
+    XSPerfAccumulate("hit_0_miss_1",  hit_0_miss_1 )
+    XSPerfAccumulate("miss_0_hit_1",  miss_0_hit_1 )
+    XSPerfAccumulate("miss_0_miss_1", miss_0_miss_1 )
+    XSPerfAccumulate("crossLine", io.toIbuffer.fire() && f3_situation(0) )
+    XSPerfAccumulate("lastInLin", io.toIbuffer.fire() && f3_situation(1) )
   }
 }
