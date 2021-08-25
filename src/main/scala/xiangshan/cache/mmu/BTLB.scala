@@ -55,6 +55,8 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   // val waiting_set_v = RegInit(Vec(Width, Vec(WaitingSetSize, false.B)))
 
   val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(BTlbEntrySize-1, 0), 0.U).asBools
+  val ptw_resp_load = Cat(io.ptw.resp.bits.vector.take(LoadPipelineWidth)).orR
+  val ptw_resp_store = Cat(io.ptw.resp.bits.vector.drop(LoadPipelineWidth)).orR
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
     val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
@@ -69,8 +71,9 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
     hitEntry.suggestName("hitEntry")
     hit.suggestName("hit")
 
+    val vector_valid = if (i < LoadPipelineWidth) ptw_resp_load else ptw_resp_store
     resp(i).valid := (RegNext(req(i)(0).valid) && hit) ||
-      (io.ptw.resp.valid && io.ptw.resp.bits.vector(i))
+      (io.ptw.resp.valid && vector_valid)
     resp(i).bits := Mux(RegNext(req(i)(0).valid) && hit, hitEntry, io.ptw.resp.bits.data)
 
     req(i)(0).ready := true.B // TODO: handle the ready
