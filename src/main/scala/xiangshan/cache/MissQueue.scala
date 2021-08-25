@@ -325,6 +325,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.refill.bits.dump()
     XSDebug("refill_count %d\n", RegNext(refill_count));
   }
+  val refill_finished = RegNext(state === s_refill_resp && refill_done) && should_refill_data
 
   when (state === s_main_pipe_req) {
     io.pipe_req.valid := true.B
@@ -386,7 +387,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
 
   val load_miss_begin = io.req_valid && (io.primary_ready || io.secondary_ready) && io.req.source === LOAD_SOURCE.U
-  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, io.refill.valid)
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
 
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
