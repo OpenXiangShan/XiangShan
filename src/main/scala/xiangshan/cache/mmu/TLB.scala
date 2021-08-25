@@ -175,7 +175,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
-    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    val update = hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
     val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
@@ -260,7 +260,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
         v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) }
       }.otherwise {
         // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
+        v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) && !g(i) }
       }
     }
   }
@@ -318,8 +318,6 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
 }
-
-
 
 object TLB {
   def apply

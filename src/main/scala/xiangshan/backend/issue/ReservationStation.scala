@@ -304,6 +304,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // select the issue instructions
   select.io.request := statusArray.io.canIssue
+  val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
+  select.io.best := AgeDetector(params.numEntries, enqVec, statusArray.io.flushed)
   for (i <- 0 until params.numDeq) {
     select.io.grant(i).ready := io.deq(i).ready
     statusArray.io.issueGranted(i).valid := select.io.grant(i).fire

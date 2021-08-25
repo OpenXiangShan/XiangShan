@@ -18,13 +18,14 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import freechips.rocketchip.tile.FType
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 {
 
-  val fma = supportedFunctionUnits.head.asInstanceOf[FMA]
+  val fma = functionUnits.head.asInstanceOf[FMA]
 
   val input = io.fromFp.bits
   val fmaOut = fma.io.out.bits
@@ -37,6 +38,10 @@ class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
   fma.io.flushIn := io.flush
   fma.io.out.ready := io.out.ready
 
-  io.out.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
+  io.out.bits.data := Mux(fma.io.out.bits.uop.ctrl.fpu.typeTagOut === S,
+    box(fma.io.out.bits.data, FType.S),
+    sanitizeNaN(fma.io.out.bits.data, FType.D)
+  )
+  // io.out.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
   io.out.bits.fflags := fma.fflags
 }

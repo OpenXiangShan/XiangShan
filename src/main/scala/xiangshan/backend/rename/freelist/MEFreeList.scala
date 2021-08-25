@@ -274,16 +274,17 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
   /*
   Flush: directly flush reference counter according to arch-rat
-  - replace specRefCounter with archRefCounter; reset headPtr to [ tailPtr - (NRPhyRegs-32) - archRefCounter.reduce(_ + _) ]
+  - replace specRefCounter with archRefCounter; reset headPtr to [ tailPtr - (NRPhyRegs-32) - (archRefCounter(i) - cmtCounter(i)).reduce(_ + _) ]
    */
 
 
   // update tail pointer
   val tailPtrNext = Mux(walk, tailPtr, tailPtr + PopCount(freeVec))
   // update head pointer
-  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - archRefCounter.reduceTree(_ + _), // FIXME Maybe this is too complicated?
+  val dupRegVec = WireInit(VecInit(archRefCounter.zip(cmtCounter).map{ case (a, c) => a - c }))
+  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegVec.reduceTree(_ + _), // FIXME Maybe this is too complicated?
                       Mux(walk, headPtr - PopCount(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }), 
-                      headPtr + PopCount(needAllocatingVec))) // when redirect is valid, needAllocatingVec is all-zero
+                      headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
   freeRegCnt := distanceBetween(tailPtrNext, headPtrNext)
   canAllocate := RegNext(freeRegCnt >= RenameWidth.U)
