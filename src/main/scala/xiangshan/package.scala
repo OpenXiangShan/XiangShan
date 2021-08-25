@@ -22,6 +22,7 @@ import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -235,7 +236,6 @@ package object xiangshan {
     def sh3add      = "b0_01_00_110".U
     def sh3add_uw   = "b0_01_00_111".U
 
-    
 
     // shift optype
     def sll         = "b0_10_00_000".U
@@ -270,7 +270,6 @@ package object xiangshan {
     def sraw        = "b1_10_01_100".U
     def rolw        = "b1_10_10_000".U
     def rorw        = "b1_10_11_000".U
-
 
     def isWordOp(func: UInt) = func(7)
     def isBranch(func: UInt) = func(6, 3) === "b0010".U
@@ -421,6 +420,7 @@ package object xiangshan {
   def f2iGen(p: Parameters) = new FPToInt()(p)
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
+  def stdGen(p: Parameters) = new Std()(p)
 
   def f2iSel(x: FunctionUnit): Bool = {
     x.io.in.bits.uop.ctrl.rfWen
@@ -441,6 +441,7 @@ package object xiangshan {
   }
 
   val aluCfg = FuConfig(
+    name = "alu",
     fuGen = aluGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.alu,
     fuType = FuType.alu,
@@ -452,6 +453,7 @@ package object xiangshan {
   )
 
   val jmpCfg = FuConfig(
+    name = "jmp",
     fuGen = jmpGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp,
     fuType = FuType.jmp,
@@ -463,6 +465,7 @@ package object xiangshan {
   )
 
   val fenceCfg = FuConfig(
+    name = "fence",
     fuGen = fenceGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
@@ -470,6 +473,7 @@ package object xiangshan {
   )
 
   val csrCfg = FuConfig(
+    name = "csr",
     fuGen = csrGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr,
     fuType = FuType.csr,
@@ -481,6 +485,7 @@ package object xiangshan {
   )
 
   val i2fCfg = FuConfig(
+    name = "i2f",
     fuGen = i2fGen,
     fuSel = i2fSel,
     FuType.i2f,
@@ -493,6 +498,7 @@ package object xiangshan {
   )
 
   val divCfg = FuConfig(
+    name = "div",
     fuGen = dividerGen,
     fuSel = (x: FunctionUnit) => MDUOpType.isDiv(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.div,
@@ -505,6 +511,7 @@ package object xiangshan {
   )
 
   val mulCfg = FuConfig(
+    name = "mul",
     fuGen = multiplierGen,
     fuSel = (x: FunctionUnit) => MDUOpType.isMul(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.mul,
@@ -516,60 +523,74 @@ package object xiangshan {
     CertainLatency(2)
   )
 
-   val bmuCfg = FuConfig(
-   fuGen = bmuGen,
-   fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.bmu,
-   fuType = FuType.bmu,
-   numIntSrc = 2,
-   numFpSrc = 0,
-   writeIntRf = true,
-   writeFpRf = false,
-   hasRedirect = false,
-   CertainLatency(1)
+  val bmuCfg = FuConfig(
+    name = "bmu",
+    fuGen = bmuGen,
+    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.bmu,
+    fuType = FuType.bmu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    hasRedirect = false,
+    CertainLatency(1)
  )
 
   val fmacCfg = FuConfig(
+    name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
     FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
   )
 
   val f2iCfg = FuConfig(
+    name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
     FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
   )
 
   val f2fCfg = FuConfig(
+    name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
     FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
   )
 
   val fdivSqrtCfg = FuConfig(
+    name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
   )
 
   val lduCfg = FuConfig(
+    "ldu",
     null, // DontCare
     null,
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
     UncertainLatency()
   )
 
-  val stuCfg = FuConfig(
+  val staCfg = FuConfig(
+    "sta",
     null,
     null,
-    FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
+  val stdCfg = FuConfig(
+    "std",
+    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
+  )
+
   val mouCfg = FuConfig(
+    "mou",
     null,
     null,
-    FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
@@ -585,5 +606,6 @@ package object xiangshan {
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }

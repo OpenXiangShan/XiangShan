@@ -25,6 +25,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -104,10 +105,10 @@ case class XSCoreParameters
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
-  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
+  PtwL3EntrySize: Int = 4096, //(512 * 8) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 2048, //(256 * 8)
+  PtwL2EntrySize: Int = 256, //(256 * 8)
   PtwMissQueueSize: Int = 8,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
@@ -140,10 +141,11 @@ case class XSCoreParameters
   useFakeL2Cache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg)
 
-  val intExuConfigs = Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg
+  val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg) ++
+    Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++

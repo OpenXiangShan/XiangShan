@@ -132,6 +132,7 @@ class WordResultSelect(implicit p: Parameters) extends XSModule {
   io.wordRes := SignExt(wordRes, XLEN)
 }
 
+
 class AluResSel(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())

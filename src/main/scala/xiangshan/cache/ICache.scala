@@ -678,7 +678,7 @@ class ICache(implicit p: Parameters) extends ICacheModule
     for(i <- 0 until blockRows){
         XSDebug(icacheMissQueue.io.resp.fire(),"[Stage 3] (%d)  %x\n",i.U,refillDataVec(i))
     }
-    XSDebug(is_same_cacheline,"WARNING: same cacheline happen!")
+    XSDebug(is_same_cacheline,"WARNING: same cacheline happen!\n")
   }
   def dump_mem_info() = {
     val toMem = io.mem_acquire
