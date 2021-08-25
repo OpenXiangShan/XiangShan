@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 
 class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
@@ -146,4 +147,11 @@ class WbImp(outer: Wb)(implicit p: Parameters) extends LazyModuleImp(outer) {
     out.bits := arb.io.out.bits
     arb.io.out.ready := true.B
   }
+
+  for (i <- 0 until outer.numInPorts) {
+    XSPerfAccumulate(s"in_valid_$i", io.in(i).valid)
+    XSPerfAccumulate(s"in_fire_$i", io.in(i).fire)
+  }
+  XSPerfHistogram("in_count", PopCount(io.in.map(_.valid)), true.B, 0, outer.numInPorts, 1)
+  XSPerfHistogram("out_count", PopCount(io.out.map(_.valid)), true.B, 0, outer.numInPorts, 1)
 }

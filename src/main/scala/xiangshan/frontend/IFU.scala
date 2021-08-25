@@ -588,6 +588,13 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
   XSPerfAccumulate("if3_prevHalfConsumed", if3_prevHalfConsumed)
   XSPerfAccumulate("if4_prevHalfConsumed", if4_prevHalfConsumed)
 
+  XSPerfAccumulate("TMA_frontend_latency_itlb", if2_valid && if3_ready && !icache.io.tlb.resp.valid)
+  XSPerfAccumulate("TMA_frontend_latency_icacheMiss", if3_valid && if4_ready && !icache.io.resp.valid)
+  XSPerfAccumulate("TMA_frontend_latency_bpu", !bpu.io.in_ready && if1_valid)
+  XSPerfAccumulate("TMA_frontend_latency_halfInstr", Mux(if3_prevHalfNotMetRedirect && HasCExtension.B, 2.U, 0.U)) // penalty for 2 cycles
+
+  XSPerfAccumulate("TMA_frontend_latency_if3Fail", if3_fire && if3_redirect && !if4_redirect && !if3_flush)
+  XSPerfAccumulate("TMA_frontend_latency_if4Fail", Mux(if4_fire && if4_redirect && !if4_flush, 2.U, 0.U)) // penalty for 2 cycles
 
   // debug info
   if (IFUDebug) {
