@@ -317,7 +317,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         s2_disagree(w) := s2_tageTakens(w) =/= pred
         // io.resp.takens(w) := pred
         // fit to always-taken condition
-        io.out.resp.s2.preds.taken_mask(w) := pred || io.in.bits.resp_in(0).s2.ftb_entry.always_taken(w)
+        io.out.resp.s2.preds.taken_mask(w) := pred
       }
     }
 

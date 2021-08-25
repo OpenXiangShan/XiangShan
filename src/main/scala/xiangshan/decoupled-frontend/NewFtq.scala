@@ -297,7 +297,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.always_taken(1) := false.B
   init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_jmp_is_jal || new_jmp_is_jalr
-  init_entry.jmpTarget := Mux(!cfi_is_jal, pd.jalTarget, io.target)
+  init_entry.jmpTarget := Mux(cfi_is_jal, pd.jalTarget, io.target)
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + ((FetchWidth*4)>>instOffsetBits).U + Mux(last_br_rvi, 1.U, 0.U))
   init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1))
@@ -500,7 +500,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   when (bpu_in_fire) {
     entry_fetch_status(bpu_in_resp_idx) := f_to_send
     commitStateQueue(bpu_in_resp_idx) := VecInit(Seq.fill(PredictWidth)(c_invalid))
-    entry_hit_status(bpu_in_resp_idx) := Mux(bpu_in_resp.preds.hit, h_hit, h_not_hit) // pd may change it to h_false_hit
     cfiIndex_vec(bpu_in_resp_idx) := bpu_in_resp.genCfiIndex
     mispredict_vec(bpu_in_resp_idx) := WireInit(VecInit(Seq.fill(PredictWidth)(false.B)))
     update_target(bpu_in_resp_idx) := bpu_in_resp.target
@@ -509,6 +508,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   
   bpuPtr := bpuPtr + enq_fire
   ifuPtr := ifuPtr + io.toIfu.req.fire
+
+  // only use ftb result to assign hit status
+  when (bpu_s2_resp.valid) {
+    entry_hit_status(bpu_s2_resp.ftq_idx.value) := Mux(bpu_s2_resp.preds.hit, h_hit, h_not_hit)
+  }
   
   
   io.toIfu.flushFromBpu.s2.valid := bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
@@ -892,13 +896,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       val misPred = commit_mispredict(i)
       val ghist = commit_spec_meta.ghist.predHist
       val predCycle = commit_meta.meta(63, 0)
+      val target = commit_target
       
       val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
       val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
       val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
       XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
       p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
-      p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) brInEntry(${inFtbEntry}) brIdx(${brIdx})\n")
+      p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+      p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
     }
 
     val enq = io.fromBpu.resp

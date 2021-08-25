@@ -225,6 +225,15 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.out.resp.s2.ftb_entry.oversize := false.B
   }
 
+  // always taken logic
+  when (s2_hit) {
+    for (i <- 0 until numBr) {
+      when (ftb_entry.always_taken(i)) {
+        io.out.resp.s2.preds.taken_mask(i) := true.B
+      }
+    }
+  }
+
   // io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   // Update logic
