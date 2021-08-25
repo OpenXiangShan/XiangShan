@@ -195,7 +195,7 @@ class Rename(implicit p: Parameters) extends XSModule {
         // calculate meEnable
         meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(uops(i).psrc(0)))
       }
-      uops(i).eliminatedMove := meEnable(i)
+      uops(i).eliminatedMove := meEnable(i) || (uops(i).ctrl.isMove && uops(i).ctrl.ldest === 0.U)
   
       // send psrc of eliminated move instructions to free list and label them as eliminated
       when (meEnable(i)) {
