@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, BTlbPtwIO, BridgeTLB}
+import xiangshan.cache.mmu.{TLB, BTlbPtwIO, BridgeTLB, PtwResp}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
@@ -70,12 +70,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
     val memoryViolation = ValidIO(new Redirect)
-    val ptw = new BTlbPtwIO(LoadPipelineWidth + StorePipelineWidth)
+    val ptw = new BTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
-    val memPredUpdate = Vec(StorePipelineWidth, Input(new MemPredUpdateReq))
+    val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
       val roq = Flipped(new RoqLsqIO) // roq to lsq
@@ -118,6 +118,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // TODO: fast load wakeup
 
   val btlb    = Module(new BridgeTLB(BTLBWidth))
+  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, isDtlb = true))
+  val dtlb_st = Module(new TLB(exuParameters.StuCnt, isDtlb = true))
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
@@ -125,9 +127,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.stIssuePtr := lsq.io.issuePtrExt
 
   // dtlb
+  val sfence = RegNext(io.sfence)
+  val tlbcsr = RegNext(io.tlbCsr)
   io.ptw         <> btlb.io.ptw
-  btlb.io.sfence <> RegNext(io.sfence)
-  btlb.io.csr    <> RegNext(io.tlbCsr)
+  btlb.io.sfence <> sfence
+  btlb.io.csr    <> tlbcsr
+  btlb.io.requestor.take(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_ld.io.ptw.req).map{case (a,b) => a <> b}
+  btlb.io.requestor.drop(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_st.io.ptw.req).map{case (a,b) => a <> b}
+
+  dtlb_ld.io.sfence <> sfence
+  dtlb_ld.io.csr <> tlbcsr
+  dtlb_st.io.sfence <> sfence
+  dtlb_st.io.csr <> tlbcsr
+  val arb_ld = Module(new Arbiter(new PtwResp, exuParameters.LduCnt))
+  val arb_st = Module(new Arbiter(new PtwResp, exuParameters.StuCnt))
+  arb_ld.io.in <> btlb.io.requestor.take(exuParameters.LduCnt).map(_.resp)
+  arb_st.io.in <> btlb.io.requestor.drop(exuParameters.LduCnt).map(_.resp)
+  dtlb_ld.io.ptw.resp <> arb_ld.io.out
+  dtlb_st.io.ptw.resp <> arb_st.io.out
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -144,9 +161,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
     // l0tlb
-    loadUnits(i).io.ptw       <> btlb.io.requestor(i)
-    loadUnits(i).io.tlbcsr.sfence    <> RegNext(io.sfence)
-    loadUnits(i).io.tlbcsr.csr       <> RegNext(io.tlbCsr)
+    loadUnits(i).io.tlb           <> dtlb_ld.io.requestor(i)
     // Lsq to load unit's rs
 
     // passdown to lsq
@@ -174,9 +189,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq         <> lsq.io.storeIn(i)
     // l0tlb
-    stu.io.ptw     <> btlb.io.requestor(exuParameters.LduCnt + i)
-    stu.io.tlbcsr.sfence  <> RegNext(io.sfence)
-    stu.io.tlbcsr.csr     <> RegNext(io.tlbCsr)
+    stu.io.tlb          <> dtlb_st.io.requestor(i)
 
     // Lsq to load unit's rs
     // rs.io.storeData <> lsq.io.storeDataIn(i)
@@ -271,8 +284,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
 
-  val amoTlb = loadUnits(0).io.amoTlb
-  loadUnits(1).io.amoTlb <> DontCare
+  val amoTlb = dtlb_ld.io.requestor(0)
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready
@@ -281,9 +293,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
-  atomicsUnit.io.dtlb <> amoTlb
+
   when (state === s_atomics_0 || state === s_atomics_1) {
     loadUnits(0).io.ldout.ready := false.B
+    atomicsUnit.io.dtlb <> amoTlb
 
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)

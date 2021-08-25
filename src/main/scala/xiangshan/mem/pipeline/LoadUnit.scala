@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbPtwIO, TlbRequestIO, TlbReq, TlbResp, TlbCmd, TlbBaseBundle, TLB}
+import xiangshan.cache.mmu.{TlbPtwIO, TlbReq, TlbResp, TlbCmd, TlbRequestIO, TLB}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -299,25 +299,22 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val lsq = new LoadToLsqIO
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
 
-    val ptw = new TlbPtwIO
-    val tlbcsr = new TlbBaseBundle
-    val amoTlb = Flipped(new TlbRequestIO())
+    val tlb = new TlbRequestIO
   })
 
   val load_s0 = Module(new LoadUnit_S0)
   val load_s1 = Module(new LoadUnit_S1)
   val load_s2 = Module(new LoadUnit_S2)
-  val dtlb = Module(new TLB(Width = 1, isDtlb = true))
 
   load_s0.io.in <> io.ldin
-  load_s0.io.dtlbReq <> dtlb.io.requestor(0).req
+  load_s0.io.dtlbReq <> io.tlb.req
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  load_s1.io.dtlbResp <> dtlb.io.requestor(0).resp
+  load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
@@ -353,7 +350,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
   XSDebug(load_s1.io.out.valid,
-    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${dtlb.io.requestor(0).resp.bits.miss}, " +
+    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
 
   // writeback to LSQ
@@ -383,17 +380,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
   io.lsq.ldout.ready := !hitLoadOut.valid
-
-  io.ptw <> dtlb.io.ptw
-  io.tlbcsr.sfence <> dtlb.io.sfence
-  io.tlbcsr.csr <> dtlb.io.csr
-  io.amoTlb <> DontCare
-  when (io.amoTlb.req.valid) {
-    dtlb.io.requestor(0) <> io.amoTlb
-
-    assert(!load_s0.io.dtlbReq.valid)
-    assert(!io.ldout.valid)
-  }
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
