@@ -31,11 +31,11 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
     io.fromInt.bits.src(1)(XLEN - 1, 0)
   )
 
-  val mul = supportedFunctionUnits.collectFirst {
+  val mul = functionUnits.collectFirst {
     case m: ArrayMultiplier => m
   }.get
 
-  val div = supportedFunctionUnits.collectFirst {
+  val div = functionUnits.collectFirst {
     case d: AbstractDivider => d
   }.orNull
 
