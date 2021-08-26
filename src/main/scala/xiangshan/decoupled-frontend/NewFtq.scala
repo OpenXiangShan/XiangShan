@@ -297,7 +297,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.always_taken(1) := false.B
   init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_jmp_is_jal || new_jmp_is_jalr
-  init_entry.jmpTarget := Mux(cfi_is_jal, pd.jalTarget, io.target)
+  init_entry.jmpTarget := Mux(cfi_is_jalr, io.target, pd.jalTarget)
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + ((FetchWidth*4)>>instOffsetBits).U + Mux(last_br_rvi, 1.U, 0.U))
   init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1))
@@ -573,6 +573,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_hit_status(ifuPtr.value) := h_false_hit
     io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
     io.toIfu.req.bits.fallThruError  := true.B
+    XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
   }
 
   val ifu_req_should_be_flushed =

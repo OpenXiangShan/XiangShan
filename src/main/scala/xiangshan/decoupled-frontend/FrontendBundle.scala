@@ -36,6 +36,8 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
     val carry = (startAddr(carryPos) =/= fallThruAddr(carryPos)).asUInt
     val startLower        = Cat(0.U(1.W), getLower(startAddr))
     val endLowerwithCarry = Cat(carry,    getLower(fallThruAddr))
+    require(startLower.getWidth == log2Ceil(PredictWidth)+2)
+    require(endLowerwithCarry.getWidth == log2Ceil(PredictWidth)+2)
     startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
   }
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
