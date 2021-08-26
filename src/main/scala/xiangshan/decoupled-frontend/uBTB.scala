@@ -46,39 +46,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val hit = Bool()
   }
 
-  class MicroBTBData extends FTBEntry {
-    // val brTargets = Vec(numBr, UInt(VAddrBits.W))
-    // val jmpTarget = UInt(VAddrBits.W)
-    // val pftAddr   = UInt((log2Up(PredictWidth)+1).W)
-  }
-
-  class ReadResp extends FTBEntry {
-    val hit = Bool()
-  }
-  
-  // object ReadResp {
-  //   def apply(entry: MicroBTBMeta, hit: Bool)(implicit p: Parameters): ReadResp = {
-  //     val e = Wire(new ReadResp())
-  //     
-  //     e.valid := entry.valid
-  //     e.brOffset := entry.brOffset
-  //     e.brTargets := entry.brTargets
-  //     e.brValids := entry.brValids
-
-  //     e.jmpOffset := entry.jmpOffset
-  //     e.jmpTarget := entry.jmpTarget
-  //     e.jmpValid := entry.jmpValid
-  //     
-  //     e.pftAddr := entry.pftAddr
-  //     e.carry := entry.carry
-  //     e.oversize := entry.oversize
-  //     e.last_is_rvc := entry.last_is_rvc
-  //     
-  //     e.hit := hit
-  //     
-  //     e
-  //   }
-  // }
+  class MicroBTBEntry extends FTBEntry {}
 
   override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBOutMeta)).getWidth // TODO: ReadResp shouldn't save useless members
 
@@ -89,72 +57,30 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
       val read_entry = Output(new FTBEntry)
       val read_hit = Output(Bool())
 
-      val update_write_meta = Input(new MicroBTBMeta)
-      val update_write_data = Flipped(Valid(new MicroBTBData))
-      val update_taken_mask = Input(Vec(numBr, Bool()))
-      val update_mask = Input(UInt(numBr.W))
+      val update_valid = Input(Bool())
+      val update_write_tag = Input(UInt(tagSize.W))
+      val update_write_entry = Input(new MicroBTBEntry)
     })
 
     val tagCam = Module(new CAMTemplate(UInt(tagSize.W), nWays, 2))
-    val validMem = Module(new AsyncDataModuleTemplate(Bool(), nWays, nWays, 1)) // valids
-    val dataMem = Module(new AsyncDataModuleTemplate(new MicroBTBData, nWays, 1, 1))
-
-
-    for (w <- 0 until nWays) {
-      validMem.io.raddr(w) := w.U
-    }
-
-    val valids = validMem.io.rdata
-    // val rbims = bims.io.rdata.take(nWays)
-    // val rdatas = data.io.rdata
-    
+    val valids = RegInit(VecInit(Seq.fill(nWays)(false.B))) // valids
+    val dataMem = Module(new AsyncDataModuleTemplate(new MicroBTBEntry, nWays, 1, 1))
 
     val read_pc = io.read_pc.bits
     val read_tag = getTag(read_pc)
 
-    // val hits = VecInit(rmetas.map(m => m.valid && m.tag === read_tag))
     val hits = VecInit((0 until nWays).map(i => valids(i) && tagCam.io.r.resp(0)(i)))
     val hit = hits.reduce(_||_)
     val hitWay = OHToUInt(hits)
 
     dataMem.io.raddr(0) := hitWay
-    // val hit_meta = ParallelMux(hits zip rmetas)
-    // val hit_data = ParallelMux(hits zip rdatas)
 
-    val hit_data = Mux(hit, dataMem.io.rdata(0), 0.U.asTypeOf(new MicroBTBData))
+    val hit_entry = Mux(hit, dataMem.io.rdata(0), 0.U.asTypeOf(new MicroBTBEntry))
 
-    io.read_entry := DontCare
-    io.read_entry.valid := io.read_pc.valid
+    io.read_entry := hit_entry
+    io.read_hit := hit
 
-    io.read_entry.tag          := read_tag
-    io.read_entry.brOffset     := hit_data.brOffset
-    io.read_entry.brTargets    := hit_data.brTargets
-    io.read_entry.brValids     := hit_data.brValids
-
-    io.read_entry.jmpOffset    := hit_data.jmpOffset
-    io.read_entry.jmpTarget    := hit_data.jmpTarget
-    io.read_entry.jmpValid     := hit_data.jmpValid
-
-    io.read_entry.pftAddr      := hit_data.pftAddr
-    io.read_entry.carry        := hit_data.carry
-
-    io.read_entry.isCall       := hit_data.isCall
-    io.read_entry.isRet        := hit_data.isRet
-    io.read_entry.isJalr       := hit_data.isJalr
-
-    io.read_entry.oversize     := hit_data.oversize
-    io.read_entry.last_is_rvc  := hit_data.last_is_rvc
-
-    val do_reset = RegInit(true.B)
-    val reset_way = RegInit(0.U(log2Ceil(nWays).W))
-    when (RegNext(reset.asBool) && !reset.asBool) {
-      do_reset := true.B
-      reset_way := 0.U
-    }
-    when (do_reset) { reset_way := reset_way + 1.U }
-    when (reset_way === (nWays-1).U) { do_reset := false.B }
-
-    val update_tag = io.update_write_meta.tag
+    val update_tag = io.update_write_tag
     val update_hits = VecInit((0 until nWays).map(i => valids(i) && tagCam.io.r.resp(1)(i)))
     val update_hit = update_hits.reduce(_||_)
     val update_hitWay = OHToUInt(update_hits)
@@ -163,20 +89,9 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     val update_alloc_way = RegInit(0.U(log2Ceil(nWays).W))
     
-    when (io.update_write_meta.valid && !update_hit) {
+    when (io.update_valid && !update_hit) {
       update_alloc_way := update_alloc_way ^ foldTag(update_tag, log2Ceil(nWays))
     }
-
-    // val update_alloc_way = {
-      // val source = Cat(VecInit(meta.map(_.tag)).asUInt, update_tag)
-      // val l = log2Ceil(nWays)
-      // val nChunks = (source.getWidth + l - 1) / l
-      // val chunks = (0 until nChunks) map { i =>
-      //   source(min((i+1)*l, source.getWidth)-1, i*l)
-      // }
-      // ParallelXOR(chunks)
-    
-    // }
 
     val update_emptys = valids.map(!_)
     val update_has_empty_way = update_emptys.reduce(_||_)
@@ -185,24 +100,17 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     tagCam.io.r.req := VecInit(Seq(read_tag, update_tag))
     
-    tagCam.io.w.valid       := do_reset || RegNext(io.update_write_meta.valid)
-    tagCam.io.w.bits.index  := Mux(do_reset, reset_way, RegNext(update_way))
-    tagCam.io.w.bits.data   := Mux(do_reset,
-      0.U(tagSize.W),
-      RegNext(io.update_write_meta.tag))
+    tagCam.io.w.valid       := RegNext(io.update_valid)
+    tagCam.io.w.bits.index  := RegNext(update_way)
+    tagCam.io.w.bits.data   := RegNext(io.update_write_tag)
 
-    validMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
-    validMem.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
-    validMem.io.wdata(0) := Mux(do_reset,
-      false.B,
-      RegNext(io.update_write_meta.valid))
+    when (RegNext(io.update_valid)) {
+      valids(RegNext(update_way)) := true.B
+    }
 
-    
-    dataMem.io.wen(0)   := do_reset || RegNext(io.update_write_data.valid)
-    dataMem.io.waddr(0) := Mux(do_reset, reset_way, RegNext(update_way))
-    dataMem.io.wdata(0) := Mux(do_reset,
-      0.U.asTypeOf(new MicroBTBData),
-      RegNext(io.update_write_data.bits))
+    dataMem.io.wen(0)   := RegNext(io.update_valid)
+    dataMem.io.waddr(0) := RegNext(update_way)
+    dataMem.io.wdata(0) := RegNext(io.update_write_entry)
 
   } // uBTBBank
 
@@ -243,39 +151,10 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
 
   val u_tag = getTag(u_pc)
-  // val u_target_lower = update.preds.target(lowerBitSize-1+instOffsetBits, instOffsetBits)
 
-  val data_write_valid = u_valid && u_taken
-  val meta_write_valid = u_valid && u_taken
-
-  val update_write_datas = Wire(new MicroBTBData)
-  val update_write_metas = Wire(new MicroBTBMeta)
-
-  update_write_metas := DontCare
-
-  update_write_metas.valid        := meta_write_valid
-  update_write_metas.tag          := u_tag
-
-  update_write_datas              := DontCare
-  update_write_datas.brOffset     := update.ftb_entry.brOffset
-  update_write_datas.brValids     := update.ftb_entry.brValids
-  update_write_datas.jmpOffset    := update.ftb_entry.jmpOffset
-  update_write_datas.jmpValid     := update.ftb_entry.jmpValid
-  update_write_datas.isCall       := update.ftb_entry.isCall
-  update_write_datas.isRet        := update.ftb_entry.isRet
-  update_write_datas.isJalr       := update.ftb_entry.isJalr
-  update_write_datas.carry        := update.ftb_entry.carry
-  update_write_datas.oversize     := update.ftb_entry.oversize
-  update_write_datas.last_is_rvc  := update.ftb_entry.last_is_rvc
-  update_write_datas.jmpTarget    := update.ftb_entry.jmpTarget
-  update_write_datas.brTargets    := update.ftb_entry.brTargets
-  update_write_datas.pftAddr      := update.ftb_entry.pftAddr
-
-  bank.update_write_meta := update_write_metas
-  bank.update_write_data.valid := data_write_valid
-  bank.update_write_data.bits := update_write_datas
-  bank.update_taken_mask := u_taken_mask
-  bank.update_mask := LowerMaskFromLowest(u_taken_mask.asUInt)
+  bank.update_valid := u_valid && u_taken
+  bank.update_write_tag := u_tag
+  bank.update_write_entry := update.ftb_entry
 
   if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
     XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
