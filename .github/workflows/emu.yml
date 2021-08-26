@@ -36,6 +36,7 @@ jobs:
   emu-basics:
     runs-on: self-hosted
     continue-on-error: false
+    timeout-minutes: 720
     name: EMU - Basics
     steps:
       - uses: actions/checkout@v2
@@ -43,10 +44,11 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          export HEAD_SHA=${{ github.run_number }}
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
-          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
+          echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
@@ -75,6 +77,7 @@ jobs:
   emu-performance:
     runs-on: self-hosted
     continue-on-error: false
+    timeout-minutes: 720
     name: EMU - Performance
     steps:
       - uses: actions/checkout@v2
@@ -82,10 +85,11 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          export HEAD_SHA=${{ github.run_number }}
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/bigdata/xs-perf/${GITHUB_SHA}" >> $GITHUB_ENV
-          mkdir -p /bigdata/xs-perf/${GITHUB_SHA}
+          echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-perf/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

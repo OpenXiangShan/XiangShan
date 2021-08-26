@@ -173,13 +173,18 @@ trait HasCSRConst {
   val Mhpmevent31   = 0x33F
 
   // Debug/Trace Registers (shared with Debug Mode) (not implemented)
-  // Debug Mode Registers (not implemented)
+  // Debug Mode Registers
+  val Dcsr          = 0x7B0
+  val Dpc           = 0x7B1
+  val Dscratch      = 0x7B2
+  val Dscratch1     = 0x7B3
 
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
   def privMret   = 0x302.U
   def privSret   = 0x102.U
   def privUret   = 0x002.U
+  def privDret   = 0x7b2.U
 
   def ModeM     = 0x3.U
   def ModeH     = 0x2.U
@@ -198,7 +203,10 @@ trait HasCSRConst {
   def IRQ_SSIP  = 9
   def IRQ_MSIP  = 11
 
+  def IRQ_DEBUG = 12
+
   val IntPriority = Seq(
+    IRQ_DEBUG, 
     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
     IRQ_UEIP, IRQ_USIP, IRQ_UTIP

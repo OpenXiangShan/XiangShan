@@ -24,8 +24,6 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
-
-
 class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
@@ -146,6 +144,8 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
     entryHitVecReg.suggestName(s"entryHitVecReg_${i}")
 
+    /***************** next cycle when two cycle is need********************/
+
     val hitVec  = VecInit((v zip entryHitVecReg).map{ case (a,b) => a&b })
     val pfHitVec   = VecInit((pf zip entryHitVecReg).map{ case (a,b) => a&b })
     val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
@@ -161,19 +161,6 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     hitppn.suggestName(s"hitppn_${i}")
     hitPerm.suggestName(s"hitPerm_${i}")
 
-    if (!isDtlb) { // NOTE: only support one access
-      val hitVecUInt = hitVec.asUInt
-      XSDebug(hitVecUInt.orR, p"HitVecUInt:${Hexadecimal(hitVecUInt)}\n")
-      when (Cat(hitVecUInt(TlbEntrySize-1, 0)).orR && validReg && vmEnable) {
-        nReplace.access(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))
-        XSDebug(p"Normal Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize-1, 0)))}\n")
-      }
-      when (Cat(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)).orR && validReg && vmEnable) {
-        sReplace.access(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))
-        XSDebug(p"Super Page Access: ${Hexadecimal(OHToUInt(hitVecUInt(TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize)))}\n")
-      }
-    }
-
     XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
     XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(hitVec.asUInt)} pfHitVec:${Hexadecimal(pfHitVec.asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
@@ -188,7 +175,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
-    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    val update = hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
     val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
@@ -222,6 +209,27 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
   val missVec = readResult.map(res => res._2)
   val hitVecVec = readResult.map(res => res._3)
   val validRegVec = readResult.map(res => res._4)
+
+  // replacement
+  def get_access_index(one_hot: UInt): Valid[UInt] = {
+    val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
+    res.valid := Cat(one_hot).orR
+    res.bits := OHToUInt(one_hot)
+    res
+  }
+  def get_access(one_hot: Seq[Bool], stop: Int, start: Int): Valid[UInt] = {
+    val tmp = VecInit(one_hot).asUInt
+    get_access_index(tmp(stop, start))
+  }
+  val nAccess = hitVecVec.map(a => get_access(a, TlbEntrySize - 1, 0))
+  val sAccess = hitVecVec.map(a => get_access(a, TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize))
+  if (Width == 1) {
+    when (nAccess(0).valid) { nReplace.access(nAccess(0).bits) }
+    when (sAccess(0).valid) { sReplace.access(sAccess(0).bits) }
+  } else {
+    nReplace.access(nAccess)
+    sReplace.access(sAccess)
+  }
 
   for (i <- 0 until Width) {
     io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
