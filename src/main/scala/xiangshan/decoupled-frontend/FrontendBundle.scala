@@ -141,16 +141,33 @@ class TableAddr(val idxBits: Int, val banks: Int)(implicit p: Parameters) extend
 }
 class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val taken_mask = Vec(numBr, Bool())
-  // val is_br = Vec(numBr, Bool())
-  // val is_jal = Bool()
-  // val is_jalr = Bool()
-  // val is_call = Bool()
-  // val is_ret = Bool()
+
+  val br_valids = Vec(numBr, Bool())
+  val br_targets = Vec(numBr, UInt(VAddrBits.W))
+
+  val jmp_valid = Bool()
+  val jmp_target = UInt(VAddrBits.W)
+
+  val is_jal = Bool()
+  val is_jalr = Bool()
+  val is_call = Bool()
+  val is_ret = Bool()
+
   // val call_is_rvc = Bool()
   val hit = Bool()
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
 
+  def fromFtbEntry(entry: FTBEntry) = {
+    br_valids := entry.brValids
+    br_targets := entry.brTargets
+    jmp_valid := entry.jmpValid
+    jmp_target := entry.jmpTarget
+    is_jal := entry.jmpValid && entry.isJal
+    is_jalr := entry.jmpValid && entry.isJalr
+    is_call := entry.jmpValid && entry.isCall
+    is_ret := entry.jmpValid && entry.isRet
+  }
   // override def toPrintable: Printable = {
   //   p"-----------BranchPrediction----------- " +
   //     p"[taken_mask] ${Binary(taken_mask.asUInt)} " +
@@ -185,25 +202,25 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
 
   def real_taken_mask(): Vec[Bool] = {
     Mux(preds.hit,
-      VecInit(preds.taken_mask.zip(ftb_entry.brValids).map{ case(m, b) => m && b } :+ ftb_entry.jmpValid),
+      VecInit(preds.taken_mask.zip(preds.br_valids).map{ case(m, b) => m && b } :+ preds.jmp_valid),
       VecInit(Seq.fill(numBr+1)(false.B)))
   }
 
   def real_br_taken_mask(): Vec[Bool] = {
     Mux(preds.hit,
-      VecInit(preds.taken_mask.zip(ftb_entry.brValids).map{ case(m, b) => m && b }),
+      VecInit(preds.taken_mask.zip(preds.br_valids).map{ case(m, b) => m && b }),
       VecInit(Seq.fill(numBr)(false.B)))
   }
-  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isCall && ftb_entry.jmpValid
-  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && ftb_entry.isRet && ftb_entry.jmpValid
+  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_call && preds.jmp_valid
+  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_ret && preds.jmp_valid
 
   def fallThroughAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
   def target(): UInt = {
     Mux(preds.hit,
       // when hit
-      Mux((real_taken_mask.asUInt & ftb_entry.brValids.asUInt) =/= 0.U,
-        PriorityMux(real_taken_mask.asUInt & ftb_entry.brValids.asUInt, ftb_entry.brTargets),
-        Mux(ftb_entry.jmpValid, ftb_entry.jmpTarget, fallThroughAddr)),
+      Mux((real_taken_mask.asUInt & preds.br_valids.asUInt) =/= 0.U,
+        PriorityMux(real_taken_mask.asUInt & preds.br_valids.asUInt, preds.br_targets),
+        Mux(preds.jmp_valid, preds.jmp_target, fallThroughAddr)),
       //otherwise
       pc + (FetchWidth*4).U
     )

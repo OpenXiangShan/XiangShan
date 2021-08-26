@@ -120,18 +120,15 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val outMeta = Wire(new MicroBTBOutMeta)
 
   XSDebug(p"uBTB entry, read_pc=${Hexadecimal(s1_pc)}\n")
-  //XSDebug(p"v=${read_entrys.valid}, brValids=${Binary(read_entrys.brValids.asUInt)}, jmpValid=${read_entrys.jmpValid}, pred0=${Binary(read_entrys.pred(0).asUInt)}, pred1=${Binary(read_entrys.pred(1).asUInt)}, hit=${read_entrys.hit}\n")
-  // XSDebug(p"v=${read_entrys.valid}, brValids=${Binary(read_entrys.brValids.asUInt)}, jmpValid=${read_entrys.jmpValid}, pred0=${Binary(read_entrys.pred(0).asUInt)}, pred1=${Binary(read_entrys.pred(1).asUInt)}, hit=${read_entrys.hit}\n")
-  // XSDebug(p"v=${read_entrys.valid}, brValids=${Binary(read_entrys.brValids.asUInt)}, jmpValid=${read_entrys.jmpValid}, pred0=${Binary(read_entrys.pred(0).asUInt)}, hit=${read_entrys.hit}\n")
 
   bank.read_pc.valid := io.s1_fire
   bank.read_pc.bits := s1_pc
 
   io.out.resp := io.in.bits.resp_in(0)
   io.out.resp.s1.pc := s1_pc
-  io.out.resp.s1.preds.taken_mask := io.in.bits.resp_in(0).s1.preds.taken_mask
   io.out.resp.s1.preds.hit := bank.read_hit
   io.out.resp.s1.ftb_entry := read_entry
+  io.out.resp.s1.preds.fromFtbEntry(read_entry)
 
   when(!bank.read_hit) {
     io.out.resp.s1.ftb_entry.pftAddr := s1_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U
