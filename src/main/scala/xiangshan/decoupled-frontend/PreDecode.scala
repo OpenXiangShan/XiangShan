@@ -212,7 +212,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
 
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
-  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump, jumpNextPC, boundPC), pcEnd)
+  realEndPC               :=  Mux(hasFalseHit, Mux(hasJump && ((jumpNextPC < boundPC) || (jumpNextPC === boundPC) ), jumpNextPC, boundPC), pcEnd)
 
   val validLastOffset     = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
   io.out.misOffset.valid  := ParallelOR(realMissPred)
