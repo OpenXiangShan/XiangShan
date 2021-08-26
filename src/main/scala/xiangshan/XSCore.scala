@@ -348,7 +348,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val dtlbRepeater = if (usePTWRepeater) {
     Module(new PTWRepeater(LoadPipelineWidth + StorePipelineWidth))
   } else {
-    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
+    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
   }
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
