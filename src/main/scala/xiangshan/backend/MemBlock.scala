@@ -58,6 +58,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val flush = Input(Bool())
     // in
     val issue = Vec(exuParameters.LsExuCnt, Flipped(DecoupledIO(new ExuInput)))
+    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
     val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
     val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))

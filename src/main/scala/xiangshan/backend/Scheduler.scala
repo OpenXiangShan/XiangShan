@@ -158,6 +158,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of replay ports: ${outer.numReplayPorts}")
   println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
   println(s"  number of std ports: ${outer.numSTDPorts}")
+  val numLoadPorts = outer.reservationStations.map(_.module.io.load).filter(_.isDefined).map(_.get.fastMatch.length).sum
+  println(s"  number of load ports: ${numLoadPorts}")
   if (intRfConfig._1) {
     println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
   }
@@ -176,6 +178,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val stData = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))) else None
     val fpRfReadIn = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, Flipped(new RfReadPort(XLEN)))) else None
     val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
+    val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -324,6 +327,10 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     require(outerUop.length == outerData.length)
   }
   require(issueIdx == io.issue.length)
+  if (io.extra.loadFastMatch.isDefined) {
+    val allLoadRS = outer.reservationStations.map(_.module.io.load).filter(_.isDefined)
+    io.extra.loadFastMatch.get := allLoadRS.map(_.get.fastMatch).fold(Seq())(_ ++ _)
+  }
 
   var intReadPort = 0
   var fpReadPort = 0
