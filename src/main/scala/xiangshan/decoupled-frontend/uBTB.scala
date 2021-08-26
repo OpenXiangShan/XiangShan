@@ -263,7 +263,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   // val u_target_lower = update.preds.target(lowerBitSize-1+instOffsetBits, instOffsetBits)
 
   val data_write_valid = u_valid && u_taken
-  val meta_write_valid = u_valid && (u_taken || update.ftb_entry.brValids.reduce(_||_))
+  val meta_write_valid = u_valid && u_taken
 
   val update_write_datas = Wire(new MicroBTBData)
   val update_write_metas = Wire(new MicroBTBMeta)

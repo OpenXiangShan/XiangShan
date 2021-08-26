@@ -33,8 +33,10 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   def fallThroughError() = {
     def carryPos = instOffsetBits+log2Ceil(PredictWidth)+1
     def getLower(pc: UInt) = pc(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits)
-    val carry = startAddr(carryPos) =/= fallThruAddr(carryPos)
-    !carry && getLower(startAddr) > getLower(fallThruAddr)
+    val carry = (startAddr(carryPos) =/= fallThruAddr(carryPos)).asUInt
+    val startLower        = Cat(0.U(1.W), getLower(startAddr))
+    val endLowerwithCarry = Cat(carry,    getLower(fallThruAddr))
+    startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
   }
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
