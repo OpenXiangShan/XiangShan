@@ -48,12 +48,12 @@ trait HasXSDts {
       )
 
       val dtlb = Map(
-        "d-tlb-size" -> TlbEntrySize.asProperty,
+        "d-tlb-size" -> ldtlbParams.pageNormalSize.asProperty,
         "d-tlb-sets" -> 1.asProperty
       )
 
       val itlb = Map(
-        "i-tlb-size" -> TlbEntrySize.asProperty,
+        "i-tlb-size" -> itlbParams.pageNormalSize.asProperty,
         "i-tlb-sets" -> 1.asProperty
       )
 

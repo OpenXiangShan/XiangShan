@@ -28,7 +28,7 @@ import xiangshan.backend.fu.util.HasCSRConst
   * 1. store the entry from L2TLB, and seed it to L0TLB
   * 2. do not translate or do the pma and pmp work, just a small edition fa L2TLB
   */
-class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCSRConst {
+class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst {
   val io = IO(new BridgeTLBIO(Width))
 
   val req = io.requestor.map(_.req)
@@ -45,16 +45,16 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   //                else               (satp.mode === 8.U && (mode < ModeM))
   // TODO: the code above is same with TLB, may need a abstract TLB module class
 
-  val entries = Reg(Vec(BTlbEntrySize, new PtwResp))
-  val entries_v = RegInit(VecInit(Seq.fill(BTlbEntrySize)(false.B)))
-  val replace = ReplacementPolicy.fromString(Some("random"), BTlbEntrySize)
+  val entries = Reg(Vec(q.pageNormalSize, new PtwResp))
+  val entries_v = RegInit(VecInit(Seq.fill(q.pageNormalSize)(false.B)))
+  val replace = ReplacementPolicy.fromString(Some("random"), q.pageNormalSize)
   val refillIdx = replaceWrapper(entries_v, replace.way)
 
   // val WaitingSetSize = 4
   // val waiting_set = Reg(Vec(Width, Vec(WaitingSetSize, UInt(vpnLen.W))))
   // val waiting_set_v = RegInit(Vec(Width, Vec(WaitingSetSize, false.B)))
 
-  val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(BTlbEntrySize-1, 0), 0.U).asBools
+  val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(q.pageNormalSize-1, 0), 0.U).asBools
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
     val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
@@ -115,7 +115,7 @@ class BridgeTLB(Width: Int)(implicit p: Parameters) extends TlbModule with HasCS
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_vector_count", Mux(ptw.resp.fire(), PopCount(ptw.resp.bits.vector), 0.U))
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.data.pf)
-  for (i <- 0 until BTlbEntrySize) {
+  for (i <- 0 until q.pageNormalSize) {
     XSPerfAccumulate(s"RefillIndex${i}", ptw.resp.valid && i.U === refillIdx)
   }
   XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 2.U)

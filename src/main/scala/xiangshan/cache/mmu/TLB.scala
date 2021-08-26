@@ -24,7 +24,7 @@ import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
-class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule with HasCSRConst{
+class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
   val req    = io.requestor.map(_.req)
@@ -35,8 +35,8 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
   val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
-  val ifecth = if (isDtlb) false.B else true.B
-  val mode   = if (isDtlb) priv.dmode else priv.imode
+  val ifecth = if (q.fetchi) true.B else false.B
+  val mode   = if (q.useDmode) priv.dmode else priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = if(EnbaleTlbDebug) (satp.mode === 8.U)
                  else               (satp.mode === 8.U && (mode < ModeM))
@@ -49,12 +49,12 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
-  val nv = RegInit(VecInit(Seq.fill(TlbEntrySize)(false.B)))
-  val nMeta = Module(new CAMTemplate(UInt(vpnLen.W), TlbEntrySize, Width + 1)).io
-  val nData = Reg(Vec(TlbEntrySize, new TlbData(false)))
-  val sv = RegInit(VecInit(Seq.fill(TlbSPEntrySize)(false.B)))
-  val sMeta = Reg(Vec(TlbSPEntrySize, new TlbSPMeta))
-  val sData = Reg(Vec(TlbSPEntrySize, new TlbData(true)))
+  val nv = RegInit(VecInit(Seq.fill(q.pageNormalSize)(false.B)))
+  val nMeta = Module(new CAMTemplate(UInt(vpnLen.W), q.pageNormalSize, Width + 1)).io
+  val nData = Reg(Vec(q.pageNormalSize, new TlbData(false)))
+  val sv = RegInit(VecInit(Seq.fill(q.pageSuperSize)(false.B)))
+  val sMeta = Reg(Vec(q.pageSuperSize, new TlbSPMeta))
+  val sData = Reg(Vec(q.pageSuperSize, new TlbData(true)))
   val v = nv ++ sv
   val data = nData ++ sData
   val g = VecInit(data.map(_.perm.g))
@@ -65,10 +65,10 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     */
   val refill = ptw.resp.fire() && !sfence.valid
 
-  val normalReplacer = if (isDtlb) Some("random") else Some("plru")
-  val superReplacer = if (isDtlb) Some("random") else Some("plru")
-  val nReplace = ReplacementPolicy.fromString(normalReplacer, TlbEntrySize)
-  val sReplace = ReplacementPolicy.fromString(superReplacer, TlbSPEntrySize)
+  val normalReplacer = q.normalReplacer
+  val superReplacer = q.superReplacer
+  val nReplace = ReplacementPolicy.fromString(normalReplacer, q.pageNormalSize)
+  val sReplace = ReplacementPolicy.fromString(superReplacer, q.pageSuperSize)
   val nRefillIdx = replaceWrapper(nv, nReplace.way)
   val sRefillIdx = replaceWrapper(sv, sReplace.way)
 
@@ -127,21 +127,21 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
   }
   nMeta.r.req(Width) := sfenceVpn
 
-  val nRefillMask = Mux(refill, UIntToOH(nRefillIdx)(TlbEntrySize-1, 0), 0.U).asBools
-  val sRefillMask = Mux(refill, UIntToOH(sRefillIdx)(TlbSPEntrySize-1, 0), 0.U).asBools
+  val nRefillMask = Mux(refill, UIntToOH(nRefillIdx)(q.pageNormalSize-1, 0), 0.U).asBools
+  val sRefillMask = Mux(refill, UIntToOH(sRefillIdx)(q.pageSuperSize-1, 0), 0.U).asBools
   def TLBNormalRead(i: Int) = {
     val entryHitVec = (
-      if (isDtlb)
+      if (!q.sameCycle)
         VecInit(nMeta.r.resp(i).zip(nRefillMask).map{ case (e, m) => ~m && e } ++
                 sMeta.zip(sRefillMask).map{ case (e,m) => ~m && e.hit(reqAddr(i).vpn) })
       else
         VecInit(nMeta.r.resp(i) ++ sMeta.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
     )
 
-    val reqAddrReg = if (isDtlb) RegNext(reqAddr(i)) else reqAddr(i)
-    val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
-    val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
-    val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+    val reqAddrReg = if (!q.sameCycle) RegNext(reqAddr(i)) else reqAddr(i)
+    val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
+    val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
+    val entryHitVecReg = if (!q.sameCycle) RegNext(entryHitVec) else entryHitVec
     entryHitVecReg.suggestName(s"entryHitVecReg_${i}")
 
     /***************** next cycle when two cycle is need********************/
@@ -170,7 +170,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
 
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
-    resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
+    resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
@@ -221,8 +221,8 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     val tmp = VecInit(one_hot).asUInt
     get_access_index(tmp(stop, start))
   }
-  val nAccess = hitVecVec.map(a => get_access(a, TlbEntrySize - 1, 0))
-  val sAccess = hitVecVec.map(a => get_access(a, TlbEntrySize + TlbSPEntrySize - 1, TlbEntrySize))
+  val nAccess = hitVecVec.map(a => get_access(a, q.pageNormalSize - 1, 0))
+  val sAccess = hitVecVec.map(a => get_access(a, q.pageNormalSize + q.pageSuperSize - 1, q.pageNormalSize))
   if (Width == 1) {
     when (nAccess(0).valid) { nReplace.access(nAccess(0).bits) }
     when (sAccess(0).valid) { sReplace.access(sAccess(0).bits) }
@@ -265,7 +265,7 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
     }
   }
 
-  if (isDtlb) {
+  if (!q.sameCycle) {
     for (i <- 0 until Width) {
       XSPerfAccumulate("first_access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
       XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable)
@@ -286,18 +286,18 @@ class TLB(Width: Int, isDtlb: Boolean)(implicit p: Parameters) extends TlbModule
   //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
-  for (i <- 0 until TlbEntrySize) {
+  for (i <- 0 until q.pageNormalSize) {
     val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
     XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
-  for (i <- 0 until TlbSPEntrySize) {
-    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + TlbEntrySize) && v }
+  for (i <- 0 until q.pageSuperSize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.pageNormalSize) && v }
     XSPerfAccumulate(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
-  for (i <- 0 until TlbEntrySize) {
+  for (i <- 0 until q.pageNormalSize) {
     XSPerfAccumulate(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
   }
-  for (i <- 0 until TlbSPEntrySize) {
+  for (i <- 0 until q.pageSuperSize) {
     XSPerfAccumulate(s"SuperRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
   }
 
@@ -328,12 +328,12 @@ object TLB {
     sfence: SfenceBundle,
     csr: TlbCsrBundle,
     width: Int,
-    isDtlb: Boolean,
-    shouldBlock: Boolean
+    shouldBlock: Boolean,
+    q: TLBParameters
   )(implicit p: Parameters) = {
     require(in.length == width)
 
-    val tlb = Module(new TLB(width, isDtlb))
+    val tlb = Module(new TLB(width, q))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr

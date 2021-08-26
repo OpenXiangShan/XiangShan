@@ -25,6 +25,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.mmu.{TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -103,9 +104,24 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   RefillSize: Int = 512,
-  TlbEntrySize: Int = 32,
-  TlbSPEntrySize: Int = 4,
-  BTlbEntrySize: Int = 64,
+  itlbParameters: TLBParameters = TLBParameters(
+    name = "itlb",
+    fetchi = true,
+    useDmode = false,
+    sameCycle = true,
+    normalReplacer = Some("plru"),
+    superReplacer = Some("plru")
+  ),
+  ldtlbParameters: TLBParameters = TLBParameters(
+    name = "ldtlb"
+  ),
+  sttlbParameters: TLBParameters = TLBParameters(
+    name = "sttlb"
+  ),
+  btlbParameters: TLBParameters = TLBParameters(
+    name = "btlb",
+    pageNormalSize = 64
+  ),
   PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
@@ -240,9 +256,10 @@ trait HasXSParameter {
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
-  val TlbEntrySize = coreParams.TlbEntrySize
-  val TlbSPEntrySize = coreParams.TlbSPEntrySize
-  val BTlbEntrySize = coreParams.BTlbEntrySize
+  val itlbParams = coreParams.itlbParameters
+  val ldtlbParams = coreParams.ldtlbParameters
+  val sttlbParams = coreParams.sttlbParameters
+  val btlbParams = coreParams.btlbParameters
   val PtwL3EntrySize = coreParams.PtwL3EntrySize
   val PtwSPEntrySize = coreParams.PtwSPEntrySize
   val PtwL1EntrySize = coreParams.PtwL1EntrySize

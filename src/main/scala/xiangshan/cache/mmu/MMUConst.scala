@@ -25,6 +25,20 @@ import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+case class TLBParameters
+(
+  name: String = "none",
+  fetchi: Boolean = false, // TODO: remove it
+  useDmode: Boolean = true,
+  sameCycle: Boolean = false,
+  pageNormalSize: Int = 32,
+  pageSuperSize: Int = 4,
+  normalReplacer: Option[String] = Some("random"),
+  superReplacer: Option[String] = Some("plru"),
+  normalAssociative: String = "fa", // "fa", "sa", "da"
+  superAssociative: String = "fa"
+)
+
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
 

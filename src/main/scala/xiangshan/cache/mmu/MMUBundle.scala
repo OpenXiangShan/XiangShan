@@ -29,6 +29,12 @@ import freechips.rocketchip.tilelink._
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
+
+
+// case class ITLBKey
+// case class LDTLBKey
+// case class STTLBKey
+
 class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val d = Bool()
   val a = Bool()

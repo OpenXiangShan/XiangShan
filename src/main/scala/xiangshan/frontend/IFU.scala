@@ -126,8 +126,8 @@ class IFU(implicit p: Parameters) extends XSModule with HasIFUConst with HasCirc
     sfence = io.sfence,
     csr = io.tlbCsr,
     width = 1,
-    isDtlb = false,
-    shouldBlock = true
+    shouldBlock = true,
+    itlbParams
   )
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)

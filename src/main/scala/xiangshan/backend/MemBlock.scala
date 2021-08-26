@@ -117,8 +117,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // TODO: fast load wakeup
 
-  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, isDtlb = true))
-  val dtlb_st = Module(new TLB(exuParameters.StuCnt, isDtlb = true))
+  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, ldtlbParams))
+  val dtlb_st = Module(new TLB(exuParameters.StuCnt, sttlbParams))
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer

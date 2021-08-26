@@ -30,6 +30,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.mmu.TLBParameters
 import device.{XSDebugModuleParams, EnableJtag}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
@@ -106,9 +107,31 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-        TlbEntrySize = 2,
-        TlbSPEntrySize = 2,
-        BTlbEntrySize = 8,
+        itlbParameters = TLBParameters(
+          name = "itlb",
+          fetchi = true,
+          useDmode = false,
+          sameCycle = true,
+          normalReplacer = Some("plru"),
+          superReplacer = Some("plru"),
+          pageNormalSize = 4,
+          pageSuperSize = 2
+        ),
+        ldtlbParameters = TLBParameters(
+          name = "ldtlb",
+          pageNormalSize = 4,
+          pageSuperSize = 2
+        ),
+        sttlbParameters = TLBParameters(
+          name = "sttlb",
+          pageNormalSize = 4,
+          pageSuperSize = 2
+        ),
+        btlbParameters = TLBParameters(
+          name = "btlb",
+          pageNormalSize = 8,
+          pageSuperSize = 2
+        ),
         PtwL1EntrySize = 2,
         PtwL2EntrySize = 64,
         PtwL3EntrySize = 128,
