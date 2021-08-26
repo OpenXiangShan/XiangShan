@@ -85,7 +85,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       params.checkWaitBit = true
     }
     if (cfg.hasCertainLatency) {
-      params.fixedLatency = if (cfg == MulDivExeUnitCfg) 2 else cfg.latency.latencyVal.get
+      params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
     }
   }
 
