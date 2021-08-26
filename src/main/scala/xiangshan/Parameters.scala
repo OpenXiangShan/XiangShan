@@ -120,8 +120,10 @@ case class XSCoreParameters
   ),
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
-    pageNormalSize = 64
+    pageNormalSize = 64,
+    pageSuperSize = 4,
   ),
+  useBTlb: Boolean = true,
   PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
@@ -256,6 +258,7 @@ trait HasXSParameter {
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

@@ -27,6 +27,11 @@ import xiangshan.backend.fu.util.HasCSRConst
 class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
+  require(q.superAssociative == "fa")
+  if (q.sameCycle) {
+    require(q.normalAssociative == "fa")
+  }
+
   val req    = io.requestor.map(_.req)
   val resp   = io.requestor.map(_.resp)
   val ptw    = io.ptw
@@ -314,6 +319,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
+
+  println(s"${q.name}: normal page: ${q.pageNormalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.pageSuperSize} ${q.superAssociative} ${q.superReplacer.get}")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")

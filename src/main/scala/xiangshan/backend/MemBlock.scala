@@ -117,8 +117,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // TODO: fast load wakeup
 
-  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, ldtlbParams))
-  val dtlb_st = Module(new TLB(exuParameters.StuCnt, sttlbParams))
+
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
@@ -128,17 +127,39 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   val sfence = RegNext(io.sfence)
   val tlbcsr = RegNext(io.tlbCsr)
-  io.ptw.req         <> (dtlb_ld.io.ptw.req ++ dtlb_st.io.ptw.req)
-  dtlb_ld.io.ptw.resp.bits := io.ptw.resp.bits.data
-  dtlb_st.io.ptw.resp.bits := io.ptw.resp.bits.data
-  io.ptw.resp.ready := true.B
-  dtlb_ld.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR
-  dtlb_st.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR
-
+  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, ldtlbParams))
+  val dtlb_st = Module(new TLB(exuParameters.StuCnt, sttlbParams))
   dtlb_ld.io.sfence <> sfence
-  dtlb_ld.io.csr <> tlbcsr
   dtlb_st.io.sfence <> sfence
+  dtlb_ld.io.csr <> tlbcsr
   dtlb_st.io.csr <> tlbcsr
+
+  if (!useBTlb) {
+    io.ptw.req         <> (dtlb_ld.io.ptw.req ++ dtlb_st.io.ptw.req)
+    dtlb_ld.io.ptw.resp.bits := io.ptw.resp.bits.data
+    dtlb_st.io.ptw.resp.bits := io.ptw.resp.bits.data
+    dtlb_ld.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR
+    dtlb_st.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR
+
+    (dtlb_ld, dtlb_st)
+  } else {
+    val btlb = Module(new BridgeTLB(BTLBWidth, btlbParams))
+    btlb.suggestName("btlb")
+
+    io.ptw <> btlb.io.ptw
+    btlb.io.sfence <> sfence
+    btlb.io.csr <> tlbcsr
+    btlb.io.requestor.take(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_ld.io.ptw.req).map{case (a,b) => a <> b}
+    btlb.io.requestor.drop(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_st.io.ptw.req).map{case (a,b) => a <> b}
+
+    val arb_ld = Module(new Arbiter(new PtwResp, exuParameters.LduCnt))
+    val arb_st = Module(new Arbiter(new PtwResp, exuParameters.StuCnt))
+    arb_ld.io.in <> btlb.io.requestor.take(exuParameters.LduCnt).map(_.resp)
+    arb_st.io.in <> btlb.io.requestor.drop(exuParameters.LduCnt).map(_.resp)
+    dtlb_ld.io.ptw.resp <> arb_ld.io.out
+    dtlb_st.io.ptw.resp <> arb_st.io.out
+  }
+  io.ptw.resp.ready := true.B
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {

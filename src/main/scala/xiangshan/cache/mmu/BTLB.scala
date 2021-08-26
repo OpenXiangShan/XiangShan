@@ -121,4 +121,6 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 2.U)
   XSPerfAccumulate(s"Refill2MBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 1.U)
   XSPerfAccumulate(s"Refill1GBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 0.U)
+
+  println(s"${q.name}: normal page: ${q.pageNormalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.pageSuperSize} ${q.superAssociative} ${q.superReplacer.get}")
 }

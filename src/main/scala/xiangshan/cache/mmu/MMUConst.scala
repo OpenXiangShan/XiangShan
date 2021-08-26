@@ -31,8 +31,8 @@ case class TLBParameters
   fetchi: Boolean = false, // TODO: remove it
   useDmode: Boolean = true,
   sameCycle: Boolean = false,
-  pageNormalSize: Int = 32,
-  pageSuperSize: Int = 4,
+  pageNormalSize: Int = 8,
+  pageSuperSize: Int = 2,
   normalReplacer: Option[String] = Some("random"),
   superReplacer: Option[String] = Some("plru"),
   normalAssociative: String = "fa", // "fa", "sa", "da"
