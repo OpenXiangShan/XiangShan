@@ -32,11 +32,11 @@ case class L2TLBParameters
   l1Associative: String = "fa",
   l1Replacer: Option[String] = Some("plru"),
   // l2
-  l2nSets: Int = 32,
-  l2nWays: Int = 8,
+  l2nSets: Int = 8,
+  l2nWays: Int = 4,
   l2Replacer: Option[String] = Some("setplru"),
   // l3
-  l3nSets: Int = 256,
+  l3nSets: Int = 64,
   l3nWays: Int = 8,
   l3Replacer: Option[String] = Some("setplru"),
   // sp
