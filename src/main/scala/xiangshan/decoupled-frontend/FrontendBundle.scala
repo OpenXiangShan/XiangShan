@@ -158,11 +158,11 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
 
   def taken = taken_mask.reduce(_||_) // || (is_jal || is_jalr)
 
-  def fromFtbEntry(entry: FTBEntry) = {
+  def fromFtbEntry(entry: FTBEntry, pc: UInt) = {
     br_valids := entry.brValids
-    br_targets := entry.brTargets
+    br_targets := entry.getBrTargets(pc)
     jmp_valid := entry.jmpValid
-    jmp_target := entry.jmpTarget
+    jmp_target := entry.getJmpTarget(pc)
     is_jal := entry.jmpValid && entry.isJal
     is_jalr := entry.jmpValid && entry.isJalr
     is_call := entry.jmpValid && entry.isCall

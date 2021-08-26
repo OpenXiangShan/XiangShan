@@ -161,7 +161,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
   
   when (spec_pop) {
-    io.out.resp.s2.ftb_entry.jmpTarget := spec_top_addr
+    io.out.resp.s2.preds.jmp_target := spec_top_addr
   }
 
   io.out.resp.s2.rasSp  := spec_ras.sp

@@ -32,17 +32,27 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val numWays    = 4
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20
+
+  val TAR_STAT_SZ = 2
+  def TAR_FIT = 0.U(TAR_STAT_SZ.W)
+  def TAR_OVF = 1.U(TAR_STAT_SZ.W)
+  def TAR_UDF = 2.U(TAR_STAT_SZ.W)
+
+  def BR_OFFSET_LEN = 13
+  def JMP_OFFSET_LEN = 21
 }
 
 class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
   val valid       = Bool()
 
   val brOffset    = Vec(numBr, UInt(log2Up(FetchWidth*2).W))
-  val brTargets    = Vec(numBr, UInt(VAddrBits.W))
+  val brLowers    = Vec(numBr, UInt(BR_OFFSET_LEN.W))
+  val brTarStats  = Vec(numBr, UInt(TAR_STAT_SZ.W))
   val brValids    = Vec(numBr, Bool())
 
   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
-  val jmpTarget   = UInt(VAddrBits.W)
+  val jmpLower   = UInt(JMP_OFFSET_LEN.W)
+  val jmpTarStat = UInt(TAR_STAT_SZ.W)
   val jmpValid    = Bool()
 
   // Partial Fall-Through Address
@@ -58,6 +68,46 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   val last_is_rvc = Bool()
   
   val always_taken = Vec(numBr, Bool())
+
+  def getTarget(offsetLen: Int)(pc: UInt, lower: UInt, stat: UInt) = {
+    val higher = pc(VAddrBits-1, offsetLen)
+    Cat(
+      Mux(stat === TAR_OVF, higher+1.U,
+        Mux(stat === TAR_UDF, higher-1.U, higher)),
+      lower
+    )
+  }
+  val getBrTarget = getTarget(BR_OFFSET_LEN)(_, _, _)
+
+  def getBrTargets(pc: UInt) = {
+    VecInit((brLowers zip brTarStats).map{
+      case (lower, stat) => getBrTarget(pc, lower, stat)
+    })
+  }
+
+  def getJmpTarget(pc: UInt) = getTarget(JMP_OFFSET_LEN)(pc, jmpLower, jmpTarStat)
+
+  def getLowerStatByTarget(offsetLen: Int)(pc: UInt, target: UInt) = {
+    val pc_higher = pc(VAddrBits-1, offsetLen)
+    val target_higher = pc(VAddrBits-1, offsetLen)
+    val stat = WireInit(Mux(target_higher > pc_higher, TAR_OVF,
+      Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT)))
+    val lower = WireInit(target(offsetLen-1, 0))
+    (lower, stat)
+  }
+  def getBrLowerStatByTarget(pc: UInt, target: UInt) = getLowerStatByTarget(BR_OFFSET_LEN)(pc, target)
+  def getJmpLowerStatByTarget(pc: UInt, target: UInt) = getLowerStatByTarget(JMP_OFFSET_LEN)(pc, target)
+  def setByBrTarget(brIdx: Int, pc: UInt, target: UInt) = {
+    val (lower, stat) = getBrLowerStatByTarget(pc, target)
+    this.brLowers(brIdx) := lower
+    this.brTarStats(brIdx) := stat
+  }
+  def setByJmpTarget(pc: UInt, target: UInt) = {
+    val (lower, stat) = getJmpLowerStatByTarget(pc, target)
+    this.jmpLower := lower
+    this.jmpTarStat := stat
+  }
+
 
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
@@ -77,9 +127,9 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
     XSDebug(cond, p"-----------FTB entry----------- \n")
     XSDebug(cond, p"v=${valid}\n")
     for(i <- 0 until numBr) {
-      XSDebug(cond, p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, target=${Hexadecimal(brTargets(i))}\n")
+      XSDebug(cond, p"[br$i]: v=${brValids(i)}, offset=${brOffset(i)}, lower=${Hexadecimal(brLowers(i))}\n")
     }
-    XSDebug(cond, p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, target=${Hexadecimal(jmpTarget)}\n")
+    XSDebug(cond, p"[jmp]: v=${jmpValid}, offset=${jmpOffset}, lower=${Hexadecimal(jmpLower)}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
     XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
     XSDebug(cond, p"oversize=$oversize, last_is_rvc=$last_is_rvc\n")
@@ -95,9 +145,9 @@ class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams wi
     XSDebug(cond, p"-----------FTB entry----------- \n")
     XSDebug(cond, p"v=${entry.valid}, tag=${Hexadecimal(tag)}\n")
     for(i <- 0 until numBr) {
-      XSDebug(cond, p"[br$i]: v=${entry.brValids(i)}, offset=${entry.brOffset(i)}, target=${Hexadecimal(entry.brTargets(i))}\n")
+      XSDebug(cond, p"[br$i]: v=${entry.brValids(i)}, offset=${entry.brOffset(i)}, lower=${Hexadecimal(entry.brLowers(i))}\n")
     }
-    XSDebug(cond, p"[jmp]: v=${entry.jmpValid}, offset=${entry.jmpOffset}, target=${Hexadecimal(entry.jmpTarget)}\n")
+    XSDebug(cond, p"[jmp]: v=${entry.jmpValid}, offset=${entry.jmpOffset}, lower=${Hexadecimal(entry.jmpLower)}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(entry.pftAddr)}, carry=${entry.carry}\n")
     XSDebug(cond, p"isCall=${entry.isCall}, isRet=${entry.isRet}, isjalr=${entry.isJalr}\n")
     XSDebug(cond, p"oversize=${entry.oversize}, last_is_rvc=${entry.last_is_rvc}\n")
@@ -223,7 +273,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.pc                  := s2_pc
   io.out.resp.s2.ftb_entry           := ftb_entry
-  io.out.resp.s2.preds.fromFtbEntry(ftb_entry)
+  io.out.resp.s2.preds.fromFtbEntry(ftb_entry, s2_pc)
 
   io.out.s3_meta                     := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_hit, GTimer()).asUInt(), io.s1_fire), io.s2_fire)
 

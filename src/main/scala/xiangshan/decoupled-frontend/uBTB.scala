@@ -128,7 +128,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.pc := s1_pc
   io.out.resp.s1.preds.hit := bank.read_hit
   io.out.resp.s1.ftb_entry := read_entry
-  io.out.resp.s1.preds.fromFtbEntry(read_entry)
+  io.out.resp.s1.preds.fromFtbEntry(read_entry, s1_pc)
 
   when(!bank.read_hit) {
     io.out.resp.s1.ftb_entry.pftAddr := s1_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U

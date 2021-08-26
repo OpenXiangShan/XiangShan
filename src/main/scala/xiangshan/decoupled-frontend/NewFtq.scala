@@ -292,12 +292,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   // tag is left for ftb to assign
   init_entry.brValids(0) := cfi_is_br
   init_entry.brOffset(0) := io.cfiIndex.bits
-  init_entry.brTargets(0) := io.target
+  init_entry.setByBrTarget(0, io.start_addr, io.target)
   init_entry.always_taken(0) := cfi_is_br // set to always taken on init
   init_entry.always_taken(1) := false.B
   init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_jmp_is_jal || new_jmp_is_jalr
-  init_entry.jmpTarget := Mux(cfi_is_jalr, io.target, pd.jalTarget)
+  init_entry.setByJmpTarget(io.start_addr, Mux(cfi_is_jalr, io.target, pd.jalTarget))
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + ((FetchWidth*4)>>instOffsetBits).U + Mux(last_br_rvi, 1.U, 0.U))
   init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1))
@@ -327,13 +327,17 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   })
 
   val old_entry_modified = WireInit(io.old_entry)
+  val (new_br_lower, new_br_tar_stat) = old_entry_modified.getBrLowerStatByTarget(io.start_addr, io.target)
   for (i <- 0 until numBr) {
     old_entry_modified.brOffset(i)  :=  Mux(new_br_insert_onehot(i), new_br_offset,
                                           Mux(oe.brOffset(i) < new_br_offset, oe.brOffset(i),
                                             (if (i != 0) oe.brOffset(i-1) else oe.brOffset(i))))
-    old_entry_modified.brTargets(i) :=  Mux(new_br_insert_onehot(i), io.target,
-                                          Mux(oe.brOffset(i) < new_br_offset, oe.brTargets(i),
-                                            (if (i != 0) oe.brTargets(i-1) else oe.brTargets(i))))
+    old_entry_modified.brLowers(i) :=  Mux(new_br_insert_onehot(i), new_br_lower,
+                                          Mux(oe.brOffset(i) < new_br_offset, oe.brLowers(i),
+                                            (if (i != 0) oe.brLowers(i-1) else oe.brLowers(i))))
+    old_entry_modified.brTarStats(i) := Mux(new_br_insert_onehot(i), new_br_tar_stat,
+                                          Mux(oe.brOffset(i) < new_br_offset, oe.brTarStats(i),
+                                            (if (i != 0) oe.brTarStats(i-1) else oe.brTarStats(i))))
     old_entry_modified.always_taken(i) := Mux(new_br_insert_onehot(i), true.B,
                                             Mux(oe.brOffset(i) < new_br_offset, false.B,
                                               (if (i != 0) oe.always_taken(i-1) else oe.always_taken(i))))
@@ -357,7 +361,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val old_entry_jmp_target_modified = WireInit(oe)
   val jalr_mispredicted = cfi_is_jalr && io.mispredict_vec(io.pd.jmpOffset)
   when (jalr_mispredicted) {
-    old_entry_jmp_target_modified.jmpTarget := io.target
+    old_entry_jmp_target_modified.setByJmpTarget(io.start_addr, io.target)
     old_entry_jmp_target_modified.always_taken := 0.U.asTypeOf(Vec(numBr, Bool()))
   }
 
