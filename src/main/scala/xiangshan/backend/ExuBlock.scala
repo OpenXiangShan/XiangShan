@@ -34,6 +34,9 @@ class ExuBlock(
 )(implicit p: Parameters) extends LazyModule {
   val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outFpRfReadPorts))
 
+  val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts
+  val wbPosition = configs.map(cfg => allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg._1)).map(_._2))
+
   lazy val module = new ExuBlockImp(this)
 }
 
@@ -68,6 +71,24 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.extra <> io.scheExtra
 
   scheduler.io.issue <> fuBlock.io.issue
+
+  val flattenFuConfigs = fuConfigs.zip(outer.wbPosition).flatMap(c => Seq.fill(c._1._2)((c._1._1, c._2)))
+  require(flattenFuConfigs.length == fuBlock.io.writeback.length)
+  val directConn = flattenFuConfigs.zip(fuBlock.io.writeback).filterNot(_._1._1.hasUncertainlatency)
+  if (directConn.length > 0) {
+    val directWbPorts = directConn.map(_._1._2).reduce(_ ++ _).toSet.toSeq
+    println(s"Ports $directWbPorts are directly connected from function units.")
+    require(directConn.length == directWbPorts.length)
+    val wbPortExuCfgs = directWbPorts.map(outer.allRfWbPorts(_))
+    wbPortExuCfgs.foreach(cfgs => require(cfgs.length == 1))
+    val schedWbPorts = directWbPorts.map(scheduler.io.writeback(_))
+    val outerWbPorts = directWbPorts.map(io.rfWriteback(_))
+    schedWbPorts.zip(directConn.map(_._2)).zip(outerWbPorts).map{ case ((s, f), o) =>
+      s := f
+      XSError((o.valid || f.valid) && o.bits.uop.roqIdx =/= f.bits.uop.roqIdx, "different instruction\n")
+      XSError((o.valid || f.valid) && o.bits.data =/= f.bits.data, "different data\n")
+    }
+  }
 
   fuBlock.io.redirect <> io.redirect
   fuBlock.io.flush <> io.flush
