@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 
 case class L2TLBParameters
 (
+  name: String = "l2tlb",
   // l1
   l1Size: Int = 16,
   l1Associative: String = "fa",
