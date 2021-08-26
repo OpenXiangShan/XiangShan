@@ -370,7 +370,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
 
   def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) = {
     require((data.getWidth / XLEN) == num,
-      "input data length must be multiple of pte length")
+      s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)

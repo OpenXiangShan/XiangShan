@@ -45,7 +45,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
       val addr = UInt(PAddrBits.W)
     })
     val resp = Flipped(ValidIO(new Bundle {
-      val data = UInt(MemBandWidth.W)
+      val data = UInt(blockBits.W)
     }))
   }
 

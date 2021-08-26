@@ -45,7 +45,9 @@ case class L2TLBParameters
   // miss queue
   missQueueSize: Int = 8,
   // sram
-  SramSinglePort: Boolean = true
+  sramSinglePort: Boolean = true,
+  // way size
+  blockBytes: Int = 64
 )
 
 trait HasTlbConst extends HasXSParameter {
@@ -94,7 +96,8 @@ trait HasTlbConst extends HasXSParameter {
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
   val MemBandWidth  = 256 // TODO: change to IO bandwidth param
-  val SramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
+  val sramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
+  val blockBits = l2tlbParams.blockBytes * 8
 
   val bPtwWidth = log2Up(PtwWidth)
 
@@ -108,7 +111,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // ptwl2: 8-way group-associated
   val l2tlbParams.l2nWays = l2tlbParams.l2nWays
   val PtwL2SetNum = l2tlbParams.l2nSets
-  val PtwL2SectorSize = MemBandWidth/XLEN
+  val PtwL2SectorSize = blockBits /XLEN
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
@@ -117,7 +120,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // ptwl3: 16-way group-associated
   val l2tlbParams.l3nWays = l2tlbParams.l3nWays
   val PtwL3SetNum = l2tlbParams.l3nSets
-  val PtwL3SectorSize = MemBandWidth / XLEN
+  val PtwL3SectorSize =  blockBits / XLEN
   val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
   val PtwL3SetIdxLen = log2Up(PtwL3SetNum)

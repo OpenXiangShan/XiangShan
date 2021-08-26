@@ -39,7 +39,6 @@ class PTW()(implicit p: Parameters) extends LazyModule {
 class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val (mem, edge) = outer.node.out.head
-  require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
   val difftestIO = IO(new Bundle() {
@@ -100,11 +99,6 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.req.bits.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.source := arb2.io.out.bits.source
   cache.io.req.bits.isReplay := arb2.io.chosen === 0.U
-  cache.io.refill.valid := mem.d.valid
-  cache.io.refill.bits.ptes := mem.d.bits.data
-  cache.io.refill.bits.vpn  := fsm.io.refill.vpn
-  cache.io.refill.bits.level := fsm.io.refill.level
-  cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
   cache.io.sfence := sfence
   cache.io.refuseRefill := fsm.io.sfenceLatch
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
@@ -121,23 +115,37 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   fsm.io.req.bits.l2Hit := cache.io.resp.bits.toFsm.l2Hit
   fsm.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   fsm.io.req.bits.vpn := cache.io.resp.bits.vpn
-  fsm.io.mem.req.ready := mem.a.ready
-  fsm.io.mem.resp.valid := mem.d.valid
-  fsm.io.mem.resp.bits.data := mem.d.bits.data
   fsm.io.csr := csr
   fsm.io.sfence := sfence
   fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, false.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(1).ready))
 
+  // mem
   val memRead =  edge.Get(
     fromSource = 0.U/*id*/,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = Cat(fsm.io.mem.req.bits.addr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
-    lgSize     = log2Up(l1BusDataWidth/8).U
+    toAddress  = Cat(fsm.io.mem.req.bits.addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W)),
+    lgSize     = log2Up(l2tlbParams.blockBytes).U
   )._2
   mem.a.bits := memRead
   mem.a.valid := fsm.io.mem.req.valid
   mem.d.ready := true.B
+
+  val refill_data = Reg(Vec(blockBits / MemBandWidth, UInt(MemBandWidth.W)))
+  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
+  val refill_valid = RegNext(refill_helper._3)
+  when (mem.d.valid) {
+    refill_data(refill_helper._4) := mem.d.bits.data
+  }
+
+  fsm.io.mem.req.ready := mem.a.ready
+  fsm.io.mem.resp.valid := refill_valid
+  fsm.io.mem.resp.bits.data := refill_data.asUInt
+  cache.io.refill.valid := refill_valid
+  cache.io.refill.bits.ptes := refill_data.asUInt
+  cache.io.refill.bits.vpn  := fsm.io.refill.vpn
+  cache.io.refill.bits.level := fsm.io.refill.level
+  cache.io.refill.bits.memAddr := fsm.io.refill.memAddr
 
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U

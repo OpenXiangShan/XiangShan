@@ -49,7 +49,7 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val toTlb = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   })
   val refill = Flipped(ValidIO(new Bundle {
-    val ptes = UInt(MemBandWidth.W)
+    val ptes = UInt(blockBits.W)
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
     val memAddr = Input(UInt(PAddrBits.W))
@@ -77,7 +77,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   // when miss queue is full, please to block itlb and dtlb input
 
   // when refill, refuce to accept new req
-  val rwHarzad = if (SramSinglePort) io.refill.valid else false.B
+  val rwHarzad = if (sramSinglePort) io.refill.valid else false.B
   io.req.ready := !rwHarzad && (second_ready || io.req.bits.isReplay)
   // NOTE: when write, don't ready, whe
   //       when replay, just come in, out make sure resp.fire()
@@ -92,7 +92,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false),
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
-    singlePort = SramSinglePort
+    singlePort = sramSinglePort
   ))
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
@@ -109,7 +109,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true),
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
-    singlePort = SramSinglePort
+    singlePort = sramSinglePort
   ))
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
