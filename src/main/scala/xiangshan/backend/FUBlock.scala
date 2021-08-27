@@ -158,7 +158,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
       }
 
       // out
-      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
+      // TODO: remove this conversion after record is removed
+      val fpWen = exu.io.out.bits.uop.ctrl.fpWen
+      val dataIsFp = if (exu.config.hasFastUopOut) RegNext(fpWen) else fpWen
+      io.writeback(i).bits.data := Mux(dataIsFp,
         ieee(exu.io.out.bits.data),
         exu.io.out.bits.data
       )
