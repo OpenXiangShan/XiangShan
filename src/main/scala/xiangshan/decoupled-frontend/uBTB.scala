@@ -96,21 +96,34 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     val update_emptys = valids.map(!_)
     val update_has_empty_way = update_emptys.reduce(_||_)
     val update_empty_way = ParallelPriorityEncoder(update_emptys)
-    val update_way = Mux(update_hit, update_hitWay, Mux(update_has_empty_way, update_empty_way, update_alloc_way))
+    val update_way = Wire(UInt(log2Ceil(nWays).W))
+    
+
+    val update_valid_reg = RegNext(io.update_valid)
+    val update_way_reg = RegNext(update_way)
+    val update_tag_reg = RegNext(update_tag)
+    val update_entry_reg = RegNext(io.update_write_entry)
+
+    val update_bypass_valid = update_valid_reg && io.update_valid && update_tag === update_tag_reg
+    update_way :=
+      Mux(update_bypass_valid, update_way_reg,
+        Mux(update_hit, update_hitWay,
+          Mux(update_has_empty_way, update_empty_way,
+            update_alloc_way)))
 
     tagCam.io.r.req := VecInit(Seq(read_tag, update_tag))
     
-    tagCam.io.w.valid       := RegNext(io.update_valid)
-    tagCam.io.w.bits.index  := RegNext(update_way)
-    tagCam.io.w.bits.data   := RegNext(io.update_write_tag)
+    tagCam.io.w.valid       := update_valid_reg
+    tagCam.io.w.bits.index  := update_way_reg
+    tagCam.io.w.bits.data   := update_tag_reg
 
-    when (RegNext(io.update_valid)) {
-      valids(RegNext(update_way)) := true.B
+    when (update_valid_reg) {
+      valids(update_way_reg) := true.B
     }
 
-    dataMem.io.wen(0)   := RegNext(io.update_valid)
-    dataMem.io.waddr(0) := RegNext(update_way)
-    dataMem.io.wdata(0) := RegNext(io.update_write_entry)
+    dataMem.io.wen(0)   := update_valid_reg
+    dataMem.io.waddr(0) := update_way_reg
+    dataMem.io.wdata(0) := update_entry_reg
 
   } // uBTBBank
 
