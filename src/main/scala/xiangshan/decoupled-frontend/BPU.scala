@@ -387,9 +387,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
   val s2_correct_s0_ghist_reg = s0_ghist_reg =/= s2_predicted_ghist
 
+  val previous_s1_pred_taken = RegEnable(resp.s1.real_taken_mask.asUInt.orR, init=false.B, enable=s1_fire)
+  val s2_pred_taken = resp.s2.real_taken_mask.asUInt.orR
+
   when(s2_fire) {
     when((s1_valid && (s1_pc =/= resp.s2.target || s2_correct_s1_ghist)) ||
-      !s1_valid && (s0_pc_reg =/= resp.s2.target || s2_correct_s0_ghist_reg)) {
+      !s1_valid && (s0_pc_reg =/= resp.s2.target || s2_correct_s0_ghist_reg) ||
+      previous_s1_pred_taken =/= s2_pred_taken) {
       s0_ghist := s2_predicted_ghist
       s2_redirect := true.B
       s0_pc := resp.s2.target
@@ -430,10 +434,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist
   val s3_correct_s0_ghist_reg = s0_ghist_reg =/= s3_predicted_ghist
 
+  val previous_s2_pred_taken = RegEnable(resp.s2.real_taken_mask.asUInt.orR, init=false.B, enable=s2_fire)
+  val s3_pred_taken = resp.s3.real_taken_mask.asUInt.orR
+
   when(s3_fire) {
     when((s2_valid && (s2_pc =/= resp.s3.target || s3_correct_s2_ghist)) ||
       (!s2_valid && s1_valid && (s1_pc =/= resp.s3.target || s3_correct_s1_ghist)) ||
-      (!s2_valid && !s1_valid && (s0_pc_reg =/= resp.s3.target || s3_correct_s0_ghist_reg))) {
+      (!s2_valid && !s1_valid && (s0_pc_reg =/= resp.s3.target || s3_correct_s0_ghist_reg)) ||
+      previous_s2_pred_taken =/= s3_pred_taken) {
 
       s0_ghist := s3_predicted_ghist
       s3_redirect := true.B
