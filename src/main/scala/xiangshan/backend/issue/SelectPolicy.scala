@@ -83,11 +83,13 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
 
   // age(i)(j): entry i enters queue before entry j
   val age = Seq.fill(numEntries)(Seq.fill(numEntries)(RegInit(false.B)))
+  val nextAge = Seq.fill(numEntries)(Seq.fill(numEntries)(Wire(Bool())))
 
   // to reduce reg usage, only use upper matrix
   def get_age(row: Int, col: Int) = if (row <= col) age(row)(col) else !age(col)(row)
+  def get_next_age(row: Int, col: Int) = if (row <= col) nextAge(row)(col) else !nextAge(col)(row)
 
-  for ((row, i) <- age.zipWithIndex) {
+  for ((row, i) <- nextAge.zipWithIndex) {
     // (1) when entry i is flushed or dequeues, set row(i) to false.B
     val thisFlushed = io.deq(i)
     val thisEnqueue = VecInit(io.enq.map(_(i))).asUInt.orR
@@ -100,7 +102,7 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
       }.elsewhen (otherFlushed) {
         elem := thisValid
       }.otherwise {
-        elem := elem
+        elem := get_age(i, j)
         for (k <- 0 until numEnq) {
           when (io.enq(k)(i)) {
             // (3) when enqueue, set age to ~validVec or enqueueFromPreviousPorts
@@ -108,12 +110,15 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
           }
         }
       }
+      age(i)(j) := elem
     }
   }
 
-  io.out := VecInit((0 until numEntries).map(i => {
-    VecInit((0 until numEntries).map(j => get_age(i, j))).asUInt.andR
+  val nextBest = VecInit((0 until numEntries).map(i => {
+    VecInit((0 until numEntries).map(j => get_next_age(i, j))).asUInt.andR
   })).asUInt
+
+  io.out := RegNext(nextBest)
   XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= io.out, "age error\n")
 }
 
