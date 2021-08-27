@@ -354,7 +354,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
 
       val updateThres = updateThresholds(w)
       when (scPred =/= taken || sumAbs < updateThres) {
-        scUpdateMask.foreach(t => t(w) := true.B)
+        scUpdateMask(w).foreach(_ := true.B)
         if (!env.FPGAPlatform && env.EnablePerfDebug) {
           XSDebug(sum < 0.S,
             p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +

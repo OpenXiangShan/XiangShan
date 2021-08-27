@@ -50,7 +50,7 @@ trait TageParams extends HasXSParameter with HasBPUParameter {
     TableInfo.map{ case (s, h, t) => (s/(1 << i), h, t) }
   )
   val BankTageNTables = BankTableInfos.map(_.size) // Number of tage tables
-  val UBitPeriod = 2048
+  val UBitPeriod = 256
   val TageBanks = numBr
   val TageCtrBits = 3
 
