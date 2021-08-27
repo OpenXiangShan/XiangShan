@@ -48,6 +48,8 @@ case class FuConfig
   writeFpRf: Boolean,
   hasRedirect: Boolean,
   latency: HasFuLatency = CertainLatency(0),
+  fastUopOut: Boolean = false,
+  fastImplemented: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }

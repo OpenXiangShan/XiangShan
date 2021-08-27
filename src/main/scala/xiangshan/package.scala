@@ -507,7 +507,9 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val mulCfg = FuConfig(
@@ -520,7 +522,10 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(2)
+    // TODO: change this back to 2 when mul is ready for fastUopOut
+    latency = CertainLatency(3),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val bmuCfg = FuConfig(
@@ -533,7 +538,9 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(1)
+    latency = CertainLatency(1),
+    fastUopOut = true,
+    fastImplemented = false
  )
 
   val fmacCfg = FuConfig(
@@ -547,21 +554,24 @@ package object xiangshan {
     name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
-    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val f2fCfg = FuConfig(
     name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val fdivSqrtCfg = FuConfig(
     name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
-    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
+    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
+    fastUopOut = true, fastImplemented = false
   )
 
   val lduCfg = FuConfig(

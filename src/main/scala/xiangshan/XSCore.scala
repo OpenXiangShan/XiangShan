@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.{ExuConfig, Wb}
+import xiangshan.backend.exu.{ExuConfig, WbArbiter}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import xiangshan.cache.L1plusCacheWrapper
@@ -69,12 +69,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val ptw = LazyModule(new PTWWrapper())
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
-  val intArbiter = LazyModule(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+  val intArbiter = LazyModule(new WbArbiter(intConfigs, NRIntWritePorts, isFp = false))
   val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
   val numIntWbPorts = intWbPorts.length
 
   val fpConfigs = exuConfigs.filter(_.writeFpRf)
-  val fpArbiter = LazyModule(new Wb(fpConfigs, NRFpWritePorts, isFp = true))
+  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, NRFpWritePorts, isFp = true))
   val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
   val numFpWbPorts = fpWbPorts.length
 
