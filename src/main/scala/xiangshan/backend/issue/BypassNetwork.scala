@@ -41,9 +41,28 @@ class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundl
     new BypassNetworkIO(numWays, numBypass, dataBits).asInstanceOf[this.type]
 }
 
-class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int, optBuf: Boolean)(implicit p: Parameters)
+class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)
   extends XSModule {
+
   val io = IO(new BypassNetworkIO(numWays, numBypass, dataBits))
+
+  def doBypass(bypassValid: Seq[Bool], bypassData: Seq[UInt], baseData: UInt, debugIndex: Int = 0): UInt = {
+    val bypassVec = VecInit(bypassValid)
+    val target = Mux(bypassVec.asUInt.orR, Mux1H(bypassValid, bypassData), baseData)
+
+    XSError(PopCount(bypassVec) > 1.U, p"bypass mask ${Binary(bypassVec.asUInt)} is not one-hot\n")
+    bypassVec.zipWithIndex.map { case (m, i) =>
+      XSDebug(bypassVec(i), p"target($debugIndex) bypassed from $i:0x${Hexadecimal(bypassData(i))}\n")
+    }
+
+    target
+  }
+
+}
+
+// Bypass at the right: RegNext(data) and compute the bypassed data at the next clock cycle
+class BypassNetworkRight(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)
+  extends BypassNetwork(numWays, numBypass, dataBits) {
 
   val target_reg = Reg(Vec(numWays, UInt(dataBits.W)))
   val bypass_reg = Reg(Vec(numBypass, new BypassInfo(numWays, dataBits)))
@@ -61,12 +80,29 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int, optBuf: Boolean
 
   // bypass data to target
   for (i <- 0 until numWays) {
-      val mask = VecInit(bypass_reg.map(_.valid(i).asBool))
-      io.target(i) := Mux(mask.asUInt.orR, Mux1H(mask, bypass_reg.map(_.data)), target_reg(i))
+    io.target(i) := doBypass(bypass_reg.map(_.valid(i)), bypass_reg.map(_.data), target_reg(i))
+  }
 
-      XSError(PopCount(mask) > 1.U, p"bypass mask ${Binary(mask.asUInt)} is not one-hot\n")
-      mask.zipWithIndex.map { case (m, j) =>
-        XSDebug(mask(j), p"target($i) bypassed from $j:0x${Hexadecimal(bypass_reg(j).data)}\n")
-      }
+}
+
+// Bypass at the left: compute the bypassed data and RegNext(bypassed_data)
+class BypassNetworkLeft(numWays: Int, numBypass: Int, dataBits: Int)(implicit p: Parameters)
+  extends BypassNetwork(numWays, numBypass, dataBits) {
+
+  val bypassedData = Reg(io.target.cloneType)
+
+  when (!io.hold) {
+    for ((by, i) <- bypassedData.zipWithIndex) {
+      by := doBypass(io.bypass.map(_.valid(i)), io.bypass.map(_.data), io.source(i))
+    }
+  }
+
+  io.target := bypassedData
+
+}
+
+object BypassNetwork {
+  def apply(numWays: Int, numBypass: Int, dataBits: Int, optFirstStage: Boolean)(implicit p: Parameters) = {
+    Module(new BypassNetworkLeft(numWays, numBypass, dataBits))
   }
 }

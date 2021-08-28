@@ -448,7 +448,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_ (j)))
       }
 
-      val bypassNetwork = Module(new BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf))
+      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
       bypassNetwork.io.hold := !io.deq(i).ready
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
