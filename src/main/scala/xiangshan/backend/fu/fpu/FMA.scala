@@ -18,10 +18,45 @@ package xiangshan.backend.fu.fpu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.util.RegEnable
-import freechips.rocketchip.tile.FType
-import hardfloat.{MulAddRecFN_pipeline_stage1, MulAddRecFN_pipeline_stage2, MulAddRecFN_pipeline_stage3, MulAddRecFN_pipeline_stage4, RoundAnyRawFNToRecFN}
+import chisel3.util._
+import fudian.FCMA
 import xiangshan._
+
+class FCMA_Module(ftype: FPU.FType)(implicit p: Parameters) extends FPUDataModule {
+
+  val fpCtrl = io.in.fpCtrl
+  val typeTagIn = fpCtrl.typeTagIn
+
+  val src1 = FPU.unbox(io.in.src(0), typeTagIn)
+  val src2 = FPU.unbox(io.in.src(1), typeTagIn)
+  val src3 = FPU.unbox(io.in.src(2), typeTagIn)
+  val (in1, in2, in3) = (
+    WireInit(src1), WireInit(src2), WireInit(Mux(fpCtrl.isAddSub, src2, src3))
+  )
+  val one = Cat(
+    0.U(1.W),
+    fudian.FloatPoint.expBias(FPU.f64.expWidth).U(FPU.f64.expWidth.W),
+    0.U(FPU.f64.sigWidth.W)
+  )
+  val zero = Cat(
+    (src1 ^ src2).head(1),
+    0.U((FPU.f64.len - 1).W)
+  )
+  when(fpCtrl.isAddSub){ in2 := one }
+  when(!(fpCtrl.isAddSub || fpCtrl.ren3)){ in3 := zero }
+
+  val fma = Module(new FCMA(ftype.expWidth, ftype.precision))
+  fma.io.a := in1
+  fma.io.b := in2
+  fma.io.c := in3
+  fma.io.rm := rm
+
+  val (result, exc) = (fma.io.result, fma.io.fflags)
+
+  io.out.data := result
+  io.out.fflags := exc
+
+}
 
 class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 
@@ -31,73 +66,40 @@ class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule 
   val fpCtrl = io.in.fpCtrl
   val typeTagIn = fpCtrl.typeTagIn
 
-  val src1 = unbox(io.in.src(0), typeTagIn, None)
-  val src2 = unbox(io.in.src(1), typeTagIn, None)
-  val src3 = unbox(io.in.src(2), typeTagIn, None)
-  val (in1, in2, in3) = (
-    WireInit(src1), WireInit(src2), WireInit(Mux(fpCtrl.isAddSub, src2, src3))
+  val sfma = Module(new FCMA_Module(FPU.f32))
+  val dfma = Module(new FCMA_Module(FPU.f64))
+
+  for(module <- Seq(sfma, dfma)){
+    module.io.in := io.in
+  }
+
+  val singleOut = typeTagOut === FPU.S
+  val result = Mux(singleOut,
+    FPU.box(sfma.io.out.data, FPU.S),
+    FPU.box(dfma.io.out.data, FPU.D)
   )
-  val one = 1.U << (FType.D.sig + FType.D.exp - 1)
-  val zero = (src1 ^ src2) & (1.U << (FType.D.sig + FType.D.exp))
-  when(fpCtrl.isAddSub){ in2 := one }
-  when(!(fpCtrl.isAddSub || fpCtrl.ren3)){ in3 := zero }
-
-  val stage1 = Module(new MulAddRecFN_pipeline_stage1(maxExpWidth, maxSigWidth))
-  val stage2 = Module(new MulAddRecFN_pipeline_stage2(maxExpWidth, maxSigWidth))
-  val stage3 = Module(new MulAddRecFN_pipeline_stage3(maxExpWidth, maxSigWidth))
-  val stage4 = Module(new MulAddRecFN_pipeline_stage4(maxExpWidth, maxSigWidth))
-  val mul = Module(new hardfloat.ArrayMultiplier(
-    maxSigWidth+1,
-    regDepth = 0,
-    realArraryMult = true,
-    hasReg = true
-  ))
-  mul.io.a := stage1.io.mulAddA
-  mul.io.b := stage1.io.mulAddB
-  mul.io.reg_en := regEnables(0)
-  stage2.io.mulSum := mul.io.sum
-  stage2.io.mulCarry := mul.io.carry
-
-  stage1.io.in.valid := DontCare
-  stage1.io.toStage2.ready := DontCare
-  stage2.io.fromStage1.valid := DontCare
-  stage2.io.toStage3.ready := DontCare
-  stage3.io.fromStage2.valid := DontCare
-  stage3.io.toStage4.ready := DontCare
-  stage4.io.fromStage3.valid := DontCare
-  stage4.io.toStage5.ready := DontCare
-
-  stage1.io.in.bits.a := in1
-  stage1.io.in.bits.b := in2
-  stage1.io.in.bits.c := in3
-  stage1.io.in.bits.op := fpCtrl.fmaCmd
-  stage1.io.in.bits.roundingMode := rm
-  stage1.io.in.bits.detectTininess := hardfloat.consts.tininess_afterRounding
-
-  stage2.io.fromStage1.bits <> RegEnable(stage1.io.toStage2.bits, regEnables(0))
-  stage3.io.fromStage2.bits <> RegEnable(stage2.io.toStage3.bits, regEnables(1))
-  stage4.io.fromStage3.bits <> RegEnable(stage3.io.toStage4.bits, regEnables(2))
-  val stage4toStage5 = RegEnable(stage4.io.toStage5.bits, regEnables(3))
-
-  val rounders = Seq(FType.S, FType.D).map(t => {
-    val rounder = Module(new RoundAnyRawFNToRecFN(FType.D.exp, FType.D.sig+2, t.exp, t.sig, 0))
-    rounder.io.invalidExc   := stage4toStage5.invalidExc
-    rounder.io.infiniteExc  := false.B
-    rounder.io.in           := stage4toStage5.rawOut
-    rounder.io.roundingMode := stage4toStage5.roundingMode
-    rounder.io.detectTininess := stage4toStage5.detectTininess
-    rounder
-  })
-
-  val singleOut = typeTagOut === S
-  io.out.data := Mux(singleOut,
-    sanitizeNaN(rounders(0).io.out, FType.S),
-    sanitizeNaN(rounders(1).io.out, FType.D)
+  val exc = Mux(singleOut,
+    sfma.fflags,
+    dfma.fflags
   )
-  fflags := Mux(singleOut,
-    rounders(0).io.exceptionFlags,
-    rounders(1).io.exceptionFlags
-  )
+
+  val stages = Wire(Vec(latency, new Bundle() {
+    val data = UInt(XLEN.W)
+    val exc = UInt(5.W)
+  }))
+
+  for((s, i) <- stages.zipWithIndex){
+    if(i == 0){
+      s.data := result
+      s.exc := exc
+    } else {
+      s := RegEnable(stages(i - 1), regEnables(i - 1))
+    }
+  }
+
+  io.out.data := stages.last.data
+  fflags := stages.last.exc
+
 }
 
 class FMA(implicit p: Parameters) extends FPUPipelineModule {
