@@ -96,7 +96,6 @@ trait HasTlbConst extends HasXSParameter {
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
-  val MemBandWidth  = 256 // TODO: change to IO bandwidth param
   val sramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
   val blockBits = l2tlbParams.blockBytes * 8
 

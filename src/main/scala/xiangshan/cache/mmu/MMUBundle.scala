@@ -405,6 +405,14 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
 
+  def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
+    this.entry.level.map(_ := level)
+    this.entry.tag := vpn
+    this.entry.perm.map(_ := pte.getPerm())
+    this.entry.ppn := pte.ppn
+    this.pf := pf
+  }
+
   override def toPrintable: Printable = {
     p"entry:${entry} pf:${pf}"
   }

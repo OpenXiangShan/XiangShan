@@ -285,9 +285,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   l2.io.w.req.valid := false.B
   l3.io.w.req.valid := false.B
 
+  def get_part(data: UInt, index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+
   val memRdata = refill.ptes
-  val memSelData = memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(refill.memAddr(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
-  val memPtes = (0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
+  val memSelData = get_part(memRdata, refill.memAddr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8)))
+  val memPtes = (0 until (l2tlbParams.blockBytes/(XLEN/8))).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
   val memPte = memSelData.asTypeOf(new PteBundle)
 
   // TODO: handle sfenceLatch outsize

@@ -131,16 +131,22 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   mem.a.valid := fsm.io.mem.req.valid
   mem.d.ready := true.B
 
-  val refill_data = Reg(Vec(blockBits / MemBandWidth, UInt(MemBandWidth.W)))
+  val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
   val refill_valid = RegNext(refill_helper._3)
   when (mem.d.valid) {
     refill_data(refill_helper._4) := mem.d.bits.data
   }
 
+  def get_part(data: Vec[UInt], index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+
+  val req_addr_low = fsm.io.mem.req.bits.addr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
   fsm.io.mem.req.ready := mem.a.ready
   fsm.io.mem.resp.valid := refill_valid
-  fsm.io.mem.resp.bits.data := refill_data.asUInt
+  fsm.io.mem.resp.bits := get_part(refill_data, req_addr_low)
   cache.io.refill.valid := refill_valid
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.vpn  := fsm.io.refill.vpn
