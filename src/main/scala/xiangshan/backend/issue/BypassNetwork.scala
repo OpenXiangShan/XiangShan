@@ -23,14 +23,12 @@ import xiangshan._
 import utils._
 
 
-class BypassInfo(numWays: Int, dataBits: Int, optBuf: Boolean = false) extends Bundle {
-  val validWidth = (if (optBuf) dataBits else 1)
-
-  val valid = Vec(numWays, UInt(validWidth.W))
+class BypassInfo(numWays: Int, dataBits: Int) extends Bundle {
+  val valid = Vec(numWays, Bool())
   val data = UInt(dataBits.W)
 
   override def cloneType: BypassInfo.this.type =
-    new BypassInfo(numWays, dataBits, optBuf).asInstanceOf[this.type]
+    new BypassInfo(numWays, dataBits).asInstanceOf[this.type]
 }
 
 class BypassNetworkIO(numWays: Int, numBypass: Int, dataBits: Int) extends Bundle {
@@ -48,40 +46,21 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int, optBuf: Boolean
   val io = IO(new BypassNetworkIO(numWays, numBypass, dataBits))
 
   val target_reg = Reg(Vec(numWays, UInt(dataBits.W)))
-  val bypass_reg = Reg(Vec(numBypass, new BypassInfo(numWays, dataBits, optBuf)))
+  val bypass_reg = Reg(Vec(numBypass, new BypassInfo(numWays, dataBits)))
 
   when (io.hold) {
     target_reg := io.target
-    if (optBuf) {
-      bypass_reg.map(_.valid.map(_ := 0.U))
-    }
-    else {
-      bypass_reg.map(_.valid.map(_ := false.B))
-    }
+    bypass_reg.map(_.valid.map(_ := false.B))
   }.otherwise {
     target_reg := io.source
     for ((by_reg, by_io) <- bypass_reg.zip(io.bypass)) {
       by_reg.data := by_io.data
-      if (optBuf) {
-        // duplicate bypass mask to avoid too many FO4s and hurting timing
-        by_reg.valid := VecInit(by_io.valid.map(v => Cat(Seq.fill(dataBits)(v))))
-      }
-      else {
-        by_reg.valid := by_io.valid
-      }
+      by_reg.valid := by_io.valid
     }
   }
 
   // bypass data to target
   for (i <- 0 until numWays) {
-    if (optBuf) {
-      val bypassData = VecInit((0 until dataBits).map(j => {
-        val mask = VecInit(bypass_reg.map(_.valid(i)(j)))
-        Mux(mask.asUInt.orR, Mux1H(mask, bypass_reg.map(_.data(j))), target_reg(i)(j))
-      })).asUInt
-      io.target(i) := bypassData
-    }
-    else {
       val mask = VecInit(bypass_reg.map(_.valid(i).asBool))
       io.target(i) := Mux(mask.asUInt.orR, Mux1H(mask, bypass_reg.map(_.data)), target_reg(i))
 
@@ -89,6 +68,5 @@ class BypassNetwork(numWays: Int, numBypass: Int, dataBits: Int, optBuf: Boolean
       mask.zipWithIndex.map { case (m, j) =>
         XSDebug(mask(j), p"target($i) bypassed from $j:0x${Hexadecimal(bypass_reg(j).data)}\n")
       }
-    }
   }
 }
