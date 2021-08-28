@@ -450,7 +450,9 @@ object TopMain extends App with HasRocketChipStageUtils {
     val (config, firrtlOpts) = ArgParser.parse(args)
     XiangShanStage.execute(firrtlOpts, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop()(config))
+        val soc = DisableMonitors { p =>
+          LazyModule(new XSTop()(p))
+        }(config)
         soc.module
       })
     ))
