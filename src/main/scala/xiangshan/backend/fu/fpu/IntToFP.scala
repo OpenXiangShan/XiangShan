@@ -22,9 +22,7 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import hardfloat.INToRecFN
 import utils.{SignExt, ZeroExt}
-import xiangshan._
 
 class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
 
@@ -32,7 +30,7 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_ready, out_valid = IO(Output(Bool()))
   val kill_w, kill_r = IO(Input(Bool()))
 
-  val s_idle :: s_cvt :: s_finish :: Nil = Enum(4)
+  val s_idle :: s_cvt :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
 

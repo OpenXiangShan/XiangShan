@@ -41,12 +41,5 @@ class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
 
   require(config.hasFastUopOut)
   io.out.bits.fflags := Mux1H(arbSelReg, fus.map(x => x.fflags))
-  val arbUop = RegNext(io.out.bits.uop)
-  io.out.bits.data := Mux(!arbUop.ctrl.fpWen,
-    dataReg,
-    Mux(arbUop.ctrl.fpu.typeTagOut === S,
-      box(dataReg, FType.S),
-      sanitizeNaN(dataReg, FType.D)
-    )
-  )
+  io.out.bits.data := dataReg
 }
