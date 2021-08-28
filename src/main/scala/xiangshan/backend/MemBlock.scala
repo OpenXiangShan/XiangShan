@@ -50,7 +50,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasExceptionNO
   with HasFPUParameters
   with HasExeBlockHelper
-  with HasFpLoadHelper
 {
 
   val io = IO(new Bundle {

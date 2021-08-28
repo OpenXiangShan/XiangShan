@@ -391,12 +391,12 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val src = Vec(3, UInt((XLEN + 1).W))
+  val src = Vec(3, UInt(XLEN.W))
 }
 
 class ExuOutput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val data = UInt((XLEN + 1).W)
+  val data = UInt(XLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

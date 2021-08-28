@@ -25,7 +25,6 @@ import chisel3.util._
 import freechips.rocketchip.tile.FType
 import hardfloat.RecFNToIN
 import utils.SignExt
-import xiangshan.backend.fu.FunctionUnit
 import xiangshan._
 
 

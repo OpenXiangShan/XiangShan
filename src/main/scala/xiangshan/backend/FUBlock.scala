@@ -148,24 +148,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     }
 
     if (exu.frm.isDefined) {
-      // fp instructions have three operands
-      for (j <- 0 until 3) {
-        // when one of the higher bits is zero, then it's not a legal single-precision number
-        val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR
-        val single = recode(io.issue(i).bits.src(j)(31, 0), S)
-        val double = recode(io.issue(i).bits.src(j)(63, 0), D)
-        exu.io.fromFp.bits.src(j) := Mux(isLegalSingle, single, double)
-      }
-
-      // out
-      // TODO: remove this conversion after record is removed
-      val fpWen = exu.io.out.bits.uop.ctrl.fpWen
-      val dataIsFp = if (exu.config.hasFastUopOut) RegNext(fpWen) else fpWen
-      io.writeback(i).bits.data := Mux(dataIsFp,
-        ieee(exu.io.out.bits.data),
-        exu.io.out.bits.data
-      )
-
       exu.frm.get := io.extra.frm.get
     }
   }
