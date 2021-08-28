@@ -252,8 +252,8 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(2.W)
-  val typeTagOut = UInt(2.W)
+  val typeTagIn = UInt(1.W)
+  val typeTagOut = UInt(1.W)
   val fromInt = Bool()
   val wflags = Bool()
   val fpWen = Bool()

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan.backend.decode.Instructions._
+import xiangshan.backend.fu.fpu.FPU
 import xiangshan.{FPUCtrlSignals, XSModule}
 
 class FPDecoder(implicit p: Parameters) extends XSModule{
@@ -32,19 +33,21 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   def X = BitPat("b?")
   def N = BitPat("b0")
   def Y = BitPat("b1")
-  val s = BitPat(S)
-  val d = BitPat(D)
-  val i = BitPat(I)
+  val s = BitPat(FPU.S)
+  val d = BitPat(FPU.D)
+  val i = BitPat(FPU.D)
 
   val default = List(X,X,X,N,N,N,X,X,X)
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
+    // IntToFP
     FMV_W_X  -> List(N,s,d,Y,N,Y,N,N,N),
     FCVT_S_W -> List(N,s,s,Y,Y,Y,N,N,Y),
     FCVT_S_WU-> List(N,s,s,Y,Y,Y,N,N,Y),
     FCVT_S_L -> List(N,s,s,Y,Y,Y,N,N,Y),
     FCVT_S_LU-> List(N,s,s,Y,Y,Y,N,N,Y),
+    // FPToInt
     FMV_X_W  -> List(N,d,i,N,N,N,N,N,N),
     FCLASS_S -> List(N,s,i,N,N,N,N,N,N),
     FCVT_W_S -> List(N,s,i,N,Y,N,N,N,Y),
@@ -54,6 +57,7 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FEQ_S    -> List(N,s,i,N,Y,N,N,N,N),
     FLT_S    -> List(N,s,i,N,Y,N,N,N,N),
     FLE_S    -> List(N,s,i,N,Y,N,N,N,N),
+    // FPToFP
     FSGNJ_S  -> List(N,s,s,N,N,Y,N,N,N),
     FSGNJN_S -> List(N,s,s,N,N,Y,N,N,N),
     FSGNJX_S -> List(N,s,s,N,N,Y,N,N,N),
