@@ -79,9 +79,9 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)       \
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
-		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
 		--num-cores $(NUM_CORES) $(SIM_ARGS)
-	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
+		#--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf   \
+	# $(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
