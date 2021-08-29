@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
+import fudian.FPUpConverter
 import hardfloat.{DivSqrtRecFNToRaw_small, DivSqrtRecFNToRaw_srt4, RoundAnyRawFNToRecFN}
 
 class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
@@ -28,75 +29,100 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val kill_w = IO(Input(Bool()))
   val kill_r = IO(Input(Bool()))
 
-//  val in_fire = in_valid && in_ready
-//  val out_fire = out_valid && out_ready
-//
-//  val s_idle :: s_div :: s_finish :: Nil = Enum(3)
-//  val state = RegInit(s_idle)
-//
-//  val divSqrt = Module(new DivSqrtRecFNToRaw_srt4(FType.D.exp, FType.D.sig))
-//  val divSqrtRawValid = divSqrt.io.rawOutValid_sqrt || divSqrt.io.rawOutValid_div
-//
-//  val fpCtrl = io.in.fpCtrl
-//  val tag = fpCtrl.typeTagIn
-//  val single = RegEnable(tag === S, in_fire)
-//  val rmReg = RegEnable(rm, in_fire)
-//
-//  switch(state){
-//    is(s_idle){
-//      when(in_fire && !kill_w){ state := s_div }
-//    }
-//    is(s_div){
-//      when(divSqrtRawValid){
-//        state := s_finish
-//      }
-//    }
-//    is(s_finish){
-//      when(out_fire){
-//        state := s_idle
-//      }
-//    }
-//  }
-//  when(kill_r){ state := s_idle }
-//
-//  val src1 = unbox(io.in.src(0), tag, None)
-//  val src2 = unbox(io.in.src(1), tag, None)
-//  divSqrt.io.inValid := in_fire && !kill_w
-//  divSqrt.io.sqrtOp := fpCtrl.sqrt
-//  divSqrt.io.kill := kill_r
-//  divSqrt.io.sigBits := Mux(tag === S, FType.S.sig.U, FType.D.sig.U)
-//  divSqrt.io.a := src1
-//  divSqrt.io.b := src2
-//  divSqrt.io.roundingMode := rm
-//
-//  val round32 = Module(new RoundAnyRawFNToRecFN(
-//    FType.D.exp, FType.D.sig+2, FType.S.exp, FType.S.sig, 0
-//  ))
-//  val round64 = Module(new RoundAnyRawFNToRecFN(
-//    FType.D.exp, FType.D.sig+2, FType.D.exp, FType.D.sig, 0
-//  ))
-//
-//  for(rounder <- Seq(round32, round64)){
-//    rounder.io.invalidExc := divSqrt.io.invalidExc
-//    rounder.io.infiniteExc := divSqrt.io.infiniteExc
-//    rounder.io.in := divSqrt.io.rawOut
-//    rounder.io.roundingMode := rmReg
-//    rounder.io.detectTininess := hardfloat.consts.tininess_afterRounding
-//  }
-//
-//  val data = Mux(single, round32.io.out, round64.io.out)
-//  val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
+  val in_fire = in_valid && in_ready
+  val out_fire = out_valid && out_ready
 
-//  assert(!(state === s_idle && !divSqrt.io.inReady))
-//  in_ready := state===s_idle
-//  out_valid := state===s_finish
-//  io.out.data := RegNext(data, divSqrtRawValid)
-//  fflags := RegNext(flags, divSqrtRawValid)
+  val s_idle :: s_div :: s_finish :: Nil = Enum(3)
+  val state = RegInit(s_idle)
 
-  in_ready := false.B
-  out_valid := false.B
-  io.out.data := DontCare
-  fflags := DontCare
+  val divSqrt = Module(new DivSqrtRecFNToRaw_srt4(FType.D.exp, FType.D.sig))
+  val divSqrtRawValid = divSqrt.io.rawOutValid_sqrt || divSqrt.io.rawOutValid_div
+
+  val fpCtrl = io.in.fpCtrl
+  val tag = fpCtrl.typeTagIn
+  val single = RegEnable(tag === S, in_fire)
+  val rmReg = RegEnable(rm, in_fire)
+
+  switch(state){
+    is(s_idle){
+      when(in_fire && !kill_w){ state := s_div }
+    }
+    is(s_div){
+      when(divSqrtRawValid){
+        state := s_finish
+      }
+    }
+    is(s_finish){
+      when(out_fire){
+        state := s_idle
+      }
+    }
+  }
+  when(kill_r){ state := s_idle }
+
+  val in1_unboxed = FPU.unbox(io.in.src(0), tag)
+  val in2_unboxed = FPU.unbox(io.in.src(1), tag)
+
+  def up_convert_s_d(in: UInt): UInt = {
+    val converter = Module(new FPUpConverter(
+      FPU.f32.expWidth, FPU.f32.precision,
+      FPU.f64.expWidth, FPU.f64.precision
+    ))
+    converter.io.in := in
+    converter.io.rm := DontCare
+    converter.io.result
+  }
+
+  val src1 = hardfloat.recFNFromFN(FType.D.exp, FType.D.sig,
+    Mux(tag === FPU.S,
+      up_convert_s_d(in1_unboxed),
+      in1_unboxed
+    )
+  )
+  val src2 = hardfloat.recFNFromFN(FType.D.exp, FType.D.sig,
+    Mux(tag === FPU.S,
+      up_convert_s_d(in2_unboxed),
+      in2_unboxed
+    )
+  )
+
+  divSqrt.io.inValid := in_fire && !kill_w
+  divSqrt.io.sqrtOp := fpCtrl.sqrt
+  divSqrt.io.kill := kill_r
+  divSqrt.io.sigBits := Mux(tag === S, FType.S.sig.U, FType.D.sig.U)
+  divSqrt.io.a := src1
+  divSqrt.io.b := src2
+  divSqrt.io.roundingMode := rm
+
+  val round32 = Module(new RoundAnyRawFNToRecFN(
+    FType.D.exp, FType.D.sig+2, FType.S.exp, FType.S.sig, 0
+  ))
+  val round64 = Module(new RoundAnyRawFNToRecFN(
+    FType.D.exp, FType.D.sig+2, FType.D.exp, FType.D.sig, 0
+  ))
+
+  for(rounder <- Seq(round32, round64)){
+    rounder.io.invalidExc := divSqrt.io.invalidExc
+    rounder.io.infiniteExc := divSqrt.io.infiniteExc
+    rounder.io.in := divSqrt.io.rawOut
+    rounder.io.roundingMode := rmReg
+    rounder.io.detectTininess := hardfloat.consts.tininess_afterRounding
+  }
+
+  val data = Mux(single,
+    FPU.box(
+      Cat(0.U(32.W), hardfloat.fNFromRecFN(FType.S.exp, FType.S.sig, round32.io.out)),
+      FPU.S
+    ),
+    FPU.box(hardfloat.fNFromRecFN(FType.D.exp, FType.D.sig, round64.io.out), FPU.D)
+  )
+  val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
+
+  assert(!(state === s_idle && !divSqrt.io.inReady))
+  in_ready := state===s_idle
+  out_valid := state===s_finish
+  io.out.data := RegNext(data, divSqrtRawValid)
+  fflags := RegNext(flags, divSqrtRawValid)
 
 }
 

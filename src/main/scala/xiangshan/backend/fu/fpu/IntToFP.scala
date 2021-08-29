@@ -65,7 +65,7 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   /*
       s_cvt
    */
-  val tag = ctrl.typeTagIn
+  val tag = ctrl.typeTagOut
   val typ = ctrl.typ
   val wflags = ctrl.wflags
 

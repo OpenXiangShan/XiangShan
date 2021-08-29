@@ -50,7 +50,7 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   def classify(x: UInt, ftype: FPU.FType): UInt = {
     val float = fudian.FloatPoint.fromUInt(x, ftype.expWidth, ftype.precision)
     val decode = float.decode
-    val isNormal = !decode.expIsOnes && !decode.sigIsZero
+    val isNormal = !decode.expIsOnes && !decode.expIsZero
     Cat(
       decode.isQNaN,
       decode.isSNaN,
@@ -99,7 +99,10 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   for(f2i <- Seq(s2i, d2i)){
     f2i.io.a := src1_d
     f2i.io.rm := rm_reg
-    f2i.io.op := ctrl_reg.typ
+    f2i.io.op := Cat(
+      ctrl_reg.typ(1),
+      !ctrl_reg.typ(0)
+    )
   }
 
   val conv_out = Mux(ctrl_reg.typeTagIn === FPU.S,

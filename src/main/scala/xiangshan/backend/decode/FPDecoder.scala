@@ -42,13 +42,13 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
     // IntToFP
-    FMV_W_X  -> List(N,s,d,Y,N,Y,N,N,N),
-    FCVT_S_W -> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_WU-> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_L -> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_LU-> List(N,s,s,Y,Y,Y,N,N,Y),
+    FMV_W_X  -> List(N,i,s,Y,N,Y,N,N,N),
+    FCVT_S_W -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_WU-> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_L -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_LU-> List(N,i,s,Y,Y,Y,N,N,Y),
     // FPToInt
-    FMV_X_W  -> List(N,d,i,N,N,N,N,N,N),
+    FMV_X_W  -> List(N,d,i,N,N,N,N,N,N), // dont box result of fmv.fp.int
     FCLASS_S -> List(N,s,i,N,N,N,N,N,N),
     FCVT_W_S -> List(N,s,i,N,Y,N,N,N,Y),
     FCVT_WU_S-> List(N,s,i,N,Y,N,N,N,Y),
@@ -77,11 +77,11 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val double: Array[(BitPat, List[BitPat])] = Array(
-    FMV_D_X  -> List(N,d,d,Y,N,Y,N,N,N),
-    FCVT_D_W -> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_WU-> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_L -> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_LU-> List(N,d,d,Y,Y,Y,N,N,Y),
+    FMV_D_X  -> List(N,i,d,Y,N,Y,N,N,N),
+    FCVT_D_W -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_WU-> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_L -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_LU-> List(N,i,d,Y,Y,Y,N,N,Y),
     FMV_X_D  -> List(N,d,i,N,N,N,N,N,N),
     FCLASS_D -> List(N,d,i,N,N,N,N,N,N),
     FCVT_W_D -> List(N,d,i,N,Y,N,N,N,Y),
