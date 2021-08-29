@@ -114,23 +114,23 @@ class MinimalConfig(n: Int = 1) extends Config(
           sameCycle = true,
           normalReplacer = Some("plru"),
           superReplacer = Some("plru"),
-          pageNormalSize = 4,
-          pageSuperSize = 2
+          normalSize = 4,
+          superSize = 2
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          pageNormalSize = 4,
-          pageSuperSize = 2
+          normalSize = 4,
+          superSize = 2
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          pageNormalSize = 4,
-          pageSuperSize = 2
+          normalSize = 4,
+          superSize = 2
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
-          pageNormalSize = 8,
-          pageSuperSize = 2
+          normalSize = 8,
+          superSize = 2
         ),
         PtwL1EntrySize = 2,
         PtwL2EntrySize = 64,

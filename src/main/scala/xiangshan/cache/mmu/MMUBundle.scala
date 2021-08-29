@@ -35,6 +35,26 @@ abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbCon
 // case class LDTLBKey
 // case class STTLBKey
 
+class vaBundle(implicit p: Parameters) extends TlbBundle {
+  val vpn  = UInt(vpnLen.W)
+  val off  = UInt(offLen.W)
+}
+class pteBundle(implicit p: Parameters) extends TlbBundle {
+  val reserved = UInt(pteResLen.W)
+  val ppn = UInt(ppnLen.W)
+  val rsw = UInt(2.W)
+  val perm = new Bundle {
+    val d = Bool()
+    val a = Bool()
+    val g = Bool()
+    val u = Bool()
+    val x = Bool()
+    val w = Bool()
+    val r = Bool()
+    val v = Bool()
+  }
+}
+
 class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   val d = Bool()
   val a = Bool()
@@ -169,6 +189,82 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
   }
 
   override def cloneType: this.type = (new TlbData(superpage)).asInstanceOf[this.type]
+}
+
+class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) extends TlbBundle {
+  require(pageNormal || pageSuper)
+
+  val tag = if (!pageNormal) UInt((vpnLen - vpnnLen).W)
+            else UInt(vpnLen.W)
+  val level = if (!pageNormal) Some(UInt(1.W))
+              else if (!pageSuper) None
+              else Some(UInt(2.W))
+  val ppn = if (!pageNormal) UInt((ppnLen - vpnnLen).W)
+            else UInt(ppnLen.W)
+  val perm = new TlbPermBundle
+
+  def hit(vpn: UInt): Bool = {
+    val low9 = tag(vpnnLen-1, 0) === vpn(vpnnLen-1, 0)
+    val mid9 = tag(tag.getWidth-vpnnLen-1, tag.getWidth-vpnnLen*2) === vpn(vpn.getWidth-vpnnLen-1, vpn.getWidth-vpnnLen*2)
+    val high9 = tag(tag.getWidth-1, tag.getWidth-vpnnLen) === vpn(vpn.getWidth-1, vpn.getWidth-vpnnLen)
+
+    if (!pageSuper) (low9 && mid9 && high9)
+    else MuxLookup(level.get, false.B, Seq(
+      0.U -> high9,
+      1.U -> (high9 && mid9),
+      2.U -> (high9 && mid9 && low9) // if pageNormal is false, this will always be false
+    ))
+  }
+
+  def apply(item: PtwResp): TlbEntry = {
+    this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
+    val inner_level = item.entry.level.getOrElse(0.U)
+    this.level.map(_ := { if (pageNormal && pageSuper) inner_level
+                          else if (pageSuper) inner_level(0)
+                          else 0.U})
+    this.ppn := { if (!pageNormal) item.entry.ppn(ppnLen-1, vpnnLen)
+                  else item.entry.ppn }
+    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
+    this.perm.pf := item.pf
+    this.perm.d := ptePerm.d
+    this.perm.a := ptePerm.a
+    this.perm.g := ptePerm.g
+    this.perm.u := ptePerm.u
+    this.perm.x := ptePerm.x
+    this.perm.w := ptePerm.w
+    this.perm.r := ptePerm.r
+
+    // get pma perm
+    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(item.entry.ppn, 0.U(12.W)))
+    this.perm.pr := PMAMode.read(pmaMode)
+    this.perm.pw := PMAMode.write(pmaMode)
+    this.perm.pe := PMAMode.execute(pmaMode)
+    this.perm.pa := PMAMode.atomic(pmaMode)
+    this.perm.pi := PMAMode.icache(pmaMode)
+    this.perm.pd := PMAMode.dcache(pmaMode)
+
+    this
+  }
+
+  def genPPN(vpn: UInt) : UInt = {
+    if (!pageSuper) ppn
+    else if (!pageNormal) MuxLookup(level.get, 0.U, Seq(
+      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen*2-1, 0)),
+      1.U -> Cat(ppn, vpn(vpnnLen-1, 0))
+    ))
+    else MuxLookup(level.get, 0.U, Seq(
+      0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn(vpnnLen*2-1, 0)),
+      1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
+      2.U -> ppn
+    ))
+  }
+
+  override def toPrintable: Printable = {
+    val inner_level = level.getOrElse(2.U)
+    p"level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm}"
+  }
+
+  override def cloneType: this.type = (new TlbEntry(pageNormal, pageSuper)).asInstanceOf[this.type]
 }
 
 object TlbCmd {
@@ -352,8 +448,8 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
-    ppn := pte.asTypeOf(pteBundle).ppn
-    perm.map(_ := pte.asTypeOf(pteBundle).perm)
+    ppn := pte.asTypeOf(new pteBundle().cloneType).ppn
+    perm.map(_ := pte.asTypeOf(new pteBundle().cloneType).perm)
     this.level.map(_ := level)
   }
 

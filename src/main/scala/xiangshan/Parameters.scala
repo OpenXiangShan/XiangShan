@@ -113,17 +113,25 @@ case class XSCoreParameters
     superReplacer = Some("plru")
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
-    name = "ldtlb"
+    name = "ldtlb",
+    normalSize = 128,
+    normalAssociative = "da",
+    superSize = 8,
+    superAsVictim = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
-    name = "sttlb"
+    name = "sttlb",
+    normalSize = 128,
+    normalAssociative = "da",
+    superSize = 8,
+    superAsVictim = true
   ),
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
-    pageNormalSize = 64,
-    pageSuperSize = 4,
+    normalSize = 64,
+    superSize = 4,
   ),
-  useBTlb: Boolean = true,
+  useBTlb: Boolean = false,
   PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
   PtwSPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,

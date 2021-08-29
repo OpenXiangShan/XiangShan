@@ -46,7 +46,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val vmEnable = if(EnbaleTlbDebug) (satp.mode === 8.U)
                  else               (satp.mode === 8.U && (mode < ModeM))
 
-  val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle))
+  val reqAddr = req.map(_.bits.vaddr.asTypeOf((new vaBundle).cloneType))
+  val vpn = reqAddr.map(_.vpn)
   val cmd     = req.map(_.bits.cmd)
   val valid   = req.map(_.valid)
 
@@ -54,123 +55,77 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
-  val nv = RegInit(VecInit(Seq.fill(q.pageNormalSize)(false.B)))
-  val nMeta = Module(new CAMTemplate(UInt(vpnLen.W), q.pageNormalSize, Width + 1)).io
-  val nData = Reg(Vec(q.pageNormalSize, new TlbData(false)))
-  val sv = RegInit(VecInit(Seq.fill(q.pageSuperSize)(false.B)))
-  val sMeta = Reg(Vec(q.pageSuperSize, new TlbSPMeta))
-  val sData = Reg(Vec(q.pageSuperSize, new TlbData(true)))
+  val nv = RegInit(VecInit(Seq.fill(q.normalSize)(false.B)))
+  val nentries = Reg(Vec(q.normalSize, new TlbEntry(true, false)))
+  val sv = RegInit(VecInit(Seq.fill(q.superSize)(false.B)))
+  val sentries = Reg(Vec(q.superSize, new TlbEntry(false, true)))
   val v = nv ++ sv
-  val data = nData ++ sData
-  val g = VecInit(data.map(_.perm.g))
-  val pf = VecInit(data.zip(v).map{ case(e, vi) => e.perm.pf & vi })
+  val entries = nentries ++ sentries
+  val g = VecInit(entries.map(_.perm.g))
 
   /**
     * PTW refill
     */
   val refill = ptw.resp.fire() && !sfence.valid
 
-  val normalReplacer = q.normalReplacer
-  val superReplacer = q.superReplacer
-  val nReplace = ReplacementPolicy.fromString(normalReplacer, q.pageNormalSize)
-  val sReplace = ReplacementPolicy.fromString(superReplacer, q.pageSuperSize)
+  val nReplace = ReplacementPolicy.fromString(q.normalReplacer, q.normalSize)
+  val sReplace = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
   val nRefillIdx = replaceWrapper(nv, nReplace.way)
   val sRefillIdx = replaceWrapper(sv, sReplace.way)
 
-  nMeta.w := DontCare
-  nMeta.w.valid := false.B
   when (refill) {
     val resp = ptw.resp.bits
     when (resp.entry.level.getOrElse(0.U) === 2.U) {
-      val refillIdx = nRefillIdx
-      refillIdx.suggestName(s"NormalRefillIdx")
-
-      nv(refillIdx) := true.B
-      nMeta.w.bits.index := nRefillIdx
-      nMeta.w.bits.data  := resp.entry.tag
-      nMeta.w.valid := true.B
-      nData(refillIdx).apply(
-        ppn   = resp.entry.ppn,
-        level = resp.entry.level.getOrElse(0.U),
-        perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
-        pf    = resp.pf
-      )
+      nv(nRefillIdx) := true.B
+      nentries(nRefillIdx).apply(resp)
       nReplace.access(nRefillIdx)
-      XSDebug(p"Refill normal: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
+      XSDebug(p"Refill normal: idx:${nRefillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }.otherwise {
-      val refillIdx = sRefillIdx
-      refillIdx.suggestName(s"SuperRefillIdx")
-
-      val dup = Cat(sv.zip(sMeta).map{ case (v, m) =>
-        v && m.hit(resp.entry.tag)
-      }).orR // NOTE: may have long latency, RegNext it
-
-      when (!dup) {
-        sv(refillIdx) := true.B
-        sMeta(refillIdx).apply(
-          vpn = resp.entry.tag,
-          level = resp.entry.level.getOrElse(0.U)
-        )
-        sData(refillIdx).apply(
-          ppn   = resp.entry.ppn,
-          level = resp.entry.level.getOrElse(0.U),
-          perm  = VecInit(resp.entry.perm.getOrElse(0.U)).asUInt,
-          pf    = resp.pf
-        )
-        sReplace.access(sRefillIdx)
-        XSDebug(p"Refill superpage: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")
-      }
+      sv(sRefillIdx) := true.B
+      sentries(sRefillIdx).apply(resp)
+      sReplace.access(sRefillIdx)
+      XSDebug(p"Refill superpage: idx:${sRefillIdx} entry:${resp.entry} pf:${resp.pf}\n")
     }
   }
 
-  /**
-    * L1 TLB read
-    */
-  val sfenceVpn = sfence.bits.addr.asTypeOf(vaBundle).vpn
-  for (i <- 0 until Width) {
-    nMeta.r.req(i) := io.requestor(i).req.bits.vaddr.asTypeOf(vaBundle).vpn
+  val nRefillMask = Mux(refill && ptw.resp.bits.entry.level.get === 2.U, UIntToOH(nRefillIdx)(q.normalSize-1, 0), 0.U).asBools
+  val sRefillMask = Mux(refill && ptw.resp.bits.entry.level.get =/= 2.U, UIntToOH(sRefillIdx)(q.superSize-1, 0), 0.U).asBools
+
+  def tlb_read(vpn: UInt, vVec: Vec[Bool], entryVec: Vec[TlbEntry], associative: String, mask: Seq[Bool]) = {
+//    if (associative == "fa") {
+      val hitVec = VecInit(entryVec.zip(vVec zip mask).map{ case (e, m) => e.hit(vpn) && m._1 && !m._2})
+      val hitVecReg = if (q.sameCycle) hitVec else RegNext(hitVec)
+      val vpnReg = if (q.sameCycle) vpn else RegNext(vpn)
+      /******************* next cycle if same cycle is false *****************/
+      val hit = ParallelOR(hitVecReg).asBool
+      val ppn = ParallelMux(hitVecReg zip entryVec.map(_.genPPN(vpnReg)))
+      val perm = ParallelMux(hitVecReg zip entryVec.map(_.perm))
+      (hit, ppn, perm, hitVecReg)
+//    }
   }
-  nMeta.r.req(Width) := sfenceVpn
 
-  val nRefillMask = Mux(refill, UIntToOH(nRefillIdx)(q.pageNormalSize-1, 0), 0.U).asBools
-  val sRefillMask = Mux(refill, UIntToOH(sRefillIdx)(q.pageSuperSize-1, 0), 0.U).asBools
   def TLBNormalRead(i: Int) = {
-    val entryHitVec = (
-      if (!q.sameCycle)
-        VecInit(nMeta.r.resp(i).zip(nRefillMask).map{ case (e, m) => ~m && e } ++
-                sMeta.zip(sRefillMask).map{ case (e,m) => ~m && e.hit(reqAddr(i).vpn) })
-      else
-        VecInit(nMeta.r.resp(i) ++ sMeta.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
-    )
+    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = tlb_read(vpn(i), nv, nentries, q.normalAssociative, nRefillMask)
+    val (super_hit, super_ppn, super_perm, super_hitVec) = tlb_read(vpn(i), sv, sentries, q.superAssociative, sRefillMask)
+    assert(!(normal_hit && super_hit))
 
-    val reqAddrReg = if (!q.sameCycle) RegNext(reqAddr(i)) else reqAddr(i)
+    val hit = normal_hit || super_hit
+    val ppn = Mux(normal_hit, normal_ppn, super_ppn)
+    val perm = Mux(normal_hit, normal_perm, super_perm)
+
+    val pf = perm.pf && hit
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
-    val entryHitVecReg = if (!q.sameCycle) RegNext(entryHitVec) else entryHitVec
-    entryHitVecReg.suggestName(s"entryHitVecReg_${i}")
+    val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
 
-    /***************** next cycle when two cycle is need********************/
-
-    val hitVec  = VecInit((v zip entryHitVecReg).map{ case (a,b) => a&b })
-    val pfHitVec   = VecInit((pf zip entryHitVecReg).map{ case (a,b) => a&b })
-    val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
-    val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
-    val miss    = !hit && validReg && vmEnable && ~pfArray
-    val hitppn  = ParallelMux(hitVec zip data.map(_.genPPN(reqAddrReg.vpn)))
-    val hitPerm = ParallelMux(hitVec zip data.map(_.perm))
-
-    hitVec.suggestName(s"hitVec_${i}")
-    pfHitVec.suggestName(s"pfHitVec_${i}")
+    /***************** next cycle when two cycle is false********************/
+    val miss = !hit && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
-    hitppn.suggestName(s"hitppn_${i}")
-    hitPerm.suggestName(s"hitPerm_${i}")
 
-    XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
-    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(hitVec.asUInt)} pfHitVec:${Hexadecimal(pfHitVec.asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
+    XSDebug(validReg, p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn)} perm:${perm}\n")
 
-    // resp  // TODO: A/D has not being concerned
-    val paddr = Cat(hitppn, reqAddrReg.off)
+    val paddr = Cat(ppn, offReg)
     val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
 
     req(i).ready := resp(i).ready
@@ -179,21 +134,20 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
-    val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
-    val update = hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
-    val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
-    val instrPf = (pfArray && TlbCmd.isExec(cmdReg)) || hit && !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld    := ldPf || update
-    resp(i).bits.excp.pf.st    := stPf || update
-    resp(i).bits.excp.pf.instr := instrPf || update
+    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/* TODO !isAMO*/)
+    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
+    val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
+    resp(i).bits.excp.pf.ld    := (ldPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.st    := (stPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
     // if vmenable, use pre-calcuated pma check result
-    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd)
-    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)
-    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)
+    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
+    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
@@ -204,9 +158,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
       resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
-    // TODO: MMIO check
-
-    (hit, miss, hitVec, validReg)
+    (hit, miss, normal_hitVec ++ super_hitVec, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
@@ -226,8 +178,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val tmp = VecInit(one_hot).asUInt
     get_access_index(tmp(stop, start))
   }
-  val nAccess = hitVecVec.map(a => get_access(a, q.pageNormalSize - 1, 0))
-  val sAccess = hitVecVec.map(a => get_access(a, q.pageNormalSize + q.pageSuperSize - 1, q.pageNormalSize))
+  val nAccess = hitVecVec.map(a => get_access(a, q.normalSize - 1, 0))
+  val sAccess = hitVecVec.map(a => get_access(a, q.normalSize + q.superSize - 1, q.normalSize))
   if (Width == 1) {
     when (nAccess(0).valid) { nReplace.access(nAccess(0).bits) }
     when (sAccess(0).valid) { sReplace.access(sAccess(0).bits) }
@@ -249,7 +201,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   // }
 
   // sfence (flush)
-  val sfenceHit = nMeta.r.resp(Width) ++ sMeta.map(_.hit(sfenceVpn))
+  val sfence_vpn = sfence.bits.addr.asTypeOf(new vaBundle().cloneType).vpn
+  val sfenceHit = entries.map(_.hit(sfence_vpn))
   when (sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
@@ -291,18 +244,18 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
-  for (i <- 0 until q.pageNormalSize) {
+  for (i <- 0 until q.normalSize) {
     val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
     XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
-  for (i <- 0 until q.pageSuperSize) {
-    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.pageNormalSize) && v }
+  for (i <- 0 until q.superSize) {
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.normalSize) && v }
     XSPerfAccumulate(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
-  for (i <- 0 until q.pageNormalSize) {
+  for (i <- 0 until q.normalSize) {
     XSPerfAccumulate(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
   }
-  for (i <- 0 until q.pageSuperSize) {
+  for (i <- 0 until q.superSize) {
     XSPerfAccumulate(s"SuperRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
   }
 
@@ -314,13 +267,13 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(VecInit(v).asUInt)}\n")
   for (i <- ptw.req.indices) {
     XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: normal page: ${q.pageNormalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.pageSuperSize} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: normal page: ${q.normalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")

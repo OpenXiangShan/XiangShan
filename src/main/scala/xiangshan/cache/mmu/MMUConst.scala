@@ -31,12 +31,13 @@ case class TLBParameters
   fetchi: Boolean = false, // TODO: remove it
   useDmode: Boolean = true,
   sameCycle: Boolean = false,
-  pageNormalSize: Int = 8,
-  pageSuperSize: Int = 2,
+  normalSize: Int = 8,
+  superSize: Int = 2,
   normalReplacer: Option[String] = Some("random"),
   superReplacer: Option[String] = Some("plru"),
   normalAssociative: String = "fa", // "fa", "sa", "da"
-  superAssociative: String = "fa"
+  superAssociative: String = "fa", // must be fa
+  superAsVictim: Boolean = false // TODO
 )
 
 trait HasTlbConst extends HasXSParameter {
@@ -50,25 +51,7 @@ trait HasTlbConst extends HasXSParameter {
   val pteResLen = XLEN - ppnLen - 2 - flagLen
   val asidLen = 16
 
-  def vaBundle = new Bundle {
-    val vpn  = UInt(vpnLen.W)
-    val off  = UInt(offLen.W)
-  }
-  def pteBundle = new Bundle {
-    val reserved  = UInt(pteResLen.W)
-    val ppn  = UInt(ppnLen.W)
-    val rsw  = UInt(2.W)
-    val perm = new Bundle {
-      val d    = Bool()
-      val a    = Bool()
-      val g    = Bool()
-      val u    = Bool()
-      val x    = Bool()
-      val w    = Bool()
-      val r    = Bool()
-      val v    = Bool()
-    }
-  }
+
 
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
     val width = v.getWidth
