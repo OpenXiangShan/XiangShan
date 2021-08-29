@@ -33,7 +33,7 @@ object FPU {
 
   def box(x: UInt, typeTag: UInt): UInt = {
     require(x.getWidth == 64)
-    Mux(typeTag === D, x, Cat(~0.U(32.W), x))
+    Mux(typeTag === D, x, Cat(~0.U(32.W), x(31, 0)))
   }
 
 }

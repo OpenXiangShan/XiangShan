@@ -86,9 +86,9 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
 	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+	#@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
+	#@mv .__out__ $@
+	#@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 
 sim-verilog: $(SIM_TOP_V)

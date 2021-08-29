@@ -87,6 +87,7 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
     val i2fResults = for(t <- FPU.ftypes) yield {
       val i2f = Module(new fudian.IntToFP(t.expWidth, t.precision))
       i2f.io.sign := ~typ(0)
+      i2f.io.long := typ(1)
       i2f.io.int := intValue
       i2f.io.rm := rmReg
       (i2f.io.result, i2f.io.fflags)

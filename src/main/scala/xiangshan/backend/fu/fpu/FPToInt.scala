@@ -50,7 +50,7 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   def classify(x: UInt, ftype: FPU.FType): UInt = {
     val float = fudian.FloatPoint.fromUInt(x, ftype.expWidth, ftype.precision)
     val decode = float.decode
-    val isNormal = !decode.expIsOnes && !decode.isSubnormal
+    val isNormal = !decode.expIsOnes && !decode.sigIsZero
     Cat(
       decode.isQNaN,
       decode.isSNaN,

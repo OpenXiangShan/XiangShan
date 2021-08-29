@@ -35,20 +35,31 @@ class FCMA_Module(ftype: FPU.FType)(implicit p: Parameters) extends FPUDataModul
   )
   val one = Cat(
     0.U(1.W),
-    fudian.FloatPoint.expBias(FPU.f64.expWidth).U(FPU.f64.expWidth.W),
-    0.U(FPU.f64.sigWidth.W)
+    fudian.FloatPoint.expBias(ftype.expWidth).U(ftype.expWidth.W),
+    0.U(ftype.sigWidth.W)
   )
   val zero = Cat(
     (src1 ^ src2).head(1),
-    0.U((FPU.f64.len - 1).W)
+    0.U((ftype.len - 1).W)
   )
   when(fpCtrl.isAddSub){ in2 := one }
   when(!(fpCtrl.isAddSub || fpCtrl.ren3)){ in3 := zero }
 
+  def invert_sign(x: UInt, len: Int) = {
+    Cat(
+      !x(len-1), x(len-2, 0)
+    )
+  }
+
+  val w = ftype.len
+  val a = in1
+  val b = Mux(fpCtrl.fmaCmd(1), invert_sign(in2, w), in2)
+  val c = Mux(fpCtrl.fmaCmd(0), invert_sign(in3, w), in3)
+
   val fma = Module(new FCMA(ftype.expWidth, ftype.precision))
-  fma.io.a := in1
-  fma.io.b := in2
-  fma.io.c := in3
+  fma.io.a := a
+  fma.io.b := b
+  fma.io.c := c
   fma.io.rm := rm
 
   val (result, exc) = (fma.io.result, fma.io.fflags)
@@ -61,7 +72,6 @@ class FCMA_Module(ftype: FPU.FType)(implicit p: Parameters) extends FPUDataModul
 class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
 
   val regEnables = IO(Input(Vec(latency, Bool())))
-  val typeTagOut = IO(Input(UInt(2.W)))
 
   val fpCtrl = io.in.fpCtrl
   val typeTagIn = fpCtrl.typeTagIn
@@ -73,7 +83,7 @@ class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule 
     module.io.in := io.in
   }
 
-  val singleOut = typeTagOut === FPU.S
+  val singleOut = typeTagIn === FPU.S
   val result = Mux(singleOut,
     FPU.box(sfma.io.out.data, FPU.S),
     FPU.box(dfma.io.out.data, FPU.D)
@@ -90,10 +100,10 @@ class FMADataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule 
 
   for((s, i) <- stages.zipWithIndex){
     if(i == 0){
-      s.data := result
-      s.exc := exc
+      s.data := RegEnable(result, regEnables(i))
+      s.exc := RegEnable(exc, regEnables(i))
     } else {
-      s := RegEnable(stages(i - 1), regEnables(i - 1))
+      s := RegEnable(stages(i - 1), regEnables(i))
     }
   }
 
@@ -108,5 +118,4 @@ class FMA(implicit p: Parameters) extends FPUPipelineModule {
   override val dataModule = Module(new FMADataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
-  dataModule.typeTagOut := io.out.bits.uop.ctrl.fpu.typeTagOut
 }
