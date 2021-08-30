@@ -97,9 +97,7 @@ object SimTop extends App {
     XiangShanStage.execute(
       firrtlOpts,
       Seq(
-        ChiselGeneratorAnnotation(() =>
-          DisableMonitors{p => new SimTop()(p)}(config)
-        )
+        ChiselGeneratorAnnotation(() => new SimTop()(config))
       )
     )
   }
