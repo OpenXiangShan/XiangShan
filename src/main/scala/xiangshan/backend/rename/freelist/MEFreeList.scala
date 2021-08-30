@@ -282,7 +282,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val tailPtrNext = Mux(walk, tailPtr, tailPtr + PopCount(freeVec))
   // update head pointer
   val dupRegVec = WireInit(VecInit(archRefCounter.zip(cmtCounter).map{ case (a, c) => a - c }))
-  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegVec.reduceTree(_ + _), // FIXME Maybe this is too complicated?
+  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegVec.reduceTree(_ +& _), // FIXME Maybe this is too complicated?
                       Mux(walk, headPtr - PopCount(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }), 
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
