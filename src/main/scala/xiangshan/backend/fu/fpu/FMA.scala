@@ -39,7 +39,7 @@ class FCMA_Module(ftype: FPU.FType)(implicit p: Parameters) extends FPUDataModul
     0.U(ftype.sigWidth.W)
   )
   val zero = Cat(
-    (src1 ^ src2).head(1),
+    (src1 ^ src2)(ftype.len - 1),
     0.U((ftype.len - 1).W)
   )
   when(fpCtrl.isAddSub){ in2 := one }
