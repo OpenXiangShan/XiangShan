@@ -22,6 +22,7 @@ import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -57,6 +58,7 @@ package object xiangshan {
     def mul          = "b0100".U
     def div          = "b0101".U
     def fence        = "b0011".U
+    def bmu          = "b0111".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1011".U
@@ -66,7 +68,7 @@ package object xiangshan {
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
 
-    def num = 13
+    def num = 14
 
     def apply() = UInt(log2Up(num).W)
 
@@ -79,8 +81,8 @@ package object xiangshan {
     def isAMO(fuType: UInt) = fuType(1)
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
-    def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1)
-    def aluCanAccept(fuType: UInt) = fuType(2) && fuType(1)
+    def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1) || fuType(2) && fuType(1) && fuType(0)
+    def aluCanAccept(fuType: UInt) = fuType(2) && fuType(1) && !fuType(0)
 
     def fmacCanAccept(fuType: UInt) = !fuType(1)
     def fmiscCanAccept(fuType: UInt) = fuType(1)
@@ -108,7 +110,7 @@ package object xiangshan {
   }
 
   object FuOpType {
-    def apply() = UInt(6.W)
+    def apply() = UInt(8.W)
   }
 
   object CommitType {
@@ -203,39 +205,78 @@ package object xiangshan {
   }
 
   object ALUOpType {
-    def add  = "b000000".U
-    def sll  = "b000001".U
-    def slt  = "b000010".U
-    def sltu = "b000011".U
-    def xor  = "b000100".U
-    def srl  = "b000101".U
-    def or   = "b000110".U
-    def and  = "b000111".U
-    def sub  = "b001000".U
-    def sra  = "b001101".U
+    // misc & branch optype
+    def and         = "b0_00_00_000".U
+    def andn        = "b0_00_00_001".U
+    def or          = "b0_00_00_010".U
+    def orn         = "b0_00_00_011".U
+    def xor         = "b0_00_00_100".U
+    def xnor        = "b0_00_00_101".U
 
-    def addw = "b100000".U
-    def subw = "b101000".U
-    def sllw = "b100001".U
-    def srlw = "b100101".U
-    def sraw = "b101101".U
+    def sext_b      = "b0_00_01_000".U
+    def sext_h      = "b0_00_01_001".U
+    def zext_h      = "b0_00_01_010".U
+    def orc_b       = "b0_00_01_100".U
+    def rev8        = "b0_00_01_101".U
 
-    def isAddSub(func: UInt) = {
-      func === add || func === sub || func === addw || func === subw
-    }
+    def beq         = "b0_00_10_000".U
+    def bne         = "b0_00_10_001".U
+    def blt         = "b0_00_10_100".U
+    def bge         = "b0_00_10_101".U
+    def bltu        = "b0_00_10_110".U
+    def bgeu        = "b0_00_10_111".U
 
-    def isWordOp(func: UInt) = func(5)
+    // add & sub optype
+    def add         = "b0_01_00_000".U
+    def add_uw      = "b0_01_00_001".U
+    def sh1add      = "b0_01_00_010".U
+    def sh1add_uw   = "b0_01_00_011".U
+    def sh2add      = "b0_01_00_100".U
+    def sh2add_uw   = "b0_01_00_101".U
+    def sh3add      = "b0_01_00_110".U
+    def sh3add_uw   = "b0_01_00_111".U
 
-    def beq  = "b010000".U
-    def bne  = "b010001".U
-    def blt  = "b010100".U
-    def bge  = "b010101".U
-    def bltu = "b010110".U
-    def bgeu = "b010111".U
 
-    def isBranch(func: UInt) = func(4)
+    // shift optype
+    def sll         = "b0_10_00_000".U
+    def slli_uw     = "b0_10_00_001".U
+    def bclr        = "b0_10_00_100".U
+    def bset        = "b0_10_00_101".U
+    def binv        = "b0_10_00_110".U
+    
+    def srl         = "b0_10_01_001".U
+    def bext        = "b0_10_01_010".U
+    def sra         = "b0_10_01_100".U
+
+    def rol         = "b0_10_10_000".U
+
+    def ror         = "b0_10_11_000".U
+
+    def sub         = "b0_11_00_000".U
+    def sltu        = "b0_11_00_001".U
+    def slt         = "b0_11_00_010".U
+    def maxu        = "b0_11_00_100".U
+    def minu        = "b0_11_00_101".U
+    def max         = "b0_11_00_110".U
+    def min         = "b0_11_00_111".U
+    
+
+
+    // RV64 32bit optype
+    def addw        = "b1_01_00_000".U
+    def subw        = "b1_11_00_000".U
+    def sllw        = "b1_10_00_000".U
+    def srlw        = "b1_10_01_001".U
+    def sraw        = "b1_10_01_100".U
+    def rolw        = "b1_10_10_000".U
+    def rorw        = "b1_10_11_000".U
+
+    def isWordOp(func: UInt) = func(7)
+    def isBranch(func: UInt) = func(6, 3) === "b0010".U
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
+
+    def apply() = UInt(8.W)
   }
 
   object MDUOpType {
@@ -330,6 +371,20 @@ package object xiangshan {
     def amomaxu_d = "b101011".U
   }
 
+  object BMUOpType {
+    
+    def clmul       = "b0000".U
+    def clmulh      = "b0010".U
+    def clmulr      = "b0100".U
+
+    def clz         = "b1000".U
+    def clzw        = "b1001".U
+    def ctz         = "b1010".U
+    def ctzw        = "b1011".U
+    def cpop        = "b1100".U
+    def cpopw       = "b1101".U
+  }
+
   object BTBtype {
     def B = "b00".U  // branch
     def J = "b01".U  // jump
@@ -340,21 +395,23 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b111".U
-    def IMM_S  = "b000".U
-    def IMM_SB = "b001".U
-    def IMM_U  = "b010".U
-    def IMM_UJ = "b011".U
-    def IMM_I  = "b100".U
-    def IMM_Z  = "b101".U
-    def INVALID_INSTR = "b110".U
+    def IMM_X  = "b0111".U
+    def IMM_S  = "b0000".U
+    def IMM_SB = "b0001".U
+    def IMM_U  = "b0010".U
+    def IMM_UJ = "b0011".U
+    def IMM_I  = "b0100".U
+    def IMM_Z  = "b0101".U
+    def INVALID_INSTR = "b0110".U
+    def IMM_B6 = "b1000".U
 
-    def apply() = UInt(3.W)
+    def apply() = UInt(4.W)
   }
 
   def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
   def aluGen(p: Parameters) = new Alu()(p)
+  def bmuGen(p: Parameters) = new Bmu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
   def fenceGen(p: Parameters) = new Fence()(p)
   def csrGen(p: Parameters) = new CSR()(p)
@@ -363,6 +420,7 @@ package object xiangshan {
   def f2iGen(p: Parameters) = new FPToInt()(p)
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
+  def stdGen(p: Parameters) = new Std()(p)
 
   def f2iSel(x: FunctionUnit): Bool = {
     x.io.in.bits.uop.ctrl.rfWen
@@ -383,8 +441,9 @@ package object xiangshan {
   }
 
   val aluCfg = FuConfig(
+    name = "alu",
     fuGen = aluGen,
-    fuSel = _ => true.B,
+    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.alu,
     fuType = FuType.alu,
     numIntSrc = 2,
     numFpSrc = 0,
@@ -394,6 +453,7 @@ package object xiangshan {
   )
 
   val jmpCfg = FuConfig(
+    name = "jmp",
     fuGen = jmpGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp,
     fuType = FuType.jmp,
@@ -405,6 +465,7 @@ package object xiangshan {
   )
 
   val fenceCfg = FuConfig(
+    name = "fence",
     fuGen = fenceGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
@@ -412,6 +473,7 @@ package object xiangshan {
   )
 
   val csrCfg = FuConfig(
+    name = "csr",
     fuGen = csrGen,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr,
     fuType = FuType.csr,
@@ -423,6 +485,7 @@ package object xiangshan {
   )
 
   val i2fCfg = FuConfig(
+    name = "i2f",
     fuGen = i2fGen,
     fuSel = i2fSel,
     FuType.i2f,
@@ -435,6 +498,7 @@ package object xiangshan {
   )
 
   val divCfg = FuConfig(
+    name = "div",
     fuGen = dividerGen,
     fuSel = (x: FunctionUnit) => MDUOpType.isDiv(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.div,
@@ -443,10 +507,13 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val mulCfg = FuConfig(
+    name = "mul",
     fuGen = multiplierGen,
     fuSel = (x: FunctionUnit) => MDUOpType.isMul(x.io.in.bits.uop.ctrl.fuOpType),
     FuType.mul,
@@ -455,58 +522,92 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(2)
+    // TODO: change this back to 2 when mul is ready for fastUopOut
+    latency = CertainLatency(3),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
+  val bmuCfg = FuConfig(
+    name = "bmu",
+    fuGen = bmuGen,
+    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.bmu,
+    fuType = FuType.bmu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    hasRedirect = false,
+    latency = CertainLatency(1),
+    fastUopOut = true,
+    fastImplemented = false
+ )
+
   val fmacCfg = FuConfig(
+    name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
     FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
   )
 
   val f2iCfg = FuConfig(
+    name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
-    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val f2fCfg = FuConfig(
+    name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val fdivSqrtCfg = FuConfig(
+    name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
-    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
+    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
+    fastUopOut = true, fastImplemented = false
   )
 
   val lduCfg = FuConfig(
+    "ldu",
     null, // DontCare
     null,
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
     UncertainLatency()
   )
 
-  val stuCfg = FuConfig(
+  val staCfg = FuConfig(
+    "sta",
     null,
     null,
-    FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
+  val stdCfg = FuConfig(
+    "std",
+    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
+  )
+
   val mouCfg = FuConfig(
+    "mou",
     null,
     null,
-    FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency()
   )
 
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg), 1, Int.MaxValue)
+  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bmuCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
@@ -515,5 +616,6 @@ package object xiangshan {
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }

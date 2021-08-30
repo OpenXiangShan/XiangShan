@@ -257,7 +257,7 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=true, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
-  when (reset.toBool || io.flush) {
+  when (reset.asBool() || io.flush) {
     for (i <- 0 until nSets) {
       valid_array(i) := 0.U
     }
@@ -265,7 +265,7 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
   XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
   // tag write
-  val wen = io.write.valid && !reset.toBool && !io.flush
+  val wen = io.write.valid && !reset.asBool() && !io.flush
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx=waddr,
@@ -297,8 +297,8 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
 
   // we use single port SRAM
   // do not allow read and write in the same cycle
-  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush && tag_array.io.r.req.ready
-  io.write.ready := !reset.toBool && !io.flush && tag_array.io.w.req.ready
+  io.read.ready  := !io.write.valid && !reset.asBool() && !io.flush && tag_array.io.r.req.ready
+  io.write.ready := !reset.asBool() && !io.flush && tag_array.io.w.req.ready
 
   def dumpRead() = {
     when (io.read.fire()) {

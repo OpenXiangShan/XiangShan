@@ -19,6 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import utils.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
@@ -37,6 +38,7 @@ case class UncertainLatency() extends HasFuLatency {
 
 case class FuConfig
 (
+  name: String,
   fuGen: Parameters => FunctionUnit,
   fuSel: FunctionUnit => Bool,
   fuType: UInt,
@@ -46,6 +48,8 @@ case class FuConfig
   writeFpRf: Boolean,
   hasRedirect: Boolean,
   latency: HasFuLatency = CertainLatency(0),
+  fastUopOut: Boolean = false,
+  fastImplemented: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
@@ -72,6 +76,11 @@ class FunctionUnitIO(val len: Int)(implicit p: Parameters) extends XSBundle {
 abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new FunctionUnitIO(len))
+
+  XSPerfAccumulate("in_valid", io.in.valid)
+  XSPerfAccumulate("in_fire", io.in.fire)
+  XSPerfAccumulate("out_valid", io.out.valid)
+  XSPerfAccumulate("out_fire", io.out.fire)
 
 }
 
