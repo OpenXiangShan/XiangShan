@@ -30,7 +30,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.TLBParameters
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{XSDebugModuleParams, EnableJtag}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
@@ -140,10 +140,15 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 8,
           superSize = 2
         ),
-        PtwL1EntrySize = 2,
-        PtwL2EntrySize = 64,
-        PtwL3EntrySize = 128,
-        PtwSPEntrySize = 2,
+        l2tlbParameters = L2TLBParameters(
+          l1Size = 4,
+          l2nSets = 4,
+          l2nWays = 4,
+          l3nSets = 4,
+          l3nWays = 8,
+          spSize = 2,
+          missQueueSize = 8
+        ),
         useFakeL2Cache = true, // disable L2 Cache
       )),
       L3Size = 256 * 1024, // 256KB L3 Cache

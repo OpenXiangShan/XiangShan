@@ -25,7 +25,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.{TLBParameters}
+import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -135,11 +135,7 @@ case class XSCoreParameters
     superSize = 4,
   ),
   useBTlb: Boolean = false,
-  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
-  PtwSPEntrySize: Int = 16,
-  PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 256, //(256 * 8)
-  PtwMissQueueSize: Int = 8,
+  l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -164,7 +160,6 @@ case class XSCoreParameters
   ),
   L2Size: Int = 512 * 1024, // 512KB
   L2NWays: Int = 8,
-  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -274,11 +269,7 @@ trait HasXSParameter {
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
-  val PtwL3EntrySize = coreParams.PtwL3EntrySize
-  val PtwSPEntrySize = coreParams.PtwSPEntrySize
-  val PtwL1EntrySize = coreParams.PtwL1EntrySize
-  val PtwL2EntrySize = coreParams.PtwL2EntrySize
-  val PtwMissQueueSize = coreParams.PtwMissQueueSize
+  val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4
@@ -294,7 +285,6 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
-  val usePTWRepeater = coreParams.usePTWRepeater
   val useFakeDCache = coreParams.useFakeDCache
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache

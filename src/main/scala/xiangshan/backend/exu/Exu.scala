@@ -66,6 +66,7 @@ case class ExuConfig
   val writeIntRf = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
+  val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
 
   val latency: HasFuLatency = {
     val lats = fuConfigs.map(_.latency)
@@ -147,34 +148,50 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
 
   val needArbiter = !(config.latency.latencyVal.nonEmpty && (config.latency.latencyVal.get == 0))
 
-  def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Arbiter[FuOutput] = {
+  def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Seq[Bool] = {
     if (needArbiter) {
       if(in.size == 1){
+        require(!config.hasFastUopOut)
         in.head.ready := out.ready
         out.bits.data := in.head.bits.data
         out.bits.uop := in.head.bits.uop
         out.valid := in.head.valid
-        null
       } else {
-        val arb = Module(new Arbiter(new FuOutput(in.head.bits.len), in.size))
-        arb.io.in <> in
-        arb.io.out.ready := out.ready
-        out.bits.data := arb.io.out.bits.data
-        out.bits.uop := arb.io.out.bits.uop
-        out.valid := arb.io.out.valid
-        arb
+        val arb = Module(new Arbiter(new ExuOutput, in.size))
+        in.zip(arb.io.in).foreach{ case (l, r) =>
+          l.ready := r.ready
+          r.valid := l.valid
+          r.bits := DontCare
+          r.bits.uop := l.bits.uop
+          r.bits.data := l.bits.data
+        }
+        arb.io.out <> out
       }
     } else {
+      require(!config.hasFastUopOut)
       in.foreach(_.ready := out.ready)
       val sel = Mux1H(in.map(x => x.valid -> x))
       out.bits.data := sel.bits.data
       out.bits.uop := sel.bits.uop
       out.valid := sel.valid
-      null
     }
+    in.map(_.fire)
   }
 
-  val arb = writebackArb(functionUnits.map(_.io.out), io.out)
+  val arbSel = writebackArb(functionUnits.map(_.io.out), io.out)
+
+  val arbSelReg = arbSel.map(RegNext(_))
+  val dataRegVec = functionUnits.map(_.io.out.bits.data).zip(config.fuConfigs).map{ case (i, cfg) =>
+    if (config.hasFastUopOut && (!cfg.fastUopOut || !cfg.fastImplemented)) {
+      println(s"WARNING: fast not implemented!! ${cfg.name} will be delayed for one cycle.")
+    }
+    (if (cfg.fastUopOut && cfg.fastImplemented) i else RegNext(i))
+  }
+  val dataReg = Mux1H(arbSelReg, dataRegVec)
+
+  if (config.hasFastUopOut) {
+    io.out.bits.data := dataReg
+  }
 
   val readIntFu = config.fuConfigs
     .zip(functionUnits.zip(fuSel))
