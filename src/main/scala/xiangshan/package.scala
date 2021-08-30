@@ -226,13 +226,6 @@ package object xiangshan {
     def bltu        = "b0_00_10_110".U
     def bgeu        = "b0_00_10_111".U
 
-    def slt         = "b0_00_11_000".U
-    def sltu        = "b0_00_11_010".U
-    def max         = "b0_00_11_100".U
-    def min         = "b0_00_11_101".U
-    def maxu        = "b0_00_11_110".U
-    def minu        = "b0_00_11_111".U
-
     // add & sub optype
     def add         = "b0_01_00_000".U
     def add_uw      = "b0_01_00_001".U
@@ -243,39 +236,40 @@ package object xiangshan {
     def sh3add      = "b0_01_00_110".U
     def sh3add_uw   = "b0_01_00_111".U
 
-    def sub         = "b0_01_01_000".U
 
     // shift optype
     def sll         = "b0_10_00_000".U
     def slli_uw     = "b0_10_00_001".U
     def bclr        = "b0_10_00_100".U
-    def binv        = "b0_10_00_101".U
-    def bset        = "b0_10_00_110".U
-    def bext        = "b0_10_00_111".U
-
-    def srl         = "b0_10_01_010".U
-    def sra         = "b0_10_01_011".U
+    def bset        = "b0_10_00_101".U
+    def binv        = "b0_10_00_110".U
+    
+    def srl         = "b0_10_01_001".U
+    def bext        = "b0_10_01_010".U
+    def sra         = "b0_10_01_100".U
 
     def rol         = "b0_10_10_000".U
 
     def ror         = "b0_10_11_000".U
 
-    // count optype
-    def clz         = "b0_11_00_000".U
-    def ctz         = "b0_11_00_001".U
-    def cpop        = "b0_11_00_010".U
+    def sub         = "b0_11_00_000".U
+    def sltu        = "b0_11_00_001".U
+    def slt         = "b0_11_00_010".U
+    def maxu        = "b0_11_00_100".U
+    def minu        = "b0_11_00_101".U
+    def max         = "b0_11_00_110".U
+    def min         = "b0_11_00_111".U
+    
+
 
     // RV64 32bit optype
     def addw        = "b1_01_00_000".U
-    def subw        = "b1_01_01_000".U
+    def subw        = "b1_11_00_000".U
     def sllw        = "b1_10_00_000".U
-    def srlw        = "b1_10_01_010".U
-    def sraw        = "b1_10_01_011".U
+    def srlw        = "b1_10_01_001".U
+    def sraw        = "b1_10_01_100".U
     def rolw        = "b1_10_10_000".U
     def rorw        = "b1_10_11_000".U
-    def clzw        = "b1_11_00_000".U
-    def ctzw        = "b1_11_00_001".U
-    def cpopw       = "b1_11_00_010".U
 
     def isWordOp(func: UInt) = func(7)
     def isBranch(func: UInt) = func(6, 3) === "b0010".U
@@ -513,7 +507,9 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val mulCfg = FuConfig(
@@ -526,7 +522,10 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(2)
+    // TODO: change this back to 2 when mul is ready for fastUopOut
+    latency = CertainLatency(3),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val bmuCfg = FuConfig(
@@ -539,7 +538,9 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(1)
+    latency = CertainLatency(1),
+    fastUopOut = true,
+    fastImplemented = false
  )
 
   val fmacCfg = FuConfig(
@@ -553,21 +554,24 @@ package object xiangshan {
     name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
-    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val f2fCfg = FuConfig(
     name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = false
   )
 
   val fdivSqrtCfg = FuConfig(
     name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
-    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
+    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
+    fastUopOut = true, fastImplemented = false
   )
 
   val lduCfg = FuConfig(

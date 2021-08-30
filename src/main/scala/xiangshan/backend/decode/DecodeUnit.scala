@@ -333,13 +333,13 @@ object FDecode extends DecodeConstants{
 object BDecode extends DecodeConstants{
   val table: Array[(BitPat, List[BitPat])] = Array(
     // Basic bit manipulation
-    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
     
-    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
     CLMUL   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmul, Y, N, N, N, N, N, N, SelImm.IMM_X),
     CLMULH  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulh, Y, N, N, N, N, N, N, SelImm.IMM_X),

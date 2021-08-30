@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import freechips.rocketchip.tile.FType
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 
@@ -38,10 +39,14 @@ class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
     module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
   }
 
-  io.out.bits.fflags := MuxCase(
-    0.U,
-    fus.map(x => x.io.out.fire() -> x.fflags)
+  require(config.hasFastUopOut)
+  io.out.bits.fflags := Mux1H(arbSelReg, fus.map(x => x.fflags))
+  val arbUop = RegNext(io.out.bits.uop)
+  io.out.bits.data := Mux(!arbUop.ctrl.fpWen,
+    dataReg,
+    Mux(arbUop.ctrl.fpu.typeTagOut === S,
+      box(dataReg, FType.S),
+      sanitizeNaN(dataReg, FType.D)
+    )
   )
-  val fpOutCtrl = io.out.bits.uop.ctrl.fpu
-  io.out.bits.data := box(arb.io.out.bits.data, fpOutCtrl.typeTagOut)
 }

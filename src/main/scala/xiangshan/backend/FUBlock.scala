@@ -20,11 +20,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import freechips.rocketchip.tile.FType
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
 import xiangshan.mem.StoreDataBundle
-
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -158,7 +158,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
       }
 
       // out
-      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
+      // TODO: remove this conversion after record is removed
+      val fpWen = exu.io.out.bits.uop.ctrl.fpWen
+      val dataIsFp = if (exu.config.hasFastUopOut) RegNext(fpWen) else fpWen
+      io.writeback(i).bits.data := Mux(dataIsFp,
         ieee(exu.io.out.bits.data),
         exu.io.out.bits.data
       )
@@ -170,4 +173,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   if (io.extra.stData.isDefined) {
     io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
   }
+
+  for ((iss, i) <- io.issue.zipWithIndex) {
+    XSPerfAccumulate(s"issue_count_$i", iss.fire())
+  }
+  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
+
 }

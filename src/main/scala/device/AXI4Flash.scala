@@ -18,6 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
+import Chisel.BlackBox
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
