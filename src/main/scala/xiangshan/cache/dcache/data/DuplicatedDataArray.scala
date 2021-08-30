@@ -29,8 +29,6 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
   val singlePort = true
   val readHighPriority = false
 
-  def eccBits = encWordBits - wordBits
-
   def getECCFromEncWord(encWord: UInt) = {
     require(encWord.getWidth == encWordBits)
     encWord(encWordBits - 1, wordBits)

@@ -91,6 +91,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     val data_read  = DecoupledIO(new L1DataReadReq)
     val data_resp  = Input(Vec(blockRows, Bits(encRowBits.W)))
     val data_write = DecoupledIO(new L1DataWriteReq)
+    val banked_data_read  = DecoupledIO(new L1BankedDataReadReq)
+    val banked_data_write = DecoupledIO(new L1BankedDataWriteReq)
+    val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
 
     val meta_read  = DecoupledIO(new L1MetaReadReq)
     val meta_resp  = Input(Vec(nWays, UInt(encMetaBits.W)))
@@ -284,10 +287,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   // read data
   // io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
   io.data_read.valid := s1_fire && s1_need_data
-  val data_read = io.data_read.bits
-  data_read.rmask := s1_rmask
-  data_read.way_en := s1_way_en
-  data_read.addr := s1_req.addr
+  io.data_read.bits.rmask := s1_rmask
+  io.data_read.bits.way_en := s1_way_en
+  io.data_read.bits.addr := s1_req.addr
+
+  io.banked_data_read.valid := s1_fire && s1_need_data
+  io.banked_data_read.bits.way_en := s1_way_en
+  io.banked_data_read.bits.addr := s1_req.addr
 
   // tag ecc check
   (0 until nWays).foreach(w => assert(!(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(ecc_meta_resp(w)).uncorrectable)))
@@ -564,13 +570,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     })
   }
 
-  val data_write = io.data_write.bits
   io.data_write.valid := s3_fire && need_write_data
-  data_write.rmask := DontCare
-  data_write.way_en := s3_way_en
-  data_write.addr := s3_req.addr
-  data_write.wmask := VecInit(wmask.map(_.orR)).asUInt
-  data_write.data := s3_amo_data_merged
+  io.data_write.bits.rmask := DontCare
+  io.data_write.bits.way_en := s3_way_en
+  io.data_write.bits.addr := s3_req.addr
+  io.data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
+  io.data_write.bits.data := s3_amo_data_merged
+
+  io.banked_data_write.valid := s3_fire && need_write_data
+  io.banked_data_write.bits.way_en := s3_way_en
+  io.banked_data_write.bits.addr := s3_req.addr
+  io.banked_data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
+  io.banked_data_write.bits.data := s3_amo_data_merged.asUInt.asTypeOf(io.banked_data_write.bits.data.cloneType)
 
   // --------------------------------------------------------------------------------
   // Writeback

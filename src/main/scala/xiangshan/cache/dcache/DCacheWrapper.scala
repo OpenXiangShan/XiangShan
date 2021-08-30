@@ -34,7 +34,6 @@ case class DCacheParameters
   nSets: Int = 64,
   nWays: Int = 8,
   rowBits: Int = 128,
-  nTLBEntries: Int = 32,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("random"),
@@ -59,6 +58,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encWordBits = cacheParams.dataCode.width(wordBits)
 
   def encRowBits = encWordBits * rowWords
+  def eccBits = encWordBits - wordBits
 
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
   def lrscBackoff = 3 // disallow LRSC reacquisition briefly
@@ -91,9 +91,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
 abstract class DCacheModule(implicit p: Parameters) extends L1CacheModule
   with HasDCacheParameters
+  with HasBankedDataArrayParameters
 
 abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
   with HasDCacheParameters
+  with HasBankedDataArrayParameters
 
 class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
   val set = UInt(log2Up(nSets).W)
@@ -229,7 +231,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
+  val newDataArray = Module(new BankedDataArray)
   val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
+  dataArray.dump()
+  newDataArray.dump()
   /*
   dataArray.dump()
   metaArray.dump()
@@ -275,6 +280,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeDataWritePort = 0
 
   dataArray.io.write <> mainPipe.io.data_write
+  newDataArray.io.write <> mainPipe.io.banked_data_write
 
   // give priority to MainPipe
   val DataReadPortCount = 2
@@ -295,6 +301,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     dataArray.io.read(w) <> ldu(w).io.data_read
     dataArray.io.resp(w) <> ldu(w).io.data_resp
   }
+
+  val bankedDataReadArb = Module(new Arbiter(new L1BankedDataReadReq, DataReadPortCount))
+
+  bankedDataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.banked_data_read
+  bankedDataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.banked_data_read
+
+  newDataArray.io.read(0) <> ldu(0).io.banked_data_read
+  newDataArray.io.read(1) <> bankedDataReadArb.io.out
+
+  newDataArray.io.resp(0) <> ldu(0).io.banked_data_resp
+  newDataArray.io.resp(1) <> ldu(1).io.banked_data_resp
+  newDataArray.io.resp(1) <> mainPipe.io.banked_data_resp
 
   //----------------------------------------
   // load pipe
