@@ -396,7 +396,9 @@ class Rename(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.canAllocate && intFreeList.canAllocate && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.canAllocate && !intFreeList.canAllocate && !io.roqCommits.isWalk)
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && io.roqCommits.isWalk)
-
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(io.roqCommits.isWalk, "TMA_backendiswalk")
+  }
 
   if (EnableIntMoveElim) {
     XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))

@@ -189,10 +189,22 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val srcBlockIssue = statusArray.zip(waitSrc).map{ case (s, w) => s.valid && !s.scheduled && !s.blocked && w }
     XSPerfAccumulate(s"wait_for_src_$i", PopCount(srcBlockIssue))
   }
+  val canIssueEntries = PopCount(io.canIssue)
+  XSPerfHistogram("can_issue_entries", canIssueEntries, true.B, 0, params.numEntries, 1)
   val isBlocked = PopCount(statusArray.map(s => s.valid && s.blocked))
   XSPerfAccumulate("blocked_entries", isBlocked)
   val isScheduled = PopCount(statusArray.map(s => s.valid && s.scheduled))
   XSPerfAccumulate("scheduled_entries", isScheduled)
   val notSelected = PopCount(io.canIssue) - PopCount(io.issueGranted.map(_.valid))
   XSPerfAccumulate("not_selected_entries", notSelected)
+  val isReplayed = PopCount(io.deqResp.map(resp => resp.valid && !resp.bits.success))
+  XSPerfAccumulate("replayed_entries", isReplayed)
+  for (j <- 0 until params.allWakeup) {
+    for (i <- 0 until params.numSrc) {
+      val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
+      XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
+    }
+    // val wakeup_j = io.wakeupMatch.map(m => PopCount(m.map(_(j)))).reduce(_ +& _)
+    // XSPerfHistogram(s"wakeup_$j", wakeup_j, true.B, 0, params.numEntries, 1)
+  }
 }

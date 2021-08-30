@@ -388,4 +388,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     difftest.io.coreid := hardId.U
     difftest.io.fpr := VecInit(fpRf.get.io.debug_rports.map(_.data))
   }
+
+  XSPerfAccumulate("allocate_valid", PopCount(io.allocate.map(_.valid)))
+  XSPerfAccumulate("allocate_fire", PopCount(io.allocate.map(_.fire())))
+  XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
+  XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
 }

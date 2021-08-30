@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.{ExuConfig, Wb}
+import xiangshan.backend.exu.{ExuConfig, WbArbiter}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import xiangshan.cache.L1plusCacheWrapper
@@ -69,12 +69,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val ptw = LazyModule(new PTWWrapper())
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
-  val intArbiter = LazyModule(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+  val intArbiter = LazyModule(new WbArbiter(intConfigs, NRIntWritePorts, isFp = false))
   val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
   val numIntWbPorts = intWbPorts.length
 
   val fpConfigs = exuConfigs.filter(_.writeFpRf)
-  val fpArbiter = LazyModule(new Wb(fpConfigs, NRFpWritePorts, isFp = true))
+  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, NRFpWritePorts, isFp = true))
   val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
   val numFpWbPorts = fpWbPorts.length
 
@@ -305,6 +305,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
   }
+  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
+  XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -346,7 +348,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val dtlbRepeater = if (usePTWRepeater) {
     Module(new PTWRepeater(LoadPipelineWidth + StorePipelineWidth))
   } else {
-    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
+    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
   }
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw

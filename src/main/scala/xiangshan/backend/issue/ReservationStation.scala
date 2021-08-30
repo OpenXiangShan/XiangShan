@@ -85,7 +85,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       params.checkWaitBit = true
     }
     if (cfg.hasCertainLatency) {
-      params.fixedLatency = if (cfg == MulDivExeUnitCfg) 2 else cfg.latency.latencyVal.get
+      params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
     }
   }
 
@@ -448,7 +448,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_ (j)))
       }
 
-      val bypassNetwork = Module(new BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf))
+      val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
       bypassNetwork.io.hold := !io.deq(i).ready
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
@@ -456,8 +456,11 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         by.data := d
       }
       bypassNetwork.io.target <> io.deq(i).bits.src.take(params.numSrc)
-    }
 
+      for (j <- 0 until params.numFastWakeup) {
+        XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire() && wakeupBypassMask(j).asUInt().orR())
+      }
+    }
     if (io.store.isDefined) {
       io.store.get.stData(i).valid := io.deq(i).valid
       io.store.get.stData(i).bits.data := io.deq(i).bits.src(1)
@@ -466,14 +469,40 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
 
   // logs
-  for (dispatch <- io.fromDispatch) {
+  for ((dispatch, i) <- io.fromDispatch.zipWithIndex) {
     XSDebug(dispatch.valid && !dispatch.ready, p"enq blocked, roqIdx ${dispatch.bits.roqIdx}\n")
     XSDebug(dispatch.fire(), p"enq fire, roqIdx ${dispatch.bits.roqIdx}, srcState ${Binary(dispatch.bits.srcState.asUInt)}\n")
+    XSPerfAccumulate(s"allcoate_fire_$i", dispatch.fire())
+    XSPerfAccumulate(s"allocate_valid_$i", dispatch.valid)
+    XSPerfAccumulate(s"srcState_ready_$i", PopCount(dispatch.bits.srcState.map(_ === SrcState.rdy)))
+    if (params.checkWaitBit) {
+      XSPerfAccumulate(s"load_wait_$i", dispatch.fire() && dispatch.bits.cf.loadWaitBit)
+    }
   }
-  for (deq <- io.deq) {
+  for ((deq, i) <- io.deq.zipWithIndex) {
     XSDebug(deq.fire(), p"deq fire, roqIdx ${deq.bits.uop.roqIdx}\n")
     XSDebug(deq.valid && !deq.ready, p"deq blocked, roqIdx ${deq.bits.uop.roqIdx}\n")
+    XSPerfAccumulate(s"deq_fire_$i", deq.fire())
+    XSPerfAccumulate(s"deq_valid_$i", deq.valid)
+    if (params.hasFeedback) {
+      XSPerfAccumulate(s"deq_not_first_issue_$i", deq.fire() && !io.feedback.get(i).isFirstIssue)
+    }
   }
+
+  for (i <- 0 until params.numEntries) {
+    val isSelected = VecInit(select.io.grant.map(s => s.valid && s.bits(i))).asUInt().orR()
+    XSPerfAccumulate(s"select_$i", isSelected)
+    val isIssued = VecInit(select.io.grant.map(s => s.fire && s.bits(i))).asUInt().orR()
+    XSPerfAccumulate(s"issue_$i", isIssued)
+    for (j <- 0 until params.numSrc) {
+      XSPerfAccumulate(s"num_wakeup_$i", slowWakeupMatchVec(i)(j).asUInt().orR())
+    }
+  }
+
+  XSPerfAccumulate("redirect_num", io.redirect.valid)
+  XSPerfAccumulate("flush_num", io.flush)
+  XSPerfHistogram("allocate_num", PopCount(io.fromDispatch.map(_.valid)), true.B, 0, params.numEnq, 1)
+  XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 
   def size = params.numEntries
 }

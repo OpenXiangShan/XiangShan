@@ -613,7 +613,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val access_bundle = Wire(ValidIO(new ReplacementAccessBundle))
   access_bundle.valid := RegNext(s3_fire && (update_meta || need_write_data))
   access_bundle.bits.set := RegNext(get_idx(s3_req.addr))
-  access_bundle.bits.way := RegNext(s3_way_en)
+  access_bundle.bits.way := RegNext(OHToUInt(s3_way_en))
   val access_bundles = io.replace_access.toSeq ++ Seq(access_bundle)
   val sets = access_bundles.map(_.bits.set)
   val touch_ways = Seq.fill(LoadPipelineWidth + 1)(Wire(ValidIO(UInt(log2Up(nWays).W))))
