@@ -470,7 +470,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       if (params.isLoad) {
         val ldFastDeq = Wire(io.deq(i).cloneType)
         // Condition: wakeup by load (to select load wakeup bits)
-        val ldCanBeFast = VecInit(wakeupBypassMask.takeRight(exuParameters.LduCnt).map(_.asUInt.orR)).asUInt
+        val isLdInst = s1_out(i).bits.uop.ctrl.fuOpType === LSUOpType.ld // Only ld inst can be fast forwarded
+        val ldCanBeFast = VecInit(
+          wakeupBypassMask.takeRight(exuParameters.LduCnt).map(_.asUInt.orR && isLdInst)
+        ).asUInt
         ldFastDeq.valid := !deq.valid && ldCanBeFast.orR
         ldFastDeq.bits.src := DontCare
         ldFastDeq.bits.uop := s1_out(i).bits.uop

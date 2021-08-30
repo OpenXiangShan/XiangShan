@@ -138,6 +138,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.rsIdx         := io.rsIdx(i) // TODO: beautify it
     loadUnits(i).io.isFirstIssue  := io.isFirstIssue(i) // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
+    loadUnits(i).io.loadFastMatch <> io.loadFastMatch(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> io.issue(i)
     // dcache access
