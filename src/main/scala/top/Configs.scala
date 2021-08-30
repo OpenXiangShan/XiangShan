@@ -114,22 +114,30 @@ class MinimalConfig(n: Int = 1) extends Config(
           sameCycle = true,
           normalReplacer = Some("plru"),
           superReplacer = Some("plru"),
-          normalSize = 4,
+          normalNWays = 4,
+          normalNSets = 1,
           superSize = 2
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          normalSize = 4,
-          superSize = 2
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "da",
+          superSize = 4,
+          superAsVictim = true
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          normalSize = 4,
-          superSize = 2
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "da",
+          superAsVictim = true,
+          superSize = 4
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
-          normalSize = 8,
+          normalNSets = 1,
+          normalNWays = 8,
           superSize = 2
         ),
         PtwL1EntrySize = 2,

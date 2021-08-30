@@ -114,21 +114,24 @@ case class XSCoreParameters
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
-    normalSize = 128,
+    normalNSets = 128,
+    normalNWays = 1,
     normalAssociative = "da",
     superSize = 8,
     superAsVictim = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
-    normalSize = 128,
+    normalNSets = 128,
+    normalNWays = 1,
     normalAssociative = "da",
     superSize = 8,
     superAsVictim = true
   ),
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
-    normalSize = 64,
+    normalNSets = 1,
+    normalNWays = 64,
     superSize = 4,
   ),
   useBTlb: Boolean = false,

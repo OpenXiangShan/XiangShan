@@ -45,16 +45,16 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   //                else               (satp.mode === 8.U && (mode < ModeM))
   // TODO: the code above is same with TLB, may need a abstract TLB module class
 
-  val entries = Reg(Vec(q.normalSize, new PtwResp))
-  val entries_v = RegInit(VecInit(Seq.fill(q.normalSize)(false.B)))
-  val replace = ReplacementPolicy.fromString(Some("random"), q.normalSize)
+  val entries = Reg(Vec(q.normalNWays, new PtwResp))
+  val entries_v = RegInit(VecInit(Seq.fill(q.normalNWays)(false.B)))
+  val replace = ReplacementPolicy.fromString(Some("random"), q.normalNWays)
   val refillIdx = replaceWrapper(entries_v, replace.way)
 
   // val WaitingSetSize = 4
   // val waiting_set = Reg(Vec(Width, Vec(WaitingSetSize, UInt(vpnLen.W))))
   // val waiting_set_v = RegInit(Vec(Width, Vec(WaitingSetSize, false.B)))
 
-  val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(q.normalSize-1, 0), 0.U).asBools
+  val refillMask = Mux(io.ptw.resp.valid, UIntToOH(refillIdx)(q.normalNWays-1, 0), 0.U).asBools
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
     val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
@@ -94,7 +94,7 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   }
   io.ptw.resp.ready := true.B
 
-  val sfence_vpn = sfence.bits.addr.asTypeOf(new vaBundle().cloneType).vpn
+  val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
   val sfence_hit = entries.map(_.entry.hit(sfence_vpn))
   when (sfence.valid) {
     // entries_v := 0.U.asTypeOf(entries_v.cloneType)
@@ -116,12 +116,12 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_vector_count", Mux(ptw.resp.fire(), PopCount(ptw.resp.bits.vector), 0.U))
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.data.pf)
-  for (i <- 0 until q.normalSize) {
+  for (i <- 0 until q.normalNWays) {
     XSPerfAccumulate(s"RefillIndex${i}", ptw.resp.valid && i.U === refillIdx)
   }
   XSPerfAccumulate(s"Refill4KBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 2.U)
   XSPerfAccumulate(s"Refill2MBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 1.U)
   XSPerfAccumulate(s"Refill1GBPage", ptw.resp.valid && ptw.resp.bits.data.entry.level.get === 0.U)
 
-  println(s"${q.name}: normal page: ${q.normalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
 }

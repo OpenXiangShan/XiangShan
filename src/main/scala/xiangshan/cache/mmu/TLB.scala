@@ -19,10 +19,13 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
+
+
 
 class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
@@ -46,7 +49,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val vmEnable = if(EnbaleTlbDebug) (satp.mode === 8.U)
                  else               (satp.mode === 8.U && (mode < ModeM))
 
-  val reqAddr = req.map(_.bits.vaddr.asTypeOf((new vaBundle).cloneType))
+  val reqAddr = req.map(_.bits.vaddr.asTypeOf((new VaBundle).cloneType))
   val vpn = reqAddr.map(_.vpn)
   val cmd     = req.map(_.bits.cmd)
   val valid   = req.map(_.valid)
@@ -55,59 +58,65 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
-  val nv = RegInit(VecInit(Seq.fill(q.normalSize)(false.B)))
-  val nentries = Reg(Vec(q.normalSize, new TlbEntry(true, false)))
-  val sv = RegInit(VecInit(Seq.fill(q.superSize)(false.B)))
-  val sentries = Reg(Vec(q.superSize, new TlbEntry(false, true)))
-  val v = nv ++ sv
-  val entries = nentries ++ sentries
-  val g = VecInit(entries.map(_.perm.g))
+  val normalPage = TlbStorage(
+    associative = q.normalAssociative,
+    sameCycle = q.sameCycle,
+    ports = Width,
+    nSets = q.normalNSets,
+    nWays = q.normalNWays,
+    sramSinglePort = sramSinglePort,
+    normalPage = true,
+    superPage = false
+  )
+  val superPage = TlbStorage(
+    associative = q.superAssociative,
+    sameCycle = q.sameCycle,
+    ports = Width,
+    nSets = 1,
+    nWays = q.superSize,
+    sramSinglePort = sramSinglePort,
+    normalPage = false,
+    superPage = true,
+  )
 
-  /**
-    * PTW refill
-    */
   val refill = ptw.resp.fire() && !sfence.valid
-
-  val nReplace = ReplacementPolicy.fromString(q.normalReplacer, q.normalSize)
+  val nReplace = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
   val sReplace = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
-  val nRefillIdx = replaceWrapper(nv, nReplace.way)
-  val sRefillIdx = replaceWrapper(sv, sReplace.way)
+  val nRefillIdx = nReplace.way
+  val sRefillIdx = sReplace.way
 
-  when (refill) {
-    val resp = ptw.resp.bits
-    when (resp.entry.level.getOrElse(0.U) === 2.U) {
-      nv(nRefillIdx) := true.B
-      nentries(nRefillIdx).apply(resp)
-      nReplace.access(nRefillIdx)
-      XSDebug(p"Refill normal: idx:${nRefillIdx} entry:${resp.entry} pf:${resp.pf}\n")
-    }.otherwise {
-      sv(sRefillIdx) := true.B
-      sentries(sRefillIdx).apply(resp)
-      sReplace.access(sRefillIdx)
-      XSDebug(p"Refill superpage: idx:${sRefillIdx} entry:${resp.entry} pf:${resp.pf}\n")
-    }
+  for (i <- 0 until Width) {
+    normalPage.r_req_apply(
+      valid = io.requestor(i).req.valid,
+      wayIdx = get_idx(vpn(i), q.normalNWays),
+      vpn = vpn(i),
+      i = i
+    )
+    superPage.r_req_apply(
+      valid = io.requestor(i).req.valid,
+      wayIdx = get_idx(vpn(i), q.superSize),
+      vpn = vpn(i),
+      i = i
+    )
   }
+  normalPage.w_apply(
+    valid = refill && ptw.resp.bits.entry.level.get === 2.U,
+    wayIdx = nRefillIdx,
+    data = ptw.resp.bits
+  )
+  superPage.w_apply(
+    valid = refill && ptw.resp.bits.entry.level.get =/= 2.U,
+    wayIdx = nRefillIdx,
+    data = ptw.resp.bits
+  )
 
-  val nRefillMask = Mux(refill && ptw.resp.bits.entry.level.get === 2.U, UIntToOH(nRefillIdx)(q.normalSize-1, 0), 0.U).asBools
-  val sRefillMask = Mux(refill && ptw.resp.bits.entry.level.get =/= 2.U, UIntToOH(sRefillIdx)(q.superSize-1, 0), 0.U).asBools
-
-  def tlb_read(vpn: UInt, vVec: Vec[Bool], entryVec: Vec[TlbEntry], associative: String, mask: Seq[Bool]) = {
-//    if (associative == "fa") {
-      val hitVec = VecInit(entryVec.zip(vVec zip mask).map{ case (e, m) => e.hit(vpn) && m._1 && !m._2})
-      val hitVecReg = if (q.sameCycle) hitVec else RegNext(hitVec)
-      val vpnReg = if (q.sameCycle) vpn else RegNext(vpn)
-      /******************* next cycle if same cycle is false *****************/
-      val hit = ParallelOR(hitVecReg).asBool
-      val ppn = ParallelMux(hitVecReg zip entryVec.map(_.genPPN(vpnReg)))
-      val perm = ParallelMux(hitVecReg zip entryVec.map(_.perm))
-      (hit, ppn, perm, hitVecReg)
-//    }
-  }
+  normalPage.sfence <> io.sfence
+  superPage.sfence <> io.sfence
 
   def TLBNormalRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = tlb_read(vpn(i), nv, nentries, q.normalAssociative, nRefillMask)
-    val (super_hit, super_ppn, super_perm, super_hitVec) = tlb_read(vpn(i), sv, sentries, q.superAssociative, sRefillMask)
-    assert(!(normal_hit && super_hit))
+    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
+    val (super_hit, super_ppn, super_perm, super_hitVec) = superPage.r_resp_apply(i)
+    assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
     val ppn = Mux(normal_hit, normal_ppn, super_ppn)
@@ -158,7 +167,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
       resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
-    (hit, miss, normal_hitVec ++ super_hitVec, validReg)
+    (hit, miss, normal_hitVec.asBools() ++ super_hitVec.asBools(), validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
@@ -178,8 +187,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val tmp = VecInit(one_hot).asUInt
     get_access_index(tmp(stop, start))
   }
-  val nAccess = hitVecVec.map(a => get_access(a, q.normalSize - 1, 0))
-  val sAccess = hitVecVec.map(a => get_access(a, q.normalSize + q.superSize - 1, q.normalSize))
+  val nAccess = hitVecVec.map(a => get_access(a, q.normalNWays - 1, 0))
+  val sAccess = hitVecVec.map(a => get_access(a, q.normalNWays + q.superSize - 1, q.normalNWays))
   if (Width == 1) {
     when (nAccess(0).valid) { nReplace.access(nAccess(0).bits) }
     when (sAccess(0).valid) { sReplace.access(sAccess(0).bits) }
@@ -193,35 +202,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     io.ptw.req(i).bits.vpn := RegNext(reqAddr(i).vpn)
   }
   io.ptw.resp.ready := true.B
-
-  // val tooManyPf = PopCount(pf) > 5.U
-  // when (tooManyPf) { // when too much pf, just clear
-  //   XSDebug(p"Too many pf just flush all the pf v:${Hexadecimal(VecInit(v).asUInt)} pf:${Hexadecimal(pf.asUInt)}\n")
-  //   v.zipWithIndex.map{ case (a, i) => a := a & !pf(i) }
-  // }
-
-  // sfence (flush)
-  val sfence_vpn = sfence.bits.addr.asTypeOf(new vaBundle().cloneType).vpn
-  val sfenceHit = entries.map(_.hit(sfence_vpn))
-  when (sfence.valid) {
-    when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
-      when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
-        // all addr and all asid
-        v.map(_ := false.B)
-      }.otherwise {
-        // all addr but specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & g(i) }
-      }
-    }.otherwise {
-      when (sfence.bits.rs2) {
-        // specific addr but all asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) }
-      }.otherwise {
-        // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
-      }
-    }
-  }
 
   if (!q.sameCycle) {
     for (i <- 0 until Width) {
@@ -244,15 +224,15 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
-  for (i <- 0 until q.normalSize) {
+  for (i <- 0 until q.normalNWays) {
     val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
     XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
   for (i <- 0 until q.superSize) {
-    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.normalSize) && v }
+    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.normalNWays) && v }
     XSPerfAccumulate(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
   }
-  for (i <- 0 until q.normalSize) {
+  for (i <- 0 until q.normalNWays) {
     XSPerfAccumulate(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
   }
   for (i <- 0 until q.superSize) {
@@ -267,13 +247,13 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(VecInit(v).asUInt)}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
     XSDebug(ptw.req(i).fire(), p"PTW req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: normal page: ${q.normalSize} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
@@ -297,6 +277,7 @@ object TLB {
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
+    tlb.suggestName(s"tlb_${q.name}")
 
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

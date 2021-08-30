@@ -35,24 +35,9 @@ abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbCon
 // case class LDTLBKey
 // case class STTLBKey
 
-class vaBundle(implicit p: Parameters) extends TlbBundle {
+class VaBundle(implicit p: Parameters) extends TlbBundle {
   val vpn  = UInt(vpnLen.W)
   val off  = UInt(offLen.W)
-}
-class pteBundle(implicit p: Parameters) extends TlbBundle {
-  val reserved = UInt(pteResLen.W)
-  val ppn = UInt(ppnLen.W)
-  val rsw = UInt(2.W)
-  val perm = new Bundle {
-    val d = Bool()
-    val a = Bool()
-    val g = Bool()
-    val u = Bool()
-    val x = Bool()
-    val w = Bool()
-    val r = Bool()
-    val v = Bool()
-  }
 }
 
 class PtePermBundle(implicit p: Parameters) extends TlbBundle {
@@ -283,6 +268,44 @@ object TlbCmd {
   def isAtom(a: UInt) = a(2)
 }
 
+class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends  TlbBundle {
+  val r = new Bundle {
+    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
+      val wayIdx = Output(UInt(log2Up(nWays).W)) // setIdx is determined by vpn low bits
+      val vpn = Output(UInt(vpnLen.W))
+    })))
+    val resp = Vec(ports, ValidIO(new Bundle{
+      val hit = Output(Bool())
+      val ppn = Output(UInt(ppnLen.W))
+      val perm = Output(new TlbPermBundle())
+      val hitVec = Output(UInt(nWays.W))
+    }))
+  }
+  val w = Flipped(ValidIO(new Bundle {
+    val wayIdx = Output(UInt(log2Up(nWays).W))
+    val data = Output(new PtwResp)
+  }))
+  val sfence = Input(new SfenceBundle())
+
+  def r_req_apply(valid: Bool, wayIdx: UInt, vpn: UInt, i: Int): Unit = {
+    this.r.req(i).valid := valid
+    this.r.req(i).bits.wayIdx := wayIdx
+    this.r.req(i).bits.vpn := vpn
+  }
+
+  def r_resp_apply(i: Int) = {
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec)
+  }
+
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
+    this.w.valid := valid
+    this.w.bits.wayIdx := wayIdx
+    this.w.bits.data := data
+  }
+
+  override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
+}
+
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
@@ -448,8 +471,8 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
-    ppn := pte.asTypeOf(new pteBundle().cloneType).ppn
-    perm.map(_ := pte.asTypeOf(new pteBundle().cloneType).perm)
+    ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
+    perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.level.map(_ := level)
   }
 
