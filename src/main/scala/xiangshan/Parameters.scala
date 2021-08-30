@@ -118,7 +118,7 @@ case class XSCoreParameters
     normalNWays = 1,
     normalAssociative = "da",
     superSize = 8,
-    superAsVictim = true
+    normalAsVictim = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -126,7 +126,7 @@ case class XSCoreParameters
     normalNWays = 1,
     normalAssociative = "da",
     superSize = 8,
-    superAsVictim = true
+    normalAsVictim = true
   ),
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",

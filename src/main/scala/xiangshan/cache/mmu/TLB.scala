@@ -75,7 +75,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = 1,
     nWays = q.superSize,
     sramSinglePort = sramSinglePort,
-    normalPage = false,
+    normalPage = q.normalAsVictim,
     superPage = true,
   )
 
@@ -100,16 +100,20 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     )
   }
   normalPage.w_apply(
-    valid = refill && ptw.resp.bits.entry.level.get === 2.U,
+    valid = { if (q.normalAsVictim) false.B
+              else refill && ptw.resp.bits.entry.level.get === 2.U },
     wayIdx = nRefillIdx,
     data = ptw.resp.bits
   )
   superPage.w_apply(
-    valid = refill && ptw.resp.bits.entry.level.get =/= 2.U,
+    valid = { if (q.normalAsVictim) refill
+              else refill && ptw.resp.bits.entry.level.get =/= 2.U },
     wayIdx = nRefillIdx,
     data = ptw.resp.bits
   )
 
+  normalPage.victim.in <> superPage.victim.out
+  normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
 

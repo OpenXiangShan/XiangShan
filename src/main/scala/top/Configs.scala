@@ -124,14 +124,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
           superSize = 4,
-          superAsVictim = true
+          normalAsVictim = true
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
           normalNSets = 4, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
-          superAsVictim = true,
+          normalAsVictim = true,
           superSize = 4
         ),
         btlbParameters = TLBParameters(

@@ -38,7 +38,7 @@ case class TLBParameters
   superReplacer: Option[String] = Some("plru"),
   normalAssociative: String = "fa", // "fa", "sa", "da", "sa" is not supported
   superAssociative: String = "fa", // must be fa
-  superAsVictim: Boolean = false // TODO
+  normalAsVictim: Boolean = false // when get replace from fa, store it into sram
 )
 
 trait HasTlbConst extends HasXSParameter {
@@ -68,6 +68,7 @@ trait HasTlbConst extends HasXSParameter {
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
+
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{

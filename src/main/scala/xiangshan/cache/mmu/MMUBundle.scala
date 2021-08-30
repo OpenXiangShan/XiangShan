@@ -285,6 +285,10 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
   }))
+  val victim = new Bundle {
+    val out = ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false)))
+    val in = Flipped(ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false))))
+  }
   val sfence = Input(new SfenceBundle())
 
   def r_req_apply(valid: Bool, wayIdx: UInt, vpn: UInt, i: Int): Unit = {

@@ -96,6 +96,18 @@ class TLBFA(
     }
   }
 
+  val victim_idx = io.w.bits.wayIdx
+  io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).level.getOrElse(3.U) === 2.U
+  io.victim.out.bits := ns_to_n(entries(victim_idx))
+
+  def ns_to_n(ns: TlbEntry): TlbEntry = {
+    val n = Wire(new TlbEntry(pageNormal = true, pageSuper = false))
+    n.perm := ns.perm
+    n.ppn := ns.ppn
+    n.tag := ns.tag
+    n
+  }
+
   println(s"tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
@@ -150,9 +162,9 @@ class TLBSA(
     resp.bits.hitVec.suggestName("hitVec")
 
     entries.io.w.apply(
-      valid = io.w.valid,
+      valid = io.w.valid || io.victim.in.valid,
       setIdx = get_idx(io.w.bits.data.entry.tag, nSets),
-      data = (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)),
+      data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
       waymask = UIntToOH(io.w.bits.wayIdx)
     )
   }
@@ -184,7 +196,9 @@ class TLBSA(
     }
   }
 
-  println(s"tlb_sa: nSets${nSets} nWays:${nWays}")
+  io.victim.out := DontCare
+
+  println(s"tlb_sa: nSets:${nSets} nWays:${nWays}")
 }
 
 object TlbStorage {
