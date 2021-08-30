@@ -19,6 +19,7 @@ package xiangshan.backend.regfile
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import Chisel.BlackBox
 import xiangshan._
 
 class RfReadPort(len: Int)(implicit p: Parameters) extends XSBundle {
@@ -176,7 +177,7 @@ class regfile_160x64_10w16r_sim extends BlackBox with HasBlackBoxResource {
 
   val vsrc = "/vsrc/regfile_160x64_10w16r_sim.v"
   println(s"Regfile: Using verilog source at: $vsrc")
-  setResource(vsrc)
+  addResource(vsrc)
 
 }
 
