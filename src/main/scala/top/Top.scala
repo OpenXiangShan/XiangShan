@@ -252,7 +252,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := core_with_l2(i).memory_port
+    l3_xbar := TLBuffer() := TLLogger("L2Logger") := core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
