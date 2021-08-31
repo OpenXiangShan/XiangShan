@@ -43,15 +43,10 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   private val core = LazyModule(new XSCore)
   private val l2xbar = TLXbar()
   private val busPMU = BusPerfMonitor(enable = true)
-  private val l2cache = if(useFakeL2Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case CacheParamsKey => huancun.CacheParameters(
-      name = "L2",
-      level = 2,
-      ways = L2NWays,
-      sets = L2NSets,
-      blockBytes = L2BlockSize,
-    )
-  })))
+  private val l2cache = if(useFakeL2Cache) null else
+    LazyModule(new HuanCun()(new Config((_, _, _) => {
+      case CacheParamsKey => coreParams.L2CacheParams
+    })))
 
   val memory_port = TLIdentityNode()
   val uncache = TLXbar()
@@ -303,14 +298,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   plic.node := peripheralXbar
 
   val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case CacheParamsKey => huancun.CacheParameters(
-      name = "L3",
-      level = 3,
-      ways = L3NWays,
-      sets = L3NSets,
-      blockBytes = L3BlockSize,
-      channelBytes = TLChannelBeatBytes(L3InnerBusWidth / 8)
-    )
+    case CacheParamsKey => soc.L3CacheParams
   })))
 
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null

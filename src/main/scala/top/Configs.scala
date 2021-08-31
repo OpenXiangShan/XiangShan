@@ -25,13 +25,12 @@ import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
-import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.{L2TLBParameters}
-import device.{XSDebugModuleParams, EnableJtag}
+import xiangshan.cache.mmu.L2TLBParameters
+import device.{EnableJtag, XSDebugModuleParams}
+import huancun.{CacheParameters, ClientCacheParameters}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -120,7 +119,10 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         useFakeL2Cache = true, // disable L2 Cache
       )),
-      L3Size = 256 * 1024, // 256KB L3 Cache
+      L3CacheParams = up(SoCParamsKey).L3CacheParams.copy(
+        sets = 1024
+      ),
+      L3NBanks = 1
     )
   })
 )
@@ -137,4 +139,60 @@ class MinimalSimConfig(n: Int = 1) extends Config(
       useFakeL3Cache = true
     )
   })
+)
+
+class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val upParams = up(SoCParamsKey)
+    val l2sets = n * 1024 / ways / 64
+    upParams.copy(
+      cores = upParams.cores.map(p => p.copy(
+        L2CacheParams = CacheParameters(
+          name = "L2",
+          level = 2,
+          ways = ways,
+          sets = l2sets,
+          inclusive = inclusive
+        ),
+        useFakeL2Cache = false,
+        useFakeDCache = false,
+        useFakePTW = false,
+        useFakeL1plusCache = false
+      ))
+    )
+})
+
+class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val upParams = up(SoCParamsKey)
+    val sets = n * 1024 / banks / ways / 64
+    upParams.copy(
+      L3NBanks = banks,
+      L3CacheParams = CacheParameters(
+        name = "L3",
+        level = 3,
+        ways = ways,
+        sets = sets,
+        inclusive = inclusive,
+        clientCache = if(inclusive) None else Some(
+          ClientCacheParameters(
+            sets = 2 * upParams.cores.head.L2CacheParams.sets,
+            ways = upParams.cores.head.L2CacheParams.ways,
+            blockBytes = 64
+          )
+        )
+      )
+    )
+})
+
+class WithL3DebugConfig extends Config(
+  new WithNKBL2(64) ++ new WithNKBL3(256, inclusive = false)
+)
+
+class MinimalL3DebugConfig(n: Int = 1) extends Config(
+  new WithL3DebugConfig ++ new MinimalConfig(n)
+)
+
+class DefaultL3DebugConfig(n: Int = 1) extends Config(
+  new WithL3DebugConfig ++ new DefaultConfig(n)
 )

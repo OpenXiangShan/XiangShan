@@ -25,8 +25,9 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.{L2TLBParameters}
+import xiangshan.cache.mmu.L2TLBParameters
 import freechips.rocketchip.diplomacy.AddressSet
+import huancun.CacheParameters
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -129,8 +130,12 @@ case class XSCoreParameters
     nReleaseEntries = 16,
     nStoreReplayEntries = 16
   ),
-  L2Size: Int = 512 * 1024, // 512KB
-  L2NWays: Int = 8,
+  L2CacheParams: CacheParameters = CacheParameters(
+    name = "l2",
+    level = 2,
+    ways = 8,
+    sets = 1024 // default 512KB L2
+  ),
   usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
@@ -261,10 +266,7 @@ trait HasXSParameter {
   // L2 configurations
   val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
   val L1BusWidth = 256
-  val L2Size = coreParams.L2Size
   val L2BlockSize = 64
-  val L2NWays = coreParams.L2NWays
-  val L2NSets = L2Size / L2BlockSize / L2NWays
 
   // L3 configurations
   val L2BusWidth = 256
