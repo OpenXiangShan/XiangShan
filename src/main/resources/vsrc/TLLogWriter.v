@@ -11,7 +11,8 @@ import "DPI-C" function void log_write_helper
     input longint data_1,
     input longint data_2,
     input longint data_3,
-    input longint stamp
+    input longint stamp,
+    input string prefix
 );
 
 module TLLogWriter(
@@ -30,13 +31,13 @@ module TLLogWriter(
     input clock,
     input reset
 );
-    parameter prefix;
+    parameter string prefix;
 
     always @(posedge clock) begin
         if(wen && !reset) begin
             log_write_helper(
                 channel, opcode, param, source, sink,
-                address, data_0, data_1, data_2, data_3, stamp
+                address, data_0, data_1, data_2, data_3, stamp, prefix
             );
         end
     end
