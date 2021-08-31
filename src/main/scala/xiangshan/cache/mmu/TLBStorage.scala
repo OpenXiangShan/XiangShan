@@ -163,7 +163,7 @@ class TLBSA(
 
     entries.io.w.apply(
       valid = io.w.valid || io.victim.in.valid,
-      setIdx = get_idx(io.w.bits.data.entry.tag, nSets),
+      setIdx = Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)),
       data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
       waymask = UIntToOH(io.w.bits.wayIdx)
     )
@@ -171,6 +171,9 @@ class TLBSA(
 
   when (io.w.valid) {
     v(get_idx(io.w.bits.data.entry.tag, nSets))(io.w.bits.wayIdx) := true.B
+  }
+  when (io.victim.in.valid) {
+    v(get_idx(io.victim.in.bits.tag, nSets))(io.w.bits.wayIdx) := true.B
   }
 
   val sfence = io.sfence

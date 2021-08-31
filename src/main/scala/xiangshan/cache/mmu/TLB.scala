@@ -108,7 +108,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
               else refill && ptw.resp.bits.entry.level.get =/= 2.U },
-    wayIdx = nRefillIdx,
+    wayIdx = sRefillIdx,
     data = ptw.resp.bits
   )
 

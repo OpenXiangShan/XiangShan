@@ -189,15 +189,15 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   val perm = new TlbPermBundle
 
   def hit(vpn: UInt): Bool = {
-    val low9 = tag(vpnnLen-1, 0) === vpn(vpnnLen-1, 0)
-    val mid9 = tag(tag.getWidth-vpnnLen-1, tag.getWidth-vpnnLen*2) === vpn(vpn.getWidth-vpnnLen-1, vpn.getWidth-vpnnLen*2)
-    val high9 = tag(tag.getWidth-1, tag.getWidth-vpnnLen) === vpn(vpn.getWidth-1, vpn.getWidth-vpnnLen)
-
-    if (!pageSuper) (low9 && mid9 && high9)
+    if (!pageSuper) vpn === tag
+    else if (!pageNormal) MuxLookup(level.get, false.B, Seq(
+      0.U -> (tag(vpnnLen*2-1, vpnnLen) === vpn(vpnLen-1, vpnnLen*2)),
+      1.U -> (tag === vpn(vpnLen-1, vpnnLen)),
+    ))
     else MuxLookup(level.get, false.B, Seq(
-      0.U -> high9,
-      1.U -> (high9 && mid9),
-      2.U -> (high9 && mid9 && low9) // if pageNormal is false, this will always be false
+      0.U -> (tag(vpnLen-1, vpnnLen*2) === vpn(vpnLen-1, vpnnLen*2)),
+      1.U -> (tag(vpnLen-1, vpnnLen) === vpn(vpnLen-1, vpnnLen)),
+      2.U -> (tag === vpn) // if pageNormal is false, this will always be false
     ))
   }
 
