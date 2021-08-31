@@ -61,6 +61,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
   // Normal page && Super page
   val normalPage = TlbStorage(
+    name = "normal",
     associative = q.normalAssociative,
     sameCycle = q.sameCycle,
     ports = Width,
@@ -71,6 +72,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     superPage = false
   )
   val superPage = TlbStorage(
+    name = "super",
     associative = q.superAssociative,
     sameCycle = q.sameCycle,
     ports = Width,
@@ -224,7 +226,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   }
   io.ptw.resp.ready := true.B
 
-  if (!q.sameCycle) {
+  if (!q.shouldBlock) {
     for (i <- 0 until Width) {
       XSPerfAccumulate("first_access" + Integer.toString(i, 10), validRegVec(i) && vmEnable && RegNext(req(i).bits.debug.isFirstIssue))
       XSPerfAccumulate("access" + Integer.toString(i, 10), validRegVec(i) && vmEnable)
@@ -236,8 +238,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   } else {
     // NOTE: ITLB is blocked, so every resp will be valid only when hit
     // every req will be ready only when hit
-    XSPerfAccumulate("access", io.requestor(0).req.fire() && vmEnable)
-    XSPerfAccumulate("miss", ptw.req(0).fire())
+    for (i <- 0 until Width) {
+      XSPerfAccumulate(s"access${i}", io.requestor(i).req.fire() && vmEnable)
+      XSPerfAccumulate(s"miss${i}", ptw.req(i).fire())
+    }
+
   }
   //val reqCycleCnt = Reg(UInt(16.W))
   //reqCycleCnt := reqCycleCnt + BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire || sfence.valid)

@@ -110,13 +110,15 @@ case class XSCoreParameters
     useDmode = false,
     sameCycle = true,
     normalReplacer = Some("plru"),
-    superReplacer = Some("plru")
+    superReplacer = Some("plru"),
+    shouldBlock = true
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     normalNSets = 128,
     normalNWays = 1,
     normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true
@@ -126,6 +128,7 @@ case class XSCoreParameters
     normalNSets = 128,
     normalNWays = 1,
     normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
     outReplace = true

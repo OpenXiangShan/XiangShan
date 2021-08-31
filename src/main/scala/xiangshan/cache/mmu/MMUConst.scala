@@ -40,7 +40,8 @@ case class TLBParameters
   normalAssociative: String = "fa", // "fa", "sa", "da", "sa" is not supported
   superAssociative: String = "fa", // must be fa
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
-  outReplace: Boolean = false
+  outReplace: Boolean = false,
+  shouldBlock: Boolean = false // only for perf, not support for io
 )
 
 case class L2TLBParameters
