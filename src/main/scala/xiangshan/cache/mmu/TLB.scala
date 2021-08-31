@@ -18,6 +18,7 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.internal.naming.chiselName
 import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
@@ -26,7 +27,7 @@ import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
 
-
+@chiselName
 class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
@@ -79,11 +80,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     superPage = true,
   )
 
-  val refill = ptw.resp.fire() && !sfence.valid
-  val nReplace = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-  val sReplace = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
-  val nRefillIdx = nReplace.way
-  val sRefillIdx = sReplace.way
 
   for (i <- 0 until Width) {
     normalPage.r_req_apply(
@@ -99,18 +95,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
       i = i
     )
   }
-  normalPage.w_apply(
-    valid = { if (q.normalAsVictim) false.B
-              else refill && ptw.resp.bits.entry.level.get === 2.U },
-    wayIdx = nRefillIdx,
-    data = ptw.resp.bits
-  )
-  superPage.w_apply(
-    valid = { if (q.normalAsVictim) refill
-              else refill && ptw.resp.bits.entry.level.get =/= 2.U },
-    wayIdx = sRefillIdx,
-    data = ptw.resp.bits
-  )
+
 
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
@@ -171,35 +156,54 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
       resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
-    (hit, miss, normal_hitVec.asBools() ++ super_hitVec.asBools(), validReg)
+    (hit, miss, normal_hitVec, super_hitVec, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
-  val hitVec = readResult.map(res => res._1)
-  val missVec = readResult.map(res => res._2)
-  val hitVecVec = readResult.map(res => res._3)
-  val validRegVec = readResult.map(res => res._4)
+  val hitVec = readResult.map(_._1)
+  val missVec = readResult.map(_._2)
+  val normalhitVecVec = readResult.map(_._3)
+  val superhitVecVec = readResult.map(_._4)
+  val validRegVec = readResult.map(_._5)
 
   // replacement
-  def get_access_index(one_hot: UInt): Valid[UInt] = {
+  def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
     val res = Wire(Valid(UInt(log2Up(one_hot.getWidth).W)))
-    res.valid := Cat(one_hot).orR
+    res.valid := Cat(one_hot).orR && valid
     res.bits := OHToUInt(one_hot)
     res
   }
-  def get_access(one_hot: Seq[Bool], stop: Int, start: Int): Valid[UInt] = {
-    val tmp = VecInit(one_hot).asUInt
-    get_access_index(tmp(stop, start))
+
+  val normal_refill_idx = if (q.normalAssociative == "fa") {
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
+    re.access(normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.way
+  } else { // set-acco && plru
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
+    re.access(vpn.map(get_idx(_, q.normalNSets)), normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
+      validRegVec(i))})
+    re.way(get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
   }
-  val nAccess = hitVecVec.map(a => get_access(a, q.normalNWays - 1, 0))
-  val sAccess = hitVecVec.map(a => get_access(a, q.normalNWays + q.superSize - 1, q.normalNWays))
-  if (Width == 1) {
-    when (nAccess(0).valid) { nReplace.access(nAccess(0).bits) }
-    when (sAccess(0).valid) { sReplace.access(sAccess(0).bits) }
-  } else {
-    nReplace.access(nAccess)
-    sReplace.access(sAccess)
+
+  val super_refill_idx = {
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
+    re.access(superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.way
   }
+
+  val refill = ptw.resp.fire() && !sfence.valid
+  normalPage.w_apply(
+    valid = { if (q.normalAsVictim) false.B
+    else refill && ptw.resp.bits.entry.level.get === 2.U },
+    wayIdx = normal_refill_idx,
+    data = ptw.resp.bits
+  )
+  superPage.w_apply(
+    valid = { if (q.normalAsVictim) refill
+    else refill && ptw.resp.bits.entry.level.get =/= 2.U },
+    wayIdx = super_refill_idx,
+    data = ptw.resp.bits
+  )
 
   for (i <- 0 until Width) {
     io.ptw.req(i).valid := validRegVec(i) && missVec(i) && !RegNext(refill)
@@ -228,20 +232,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   //XSPerfAccumulate("ptw_req_cycle", Mux(ptw.resp.fire(), reqCycleCnt, 0.U))
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
-  for (i <- 0 until q.normalNWays) {
-    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i) && v }
-    XSPerfAccumulate(s"NormalAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
-  }
-  for (i <- 0 until q.superSize) {
-    val indexHitVec = hitVecVec.zip(validRegVec).map{ case (h, v) => h(i + q.normalNWays) && v }
-    XSPerfAccumulate(s"SuperAccessIndex${i}", Mux(vmEnable, PopCount(indexHitVec), 0.U))
-  }
-  for (i <- 0 until q.normalNWays) {
-    XSPerfAccumulate(s"NormalRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) === 2.U && i.U === nRefillIdx)
-  }
-  for (i <- 0 until q.superSize) {
-    XSPerfAccumulate(s"SuperRefillIndex${i}", refill && ptw.resp.bits.entry.level.getOrElse(0.U) =/= 2.U && i.U === sRefillIdx)
-  }
 
   // Log
   for(i <- 0 until Width) {

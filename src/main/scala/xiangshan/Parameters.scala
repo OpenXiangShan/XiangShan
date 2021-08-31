@@ -116,7 +116,7 @@ case class XSCoreParameters
     name = "ldtlb",
     normalNSets = 128,
     normalNWays = 1,
-    normalAssociative = "da",
+    normalAssociative = "sa",
     superSize = 8,
     normalAsVictim = true
   ),
@@ -124,7 +124,7 @@ case class XSCoreParameters
     name = "sttlb",
     normalNSets = 128,
     normalNWays = 1,
-    normalAssociative = "da",
+    normalAssociative = "sa",
     superSize = 8,
     normalAsVictim = true
   ),
