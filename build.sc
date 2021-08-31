@@ -17,6 +17,7 @@
 import os.Path
 import mill._
 import scalalib._
+import coursier.maven.MavenRepository
 
 trait CommonModule extends ScalaModule {
   override def scalaVersion = "2.12.10"
@@ -28,10 +29,17 @@ trait CommonModule extends ScalaModule {
   override def compileIvyDeps = Agg(macroParadise)
 
   override def scalacPluginIvyDeps = Agg(macroParadise)
+
+  override def repositoriesTask = T.task {
+    super.repositoriesTask() ++ Seq(
+      MavenRepository("https://oss.sonatype.org/content/repositories/snapshots")
+    )
+  }
+
 }
 
 val chisel = Agg(
-  ivy"edu.berkeley.cs::chisel3:3.4.3"
+  ivy"edu.berkeley.cs::chisel3:3.5-SNAPSHOT"
 )
 
 object `api-config-chipsalliance` extends CommonModule {

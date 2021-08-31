@@ -19,7 +19,6 @@ package top
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
-
 import device.{AXI4RAMWrapper, SimJTAG}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.GTimer
