@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, BTlbPtwIO, BridgeTLB, PtwResp}
+import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
@@ -133,6 +133,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_st.io.sfence <> sfence
   dtlb_ld.io.csr <> tlbcsr
   dtlb_st.io.csr <> tlbcsr
+  if (ldtlbParams.outReplace) {
+    val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
+    dtlb_ld.io.replace <> replace_ld.io
+  }
+  if (sttlbParams.outReplace) {
+    val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
+    dtlb_st.io.replace <> replace_st.io
+  }
 
   if (!useBTlb) {
     io.ptw.req         <> (dtlb_ld.io.ptw.req ++ dtlb_st.io.ptw.req)
@@ -140,8 +148,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_st.io.ptw.resp.bits := io.ptw.resp.bits.data
     dtlb_ld.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR
     dtlb_st.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR
-
-    (dtlb_ld, dtlb_st)
   } else {
     val btlb = Module(new BridgeTLB(BTLBWidth, btlbParams))
     btlb.suggestName("btlb")

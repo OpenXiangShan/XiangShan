@@ -310,6 +310,24 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
+class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
+  val access = Flipped(new Bundle {
+    val sets = Output(Vec(Width, UInt(log2Up(nSets).W)))
+    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nSets).W))))
+  })
+
+  val refillIdx = Output(UInt(log2Up(nWays).W))
+  val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
+}
+
+class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
+  TlbBundle {
+  val normalPage = new ReplaceIO(Width, q.normalNSets, q.normalNWays)
+  val superPage = new ReplaceIO(Width, 1, q.superSize)
+
+  override def cloneType = (new TlbReplaceIO(Width, q)).asInstanceOf[this.type]
+}
+
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
@@ -373,11 +391,13 @@ class TlbBaseBundle(implicit p: Parameters) extends TlbBundle {
   val csr = Input(new TlbCsrBundle)
 }
 
-class TlbIO(Width: Int)(implicit p: Parameters) extends TlbBaseBundle {
+class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
+  TlbBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
+  val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
 
-  override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }
 
 class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {

@@ -124,7 +124,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
           superSize = 4,
-          normalAsVictim = true
+          normalAsVictim = true,
+          outReplace = true
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
@@ -132,7 +133,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
           normalAsVictim = true,
-          superSize = 4
+          superSize = 4,
+          outReplace = true
         ),
         btlbParameters = TLBParameters(
           name = "btlb",

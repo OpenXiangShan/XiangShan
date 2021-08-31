@@ -28,34 +28,35 @@ import xiangshan.backend.fu.util.HasCSRConst
 
 
 @chiselName
-class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst{
-  val io = IO(new TlbIO(Width))
+class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule with HasCSRConst {
+  val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
   if (q.sameCycle) {
     require(q.normalAssociative == "fa")
   }
 
-  val req    = io.requestor.map(_.req)
-  val resp   = io.requestor.map(_.resp)
-  val ptw    = io.ptw
+  val req = io.requestor.map(_.req)
+  val resp = io.requestor.map(_.resp)
+  val ptw = io.ptw
 
   val sfence = io.sfence
-  val csr    = io.csr
-  val satp   = csr.satp
-  val priv   = csr.priv
+  val csr = io.csr
+  val satp = csr.satp
+  val priv = csr.priv
   val ifecth = if (q.fetchi) true.B else false.B
-  val mode   = if (q.useDmode) priv.dmode else priv.imode
+  val mode = if (q.useDmode) priv.dmode else priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = if(EnbaleTlbDebug) (satp.mode === 8.U)
-                 else               (satp.mode === 8.U && (mode < ModeM))
+  val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
+  else (satp.mode === 8.U && (mode < ModeM))
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf((new VaBundle).cloneType))
   val vpn = reqAddr.map(_.vpn)
-  val cmd     = req.map(_.bits.cmd)
-  val valid   = req.map(_.valid)
+  val cmd = req.map(_.bits.cmd)
+  val valid = req.map(_.valid)
 
   def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
+
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
@@ -116,7 +117,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
 
-    /***************** next cycle when two cycle is false********************/
+    /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
@@ -134,25 +135,25 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/* TODO !isAMO*/)
-    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
+    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
+    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
     val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld    := (ldPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.st    := (stPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
     resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
-    when(!vmEnable){
+    when(!vmEnable) {
       resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-      resp(i).bits.excp.af.ld    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
-      resp(i).bits.excp.af.st    := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
+      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
+      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
       resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
@@ -174,7 +175,13 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     res
   }
 
-  val normal_refill_idx = if (q.normalAssociative == "fa") {
+  val normal_refill_idx = if (q.outReplace) {
+    io.replace.normalPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
+    io.replace.normalPage.access.touch_ways := normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
+      validRegVec(i))}
+    io.replace.normalPage.chosen_set := get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
+    io.replace.normalPage.refillIdx
+  } else if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
     re.access(normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
     re.way
@@ -185,7 +192,13 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     re.way(get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
   }
 
-  val super_refill_idx = {
+  val super_refill_idx = if (q.outReplace) {
+    io.replace.superPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
+    io.replace.superPage.access.touch_ways := superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
+      validRegVec(i))}
+    io.replace.superPage.chosen_set := DontCare
+    io.replace.superPage.refillIdx
+  } else {
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
     re.access(superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
     re.way
@@ -253,7 +266,29 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
 }
 
+class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
+  val io = IO(new TlbReplaceIO(Width, q))
 
+  if (q.normalAssociative == "fa") {
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
+    re.access(io.normalPage.access.touch_ways)
+    io.normalPage.refillIdx := re.way
+  } else { // set-acco && plru
+    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
+    re.access(io.normalPage.access.sets, io.normalPage.access.touch_ways)
+    io.normalPage.refillIdx := re.way(io.normalPage.chosen_set)
+  }
+
+  if (q.superAssociative == "fa") {
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
+    re.access(io.superPage.access.touch_ways)
+    io.superPage.refillIdx := re.way
+  } else { // set-acco && plru
+    val re = ReplacementPolicy.fromString(q.superReplacer, 1, q.superSize)
+    re.access(io.superPage.access.sets, io.superPage.access.touch_ways)
+    io.superPage.refillIdx := re.way(io.superPage.chosen_set)
+  }
+}
 
 object TLB {
   def apply
