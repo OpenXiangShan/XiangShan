@@ -227,19 +227,19 @@ package object xiangshan {
     def bgeu        = "b0_00_10_111".U
 
     // add & sub optype
-    def add         = "b0_01_00_000".U
-    def add_uw      = "b0_01_00_001".U
-    def sh1add      = "b0_01_00_010".U
-    def sh1add_uw   = "b0_01_00_011".U
-    def sh2add      = "b0_01_00_100".U
-    def sh2add_uw   = "b0_01_00_101".U
-    def sh3add      = "b0_01_00_110".U
-    def sh3add_uw   = "b0_01_00_111".U
+    def add_uw       = "b0_01_00_000".U
+    def add          = "b0_01_00_001".U
+    def sh1add_uw    = "b0_01_00_010".U
+    def sh1add       = "b0_01_00_011".U
+    def sh2add_uw    = "b0_01_00_100".U
+    def sh2add       = "b0_01_00_101".U
+    def sh3add_uw    = "b0_01_00_110".U
+    def sh3add       = "b0_01_00_111".U
 
 
     // shift optype
-    def sll         = "b0_10_00_000".U
-    def slli_uw     = "b0_10_00_001".U
+    def slli_uw     = "b0_10_00_000".U
+    def sll         = "b0_10_00_001".U
     def bclr        = "b0_10_00_100".U
     def bset        = "b0_10_00_101".U
     def binv        = "b0_10_00_110".U
@@ -263,7 +263,7 @@ package object xiangshan {
 
 
     // RV64 32bit optype
-    def addw        = "b1_01_00_000".U
+    def addw        = "b1_01_00_001".U
     def subw        = "b1_11_00_000".U
     def sllw        = "b1_10_00_000".U
     def srlw        = "b1_10_01_001".U
