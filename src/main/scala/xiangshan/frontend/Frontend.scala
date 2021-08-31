@@ -126,6 +126,50 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
+  val issueSlots = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && ibuffer.io.out(i).valid))
+  for (i <- 1 until DecodeWidth) {
+    assert(io.backend.cfVec(i).ready === io.backend.cfVec(0).ready)
+  }
+
+  val fetchStatus = RegInit(0.U(1.W))  // 0 for latency; 1 for bandwidth
+  fetchStatus := Mux(ifu.io.fetchPacket.valid, Mux(ifu.io.fetchPacket.bits.mask === 0.U, 0.U, 1.U), 0.U)
+
+  val frontendOutCnt = PopCount(ibuffer.io.out.map(_.valid))
+  val backendAccept = io.backend.cfVec(0).ready
+  val latencySlotT1 = Mux(backendAccept && (frontendOutCnt === 0.U), DecodeWidth.U, 0.U)
+  val bandWidthSlotT1 = frontendBubble - latencySlotT1
+
+  val frontendOutBubble = DecodeWidth.U - frontendOutCnt
+  val latencySlotT2 = Mux(backendAccept && (fetchStatus === 0.U), frontendOutBubble, 0.U)
+  val bandWidthSlotT2 = Mux(backendAccept && (fetchStatus === 1.U), frontendOutBubble, 0.U)
+  when (backendAccept && (fetchStatus === 1.U)) {
+    assert(frontendOutBubble =/= DecodeWidth.U)
+  }
+
+  val redirectLevelLatch = HoldUnless(io.backend.redirect_cfiUpdate.bits.level, needFlush)
+  val refillCnt = RegInit(0.U(2.W))
+  when (needFlush || refillCnt =/= 0.U) {
+    refillCnt := refillCnt + 1.U
+  }
+  when (refillCnt === 3.U) {
+    refillCnt := 0.U
+  }
+  val frontendRefill = (refillCnt =/= 0.U)
+  val isWalk = WireInit(false.B)
+  ExcitingUtils.addSink(isWalk, "TMA_backendiswalk")
+  val recoveryCondition = frontendRefill || isWalk
+  val recoveryBubble = Mux(recoveryCondition, frontendBubble, 0.U)
+
+  XSPerfAccumulate("TMA_frontendBubble", frontendBubble)
+  XSPerfAccumulate("TMA_top_totalslot", DecodeWidth.U)
+  XSPerfAccumulate("TMA_top_issueslot", issueSlots)
+  XSPerfAccumulate("TMA_frontend_latencyT1", latencySlotT1)
+  XSPerfAccumulate("TMA_frontend_bandwidthT1", bandWidthSlotT1)
+  XSPerfAccumulate("TMA_frontend_latencyT2", latencySlotT2)
+  XSPerfAccumulate("TMA_frontend_bandwidthT2", bandWidthSlotT2)
+  XSPerfAccumulate("TMA_frontend_recoveryBubble", recoveryBubble)
+  XSPerfAccumulate("TMA_frontend_recoveryBubbleBp", Mux(redirectLevelLatch === 0.U, recoveryBubble, 0.U))
+  XSPerfAccumulate("TMA_frontend_recoveryBubbleLv", Mux(redirectLevelLatch =/= 0.U, recoveryBubble, 0.U))
 
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 }

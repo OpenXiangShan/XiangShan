@@ -44,9 +44,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val req = DecoupledIO(new Bundle {
       val addr = UInt(PAddrBits.W)
     })
-    val resp = Flipped(ValidIO(new Bundle {
-      val data = UInt(MemBandWidth.W)
-    }))
+    val resp = Flipped(ValidIO(UInt(XLEN.W)))
   }
 
   val csr = Input(new TlbCsrBundle)
@@ -78,10 +76,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
 
-  val memRdata = mem.resp.bits.data
-  val memSelData = memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrReg(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
-  val memPtes = (0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
-  val memPte = memSelData.asTypeOf(new PteBundle)
+  val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val memPteReg = RegEnable(memPte, mem.resp.fire())
 
   val notFound = WireInit(false.B)
@@ -136,17 +131,17 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
-  val resp = Reg(io.resp.bits.cloneType)
+  val resp_pf = Reg(Bool())
+  val resp_level = Reg(UInt(2.W))
+  val resp_pte = Reg(new PteBundle())
   when (finish && !sfenceLatch) {
-    resp.source := RegEnable(io.req.bits.source, io.req.fire())
-    resp.resp.pf := level === 3.U || notFound
-    resp.resp.entry.tag := vpn
-    resp.resp.entry.ppn := memPte.ppn
-    resp.resp.entry.perm.map(_ := memPte.getPerm())
-    resp.resp.entry.level.map(_ := level)
+    resp_pf := level === 3.U || notFound
+    resp_level := level
+    resp_pte := memPte
   }
   io.resp.valid := state === s_resp
-  io.resp.bits := resp
+  io.resp.bits.source := RegEnable(io.req.bits.source, io.req.fire())
+  io.resp.bits.resp.apply(resp_pf, resp_level, resp_pte, vpn)
   io.req.ready := state === s_idle
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))

@@ -27,8 +27,15 @@ import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TLB, TlbPtwIO}
 import xiangshan.mem._
-import xiangshan.backend.fu.{FenceToSbuffer, HasExceptionNO}
+import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
+
+class Std(implicit p: Parameters) extends FunctionUnit {
+  io.in.ready := true.B
+  io.out.valid := io.in.valid
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.data := io.in.bits.src(0)
+}
 
 class MemBlock()(implicit p: Parameters) extends LazyModule {
 
@@ -169,10 +176,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // Lsq to load unit's rs
     // rs.io.storeData <> lsq.io.storeDataIn(i)
     lsq.io.storeDataIn(i) := io.stData(i)
-
-    // sync issue info to rs
-    lsq.io.storeIssue(i).valid := io.issue(exuParameters.LduCnt + i).valid
-    lsq.io.storeIssue(i).bits := io.issue(exuParameters.LduCnt + i).bits
 
     // sync issue info to store set LFST
     io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid

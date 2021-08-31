@@ -69,6 +69,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
       val fpdqFull  = Output(Bool())
       val lsdqFull  = Output(Bool())
     }
+    // From CSR: to control single step execution
+    val singleStep = Input(Bool())
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -97,6 +99,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   dispatch1.io.storeIssue <> io.storeIssue
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.flush <> io.flush
+  dispatch1.io.singleStep := io.singleStep
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops

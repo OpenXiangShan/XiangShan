@@ -370,7 +370,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
 
   def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) = {
     require((data.getWidth / XLEN) == num,
-      "input data length must be multiple of pte length")
+      s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
@@ -404,6 +404,14 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
+
+  def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
+    this.entry.level.map(_ := level)
+    this.entry.tag := vpn
+    this.entry.perm.map(_ := pte.getPerm())
+    this.entry.ppn := pte.ppn
+    this.pf := pf
+  }
 
   override def toPrintable: Printable = {
     p"entry:${entry} pf:${pf}"
