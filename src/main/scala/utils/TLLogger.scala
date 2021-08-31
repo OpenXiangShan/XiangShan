@@ -1,5 +1,6 @@
 package utils
 
+import bus.tilelink.TLMessages
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.experimental.StringParam
@@ -96,8 +97,10 @@ object TLLogger {
   def track(in: TLBundle, edge: TLEdgeIn, clock: Clock, reset: Reset)(name: String) = {
     val numClients = edge.client.endSourceId
 
-    // address map for Grant/AccesAck/ReleaseAck
-    val d_addrs = Reg(Vec(numClients, UInt(edge.bundle.addressBits.W)))
+    // Acquire/Get -> Grant
+    val a_d_addrs = Reg(Vec(numClients, UInt(edge.bundle.addressBits.W)))
+    // Release -> ReleaseAck
+    val c_d_addrs = Reg(Vec(numClients, UInt(edge.bundle.addressBits.W)))
     val a_log, b_log, c_log, d_log = WireInit(0.U.asTypeOf(new TLLog))
     val a_writer, b_writer, c_writer, d_writer = Module(new TLLogWriter(name))
     val timer = GTimer()
@@ -123,7 +126,7 @@ object TLLogger {
 
     when(in.a.fire()){
       logA(a_log, in.a.bits, timer)
-      d_addrs(in.a.bits.source) := in.a.bits.address
+      a_d_addrs(in.a.bits.source) := in.a.bits.address
     }
 
     when(in.b.fire()){
@@ -132,10 +135,17 @@ object TLLogger {
 
     when(in.c.fire()){
       logC(c_log, in.c.bits, timer)
+      c_d_addrs(in.c.bits.source) := in.c.bits.address
     }
 
     when(in.d.fire()){
-      logD(d_log, in.d.bits, timer, d_addrs(in.d.bits.source))
+      val a_d = a_d_addrs(in.d.bits.source)
+      val c_d = c_d_addrs(in.d.bits.source)
+      val addr = Mux(in.d.bits.opcode === TLMessages.ReleaseAck,
+        c_d,
+        a_d
+      )
+      logD(d_log, in.d.bits, timer, addr)
     }
 
   }
