@@ -186,7 +186,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
 })
 
 class WithL3DebugConfig extends Config(
-  new WithNKBL2(64) ++ new WithNKBL3(256, inclusive = false)
+  new WithNKBL3(256, inclusive = false) ++ new WithNKBL2(64)
 )
 
 class MinimalL3DebugConfig(n: Int = 1) extends Config(
