@@ -243,12 +243,21 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   resp.bits := DontCare
   // resp.bits.data := s2_word_decoded
   resp.bits.data := banked_data_resp_word.raw_data
-  // on miss or nack, upper level should replay request
+  // * on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
-  resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
+  // 
+  // * report a miss if bank conflict is detected
+  resp.bits.miss := !s2_hit || s2_nack || io.bank_conflict_slow
+  if (id == 0) {
+    // load pipe 0 will not be influenced by bank conflict
+    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
+  } else {
+    // load pipe 1 need replay when there is a bank conflict
+    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
+    XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
+  }
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

@@ -300,6 +300,19 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.bank_conflict_slow := RegNext(bank_conflict)
 
   for (bank_index <- 0 until DCacheBanks) {
+    //     Set Addr & Read Way Mask
+    //
+    //      Pipe 0      Pipe 1
+    //        +           +
+    //        |           |
+    // +------+-----------+-------+
+    //  X                        X
+    //   X                      +------+ Bank Addr Match
+    //    +---------+----------+
+    //              |
+    //     +--------+--------+
+    //     |    Data Bank    |
+    //     +-----------------+
     val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
       bank_addrs(i) === bank_index.U
     })))
