@@ -314,7 +314,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     //     |    Data Bank    |
     //     +-----------------+
     val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-      bank_addrs(i) === bank_index.U
+      bank_addrs(i) === bank_index.U && io.read(i).valid
     })))
     val bank_way_en = Mux(bank_addr_matchs(0), way_en(0), way_en(1))
     val bank_set_addr = Mux(bank_addr_matchs(0), set_addrs(0), set_addrs(1))
