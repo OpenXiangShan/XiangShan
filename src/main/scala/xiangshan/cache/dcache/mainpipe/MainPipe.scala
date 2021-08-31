@@ -577,10 +577,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
   io.data_write.bits.data := s3_amo_data_merged
 
+  val banked_wmask = VecInit(wmask.map(i => Cat(i.orR, i.orR))).asUInt
   io.banked_data_write.valid := s3_fire && need_write_data
   io.banked_data_write.bits.way_en := s3_way_en
   io.banked_data_write.bits.addr := s3_req.addr
-  io.banked_data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
+  io.banked_data_write.bits.wmask := banked_wmask
   io.banked_data_write.bits.data := s3_amo_data_merged.asUInt.asTypeOf(io.banked_data_write.bits.data.cloneType)
 
   // --------------------------------------------------------------------------------

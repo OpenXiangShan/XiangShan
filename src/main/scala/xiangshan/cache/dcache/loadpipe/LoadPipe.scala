@@ -177,7 +177,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s2_data = data_resp(get_row(s2_addr))
 
   val banked_data_resp = io.banked_data_resp
-  val banked_data_resp_word = io.banked_data_resp(addrToDCacheBank(s2_addr))
+  val bank_addr = addrToDCacheBank(s2_addr)
+  val banked_data_resp_word = io.banked_data_resp(bank_addr)
+  dontTouch(bank_addr)
 
   // select the word
   // the index of word in a row, in case rowBits != wordBits
