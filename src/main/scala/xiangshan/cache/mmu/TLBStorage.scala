@@ -108,6 +108,17 @@ class TLBFA(
     n
   }
 
+  XSPerfAccumulate(s"fa_access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _))
+  XSPerfAccumulate(s"fa_hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
+
+  for (i <- 0 until nWays) {
+    XSPerfAccumulate(s"fa_access_${i}", io.r.resp.map(a => a.valid && a.bits.hit && a.bits.hitVec(i)).fold(0.U)(_.asUInt
+    () + _.asUInt()))
+  }
+  for (i <- 0 until nWays) {
+    XSPerfAccumulate(s"fa_refill_${i}", io.w.valid && io.w.bits.wayIdx === i.U)
+  }
+
   println(s"tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
@@ -200,6 +211,38 @@ class TLBSA(
   }
 
   io.victim.out := DontCare
+
+  XSPerfAccumulate(s"SA_access", io.r.req.map(_.valid.asUInt()).fold(0.U)(_ + _))
+  XSPerfAccumulate(s"SA_hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
+
+  for (i <- 0 until nSets) {
+    for (j <- 0 until nWays) {
+      XSPerfAccumulate(s"SA_refill_${i}_${j}", (io.w.valid || io.victim.in.valid) &&
+        (Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)) === i.U) &&
+        (j.U === io.w.bits.wayIdx)
+      )
+    }
+  }
+
+  for (i <- 0 until nSets) {
+    for (j <- 0 until nWays) {
+      XSPerfAccumulate(s"SA_hit_${i}_${j}", io.r.resp.map(_.valid)
+        .zip(io.r.resp.map(_.bits.hitVec(j)))
+        .map{case(vi, hi) => vi && hi }
+        .zip(io.r.req.map(a => RegNext(get_idx(a.bits.vpn, nSets)) === i.U))
+        .map{a => (a._1 && a._2).asUInt()}
+        .fold(0.U)(_ + _)
+      )
+    }
+  }
+
+  for (i <- 0 until nSets) {
+    XSPerfAccumulate(s"SA_access_${i}", io.r.resp.map(_.valid)
+      .zip(io.r.req.map(a => RegNext(get_idx(a.bits.vpn, nSets)) === i.U))
+      .map{a => (a._1 && a._2).asUInt()}
+      .fold(0.U)(_ + _)
+    )
+  }
 
   println(s"tlb_sa: nSets:${nSets} nWays:${nWays}")
 }
