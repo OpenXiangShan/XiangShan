@@ -373,7 +373,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid &&
     !load_s1.io.dcacheKill && !io.lsq.forward.dataInvalidFast
   io.fastUop.bits := load_s1.io.out.bits.uop
-  io.fastUop.bits.cf.fastfwd := load_s1.io.out.bits.uop.ctrl.fuOpType === LSUOpType.ld
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
