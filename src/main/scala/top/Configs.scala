@@ -116,14 +116,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           superReplacer = Some("plru"),
           normalNWays = 4,
           normalNSets = 1,
-          superSize = 2
+          superNWays = 2
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
           normalNSets = 4, // when da or sa
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
-          superSize = 4,
+          superNWays = 4,
           normalAsVictim = true,
           outReplace = true
         ),
@@ -133,14 +133,14 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 1, // when fa or sa
           normalAssociative = "da",
           normalAsVictim = true,
-          superSize = 4,
+          superNWays = 4,
           outReplace = true
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
           normalNSets = 1,
           normalNWays = 8,
-          superSize = 2
+          superNWays = 2
         ),
         l2tlbParameters = L2TLBParameters(
           l1Size = 4,

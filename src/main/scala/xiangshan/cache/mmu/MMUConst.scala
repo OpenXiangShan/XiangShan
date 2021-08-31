@@ -33,7 +33,8 @@ case class TLBParameters
   sameCycle: Boolean = false,
   normalNSets: Int = 1, // when da or sa
   normalNWays: Int = 8, // when fa or sa
-  superSize: Int = 2,
+  superNSets: Int = 1,
+  superNWays: Int = 2,
   normalReplacer: Option[String] = Some("random"),
   superReplacer: Option[String] = Some("plru"),
   normalAssociative: String = "fa", // "fa", "sa", "da", "sa" is not supported

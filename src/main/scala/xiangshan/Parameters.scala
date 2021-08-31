@@ -117,7 +117,7 @@ case class XSCoreParameters
     normalNSets = 128,
     normalNWays = 1,
     normalAssociative = "sa",
-    superSize = 8,
+    superNWays = 8,
     normalAsVictim = true,
     outReplace = true
   ),
@@ -126,7 +126,7 @@ case class XSCoreParameters
     normalNSets = 128,
     normalNWays = 1,
     normalAssociative = "sa",
-    superSize = 8,
+    superNWays = 8,
     normalAsVictim = true,
     outReplace = true
   ),
@@ -134,7 +134,7 @@ case class XSCoreParameters
     name = "btlb",
     normalNSets = 1,
     normalNWays = 64,
-    superSize = 4,
+    superNWays = 4,
   ),
   useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),

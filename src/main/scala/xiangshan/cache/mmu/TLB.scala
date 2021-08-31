@@ -74,8 +74,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     associative = q.superAssociative,
     sameCycle = q.sameCycle,
     ports = Width,
-    nSets = 1,
-    nWays = q.superSize,
+    nSets = q.superNSets,
+    nWays = q.superNWays,
     sramSinglePort = sramSinglePort,
     normalPage = q.normalAsVictim,
     superPage = true,
@@ -91,7 +91,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
-      wayIdx = get_idx(vpn(i), q.superSize),
+      wayIdx = get_idx(vpn(i), q.superNWays),
       vpn = vpn(i),
       i = i
     )
@@ -199,7 +199,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     io.replace.superPage.chosen_set := DontCare
     io.replace.superPage.refillIdx
   } else {
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
     re.access(superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
     re.way
   }
@@ -260,7 +260,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   }
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superSize} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
@@ -280,11 +280,11 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
   }
 
   if (q.superAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superSize)
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
     re.access(io.superPage.access.touch_ways)
     io.superPage.refillIdx := re.way
   } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.superReplacer, 1, q.superSize)
+    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
     re.access(io.superPage.access.sets, io.superPage.access.touch_ways)
     io.superPage.refillIdx := re.way(io.superPage.chosen_set)
   }

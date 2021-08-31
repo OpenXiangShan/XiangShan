@@ -323,7 +323,7 @@ class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) exte
 class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   TlbBundle {
   val normalPage = new ReplaceIO(Width, q.normalNSets, q.normalNWays)
-  val superPage = new ReplaceIO(Width, 1, q.superSize)
+  val superPage = new ReplaceIO(Width, q.superNSets, q.superNWays)
 
   override def cloneType = (new TlbReplaceIO(Width, q)).asInstanceOf[this.type]
 }
