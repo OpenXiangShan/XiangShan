@@ -22,7 +22,7 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import hardfloat.CompareRecFN
+import fudian.{FCMP, FloatPoint}
 import xiangshan._
 
 class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
@@ -34,69 +34,93 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
   val inTag = ctrl.typeTagIn
   val outTag = ctrl.typeTagOut
   val wflags = ctrl.wflags
-  val src1 = RegEnable(unbox(io.in.src(0), ctrlIn.typeTagIn, None), regEnables(0))
-  val src2 = RegEnable(unbox(io.in.src(1), ctrlIn.typeTagIn, None), regEnables(0))
+  val src1 = RegEnable(FPU.unbox(io.in.src(0), ctrlIn.typeTagIn), regEnables(0))
+  val src2 = RegEnable(FPU.unbox(io.in.src(1), ctrlIn.typeTagIn), regEnables(0))
   val rmReg = RegEnable(rm, regEnables(0))
 
   val signNum = Mux(rmReg(1), src1 ^ src2, Mux(rmReg(0), ~src2, src2))
-  val fsgnj = Cat(signNum(fLen), src1(fLen-1, 0))
+  val fsgnj = VecInit(FPU.ftypes.map { t =>
+    Cat(signNum(t.len - 1), src1(t.len - 2, 0))
+  })(inTag)
+
+//  val signNum = Mux(rmReg(1), src1 ^ src2, Mux(rmReg(0), ~src2, src2))
+//  val fsgnj = Cat(signNum(fLen - 1), src1(fLen - 2, 0))
 
   val fsgnjMux = Wire(new Bundle() {
-    val data = UInt((XLEN+1).W)
+    val data = UInt(XLEN.W)
     val exc = UInt(5.W)
   })
   fsgnjMux.data := fsgnj
   fsgnjMux.exc := 0.U
 
-  val dcmp = Module(new CompareRecFN(maxExpWidth, maxSigWidth))
-  dcmp.io.a := src1
-  dcmp.io.b := src2
-  dcmp.io.signaling := !rmReg(1)
+  val scmp = Module(new FCMP(FPU.f32.expWidth, FPU.f64.precision))
+  val dcmp = Module(new FCMP(FPU.f64.expWidth, FPU.f64.precision))
+  val lt = VecInit(Seq(scmp, dcmp).map { fcmp =>
+    fcmp.io.a := src1
+    fcmp.io.b := src2
+    fcmp.io.signaling := !rmReg(1)
+    fcmp.io.lt || (fcmp.io.a.asSInt() < 0.S && fcmp.io.b.asSInt() >= 0.S)
+  })(inTag)
 
-  val lt = dcmp.io.lt || (dcmp.io.a.asSInt() < 0.S && dcmp.io.b.asSInt() >= 0.S)
-
-  when(wflags){
-    val isnan1 = maxType.isNaN(src1)
-    val isnan2 = maxType.isNaN(src2)
-    val isInvalid = maxType.isSNaN(src1) || maxType.isSNaN(src2)
+  val fminmax = FPU.ftypes map { t =>
+    val fcmp = Module(new FCMP(t.expWidth, t.precision))
+    fcmp.io.a := src1
+    fcmp.io.b := src2
+    fcmp.io.signaling := !rmReg(1)
+    val lt = fcmp.io.lt || (fcmp.io.a.asSInt() < 0.S && fcmp.io.b.asSInt() >= 0.S)
+    val fp_a = FloatPoint.fromUInt(fcmp.io.a, t.expWidth, t.precision).decode
+    val fp_b = FloatPoint.fromUInt(fcmp.io.b, t.expWidth, t.precision).decode
+    val isnan1 = fp_a.isNaN
+    val isnan2 = fp_b.isNaN
+    val isInv = fp_a.isSNaN || fp_b.isSNaN
     val isNaNOut = isnan1 && isnan2
     val isLHS = isnan2 || rmReg(0) =/= lt && !isnan1
-    fsgnjMux.exc := isInvalid << 4
-    fsgnjMux.data := Mux(isNaNOut, maxType.qNaN, Mux(isLHS, src1, src2))
+    val data = Mux(isNaNOut,
+      FloatPoint.defaultNaNUInt(t.expWidth, t.precision),
+      Mux(isLHS, src1, src2)
+    )
+    val exc = Cat(isInv, 0.U(4.W))
+    (data, exc)
   }
+  val (fminmax_data, fminmax_exc) = fminmax.unzip
+  when(wflags){
+    fsgnjMux.exc := VecInit(fminmax_exc)(inTag)
+    fsgnjMux.data := VecInit(fminmax_data)(inTag)
+  }
+
+//  val lt = dcmp.io.lt || (dcmp.io.a.asSInt() < 0.S && dcmp.io.b.asSInt() >= 0.S)
 
   val mux = WireInit(fsgnjMux)
-  for(t <- floatTypes.init){
-    when(outTag === typeTag(t).U){
-      mux.data := Cat(fsgnjMux.data >> t.recodedWidth, maxType.unsafeConvert(fsgnjMux.data, t))
-    }
+
+  val s2d = Module(new fudian.FPToFP(
+    FPU.f32.expWidth, FPU.f32.precision,
+    FPU.f64.expWidth, FPU.f64.precision
+  ))
+
+  val d2s = Module(new fudian.FPToFP(
+    FPU.f64.expWidth, FPU.f64.precision,
+    FPU.f32.expWidth, FPU.f32.precision
+  ))
+
+  for(fcvt <- Seq(s2d, d2s)){
+    fcvt.io.in := src1
+    fcvt.io.rm := rmReg
   }
+
+  val fcvt_data = Mux(inTag === FPU.D, d2s.io.result, s2d.io.result)
+  val fcvt_exc = Mux(inTag === FPU.D, d2s.io.fflags, s2d.io.fflags)
 
   when(ctrl.fcvt){
-    if(floatTypes.size > 1){
-      // widening conversions simply canonicalize NaN operands
-      val widened = Mux(maxType.isNaN(src1), maxType.qNaN, src1)
-      fsgnjMux.data := widened
-      fsgnjMux.exc := maxType.isSNaN(src1) << 4
-
-      // narrowing conversions require rounding (for RVQ, this could be
-      // optimized to use a single variable-position rounding unit, rather
-      // than two fixed-position ones)
-      for(outType <- floatTypes.init){
-        when(outTag === typeTag(outType).U && (typeTag(outType) == 0).B || (outTag < inTag)){
-          val narrower = Module(new hardfloat.RecFNToRecFN(maxType.exp, maxType.sig, outType.exp, outType.sig))
-          narrower.io.in := src1
-          narrower.io.roundingMode := rmReg
-          narrower.io.detectTininess := hardfloat.consts.tininess_afterRounding
-          val narrowed = sanitizeNaN(narrower.io.out, outType)
-          mux.data := Cat(fsgnjMux.data >> narrowed.getWidth, narrowed)
-          mux.exc := narrower.io.exceptionFlags
-        }
-      }
-    }
+    mux.data := fcvt_data
+    mux.exc := fcvt_exc
   }
 
-  io.out.data := RegEnable(mux.data, regEnables(1))
+  val boxed_data = Mux(outTag === FPU.S,
+    FPU.box(mux.data, FPU.S),
+    FPU.box(mux.data, FPU.D)
+  )
+
+  io.out.data := RegEnable(boxed_data, regEnables(1))
   fflags := RegEnable(mux.exc, regEnables(1))
 }
 
