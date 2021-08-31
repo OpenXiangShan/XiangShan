@@ -494,7 +494,7 @@ package object xiangshan {
     writeIntRf = false,
     writeFpRf = true,
     hasRedirect = false,
-    UncertainLatency()
+    CertainLatency(2)
   )
 
   val divCfg = FuConfig(

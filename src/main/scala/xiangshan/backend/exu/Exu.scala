@@ -73,11 +73,13 @@ case class ExuConfig
     if (lats.exists(x => x.latencyVal.isEmpty)) {
       UncertainLatency()
     } else {
-      val x = lats.head
-      for (l <- lats.drop(1)) {
-        require(x.latencyVal.get == l.latencyVal.get)
+      if(
+        lats.drop(1).map(_.latencyVal.get == lats.head.latencyVal.get).forall(eq => eq)
+      ) {
+        lats.head
+      } else {
+        UncertainLatency()
       }
-      x
     }
   }
   // NOTE: dirty code for MulDivExeUnit
