@@ -289,7 +289,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
-    way_en(rport_index) := RegNext(io.read(rport_index).bits.way_en)
+    way_en(rport_index) := io.read(rport_index).bits.way_en
   })
 
   // read each bank, get bank result

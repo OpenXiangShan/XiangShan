@@ -245,7 +245,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core modules
-  val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
+  val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val storeReplayUnit = Module(new StoreReplayQueue)
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
 
@@ -314,6 +314,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   newDataArray.io.resp(0) <> ldu(0).io.banked_data_resp
   newDataArray.io.resp(1) <> ldu(1).io.banked_data_resp
   newDataArray.io.resp(1) <> mainPipe.io.banked_data_resp
+
+  ldu(0).io.bank_conflict_fast := false.B
+  ldu(1).io.bank_conflict_fast := newDataArray.io.bank_conflict_fast
+  ldu(0).io.bank_conflict_slow := false.B
+  ldu(1).io.bank_conflict_slow := newDataArray.io.bank_conflict_slow
 
   //----------------------------------------
   // load pipe
