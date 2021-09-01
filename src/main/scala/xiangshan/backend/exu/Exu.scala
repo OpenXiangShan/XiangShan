@@ -73,18 +73,22 @@ case class ExuConfig
     if (lats.exists(x => x.latencyVal.isEmpty)) {
       UncertainLatency()
     } else {
-      val x = lats.head
-      for (l <- lats.drop(1)) {
-        require(x.latencyVal.get == l.latencyVal.get)
+      if(
+        lats.drop(1).map(_.latencyVal.get == lats.head.latencyVal.get).forall(eq => eq)
+      ) {
+        lats.head
+      } else {
+        UncertainLatency()
       }
-      x
     }
   }
   // NOTE: dirty code for MulDivExeUnit
   val hasCertainLatency = if (name == "MulDivExeUnit") true else latency.latencyVal.nonEmpty
   val hasUncertainlatency = if (name == "MulDivExeUnit") true else latency.latencyVal.isEmpty
   val wakeupFromRS = hasCertainLatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
+  val allWakeupFromRS = !hasUncertainlatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
   val wakeupFromExu = !wakeupFromRS
+  val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
@@ -151,7 +155,6 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Seq[Bool] = {
     if (needArbiter) {
       if(in.size == 1){
-        require(!config.hasFastUopOut)
         in.head.ready := out.ready
         out.bits.data := in.head.bits.data
         out.bits.uop := in.head.bits.uop
@@ -168,7 +171,6 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
         arb.io.out <> out
       }
     } else {
-      require(!config.hasFastUopOut)
       in.foreach(_.ready := out.ready)
       val sel = Mux1H(in.map(x => x.valid -> x))
       out.bits.data := sel.bits.data

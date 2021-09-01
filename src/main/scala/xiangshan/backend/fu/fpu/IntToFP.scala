@@ -22,104 +22,65 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import hardfloat.INToRecFN
 import utils.{SignExt, ZeroExt}
-import xiangshan._
+import xiangshan.backend.fu.HasPipelineReg
+import xiangshan.i2fCfg
 
-class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
+class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
+  val regEnables = IO(Input(Vec(latency, Bool())))
 
-  val in_valid, out_ready = IO(Input(Bool()))
-  val in_ready, out_valid = IO(Output(Bool()))
-  val kill_w, kill_r = IO(Input(Bool()))
-
-  val s_idle :: s_cvt :: s_ieee :: s_finish :: Nil = Enum(4)
-  val state = RegInit(s_idle)
-
-
-  val in_fire = in_valid && in_ready
-  val out_fire = out_valid && out_ready
-  in_ready := state === s_idle
-  out_valid := state === s_finish
-
-  val src1 = RegEnable(io.in.src(0)(XLEN-1, 0), in_fire)
-  val rmReg = RegEnable(rm, in_fire)
-  val ctrl = RegEnable(io.in.fpCtrl, in_fire)
-
-  switch(state){
-    is(s_idle){
-      when(in_fire && !kill_w){
-        state := s_cvt
-      }
-    }
-    is(s_cvt){
-      state := s_ieee
-    }
-    is(s_ieee){
-      state := s_finish
-    }
-    is(s_finish){
-      when(out_fire){
-        state := s_idle
-      }
-    }
-  }
-  when(state =/= s_idle && kill_r){
-    state := s_idle
-  }
-
-  /*
-      s_cvt
-   */
-  val tag = ctrl.typeTagIn
+  //  stage1
+  val ctrl = io.in.fpCtrl
+  val in = io.in.src(0)
   val typ = ctrl.typ
-  val wflags = ctrl.wflags
+  val intValue = RegEnable(Mux(ctrl.wflags,
+    Mux(typ(1),
+      Mux(typ(0), ZeroExt(in, XLEN), SignExt(in, XLEN)),
+      Mux(typ(0), ZeroExt(in(31, 0), XLEN), SignExt(in(31, 0), XLEN))
+    ),
+    in
+  ), regEnables(0))
+  val ctrlReg = RegEnable(ctrl, regEnables(0))
+  val rmReg = RegEnable(rm, regEnables(0))
+
+  // stage2
+  val s2_tag = ctrlReg.typeTagOut
+  val s2_wflags = ctrlReg.wflags
+  val s2_typ = ctrlReg.typ
 
   val mux = Wire(new Bundle() {
-    val data = UInt((XLEN+1).W)
+    val data = UInt(XLEN.W)
     val exc = UInt(5.W)
   })
-  mux.data := recode(src1, tag)
+
+  mux.data := intValue
   mux.exc := 0.U
 
-  val intValue = Mux(typ(1),
-    Mux(typ(0), ZeroExt(src1, XLEN), SignExt(src1, XLEN)),
-    Mux(typ(0), ZeroExt(src1(31, 0), XLEN), SignExt(src1(31, 0), XLEN))
-  )
-
-  when(wflags){
-    val i2fResults = for(t <- floatTypes) yield {
-      val i2f = Module(new INToRecFN(XLEN, t.exp, t.sig))
-      i2f.io.signedIn := ~typ(0)
-      i2f.io.in := intValue
-      i2f.io.roundingMode := rmReg
-      i2f.io.detectTininess := hardfloat.consts.tininess_afterRounding
-      (sanitizeNaN(i2f.io.out, t), i2f.io.exceptionFlags)
+  when(s2_wflags){
+    val i2fResults = for(t <- FPU.ftypes) yield {
+      val i2f = Module(new fudian.IntToFP(t.expWidth, t.precision))
+      i2f.io.sign := ~s2_typ(0)
+      i2f.io.long := s2_typ(1)
+      i2f.io.int := intValue
+      i2f.io.rm := rmReg
+      (i2f.io.result, i2f.io.fflags)
     }
     val (data, exc) = i2fResults.unzip
-    mux.data := VecInit(data)(tag)
-    mux.exc := VecInit(exc)(tag)
+    mux.data := VecInit(data)(s2_tag)
+    mux.exc := VecInit(exc)(s2_tag)
   }
 
-  val muxReg = Reg(mux.cloneType)
-  when(state === s_cvt){
-    muxReg := mux
-  }.elsewhen(state === s_ieee){
-    muxReg.data := ieee(box(muxReg.data, ctrl.typeTagOut))
-  }
+  // stage3
+  val s3_out = RegEnable(mux, regEnables(1))
+  val s3_tag = RegEnable(s2_tag, regEnables(1))
 
-  fflags := muxReg.exc
-  io.out.data := muxReg.data
+  fflags := s3_out.exc
+  io.out.data := FPU.box(s3_out.data, s3_tag)
 }
 
-class IntToFP(implicit p: Parameters) extends FPUSubModule {
-  override val dataModule = Module(new IntToFPDataModule)
-  dataModule.in_valid := io.in.valid
-  dataModule.out_ready := io.out.ready
+class IntToFP(implicit p: Parameters) extends FPUSubModule with HasPipelineReg {
+  override def latency: Int = i2fCfg.latency.latencyVal.get
+  override val dataModule = Module(new IntToFPDataModule(latency))
   connectDataModule
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  dataModule.kill_w := io.in.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
-  dataModule.kill_r := uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
-  io.in.ready := dataModule.in_ready
-  io.out.valid := dataModule.out_valid
-  io.out.bits.uop := uopReg
+  dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))
 }

@@ -19,7 +19,6 @@ package xiangshan.mem
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 import xiangshan._
 import xiangshan.cache._
@@ -29,6 +28,7 @@ import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.frontend.FtqPtr
+import xiangshan.backend.fu.fpu.FPU
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -46,22 +46,19 @@ object LqPtr {
   }
 }
 
-trait HasFpLoadHelper { this: HasFPUParameters =>
-  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
-    LookupTree(uop.ctrl.fuOpType, List(
-      LSUOpType.lw   -> recode(rdata(31, 0), S),
-      LSUOpType.ld   -> recode(rdata(63, 0), D)
-    ))
-  }
-}
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
     val fpWen = uop.ctrl.fpWen
     LookupTree(uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, Cat(Fill(32, 1.U(1.W)), rdata(31, 0)), SignExt(rdata(31, 0), XLEN)),
-      LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
+      /*
+          riscv-spec-20191213: 12.2 NaN Boxing of Narrower Values
+          Any operation that writes a narrower result to an f register must write
+          all 1s to the uppermost FLEN−n bits to yield a legal NaN-boxed value.
+      */
+      LSUOpType.lw   -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.ld   -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), XLEN)),
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
