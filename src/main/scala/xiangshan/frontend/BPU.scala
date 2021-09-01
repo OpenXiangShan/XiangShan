@@ -366,10 +366,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s1_taken = Mux(resp.s1.preds.hit, resp.s1.real_br_taken_mask.asUInt =/= 0.U, false.B)
   val s1_predicted_ghist = s1_ghist.update(s1_shift, s1_taken)
 
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug(p"[hit] ${resp.s1.preds.hit} [s1_real_br_taken_mask] ${Binary(resp.s1.real_br_taken_mask.asUInt)} [s1_shift] ${s1_shift} [s1_taken] ${s1_taken}\n")
-    XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
-  }
+  XSDebug(p"[hit] ${resp.s1.preds.hit} [s1_real_br_taken_mask] ${Binary(resp.s1.real_br_taken_mask.asUInt)} [s1_shift] ${s1_shift} [s1_taken] ${s1_taken}\n")
+  XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
 
   when(s1_valid) {
     s0_pc := resp.s1.target
@@ -398,12 +396,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       s2_redirect := true.B
       s0_pc := resp.s2.target
       s0_phist := (s2_phist << 1) | s2_pc(instOffsetBits)
-      if (!env.FPGAPlatform && env.EnablePerfDebug) {
-        XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.target)}\n")
-        XSDebug(p"s2_correct_s1_ghist=$s2_correct_s1_ghist\n")
-        XSDebug(p"s1_ghist=${Binary(s1_ghist.predHist)}\n")
-        XSDebug(p"s2_predicted_ghist=${Binary(s2_predicted_ghist.predHist)}\n")
-      }
+      XSDebug(p"s1_valid=$s1_valid, s1_pc=${Hexadecimal(s1_pc)}, s2_resp_target=${Hexadecimal(resp.s2.target)}\n")
+      XSDebug(p"s2_correct_s1_ghist=$s2_correct_s1_ghist\n")
+      XSDebug(p"s1_ghist=${Binary(s1_ghist.predHist)}\n")
+      XSDebug(p"s2_predicted_ghist=${Binary(s2_predicted_ghist.predHist)}\n")
     }
   }
 
@@ -411,17 +407,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_saw_s1_hit = RegEnable(resp.s1.preds.hit, s1_fire)
   val s2_redirect_target_both_hit = s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit
 
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    XSPerfAccumulate("s2_redirect_because_s1_not_valid", s2_fire && !s1_valid)
-    XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
-    XSPerfAccumulate("s2_redirect_target_diff_s1_nhit_s2_hit", s2_redirect_target && !s2_saw_s1_hit &&  resp.s2.preds.hit)
-    XSPerfAccumulate("s2_redirect_target_diff_s1_hit_s2_nhit", s2_redirect_target &&  s2_saw_s1_hit && !resp.s2.preds.hit)
-    XSPerfAccumulate("s2_redirect_target_diff_both_hit",  s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit)
-    XSPerfAccumulate("s2_redirect_br_direction_diff",
-      s2_redirect_target_both_hit &&
-      RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
-    XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
-  }
+  XSPerfAccumulate("s2_redirect_because_s1_not_valid", s2_fire && !s1_valid)
+  XSPerfAccumulate("s2_redirect_because_target_diff", s2_fire && s1_valid && s1_pc =/= resp.s2.target)
+  XSPerfAccumulate("s2_redirect_target_diff_s1_nhit_s2_hit", s2_redirect_target && !s2_saw_s1_hit &&  resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_target_diff_s1_hit_s2_nhit", s2_redirect_target &&  s2_saw_s1_hit && !resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_target_diff_both_hit",  s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit)
+  XSPerfAccumulate("s2_redirect_br_direction_diff",
+    s2_redirect_target_both_hit &&
+    RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
+  XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
   // s3
   val s3_shift = Mux(resp.s3.preds.hit,
@@ -485,47 +479,43 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     val phNewBit = redirect.cfiUpdate.phNewBit
     s0_phist := (oldPh << 1) | phNewBit
 
-    if (!env.FPGAPlatform && env.EnablePerfDebug) {
-      XSDebug(io.ftq_to_bpu.redirect.valid, p"-------------redirect Repair------------\n")
-      // XSDebug(io.ftq_to_bpu.redirect.valid, p"taken_mask=${Binary(taken_mask.asUInt)}, brValids=${Binary(brValids.asUInt)}\n")
-      XSDebug(io.ftq_to_bpu.redirect.valid, p"isBr: ${isBr}, taken: ${taken}, addIntoHist: ${addIntoHist}, shift: ${shift}\n")
-      XSDebug(io.ftq_to_bpu.redirect.valid, p"oldGh   =${Binary(oldGh.predHist)}\n")
-      XSDebug(io.ftq_to_bpu.redirect.valid, p"updateGh=${Binary(updatedGh.predHist)}\n")
-    }
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"-------------redirect Repair------------\n")
+    // XSDebug(io.ftq_to_bpu.redirect.valid, p"taken_mask=${Binary(taken_mask.asUInt)}, brValids=${Binary(brValids.asUInt)}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"isBr: ${isBr}, taken: ${taken}, addIntoHist: ${addIntoHist}, shift: ${shift}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"oldGh   =${Binary(oldGh.predHist)}\n")
+    XSDebug(io.ftq_to_bpu.redirect.valid, p"updateGh=${Binary(updatedGh.predHist)}\n")
 
   }
 
-  if(debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
-    XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")
-    XSDebug(io.ftq_to_bpu.redirect.valid, p"Redirect from ftq\n")
+  XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
+  XSDebug(io.ftq_to_bpu.update.valid, p"Update from ftq\n")
+  XSDebug(io.ftq_to_bpu.redirect.valid, p"Redirect from ftq\n")
 
-    XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire, s0_pc)
-    XSDebug("[BP1] v=%d r=%d cr=%d fire=%d             flush=%d pc=%x\n",
-      s1_valid, s1_ready, s1_components_ready, s1_fire, s1_flush, s1_pc)
-    XSDebug("[BP2] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
-    s2_valid, s2_ready, s2_components_ready, s2_fire, s2_redirect, s2_flush, s2_pc)
-    XSDebug("[BP3] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
-    s3_valid, s3_ready, s3_components_ready, s3_fire, s3_redirect, s3_flush, s3_pc)
-    XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
-    XSDebug("resp.s1.target=%x\n", resp.s1.target)
-    XSDebug("resp.s2.target=%x\n", resp.s2.target)
-    XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
-    XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
-    XSDebug("s2_ghist: %b\n", s2_ghist.predHist)
-    XSDebug("s3_ghist: %b\n", s3_ghist.predHist)
-    XSDebug("s2_predicted_ghist: %b\n", s2_predicted_ghist.predHist)
-    XSDebug("s3_predicted_ghist: %b\n", s3_predicted_ghist.predHist)
-    XSDebug("s3_correct_s2_ghist: %b, s3_correct_s1_ghist: %b, s2_correct_s1_ghist: %b\n",
-    s3_correct_s2_ghist,  s3_correct_s1_ghist,  s2_correct_s1_ghist)
-
-
-    io.ftq_to_bpu.update.bits.display(io.ftq_to_bpu.update.valid)
-    io.ftq_to_bpu.redirect.bits.display(io.ftq_to_bpu.redirect.valid)
+  XSDebug("[BP0]                 fire=%d                      pc=%x\n", s0_fire, s0_pc)
+  XSDebug("[BP1] v=%d r=%d cr=%d fire=%d             flush=%d pc=%x\n",
+    s1_valid, s1_ready, s1_components_ready, s1_fire, s1_flush, s1_pc)
+  XSDebug("[BP2] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
+  s2_valid, s2_ready, s2_components_ready, s2_fire, s2_redirect, s2_flush, s2_pc)
+  XSDebug("[BP3] v=%d r=%d cr=%d fire=%d redirect=%d flush=%d pc=%x\n",
+  s3_valid, s3_ready, s3_components_ready, s3_fire, s3_redirect, s3_flush, s3_pc)
+  XSDebug("[FTQ] ready=%d\n", io.bpu_to_ftq.resp.ready)
+  XSDebug("resp.s1.target=%x\n", resp.s1.target)
+  XSDebug("resp.s2.target=%x\n", resp.s2.target)
+  XSDebug("s0_ghist: %b\n", s0_ghist.predHist)
+  XSDebug("s1_ghist: %b\n", s1_ghist.predHist)
+  XSDebug("s2_ghist: %b\n", s2_ghist.predHist)
+  XSDebug("s3_ghist: %b\n", s3_ghist.predHist)
+  XSDebug("s2_predicted_ghist: %b\n", s2_predicted_ghist.predHist)
+  XSDebug("s3_predicted_ghist: %b\n", s3_predicted_ghist.predHist)
+  XSDebug("s3_correct_s2_ghist: %b, s3_correct_s1_ghist: %b, s2_correct_s1_ghist: %b\n",
+  s3_correct_s2_ghist,  s3_correct_s1_ghist,  s2_correct_s1_ghist)
 
 
-    XSPerfAccumulate("s2_redirect", s2_redirect)
-    XSPerfAccumulate("s3_redirect", s3_redirect)
+  io.ftq_to_bpu.update.bits.display(io.ftq_to_bpu.update.valid)
+  io.ftq_to_bpu.redirect.bits.display(io.ftq_to_bpu.redirect.valid)
 
-  }
+
+  XSPerfAccumulate("s2_redirect", s2_redirect)
+  XSPerfAccumulate("s3_redirect", s3_redirect)
+
 }

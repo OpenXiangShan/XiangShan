@@ -166,22 +166,20 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   bank.update_write_tag := u_tag
   bank.update_write_entry := update.ftb_entry
 
-  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
-    XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
-      io.out.resp.s1.target, io.out.resp.s1.real_taken_mask.asUInt, io.out.resp.s1.preds.taken_mask.asUInt, read_entry.brValids.asUInt, read_entry.jmpValid.asUInt)
+  XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
+  XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
+    io.out.resp.s1.target, io.out.resp.s1.real_taken_mask.asUInt, io.out.resp.s1.preds.taken_mask.asUInt, read_entry.brValids.asUInt, read_entry.jmpValid.asUInt)
 
-    XSDebug(u_valid, "[update]Update from ftq\n")
-    XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, getTag(u_pc))
-    XSDebug(u_valid, "[update]taken_mask=%b, brValids=%b, jmpValid=%b\n",
-      u_taken_mask.asUInt, update.ftb_entry.brValids.asUInt, update.ftb_entry.jmpValid)
+  XSDebug(u_valid, "[update]Update from ftq\n")
+  XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, getTag(u_pc))
+  XSDebug(u_valid, "[update]taken_mask=%b, brValids=%b, jmpValid=%b\n",
+    u_taken_mask.asUInt, update.ftb_entry.brValids.asUInt, update.ftb_entry.jmpValid)
 
-    XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && bank.read_hit)
-    XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !bank.read_hit)
+  XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && bank.read_hit)
+  XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !bank.read_hit)
 
-    XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
-    XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
-  }
+  XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
+  XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
 
 
 }

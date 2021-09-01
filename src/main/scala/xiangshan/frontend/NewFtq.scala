@@ -894,8 +894,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.old_entry         := ftbEntryGen.is_old_entry
   update.preds.taken_mask  := ftbEntryGen.taken_mask
 
+  // ******************************************************************************
+  // **************************** commit perf counters ****************************
+  // ******************************************************************************
 
-  // commit perf counters
   val commit_inst_mask    = VecInit(commit_state.map(c => c === c_commited && do_commit)).asUInt
   val commit_mispred_mask = commit_mispredict.asUInt
   val commit_not_mispred_mask = ~commit_mispred_mask
@@ -912,168 +914,164 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
 
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    // Cfi Info
-    for (i <- 0 until PredictWidth) {
-      val pc = commit_pc_bundle.startAddr + (i * instBytes).U
-      val v = commit_state(i) === c_commited
-      val isBr = commit_pd.brMask(i)
-      val isJmp = commit_pd.jmpInfo.valid && commit_pd.jmpOffset === i.U
-      val isCfi = isBr || isJmp
-      val isTaken = commit_cfi.valid && commit_cfi.bits === i.U
-      val misPred = commit_mispredict(i)
-      val ghist = commit_spec_meta.ghist.predHist
-      val predCycle = commit_meta.meta(63, 0)
-      val target = commit_target
-      
-      val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
-      val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
-      val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
-      XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
-      p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
-      p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
-      p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
-    }
-
-    val enq = io.fromBpu.resp
-    val perf_redirect = io.fromBackend.stage2Redirect
-
-    XSPerfAccumulate("entry", validEntries)
-    XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
-    XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
-    XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
-    XSPerfAccumulate("predecodeRedirect", fromIfuRedirect.valid)
+  // Cfi Info
+  for (i <- 0 until PredictWidth) {
+    val pc = commit_pc_bundle.startAddr + (i * instBytes).U
+    val v = commit_state(i) === c_commited
+    val isBr = commit_pd.brMask(i)
+    val isJmp = commit_pd.jmpInfo.valid && commit_pd.jmpOffset === i.U
+    val isCfi = isBr || isJmp
+    val isTaken = commit_cfi.valid && commit_cfi.bits === i.U
+    val misPred = commit_mispredict(i)
+    val ghist = commit_spec_meta.ghist.predHist
+    val predCycle = commit_meta.meta(63, 0)
+    val target = commit_target
     
-    XSPerfAccumulate("to_ifu_bubble", io.toIfu.req.ready && !io.toIfu.req.valid)
-
-    XSPerfAccumulate("to_ifu_stall", io.toIfu.req.valid && !io.toIfu.req.ready)
-    XSPerfAccumulate("from_bpu_real_bubble", !enq.valid && enq.ready && allowBpuIn)
-
-    val from_bpu = io.fromBpu.resp.bits
-    def in_entry_len_map_gen(resp: BranchPredictionBundle)(stage: String) = {
-      val entry_len = (resp.ftb_entry.getFallThrough(resp.pc) - resp.pc) >> instOffsetBits
-      val entry_len_recording_vec = (1 to PredictWidth+1).map(i => entry_len === i.U)
-      val entry_len_map = (1 to PredictWidth+1).map(i =>
-        f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.valid)
-      ).foldLeft(Map[String, UInt]())(_+_)
-      entry_len_map
-    }
-    val s1_entry_len_map = in_entry_len_map_gen(from_bpu.s1)("s1")
-    val s2_entry_len_map = in_entry_len_map_gen(from_bpu.s2)("s2")
-    val s3_entry_len_map = in_entry_len_map_gen(from_bpu.s3)("s3")
-
-    val to_ifu = io.toIfu.req.bits
-    val to_ifu_entry_len = (to_ifu.fallThruAddr - to_ifu.startAddr) >> instOffsetBits
-    val to_ifu_entry_len_recording_vec = (1 to PredictWidth+1).map(i => to_ifu_entry_len === i.U)
-    val to_ifu_entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"to_ifu_ftb_entry_len_$i" -> (to_ifu_entry_len_recording_vec(i-1) && io.toIfu.req.fire)
-    ).foldLeft(Map[String, UInt]())(_+_)
-
-
-    
-    val commit_num_inst_recording_vec = (1 to PredictWidth).map(i => PopCount(commit_inst_mask) === i.U)
-    val commit_num_inst_map = (1 to PredictWidth).map(i => 
-      f"commit_num_inst_$i" -> (commit_num_inst_recording_vec(i-1) && do_commit)
-    ).foldLeft(Map[String, UInt]())(_+_)
-
-
-
-    val commit_jal_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJal.asTypeOf(UInt(1.W)))
-    val commit_jalr_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJalr.asTypeOf(UInt(1.W)))
-    val commit_call_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasCall.asTypeOf(UInt(1.W)))
-    val commit_ret_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasRet.asTypeOf(UInt(1.W)))
-    
-
-    val mbpBRights = mbpRights & commit_br_mask
-    val mbpJRights = mbpRights & commit_jal_mask
-    val mbpIRights = mbpRights & commit_jalr_mask
-    val mbpCRights = mbpRights & commit_call_mask
-    val mbpRRights = mbpRights & commit_ret_mask
-
-    val mbpBWrongs = mbpWrongs & commit_br_mask
-    val mbpJWrongs = mbpWrongs & commit_jal_mask
-    val mbpIWrongs = mbpWrongs & commit_jalr_mask
-    val mbpCWrongs = mbpWrongs & commit_call_mask
-    val mbpRWrongs = mbpWrongs & commit_ret_mask
-
-    val update_valid = io.toBpu.update.valid
-    def u(cond: Bool) = update_valid && cond
-    val ftb_false_hit = u(update.false_hit)
-    val ftb_hit = u(commit_hit === h_hit)
-
-    val ftb_new_entry = u(ftbEntryGen.is_init_entry)
-    val ftb_new_entry_only_br = ftb_new_entry && !update.ftb_entry.jmpValid
-    val ftb_new_entry_only_jmp = ftb_new_entry && !update.ftb_entry.brValids(0)
-    val ftb_new_entry_has_br_and_jmp = ftb_new_entry && update.ftb_entry.brValids(0) && update.ftb_entry.jmpValid
-
-    val ftb_old_entry = u(ftbEntryGen.is_old_entry)
-    
-    val ftb_modified_entry = u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified || ftbEntryGen.is_always_taken_modified)
-    val ftb_modified_entry_new_br = u(ftbEntryGen.is_new_br)
-    val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
-    val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
-    val ftb_modified_entry_always_taken = ftb_modified_entry && ftbEntryGen.is_always_taken_modified
-
-    val ftb_entry_len = (ftbEntryGen.new_entry.getFallThrough(update.pc) - update.pc) >> instOffsetBits
-    val ftb_entry_len_recording_vec = (1 to PredictWidth+1).map(i => ftb_entry_len === i.U)
-    val ftb_init_entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_new_entry)
-    ).foldLeft(Map[String, UInt]())(_+_)
-    val ftb_modified_entry_len_map = (1 to PredictWidth+1).map(i =>
-      f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_modified_entry)
-    ).foldLeft(Map[String, UInt]())(_+_)
-    
-    val ftq_occupancy_map = (0 to FtqSize).map(i =>
-      f"ftq_has_entry_$i" ->( validEntries === i.U)
-    ).foldLeft(Map[String, UInt]())(_+_)
-
-    val perfCountsMap = Map(
-      "BpInstr" -> PopCount(mbpInstrs),
-      "BpBInstr" -> PopCount(mbpBRights | mbpBWrongs),
-      "BpRight"  -> PopCount(mbpRights),
-      "BpWrong"  -> PopCount(mbpWrongs),
-      "BpBRight" -> PopCount(mbpBRights),
-      "BpBWrong" -> PopCount(mbpBWrongs),
-      "BpJRight" -> PopCount(mbpJRights),
-      "BpJWrong" -> PopCount(mbpJWrongs),
-      "BpIRight" -> PopCount(mbpIRights),
-      "BpIWrong" -> PopCount(mbpIWrongs),
-      "BpCRight" -> PopCount(mbpCRights),
-      "BpCWrong" -> PopCount(mbpCWrongs),
-      "BpRRight" -> PopCount(mbpRRights),
-      "BpRWrong" -> PopCount(mbpRWrongs),
-
-      "ftb_false_hit"                -> PopCount(ftb_false_hit),
-      "ftb_hit"                      -> PopCount(ftb_hit),
-      "ftb_new_entry"                -> PopCount(ftb_new_entry),
-      "ftb_new_entry_only_br"        -> PopCount(ftb_new_entry_only_br),
-      "ftb_new_entry_only_jmp"       -> PopCount(ftb_new_entry_only_jmp),
-      "ftb_new_entry_has_br_and_jmp" -> PopCount(ftb_new_entry_has_br_and_jmp),
-      "ftb_old_entry"                -> PopCount(ftb_old_entry),
-      "ftb_modified_entry"           -> PopCount(ftb_modified_entry),
-      "ftb_modified_entry_new_br"    -> PopCount(ftb_modified_entry_new_br),
-      "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
-      "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full),
-      "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
-    ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s1_entry_len_map ++
-    s2_entry_len_map ++ s3_entry_len_map ++
-    to_ifu_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map
-
-    for((key, value) <- perfCountsMap) {
-      XSPerfAccumulate(key, value)
-    }
-
-    // --------------------------- Debug --------------------------------
-    // XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
-    XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
-    XSDebug(do_commit, p"deq! [ptr] $do_commit_ptr\n")
-    XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [ifuWbPtr] $ifuWbPtr [commPtr] $commPtr\n")
-    XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
-      p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
-    XSDebug(do_commit, p"[deq info] cfiIndex: $commit_cfi, $commit_pc_bundle, target: ${Hexadecimal(commit_target)}\n")
-
-
+    val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
+    val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
+    val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
+    XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
+    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
+    p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
+    p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
   }
+
+  val enq = io.fromBpu.resp
+  val perf_redirect = io.fromBackend.stage2Redirect
+
+  XSPerfAccumulate("entry", validEntries)
+  XSPerfAccumulate("bpu_to_ftq_stall", enq.valid && !enq.ready)
+  XSPerfAccumulate("mispredictRedirect", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level)
+  XSPerfAccumulate("replayRedirect", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level))
+  XSPerfAccumulate("predecodeRedirect", fromIfuRedirect.valid)
+  
+  XSPerfAccumulate("to_ifu_bubble", io.toIfu.req.ready && !io.toIfu.req.valid)
+
+  XSPerfAccumulate("to_ifu_stall", io.toIfu.req.valid && !io.toIfu.req.ready)
+  XSPerfAccumulate("from_bpu_real_bubble", !enq.valid && enq.ready && allowBpuIn)
+
+  val from_bpu = io.fromBpu.resp.bits
+  def in_entry_len_map_gen(resp: BranchPredictionBundle)(stage: String) = {
+    val entry_len = (resp.ftb_entry.getFallThrough(resp.pc) - resp.pc) >> instOffsetBits
+    val entry_len_recording_vec = (1 to PredictWidth+1).map(i => entry_len === i.U)
+    val entry_len_map = (1 to PredictWidth+1).map(i =>
+      f"${stage}_ftb_entry_len_$i" -> (entry_len_recording_vec(i-1) && resp.valid)
+    ).foldLeft(Map[String, UInt]())(_+_)
+    entry_len_map
+  }
+  val s1_entry_len_map = in_entry_len_map_gen(from_bpu.s1)("s1")
+  val s2_entry_len_map = in_entry_len_map_gen(from_bpu.s2)("s2")
+  val s3_entry_len_map = in_entry_len_map_gen(from_bpu.s3)("s3")
+
+  val to_ifu = io.toIfu.req.bits
+  val to_ifu_entry_len = (to_ifu.fallThruAddr - to_ifu.startAddr) >> instOffsetBits
+  val to_ifu_entry_len_recording_vec = (1 to PredictWidth+1).map(i => to_ifu_entry_len === i.U)
+  val to_ifu_entry_len_map = (1 to PredictWidth+1).map(i =>
+    f"to_ifu_ftb_entry_len_$i" -> (to_ifu_entry_len_recording_vec(i-1) && io.toIfu.req.fire)
+  ).foldLeft(Map[String, UInt]())(_+_)
+
+
+  
+  val commit_num_inst_recording_vec = (1 to PredictWidth).map(i => PopCount(commit_inst_mask) === i.U)
+  val commit_num_inst_map = (1 to PredictWidth).map(i => 
+    f"commit_num_inst_$i" -> (commit_num_inst_recording_vec(i-1) && do_commit)
+  ).foldLeft(Map[String, UInt]())(_+_)
+
+
+
+  val commit_jal_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJal.asTypeOf(UInt(1.W)))
+  val commit_jalr_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJalr.asTypeOf(UInt(1.W)))
+  val commit_call_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasCall.asTypeOf(UInt(1.W)))
+  val commit_ret_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasRet.asTypeOf(UInt(1.W)))
+  
+
+  val mbpBRights = mbpRights & commit_br_mask
+  val mbpJRights = mbpRights & commit_jal_mask
+  val mbpIRights = mbpRights & commit_jalr_mask
+  val mbpCRights = mbpRights & commit_call_mask
+  val mbpRRights = mbpRights & commit_ret_mask
+
+  val mbpBWrongs = mbpWrongs & commit_br_mask
+  val mbpJWrongs = mbpWrongs & commit_jal_mask
+  val mbpIWrongs = mbpWrongs & commit_jalr_mask
+  val mbpCWrongs = mbpWrongs & commit_call_mask
+  val mbpRWrongs = mbpWrongs & commit_ret_mask
+
+  val update_valid = io.toBpu.update.valid
+  def u(cond: Bool) = update_valid && cond
+  val ftb_false_hit = u(update.false_hit)
+  val ftb_hit = u(commit_hit === h_hit)
+
+  val ftb_new_entry = u(ftbEntryGen.is_init_entry)
+  val ftb_new_entry_only_br = ftb_new_entry && !update.ftb_entry.jmpValid
+  val ftb_new_entry_only_jmp = ftb_new_entry && !update.ftb_entry.brValids(0)
+  val ftb_new_entry_has_br_and_jmp = ftb_new_entry && update.ftb_entry.brValids(0) && update.ftb_entry.jmpValid
+
+  val ftb_old_entry = u(ftbEntryGen.is_old_entry)
+  
+  val ftb_modified_entry = u(ftbEntryGen.is_new_br || ftbEntryGen.is_jalr_target_modified || ftbEntryGen.is_always_taken_modified)
+  val ftb_modified_entry_new_br = u(ftbEntryGen.is_new_br)
+  val ftb_modified_entry_jalr_target_modified = u(ftbEntryGen.is_jalr_target_modified)
+  val ftb_modified_entry_br_full = ftb_modified_entry && ftbEntryGen.is_br_full
+  val ftb_modified_entry_always_taken = ftb_modified_entry && ftbEntryGen.is_always_taken_modified
+
+  val ftb_entry_len = (ftbEntryGen.new_entry.getFallThrough(update.pc) - update.pc) >> instOffsetBits
+  val ftb_entry_len_recording_vec = (1 to PredictWidth+1).map(i => ftb_entry_len === i.U)
+  val ftb_init_entry_len_map = (1 to PredictWidth+1).map(i =>
+    f"ftb_init_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_new_entry)
+  ).foldLeft(Map[String, UInt]())(_+_)
+  val ftb_modified_entry_len_map = (1 to PredictWidth+1).map(i =>
+    f"ftb_modified_entry_len_$i" -> (ftb_entry_len_recording_vec(i-1) && ftb_modified_entry)
+  ).foldLeft(Map[String, UInt]())(_+_)
+  
+  val ftq_occupancy_map = (0 to FtqSize).map(i =>
+    f"ftq_has_entry_$i" ->( validEntries === i.U)
+  ).foldLeft(Map[String, UInt]())(_+_)
+
+  val perfCountsMap = Map(
+    "BpInstr" -> PopCount(mbpInstrs),
+    "BpBInstr" -> PopCount(mbpBRights | mbpBWrongs),
+    "BpRight"  -> PopCount(mbpRights),
+    "BpWrong"  -> PopCount(mbpWrongs),
+    "BpBRight" -> PopCount(mbpBRights),
+    "BpBWrong" -> PopCount(mbpBWrongs),
+    "BpJRight" -> PopCount(mbpJRights),
+    "BpJWrong" -> PopCount(mbpJWrongs),
+    "BpIRight" -> PopCount(mbpIRights),
+    "BpIWrong" -> PopCount(mbpIWrongs),
+    "BpCRight" -> PopCount(mbpCRights),
+    "BpCWrong" -> PopCount(mbpCWrongs),
+    "BpRRight" -> PopCount(mbpRRights),
+    "BpRWrong" -> PopCount(mbpRWrongs),
+
+    "ftb_false_hit"                -> PopCount(ftb_false_hit),
+    "ftb_hit"                      -> PopCount(ftb_hit),
+    "ftb_new_entry"                -> PopCount(ftb_new_entry),
+    "ftb_new_entry_only_br"        -> PopCount(ftb_new_entry_only_br),
+    "ftb_new_entry_only_jmp"       -> PopCount(ftb_new_entry_only_jmp),
+    "ftb_new_entry_has_br_and_jmp" -> PopCount(ftb_new_entry_has_br_and_jmp),
+    "ftb_old_entry"                -> PopCount(ftb_old_entry),
+    "ftb_modified_entry"           -> PopCount(ftb_modified_entry),
+    "ftb_modified_entry_new_br"    -> PopCount(ftb_modified_entry_new_br),
+    "ftb_jalr_target_modified"     -> PopCount(ftb_modified_entry_jalr_target_modified),
+    "ftb_modified_entry_br_full"   -> PopCount(ftb_modified_entry_br_full),
+    "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
+  ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s1_entry_len_map ++
+  s2_entry_len_map ++ s3_entry_len_map ++
+  to_ifu_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map
+
+  for((key, value) <- perfCountsMap) {
+    XSPerfAccumulate(key, value)
+  }
+
+  // --------------------------- Debug --------------------------------
+  // XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
+  XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
+  XSDebug(do_commit, p"deq! [ptr] $do_commit_ptr\n")
+  XSDebug(true.B, p"[bpuPtr] $bpuPtr, [ifuPtr] $ifuPtr, [ifuWbPtr] $ifuWbPtr [commPtr] $commPtr\n")
+  XSDebug(true.B, p"[in] v:${io.fromBpu.resp.valid} r:${io.fromBpu.resp.ready} " +
+    p"[out] v:${io.toIfu.req.valid} r:${io.toIfu.req.ready}\n")
+  XSDebug(do_commit, p"[deq info] cfiIndex: $commit_cfi, $commit_pc_bundle, target: ${Hexadecimal(commit_target)}\n")
 
   //   def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
   //     commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {

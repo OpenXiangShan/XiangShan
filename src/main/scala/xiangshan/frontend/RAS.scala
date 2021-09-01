@@ -188,21 +188,19 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // TODO: back-up stack for ras
   // use checkpoint to recover RAS
 
-  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-      val spec_debug = spec.debugIO
-      XSDebug("----------------RAS----------------\n")
-      XSDebug(" TopRegister: 0x%x   %d \n",spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
-      XSDebug("  index       addr           ctr \n")
-      for(i <- 0 until RasSize){
-          XSDebug("  (%d)   0x%x      %d",i.U,spec_debug.out_mem(i).retAddr,spec_debug.out_mem(i).ctr)
-          when(i.U === spec_debug.sp){XSDebug(false,true.B,"   <----sp")}
-          XSDebug(false,true.B,"\n")
-      }
-      XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
-          spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
-      XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.target)
-      val redirectUpdate = redirect.bits.cfiUpdate
-      XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
-          do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
+  val spec_debug = spec.debugIO
+  XSDebug("----------------RAS----------------\n")
+  XSDebug(" TopRegister: 0x%x   %d \n",spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
+  XSDebug("  index       addr           ctr \n")
+  for(i <- 0 until RasSize){
+      XSDebug("  (%d)   0x%x      %d",i.U,spec_debug.out_mem(i).retAddr,spec_debug.out_mem(i).ctr)
+      when(i.U === spec_debug.sp){XSDebug(false,true.B,"   <----sp")}
+      XSDebug(false,true.B,"\n")
   }
+  XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",
+      spec_new_addr,spec_debug.push_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
+  XSDebug(spec_pop, "(spec_ras)pop  outAddr: 0x%x \n",io.out.resp.s2.target)
+  val redirectUpdate = redirect.bits.cfiUpdate
+  XSDebug("recoverValid:%d recover(SP:%d retAddr:%x ctr:%d) \n",
+      do_recover,redirectUpdate.rasSp,redirectUpdate.rasEntry.retAddr,redirectUpdate.rasEntry.ctr)
 }

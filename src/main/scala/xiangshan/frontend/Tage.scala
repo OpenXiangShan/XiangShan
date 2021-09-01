@@ -246,29 +246,6 @@ class TageBTable
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
   )
 
-//  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-//    val latch_s0_fire = RegNext(io.s0_fire)
-//
-//    XSDebug(doing_reset, "Doing reset...\n")
-//
-//    XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", io.s0_pc, s0_idx)
-//
-//    for(i <- 0 until numBr) {
-//      XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
-//    }
-//
-//    XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.ftb_entry.brValids.asUInt)
-//
-//    XSDebug(u_valid, "newTakens=%b\n", newTakens.asUInt)
-//
-//    for(i <- 0 until numBr) {
-//      XSDebug(u_valid, "oldCtrs%d=%b\n", i.U, oldCtrs(i))
-//    }
-//
-//    for(i <- 0 until numBr) {
-//      XSDebug(u_valid, "newCtrs%d=%b\n", i.U, newCtrs(i))
-//    }
-//  }
 }
 
 
@@ -790,62 +767,60 @@ class Tage(implicit p: Parameters) extends BaseTage {
     commit_perf(name, commit_cnt)
   }
 
-  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    // Debug and perf info
-    for (b <- 0 until TageBanks) {
-      for (i <- 0 until BankTageNTables(b)) {
-        val pred_i_provided =
-          s2_provideds(b) && s2_providers(b) === i.U
-        val commit_i_provided =
-          updateMetas(b).provider.valid && updateMetas(b).provider.bits === i.U && updateValids(b)
-        tage_perf(
-          s"bank_${b}_tage_table_${i}_provided",
-          PopCount(pred_i_provided),
-          PopCount(commit_i_provided)
-        )
-      }
+  // Debug and perf info
+  for (b <- 0 until TageBanks) {
+    for (i <- 0 until BankTageNTables(b)) {
+      val pred_i_provided =
+        s2_provideds(b) && s2_providers(b) === i.U
+      val commit_i_provided =
+        updateMetas(b).provider.valid && updateMetas(b).provider.bits === i.U && updateValids(b)
       tage_perf(
-        s"bank_${b}_tage_use_bim",
-        PopCount(!s2_provideds(b)),
-        PopCount(!updateMetas(b).provider.valid && updateValids(b))
-      )
-      def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
-      tage_perf(
-        s"bank_${b}_tage_use_altpred",
-        PopCount(s2_provideds(b) && unconf(s2_providerCtrs(b))),
-        PopCount(updateMetas(b).provider.valid &&
-          unconf(updateMetas(b).providerCtr) && updateValids(b))
-      )
-      tage_perf(
-        s"bank_${b}_tage_provided",
-        PopCount(s2_provideds(b)),
-        PopCount(updateMetas(b).provider.valid && updateValids(b))
+        s"bank_${b}_tage_table_${i}_provided",
+        PopCount(pred_i_provided),
+        PopCount(commit_i_provided)
       )
     }
+    tage_perf(
+      s"bank_${b}_tage_use_bim",
+      PopCount(!s2_provideds(b)),
+      PopCount(!updateMetas(b).provider.valid && updateValids(b))
+    )
+    def unconf(providerCtr: UInt) = providerCtr === 3.U || providerCtr === 4.U
+    tage_perf(
+      s"bank_${b}_tage_use_altpred",
+      PopCount(s2_provideds(b) && unconf(s2_providerCtrs(b))),
+      PopCount(updateMetas(b).provider.valid &&
+        unconf(updateMetas(b).providerCtr) && updateValids(b))
+    )
+    tage_perf(
+      s"bank_${b}_tage_provided",
+      PopCount(s2_provideds(b)),
+      PopCount(updateMetas(b).provider.valid && updateValids(b))
+    )
+  }
 
-    for (b <- 0 until TageBanks) {
-      val m = updateMetas(b)
-      // val bri = u.metas(b)
-      XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-        b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
-        0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
-      )
+  for (b <- 0 until TageBanks) {
+    val m = updateMetas(b)
+    // val bri = u.metas(b)
+    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+      b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
+      0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
+    )
+  }
+  val s2_resps = RegEnable(s1_resps, io.s1_fire)
+  XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s0_fire, s0_pc, io.in.bits.ghist)
+  XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
+  XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
+    debug_pc_s2, io.out.resp.s2.target, debug_hist_s2, s2_provideds.asUInt, s2_tageTakens.asUInt)
+  
+  for (b <- 0 until TageBanks) {
+    for (i <- 0 until BankTageNTables(b)) {
+      XSDebug("bank(%d)_tage_table(%d): valid:%b, resp_ctr:%d, resp_us:%d\n",
+        b.U, i.U, s2_resps(b)(i).valid, s2_resps(b)(i).bits.ctr, s2_resps(b)(i).bits.u)
     }
-    val s2_resps = RegEnable(s1_resps, io.s1_fire)
-    XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s0_fire, s0_pc, io.in.bits.ghist)
-    XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
-    XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
-      debug_pc_s2, io.out.resp.s2.target, debug_hist_s2, s2_provideds.asUInt, s2_tageTakens.asUInt)
-    
-    for (b <- 0 until TageBanks) {
-      for (i <- 0 until BankTageNTables(b)) {
-        XSDebug("bank(%d)_tage_table(%d): valid:%b, resp_ctr:%d, resp_us:%d\n",
-          b.U, i.U, s2_resps(b)(i).valid, s2_resps(b)(i).bits.ctr, s2_resps(b)(i).bits.u)
-      }
-    }
+  }
     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
-  }
 }
 
 

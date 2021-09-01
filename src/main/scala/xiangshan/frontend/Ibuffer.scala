@@ -116,17 +116,13 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
     io.out(i).bits.instr := outWire.inst
     io.out(i).bits.pc := outWire.pc
-    // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
     io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
-    //TODO: Frontend Exception
     io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
     io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
-    // io.out(i).bits.brUpdate := outWire.brInfo
     io.out(i).bits.pd := outWire.pd
     io.out(i).bits.pred_taken := outWire.pred_taken
     io.out(i).bits.ftqPtr := outWire.ftqPtr
     io.out(i).bits.ftqOffset := outWire.ftqOffset
-    //TODO: Frontend Exception
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
@@ -147,40 +143,38 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
 
   // Debug info
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug(io.flush, "IBuffer Flushed\n")
-  
-    when(io.in.fire) {
-      XSDebug("Enque:\n")
-      XSDebug(p"MASK=${Binary(io.in.bits.valid)}\n")
-      for(i <- 0 until PredictWidth){
-        XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
-      }
+  XSDebug(io.flush, "IBuffer Flushed\n")
+
+  when(io.in.fire) {
+    XSDebug("Enque:\n")
+    XSDebug(p"MASK=${Binary(io.in.bits.valid)}\n")
+    for(i <- 0 until PredictWidth){
+      XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
-  
-    for (i <- 0 until DecodeWidth) {
-      XSDebug(io.out(i).fire(), p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
-        p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
-    }
-  
-    XSDebug(p"ValidEntries: ${validEntries}\n")
-    XSDebug(p"EnqNum: ${numEnq}\n")
-    XSDebug(p"DeqNum: ${numDeq}\n")
-  
-  
-  
-    val afterInit = RegInit(false.B)
-    val headBubble = RegInit(false.B)
-    when (io.in.fire) { afterInit := true.B }
-    when (io.flush) {
-      headBubble := true.B
-    } .elsewhen(validEntries =/= 0.U) {
-      headBubble := false.B
-    }
-    val instrHungry = afterInit && (validEntries === 0.U) && !headBubble
-  
-    QueuePerf(IBufSize, validEntries, !allowEnq)
-    XSPerfAccumulate("flush", io.flush)
-    XSPerfAccumulate("hungry", instrHungry)
   }
+
+  for (i <- 0 until DecodeWidth) {
+    XSDebug(io.out(i).fire(), p"deq: ${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
+      p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
+  }
+
+  XSDebug(p"ValidEntries: ${validEntries}\n")
+  XSDebug(p"EnqNum: ${numEnq}\n")
+  XSDebug(p"DeqNum: ${numDeq}\n")
+
+
+
+  val afterInit = RegInit(false.B)
+  val headBubble = RegInit(false.B)
+  when (io.in.fire) { afterInit := true.B }
+  when (io.flush) {
+    headBubble := true.B
+  } .elsewhen(validEntries =/= 0.U) {
+    headBubble := false.B
+  }
+  val instrHungry = afterInit && (validEntries === 0.U) && !headBubble
+
+  QueuePerf(IBufSize, validEntries, !allowEnq)
+  XSPerfAccumulate("flush", io.flush)
+  XSPerfAccumulate("hungry", instrHungry)
 }

@@ -121,27 +121,26 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
   )
 
-  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    val latch_s0_fire = RegNext(io.s0_fire)
+  val latch_s0_fire = RegNext(io.s0_fire)
 
-    XSDebug(doing_reset, "Doing reset...\n")
+  XSDebug(doing_reset, "Doing reset...\n")
 
-    XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", s0_pc, s0_idx)
+  XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", s0_pc, s0_idx)
 
-    for(i <- 0 until numBr) {
-      XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
-    }
-
-    XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.ftb_entry.brValids.asUInt)
-
-    XSDebug(u_valid, "newTakens=%b\n", newTakens.asUInt)
-
-    for(i <- 0 until numBr) {
-      XSDebug(u_valid, "oldCtrs%d=%b\n", i.U, oldCtrs(i))
-    }
-
-    for(i <- 0 until numBr) {
-      XSDebug(u_valid, "newCtrs%d=%b\n", i.U, newCtrs(i))
-    }
+  for(i <- 0 until numBr) {
+    XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
   }
+
+  XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.ftb_entry.brValids.asUInt)
+
+  XSDebug(u_valid, "newTakens=%b\n", newTakens.asUInt)
+
+  for(i <- 0 until numBr) {
+    XSDebug(u_valid, "oldCtrs%d=%b\n", i.U, oldCtrs(i))
+  }
+
+  for(i <- 0 until numBr) {
+    XSDebug(u_valid, "newCtrs%d=%b\n", i.U, newCtrs(i))
+  }
+
 }

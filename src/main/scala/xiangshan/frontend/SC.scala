@@ -301,23 +301,17 @@ trait HasSC extends HasSCParameter { this: Tage =>
       s2_sc_used(w) := true.B
       s2_unconf(w) := s2_sumBelowThresholds(s2_chooseBit)
       s2_conf(w) := !s2_sumBelowThresholds(s2_chooseBit)
-      if (!env.FPGAPlatform && env.EnablePerfDebug) {
-        // Use prediction from Statistical Corrector
-        XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
-        XSDebug(p"scCtrs:$s2_scCtrs, prdrCtr:${s2_providerCtrs(w)}, sumAbs:$s2_sumAbs, tageTaken:${s2_chooseBit}\n")
-      }
+      // Use prediction from Statistical Corrector
+      XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
+      XSDebug(p"scCtrs:$s2_scCtrs, prdrCtr:${s2_providerCtrs(w)}, sumAbs:$s2_sumAbs, tageTaken:${s2_chooseBit}\n")
       when (!s2_sumBelowThresholds(s2_chooseBit)) {
-        // when (ctrl.sc_enable) {
         val pred = s2_scPreds(s2_chooseBit)
         val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
-        if (!env.FPGAPlatform && env.EnablePerfDebug) {
-          XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
-        }
         s2_agree(w) := s2_tageTakens(w) === pred
         s2_disagree(w) := s2_tageTakens(w) =/= pred
-        // io.resp.takens(w) := pred
         // fit to always-taken condition
         io.out.resp.s2.preds.taken_mask(w) := pred
+        XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
       }
     }
 
@@ -347,44 +341,28 @@ trait HasSC extends HasSCParameter { this: Tage =>
       when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
         val newThres = scThresholds(w).update(scPred =/= taken)
         scThresholds(w) := newThres
-        if (!env.FPGAPlatform && env.EnablePerfDebug) {
-          XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
-        }
+        XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
       }
 
       val updateThres = updateThresholds(w)
       when (scPred =/= taken || sumAbs < updateThres) {
         scUpdateMask(w).foreach(_ := true.B)
-        if (!env.FPGAPlatform && env.EnablePerfDebug) {
-          XSDebug(sum < 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-            p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-          )
-          XSDebug(sum >= 0.S,
-            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-            p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-          )
-          XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
-        }
+        XSDebug(sum < 0.S,
+          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+        )
+        XSDebug(sum >= 0.S,
+          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+          p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+        )
+        XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
         update_on_mispred(w) := scPred =/= taken
         update_on_unconf(w) := scPred === taken
       }
     }
   }
 
-  if (!env.FPGAPlatform && env.EnablePerfDebug) {
-    tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
-    tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
-    tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
-    tage_perf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
-    tage_perf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
-    XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
-    XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
-    XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
-    XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
-  }
-
-
+  
   for (b <- 0 until TageBanks) {
     for (i <- 0 until BankSCNTables(b)) {
       bank_scTables(b)(i).io.update.mask := RegNext(scUpdateMask(b)(i))
@@ -395,4 +373,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
       bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist << b)
     }
   }
+  
+  tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
+  tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
+  tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
+  tage_perf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
+  tage_perf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
+  XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
+  XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
+  XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
+  XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
 }

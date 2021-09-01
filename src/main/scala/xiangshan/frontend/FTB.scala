@@ -323,37 +323,35 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     has_update_ptr := has_update_ptr + !u_updated
   }
 
-  if (debug && !env.FPGAPlatform && env.EnablePerfDebug) {
-    XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
-    XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
-    XSDebug("s2_taken_mask=%b, s2_real_taken_mask=%b\n",
-      io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.real_taken_mask().asUInt)
-    XSDebug("s2_target=%x\n", io.out.resp.s2.target)
+  XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
+  XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit, writeWay.asUInt)
+  XSDebug("s2_taken_mask=%b, s2_real_taken_mask=%b\n",
+    io.in.bits.resp_in(0).s2.preds.taken_mask.asUInt, io.out.resp.s2.real_taken_mask().asUInt)
+  XSDebug("s2_target=%x\n", io.out.resp.s2.target)
 
-    ftb_entry.display(true.B)
+  ftb_entry.display(true.B)
 
-    XSDebug(u_valid, "Update from ftq\n")
-    XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b, pred_cycle=%d\n",
-      update.pc, ftbAddr.getTag(update.pc), u_way_mask, u_meta.pred_cycle)
-
+  XSDebug(u_valid, "Update from ftq\n")
+  XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b, pred_cycle=%d\n",
+    update.pc, ftbAddr.getTag(update.pc), u_way_mask, u_meta.pred_cycle)
 
 
 
 
-    XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.preds.hit)
-    XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.preds.hit)
 
-    XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
-    XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
+  XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.preds.hit)
+  XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.preds.hit)
 
-    XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
-    XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
+  XSPerfAccumulate("ftb_read_first_miss", RegNext(io.s0_fire) && !s1_hit && !r_updated)
+  XSPerfAccumulate("ftb_read_updated_miss", RegNext(io.s0_fire) && !s1_hit && r_updated)
 
-    XSPerfAccumulate("ftb_commit_hits", u_valid && update.preds.hit)
-    XSPerfAccumulate("ftb_commit_misses", u_valid && !update.preds.hit)
+  XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
+  XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
 
-    XSPerfAccumulate("ftb_update_req", io.update.valid)
-    XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
-    XSPerfAccumulate("ftb_updated", u_valid)
-  }
+  XSPerfAccumulate("ftb_commit_hits", u_valid && update.preds.hit)
+  XSPerfAccumulate("ftb_commit_misses", u_valid && !update.preds.hit)
+
+  XSPerfAccumulate("ftb_update_req", io.update.valid)
+  XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
+  XSPerfAccumulate("ftb_updated", u_valid)
 }
