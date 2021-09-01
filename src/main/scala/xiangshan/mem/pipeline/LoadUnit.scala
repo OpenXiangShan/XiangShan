@@ -74,6 +74,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   // select vaddr from 2 alus
   val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr) 
   val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask) 
+  XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
