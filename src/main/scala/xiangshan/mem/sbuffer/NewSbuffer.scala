@@ -279,7 +279,8 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   val validCount = PopCount(validMask)
-  val do_eviction = RegNext(validCount >= threshold || validCount === StoreBufferSize.U, init = false.B)
+  val do_eviction = RegNext(validCount >= threshold || validCount === (StoreBufferSize-1).U, init = false.B)
+  require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
   XSDebug(p"validCount[$validCount]\n")
 
