@@ -252,8 +252,8 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(2.W)
-  val typeTagOut = UInt(2.W)
+  val typeTagIn = UInt(1.W)
+  val typeTagOut = UInt(1.W)
   val fromInt = Bool()
   val wflags = Bool()
   val fpWen = Bool()
@@ -391,12 +391,12 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val src = Vec(3, UInt((XLEN + 1).W))
+  val src = Vec(3, UInt(XLEN.W))
 }
 
 class ExuOutput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val data = UInt((XLEN + 1).W)
+  val data = UInt(XLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

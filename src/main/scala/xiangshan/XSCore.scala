@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.{ExuConfig, Wb}
+import xiangshan.backend.exu.{ExuConfig, WbArbiter}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import xiangshan.cache.L1plusCacheWrapper
@@ -69,12 +69,12 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val ptw = LazyModule(new PTWWrapper())
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
-  val intArbiter = LazyModule(new Wb(intConfigs, NRIntWritePorts, isFp = false))
+  val intArbiter = LazyModule(new WbArbiter(intConfigs, NRIntWritePorts, isFp = false))
   val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
   val numIntWbPorts = intWbPorts.length
 
   val fpConfigs = exuConfigs.filter(_.writeFpRf)
-  val fpArbiter = LazyModule(new Wb(fpConfigs, NRFpWritePorts, isFp = true))
+  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, NRFpWritePorts, isFp = true))
   val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
   val numFpWbPorts = fpWbPorts.length
 
@@ -127,7 +127,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => Seq((0, i)))
-  val int1DpPorts = (0 until 2*exuParameters.MduCnt).map(i => {
+  val int1DpPorts = (0 until exuParameters.MduCnt).map(i => {
     if (i < exuParameters.JmpCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   }) ++ (0 until exuParameters.StuCnt).map(i => Seq((2, i)))
@@ -251,13 +251,20 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
   ctrlBlock.io.enqIQ <> exuBlocks(0).io.allocate ++ exuBlocks(2).io.allocate ++ memScheduler.io.allocate
-  for (i <- 0 until exuParameters.AluCnt) {
+  for (i <- 0 until exuParameters.MduCnt) {
     val rsIn = VecInit(Seq(exuBlocks(0).io.allocate(i), exuBlocks(1).io.allocate(i)))
     val func1 = (op: MicroOp) => outer.exuBlocks(0).scheduler.canAccept(op.ctrl.fuType)
     val func2 = (op: MicroOp) => outer.exuBlocks(1).scheduler.canAccept(op.ctrl.fuType)
     val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
     rsIn <> arbiterOut
   }
+  for (i <- exuParameters.MduCnt until exuParameters.AluCnt) {
+    val rsIn = exuBlocks(0).io.allocate(i)
+    val dpOut = ctrlBlock.io.enqIQ(i)
+    rsIn.valid := dpOut.valid && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
+    dpOut.ready := rsIn.ready && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
+  }
+
   val stdAllocate = exuBlocks(1).io.allocate.takeRight(2)
   val staAllocate = memScheduler.io.allocate.takeRight(2)
   stdAllocate.zip(staAllocate).zip(ctrlBlock.io.enqIQ.takeRight(2)).zipWithIndex.foreach{ case (((std, sta), enq), i) =>
@@ -270,9 +277,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     std.bits.srcState(0) := enq.bits.srcState(1)
     std.bits.ctrl.srcType(0) := enq.bits.ctrl.srcType(1)
     enq.ready := sta.ready && std.ready
-    XSPerfAccumulate(s"st_not_ready_$i", enq.valid && !enq.ready)
-    XSPerfAccumulate(s"sta_not_ready_$i", sta.valid && !sta.ready)
-    XSPerfAccumulate(s"std_not_ready_$i", std.valid && !std.ready)
+    XSPerfAccumulate(s"st_rs_not_ready_$i", enq.valid && !enq.ready)
+    XSPerfAccumulate(s"sta_rs_not_ready_$i", sta.valid && !sta.ready)
+    XSPerfAccumulate(s"std_rs_not_ready_$i", std.valid && !std.ready)
   }
   exuBlocks(1).io.scheExtra.fpRfReadIn.get <> exuBlocks(2).io.scheExtra.fpRfReadOut.get
 
@@ -299,6 +306,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
   }
+  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
+  XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -340,7 +349,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val dtlbRepeater = if (usePTWRepeater) {
     Module(new PTWRepeater(LoadPipelineWidth + StorePipelineWidth))
   } else {
-    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, PtwMissQueueSize))
+    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
   }
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import xiangshan.backend.decode.Instructions._
+import xiangshan.backend.fu.fpu.FPU
 import xiangshan.{FPUCtrlSignals, XSModule}
 
 class FPDecoder(implicit p: Parameters) extends XSModule{
@@ -32,20 +33,22 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
   def X = BitPat("b?")
   def N = BitPat("b0")
   def Y = BitPat("b1")
-  val s = BitPat(S)
-  val d = BitPat(D)
-  val i = BitPat(I)
+  val s = BitPat(FPU.S)
+  val d = BitPat(FPU.D)
+  val i = BitPat(FPU.D)
 
   val default = List(X,X,X,N,N,N,X,X,X)
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
-    FMV_W_X  -> List(N,s,d,Y,N,Y,N,N,N),
-    FCVT_S_W -> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_WU-> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_L -> List(N,s,s,Y,Y,Y,N,N,Y),
-    FCVT_S_LU-> List(N,s,s,Y,Y,Y,N,N,Y),
-    FMV_X_W  -> List(N,d,i,N,N,N,N,N,N),
+    // IntToFP
+    FMV_W_X  -> List(N,i,s,Y,N,Y,N,N,N),
+    FCVT_S_W -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_WU-> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_L -> List(N,i,s,Y,Y,Y,N,N,Y),
+    FCVT_S_LU-> List(N,i,s,Y,Y,Y,N,N,Y),
+    // FPToInt
+    FMV_X_W  -> List(N,d,i,N,N,N,N,N,N), // dont box result of fmv.fp.int
     FCLASS_S -> List(N,s,i,N,N,N,N,N,N),
     FCVT_W_S -> List(N,s,i,N,Y,N,N,N,Y),
     FCVT_WU_S-> List(N,s,i,N,Y,N,N,N,Y),
@@ -54,6 +57,7 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     FEQ_S    -> List(N,s,i,N,Y,N,N,N,N),
     FLT_S    -> List(N,s,i,N,Y,N,N,N,N),
     FLE_S    -> List(N,s,i,N,Y,N,N,N,N),
+    // FPToFP
     FSGNJ_S  -> List(N,s,s,N,N,Y,N,N,N),
     FSGNJN_S -> List(N,s,s,N,N,Y,N,N,N),
     FSGNJX_S -> List(N,s,s,N,N,Y,N,N,N),
@@ -73,11 +77,11 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val double: Array[(BitPat, List[BitPat])] = Array(
-    FMV_D_X  -> List(N,d,d,Y,N,Y,N,N,N),
-    FCVT_D_W -> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_WU-> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_L -> List(N,d,d,Y,Y,Y,N,N,Y),
-    FCVT_D_LU-> List(N,d,d,Y,Y,Y,N,N,Y),
+    FMV_D_X  -> List(N,i,d,Y,N,Y,N,N,N),
+    FCVT_D_W -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_WU-> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_L -> List(N,i,d,Y,Y,Y,N,N,Y),
+    FCVT_D_LU-> List(N,i,d,Y,Y,Y,N,N,Y),
     FMV_X_D  -> List(N,d,i,N,N,N,N,N,N),
     FCLASS_D -> List(N,d,i,N,N,N,N,N,N),
     FCVT_W_D -> List(N,d,i,N,Y,N,N,N,Y),

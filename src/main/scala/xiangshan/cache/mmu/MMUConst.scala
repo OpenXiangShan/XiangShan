@@ -25,6 +25,32 @@ import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+case class L2TLBParameters
+(
+  name: String = "l2tlb",
+  // l1
+  l1Size: Int = 16,
+  l1Associative: String = "fa",
+  l1Replacer: Option[String] = Some("plru"),
+  // l2
+  l2nSets: Int = 8,
+  l2nWays: Int = 4,
+  l2Replacer: Option[String] = Some("setplru"),
+  // l3
+  l3nSets: Int = 64,
+  l3nWays: Int = 8,
+  l3Replacer: Option[String] = Some("setplru"),
+  // sp
+  spSize: Int = 16,
+  spReplacer: Option[String] = Some("plru"),
+  // miss queue
+  missQueueSize: Int = 8,
+  // sram
+  sramSinglePort: Boolean = true,
+  // way size
+  blockBytes: Int = 64
+)
+
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
 
@@ -70,48 +96,40 @@ trait HasTlbConst extends HasXSParameter {
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
-  val MemBandWidth  = 256 // TODO: change to IO bandwidth param
-  val SramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
+  val sramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
+  val blockBits = l2tlbParams.blockBytes * 8
 
   val bPtwWidth = log2Up(PtwWidth)
 
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
-  val ptwl1Replacer = Some("plru")
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
    * +-------+----------+-------------+
    */
   // ptwl2: 8-way group-associated
-  val PtwL2WayNum = 8
-  val PtwL2WaySize = PtwL2EntrySize / PtwL2WayNum
-  val PtwL2SectorSize = MemBandWidth/XLEN
-  val PtwL2LineSize = PtwL2SectorSize * PtwL2WayNum
-  val PtwL2LineNum  = PtwL2EntrySize / PtwL2LineSize
-  val PtwL2IdxLen = log2Up(PtwL2WaySize)
+  val l2tlbParams.l2nWays = l2tlbParams.l2nWays
+  val PtwL2SetNum = l2tlbParams.l2nSets
+  val PtwL2SectorSize = blockBits /XLEN
+  val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
-  val PtwL2SetIdxLen = log2Up(PtwL2LineNum)
+  val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
   val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
-  val ptwl2Replacer = Some("setplru")
 
   // ptwl3: 16-way group-associated
-  val PtwL3WayNum = 8
-  val PtwL3WaySize = PtwL3EntrySize / PtwL3WayNum
-  val PtwL3SectorSize = MemBandWidth / XLEN
-  val PtwL3LineSize = PtwL3SectorSize * PtwL3WayNum
-  val PtwL3LineNum  = PtwL3EntrySize / PtwL3LineSize
-  val PtwL3IdxLen = log2Up(PtwL3WaySize)
+  val l2tlbParams.l3nWays = l2tlbParams.l3nWays
+  val PtwL3SetNum = l2tlbParams.l3nSets
+  val PtwL3SectorSize =  blockBits / XLEN
+  val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
-  val PtwL3SetIdxLen = log2Up(PtwL3LineNum)
+  val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
   val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
-  val ptwl3Replacer = Some("setplru")
 
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
-  val spReplacer = Some("plru")
 
-  val MSHRSize = PtwMissQueueSize
+  val MSHRSize = l2tlbParams.missQueueSize
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)

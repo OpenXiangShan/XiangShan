@@ -77,6 +77,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // block probe
     val block_addr = ValidIO(UInt(PAddrBits.W))
   })
+  val tma_io = IO(new Bundle {
+    val req    = Output(new MissReq)
+    val state  = Output(UInt(5.W))
+  })
 
   // old MSHR:
   // 1. receive req
@@ -96,10 +100,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val s_invalid :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_main_pipe_req :: s_main_pipe_resp :: s_release_entry :: Nil = Enum(7)
 
   val state = RegInit(s_invalid)
+  tma_io.state := state
 
   // --------------------------------------------
   // internal registers
   val req = Reg(new MissReq)
+  tma_io.req := req
 
   // param of grant
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
@@ -480,6 +486,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     entry
   }
+
+  val pendingVec = entries.map(entry => (entry.tma_io.req.source =/= STORE_SOURCE.U) && (entry.tma_io.state =/= 0.U))
+  ExcitingUtils.addSource(pendingVec.reduce(_||_), "TMA_l1miss")
 
   io.refill.valid := refill_arb.io.out.valid
   io.refill.bits  := refill_arb.io.out.bits

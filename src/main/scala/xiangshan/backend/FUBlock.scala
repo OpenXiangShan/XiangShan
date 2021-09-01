@@ -20,11 +20,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
+import freechips.rocketchip.tile.FType
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
 import xiangshan.mem.StoreDataBundle
-
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -148,21 +148,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     }
 
     if (exu.frm.isDefined) {
-      // fp instructions have three operands
-      for (j <- 0 until 3) {
-        // when one of the higher bits is zero, then it's not a legal single-precision number
-        val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR
-        val single = recode(io.issue(i).bits.src(j)(31, 0), S)
-        val double = recode(io.issue(i).bits.src(j)(63, 0), D)
-        exu.io.fromFp.bits.src(j) := Mux(isLegalSingle, single, double)
-      }
-
-      // out
-      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
-        ieee(exu.io.out.bits.data),
-        exu.io.out.bits.data
-      )
-
       exu.frm.get := io.extra.frm.get
     }
   }
@@ -170,4 +155,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   if (io.extra.stData.isDefined) {
     io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
   }
+
+  for ((iss, i) <- io.issue.zipWithIndex) {
+    XSPerfAccumulate(s"issue_count_$i", iss.fire())
+  }
+  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
+
 }
