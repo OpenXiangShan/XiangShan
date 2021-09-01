@@ -106,8 +106,10 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     println(s"scheduler.writeback($i) is connected from exu ${cfg.name}")
     val outerWb = io.rfWriteback(i)
     val hasWb = outerWb.valid || scheWb.valid
-    XSError(hasWb && outerWb.bits.uop.roqIdx =/= scheWb.bits.uop.roqIdx, "different instruction\n")
-    XSError(hasWb && outerWb.bits.data =/= scheWb.bits.data, "different data\n")
+    XSError(hasWb && outerWb.bits.uop.roqIdx =/= scheWb.bits.uop.roqIdx,
+      "different instruction between io.rfWriteback and fu.writeback\n")
+    XSError(hasWb && outerWb.bits.data =/= scheWb.bits.data,
+      "different data between io.rfWriteback and fu.writeback\n")
   }
 
   // (2) If the reservation station has fastUopOut for all instructions in this exu,
@@ -116,18 +118,29 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   // unless it's impossible that rs can ensure the instruction is able to write the regfile.
   val allWakeupFromRs = flattenFuConfigs.zipWithIndex.filter(_._1.allWakeupFromRS)
   for ((cfg, i) <- allWakeupFromRs) {
+    // When the exu has fastUopOut, we still let rs have higher priority,
+    // assuming the rs has better timing for wakeup.
+    if (!cfg.hasFastUopOut) {
     val wbOut = io.fuWriteback(i)
     val fastWakeup = scheduler.io.fastUopOut(i)
-    val isFlushed = fastWakeup.bits.roqIdx.needFlush(io.redirect, io.flush)
-    wbOut.valid := RegNext(fastWakeup.valid && !isFlushed)
-    wbOut.bits.uop := RegNext(fastWakeup.bits)
+    if (cfg.hasFastUopOut) {
+      wbOut.valid := fastWakeup.valid
+      wbOut.bits.uop := fastWakeup.bits
+    }
+    else {
+      val isFlushed = fastWakeup.bits.roqIdx.needFlush(io.redirect, io.flush)
+      wbOut.valid := RegNext(fastWakeup.valid && !isFlushed)
+      wbOut.bits.uop := RegNext(fastWakeup.bits)
+    }
 
     println(s"writeback from exu $i is replaced by RegNext(rs.fastUopOut)")
     XSError(wbOut.valid && !wbOut.ready, "fast uop wb should not be blocked\n")
     require(cfg.hasExclusiveWbPort, "it's impossible to have allWakeupFromRs if it doesn't have exclusive rf ports")
     val fuWb = fuBlock.io.writeback(i)
-    XSError((wbOut.valid || fuWb.valid) && wbOut.bits.uop.roqIdx =/= fuWb.bits.uop.roqIdx, "different instruction\n")
-    XSError((wbOut.valid || fuWb.valid) && wbOut.bits.data =/= fuWb.bits.data, "different data\n")
+    val fuWbValid = if (cfg.hasFastUopOut) RegNext(fuWb.valid) else fuWb.valid
+    val fuWbRoqIdx = if (cfg.hasFastUopOut) RegNext(fuWb.bits.uop.roqIdx) else fuWb.bits.uop.roqIdx
+    XSError((wbOut.valid || fuWbValid) && wbOut.bits.uop.roqIdx =/= fuWbRoqIdx,
+      "different instruction between rs.fastUopOut and fu.writeback\n")}
   }
 
   // (3) If the reservation station has fastUopOut for all instructions in this exu,
