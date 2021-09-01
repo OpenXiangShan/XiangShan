@@ -255,7 +255,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // they can sit in load queue and wait for refill
   // 
   // * report a miss if bank conflict is detected
-  resp.bits.miss := !s2_hit || s2_nack || io.bank_conflict_slow
+  val real_miss = !s2_hit || s2_nack
+  resp.bits.miss := real_miss || io.bank_conflict_slow
   if (id == 0) {
     // load pipe 0 will not be influenced by bank conflict
     resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
@@ -300,8 +301,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("load_replay", io.lsu.resp.fire() && resp.bits.replay)
   XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
   XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
-  XSPerfAccumulate("load_miss", io.lsu.resp.fire() && resp.bits.miss)
+  XSPerfAccumulate("load_replay_for_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
+  XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
+  XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire() && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.data_read.fire() && s1_tag_match)
 }
