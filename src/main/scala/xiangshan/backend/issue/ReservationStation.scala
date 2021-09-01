@@ -262,6 +262,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val dataArray = Module(new DataArray(params))
   val payloadArray = Module(new PayloadArray(new MicroOp, params))
 
+  val s2_deq = Wire(io.deq.cloneType)
+
   io.numExist := PopCount(statusArray.io.isValid)
   statusArray.io.redirect := io.redirect
   statusArray.io.flush := io.flush
@@ -315,12 +317,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
   select.io.best := AgeDetector(params.numEntries, enqVec, statusArray.io.flushed)
   for (i <- 0 until params.numDeq) {
-    select.io.grant(i).ready := io.deq(i).ready
+    select.io.grant(i).ready := s2_deq(i).ready
     statusArray.io.issueGranted(i).valid := select.io.grant(i).fire
     statusArray.io.issueGranted(i).bits := select.io.grant(i).bits
     statusArray.io.deqResp(i).valid := select.io.grant(i).fire
     statusArray.io.deqResp(i).bits.rsMask := select.io.grant(i).bits
-    statusArray.io.deqResp(i).bits.success := io.deq(i).ready
+    statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
     statusArray.io.deqResp(i).bits.resptype := DontCare
     if (io.feedback.isDefined) {
       statusArray.io.deqResp(i).valid := io.feedback.get(i).memfeedback.valid
@@ -434,22 +436,21 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
   val fastWakeupMatchRegVec = RegNext(fastWakeupMatchVec)
 
+  /**
+    * S2: to function units
+    */
   for (i <- 0 until params.numDeq) {
-    /**
-      * S2: to function units
-      */
     // payload: send to function units
     // TODO: these should be done outside RS
-    val deq = Wire(io.deq(i).cloneType)
-    PipelineConnect(s1_out(i), deq, deq.ready || deq.bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
-    val pipeline_fire = s1_out(i).valid && deq.ready
+    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
+    val pipeline_fire = s1_out(i).valid && s2_deq(i).ready
     if (params.hasFeedback) {
       io.feedback.get(i).rsIdx := RegEnable(OHToUInt(select.io.grant(i).bits), pipeline_fire)
       io.feedback.get(i).isFirstIssue := RegEnable(statusArray.io.isFirstIssue(i), pipeline_fire)
     }
-    deq.ready := io.deq(i).ready
-    io.deq(i).valid := deq.valid
-    io.deq(i).bits := deq.bits
+    s2_deq(i).ready := io.deq(i).ready
+    io.deq(i).valid := s2_deq(i).valid
+    io.deq(i).bits := s2_deq(i).bits
 
     // data: send to bypass network
     // TODO: these should be done outside RS
@@ -457,17 +458,17 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       val targetFastWakeupMatch = Mux1H(select.io.grant(i).bits, fastWakeupMatchRegVec)
       val wakeupBypassMask = Wire(Vec(params.numFastWakeup, Vec(params.numSrc, Bool())))
       for (j <- 0 until params.numFastWakeup) {
-        wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_ (j)))
+        wakeupBypassMask(j) := VecInit(targetFastWakeupMatch.map(_(j)))
       }
 
       val bypassNetwork = BypassNetwork(params.numSrc, params.numFastWakeup, params.dataBits, params.optBuf)
-      bypassNetwork.io.hold := !deq.ready
+      bypassNetwork.io.hold := !s2_deq(i).ready
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
         by.valid := m
         by.data := d
       }
-      bypassNetwork.io.target <> deq.bits.src.take(params.numSrc)
+      bypassNetwork.io.target <> s2_deq(i).bits.src.take(params.numSrc)
 
       // For load instructions, if its source operand is bypassed from load,
       // we reduce its latency for one cycle since it does not need to read
@@ -478,26 +479,29 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         val ldCanBeFast = VecInit(
           wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
         ).asUInt
-        ldFastDeq.valid := !deq.valid && ldCanBeFast.orR
+        ldFastDeq.valid := select.io.grant(i).valid && ldCanBeFast.orR
         ldFastDeq.ready := true.B
         ldFastDeq.bits.src := DontCare
         ldFastDeq.bits.uop := s1_out(i).bits.uop
         // when last cycle load has fast issue, cancel this cycle's normal issue and let it go
-        val lastCycleLdFire = RegNext(ldFastDeq.valid && !deq.valid && io.deq(i).ready)
+        val lastCycleLdFire = RegNext(ldFastDeq.valid && !s2_deq(i).valid && io.deq(i).ready)
         when (lastCycleLdFire) {
-          deq.valid := false.B
-          deq.ready := true.B
+          s2_deq(i).valid := false.B
+          s2_deq(i).ready := true.B
         }
         // For now, we assume deq.valid has higher priority than ldFastDeq.
-        io.deq(i).valid := deq.valid || ldFastDeq.valid
-        io.deq(i).bits := Mux(deq.valid, deq.bits, ldFastDeq.bits)
-        io.load.get.fastMatch(i) := Mux(deq.valid, 0.U, ldCanBeFast)
-        when (!deq.valid) {
+        when (!s2_deq(i).valid) {
+          io.deq(i).valid := ldFastDeq.valid
+          io.deq(i).bits := ldFastDeq.bits
+          s2_deq(i).ready := true.B
+        }
+        io.load.get.fastMatch(i) := Mux(s2_deq(i).valid, 0.U, ldCanBeFast)
+        when (!s2_deq(i).valid) {
           io.feedback.get(i).rsIdx := OHToUInt(select.io.grant(i).bits)
           io.feedback.get(i).isFirstIssue := statusArray.io.isFirstIssue(i)
         }
-        XSPerfAccumulate("fast_load_deq_valid", !deq.valid && ldFastDeq.valid)
-        XSPerfAccumulate("fast_load_deq_fire", !deq.valid && ldFastDeq.valid && io.deq(i).ready)
+        XSPerfAccumulate("fast_load_deq_valid", !s2_deq(i).valid && ldFastDeq.valid)
+        XSPerfAccumulate("fast_load_deq_fire", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
       }
 
       for (j <- 0 until params.numFastWakeup) {
@@ -506,9 +510,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     }
 
     if (io.store.isDefined) {
-      io.store.get.stData(i).valid := deq.valid
-      io.store.get.stData(i).bits.data := deq.bits.src(1)
-      io.store.get.stData(i).bits.uop := deq.bits.uop
+      io.store.get.stData(i).valid := s2_deq(i).valid
+      io.store.get.stData(i).bits.data := s2_deq(i).bits.src(1)
+      io.store.get.stData(i).bits.uop := s2_deq(i).bits.uop
     }
   }
 
