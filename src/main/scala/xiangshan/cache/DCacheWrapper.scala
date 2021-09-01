@@ -87,6 +87,7 @@ class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
   val data   = UInt((cfg.blockBytes * 8).W)
+  val data_raw = UInt((cfg.blockBytes * 8).W)
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
   }
