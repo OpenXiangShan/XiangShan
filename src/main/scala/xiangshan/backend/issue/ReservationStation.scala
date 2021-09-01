@@ -476,7 +476,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         val ldFastDeq = Wire(io.deq(i).cloneType)
         // Condition: wakeup by load (to select load wakeup bits)
         val ldCanBeFast = VecInit(
-          wakeupBypassMask.takeRight(exuParameters.LduCnt).map(_.asUInt.orR)
+          wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
         ).asUInt
         ldFastDeq.valid := !deq.valid && ldCanBeFast.orR
         ldFastDeq.ready := true.B
@@ -488,9 +488,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
           deq.valid := false.B
           deq.ready := true.B
         }
+        // For now, we assume deq.valid has higher priority than ldFastDeq.
         io.deq(i).valid := deq.valid || ldFastDeq.valid
         io.deq(i).bits := Mux(deq.valid, deq.bits, ldFastDeq.bits)
-        io.load.get.fastMatch(i) := ldCanBeFast
+        io.load.get.fastMatch(i) := Mux(deq.valid, 0.U, ldCanBeFast)
         when (!deq.valid) {
           io.feedback.get(i).rsIdx := OHToUInt(select.io.grant(i).bits)
           io.feedback.get(i).isFirstIssue := statusArray.io.isFirstIssue(i)
