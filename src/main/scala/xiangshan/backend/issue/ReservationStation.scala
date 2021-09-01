@@ -197,6 +197,9 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.store.isDefined) {
       io.store.get.stData <> rs.flatMap(_.io.store.get.stData)
     }
+    if (io.load.isDefined) {
+      io.load.get.fastMatch <> rs.flatMap(_.io.load.get.fastMatch)
+    }
   }
 
   var fastWakeupIdx = 0
@@ -488,6 +491,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         io.deq(i).valid := deq.valid || ldFastDeq.valid
         io.deq(i).bits := Mux(deq.valid, deq.bits, ldFastDeq.bits)
         io.load.get.fastMatch(i) := ldCanBeFast
+        when (!deq.valid) {
+          io.feedback.get(i).rsIdx := OHToUInt(select.io.grant(i).bits)
+          io.feedback.get(i).isFirstIssue := statusArray.io.isFirstIssue(i)
+        }
+        XSPerfAccumulate("fast_load_deq_valid", !deq.valid && ldFastDeq.valid)
+        XSPerfAccumulate("fast_load_deq_fire", !deq.valid && ldFastDeq.valid && io.deq(i).ready)
       }
 
       for (j <- 0 until params.numFastWakeup) {
