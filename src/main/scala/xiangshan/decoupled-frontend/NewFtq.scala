@@ -893,7 +893,25 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.mispred_mask      := ftbEntryGen.mispred_mask
   update.old_entry         := ftbEntryGen.is_old_entry
   update.preds.taken_mask  := ftbEntryGen.taken_mask
-  
+
+
+  // commit perf counters
+  val commit_inst_mask    = VecInit(commit_state.map(c => c === c_commited && do_commit)).asUInt
+  val commit_mispred_mask = commit_mispredict.asUInt
+  val commit_not_mispred_mask = ~commit_mispred_mask
+
+  val commit_br_mask = commit_pd.brMask.asUInt
+  val commit_jmp_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.jmpInfo.valid.asTypeOf(UInt(1.W)))
+  val commit_cfi_mask = (commit_br_mask | commit_jmp_mask)
+
+  val mbpInstrs = commit_inst_mask & commit_cfi_mask
+
+  val mbpRights = mbpInstrs & commit_not_mispred_mask
+  val mbpWrongs = mbpInstrs & commit_mispred_mask
+
+  io.bpuInfo.bpRight := PopCount(mbpRights)
+  io.bpuInfo.bpWrong := PopCount(mbpWrongs)
+
   if (!env.FPGAPlatform && env.EnablePerfDebug) {
     // Cfi Info
     for (i <- 0 until PredictWidth) {
@@ -951,35 +969,27 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       f"to_ifu_ftb_entry_len_$i" -> (to_ifu_entry_len_recording_vec(i-1) && io.toIfu.req.fire)
     ).foldLeft(Map[String, UInt]())(_+_)
 
-    // commit perf counters
-    val commit_inst_mask    = VecInit(commit_state.map(c => c === c_commited && do_commit)).asUInt
-    val commit_mispred_mask = commit_mispredict.asUInt
-    val commit_not_mispred_mask = ~commit_mispred_mask
+
     
     val commit_num_inst_recording_vec = (1 to PredictWidth).map(i => PopCount(commit_inst_mask) === i.U)
     val commit_num_inst_map = (1 to PredictWidth).map(i => 
       f"commit_num_inst_$i" -> (commit_num_inst_recording_vec(i-1) && do_commit)
     ).foldLeft(Map[String, UInt]())(_+_)
 
-    val commit_br_mask = commit_pd.brMask.asUInt
-    val commit_jmp_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.jmpInfo.valid.asTypeOf(UInt(1.W)))
-    val commit_cfi_mask = (commit_br_mask | commit_jmp_mask)
+
 
     val commit_jal_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJal.asTypeOf(UInt(1.W)))
     val commit_jalr_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasJalr.asTypeOf(UInt(1.W)))
     val commit_call_mask = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasCall.asTypeOf(UInt(1.W)))
     val commit_ret_mask  = UIntToOH(commit_pd.jmpOffset) & Fill(PredictWidth, commit_pd.hasRet.asTypeOf(UInt(1.W)))
     
-    val mbpInstrs = commit_inst_mask & commit_cfi_mask
 
-    val mbpRights = commit_inst_mask & commit_not_mispred_mask
     val mbpBRights = mbpRights & commit_br_mask
     val mbpJRights = mbpRights & commit_jal_mask
     val mbpIRights = mbpRights & commit_jalr_mask
     val mbpCRights = mbpRights & commit_call_mask
     val mbpRRights = mbpRights & commit_ret_mask
 
-    val mbpWrongs = commit_inst_mask & commit_mispred_mask
     val mbpBWrongs = mbpWrongs & commit_br_mask
     val mbpJWrongs = mbpWrongs & commit_jal_mask
     val mbpIWrongs = mbpWrongs & commit_jalr_mask
@@ -1033,17 +1043,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       "BpRRight" -> PopCount(mbpRRights),
       "BpRWrong" -> PopCount(mbpRWrongs),
 
-      // "ubtbRight" -> PopCount(ubtbRights),
-      // "ubtbWrong" -> PopCount(ubtbWrongs),
-      // "btbRight" -> PopCount(btbRights),
-      // "btbWrong" -> PopCount(btbWrongs),
-      // "tageRight" -> PopCount(tageRights),
-      // "tageWrong" -> PopCount(tageWrongs),
-
-      // "rasRight"  -> PopCount(rasRights),
-      // "rasWrong"  -> PopCount(rasWrongs),
-      // "loopRight" -> PopCount(loopRights),
-      // "loopWrong" -> PopCount(loopWrongs),
       "ftb_false_hit"                -> PopCount(ftb_false_hit),
       "ftb_hit"                      -> PopCount(ftb_hit),
       "ftb_new_entry"                -> PopCount(ftb_new_entry),
@@ -1064,14 +1063,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       XSPerfAccumulate(key, value)
     }
 
-    // XSError(mbpJWrongs.orR, p"commit detetced jal misprediction! " +
-    //   p"commPtr: $commPtr, startAddr: ${commit_pc_bundle.startAddr}, offset: ${PriorityEncoder(mbpJWrongs)}\n")
-    // XSDebug(io.commit_ftqEntry.valid, p"ftq commit: ${io.commit_ftqEntry.bits}")
-    // XSDebug(enq_fire, p"ftq enq: ${enq.bits}")
-
-    // io.bpuInfo.bpRight := PopCount(predRights)
-    // io.bpuInfo.bpWrong := PopCount(predWrongs)
-
     // --------------------------- Debug --------------------------------
     // XSDebug(enq_fire, p"enq! " + io.fromBpu.resp.bits.toPrintable)
     XSDebug(io.toIfu.req.fire, p"fire to ifu " + io.toIfu.req.bits.toPrintable)
@@ -1083,31 +1074,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
 
   }
-  // val predRights = (0 until PredictWidth).map{i => !commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
-  // val predWrongs = (0 until PredictWidth).map{i => commitEntry.mispred(i) && !commitEntry.pd(i).notCFI && commitEntry.valids(i)}
-
-  // // Branch Predictor Perf counters
-  // if (!env.FPGAPlatform && env.EnablePerfDebug) {
-  //   val fires = commitEntry.valids.zip(commitEntry.pd).map{case (valid, pd) => valid && !pd.notCFI}
-  //   val isBTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isBr}
-  //   val isJTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJal}
-  //   val isITypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isJalr}
-  //   val isCTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isCall}
-  //   val isRTypes = (0 until PredictWidth).map{i => commitEntry.pd(i).isRet}
-
-  //   val mbpInstrs = fires
-  //   val mbpRights = predRights
-  //   val mbpWrongs = predWrongs
-  //   val mbpBRights = Cat(predRights) & Cat(isBTypes)
-  //   val mbpBWrongs = Cat(predWrongs) & Cat(isBTypes)
-  //   val mbpJRights = Cat(predRights) & Cat(isJTypes)
-  //   val mbpJWrongs = Cat(predWrongs) & Cat(isJTypes)
-  //   val mbpIRights = Cat(predRights) & Cat(isITypes)
-  //   val mbpIWrongs = Cat(predWrongs) & Cat(isITypes)
-  //   val mbpCRights = Cat(predRights) & Cat(isCTypes)
-  //   val mbpCWrongs = Cat(predWrongs) & Cat(isCTypes)
-  //   val mbpRRights = Cat(predRights) & Cat(isRTypes)
-  //   val mbpRWrongs = Cat(predWrongs) & Cat(isRTypes)
 
   //   def ubtbCheck(commit: FtqEntry, predAns: Seq[PredictorAnswer], isWrong: Bool) = {
   //     commit.valids.zip(commit.pd).zip(predAns).zip(commit.takens).map {
@@ -1173,7 +1139,5 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
-
-
 
 }
