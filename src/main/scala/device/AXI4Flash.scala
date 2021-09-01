@@ -18,18 +18,16 @@ package device
 
 import chisel3._
 import chisel3.util._
-import Chisel.BlackBox
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.experimental.ExtModule
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
 
-class FlashHelper extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val ren = Input(Bool())
-    val data = Output(UInt(64.W))
-    val addr = Input(UInt(32.W))
-  })
+class FlashHelper extends ExtModule with HasExtModuleInline {
+  val clk = IO(Input(Clock()))
+  val ren = IO(Input(Bool()))
+  val data = IO(Output(UInt(64.W)))
+  val addr = IO(Input(UInt(32.W)))
 
   setInline("FlashHelper.v",
     s"""
@@ -66,10 +64,10 @@ class AXI4Flash
     def getOffset(addr: UInt) = addr(15,0)
 
     val flash = Module(new FlashHelper)
-    flash.io.clk := clock
-    flash.io.ren := in.ar.fire()
-    flash.io.addr := Cat(0.U(16.W), getOffset(raddr))
+    flash.clk := clock
+    flash.ren := in.ar.fire()
+    flash.addr := Cat(0.U(16.W), getOffset(raddr))
 
-    in.r.bits.data := flash.io.data
+    in.r.bits.data := flash.data
   }
 }

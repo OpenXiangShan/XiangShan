@@ -18,8 +18,8 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.ExtModule
 import chisel3.util._
-import Chisel.BlackBox
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -190,16 +190,14 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   println(s"${l2tlbParams.name}: one ptw, miss queue size ${l2tlbParams.missQueueSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
 }
 
-class PTEHelper() extends BlackBox {
-  val io = IO(new Bundle {
-    val clock  = Input(Clock())
-    val enable = Input(Bool())
-    val satp   = Input(UInt(64.W))
-    val vpn    = Input(UInt(64.W))
-    val pte    = Output(UInt(64.W))
-    val level  = Output(UInt(8.W))
-    val pf     = Output(UInt(8.W))
-  })
+class PTEHelper() extends ExtModule {
+  val clock  = IO(Input(Clock()))
+  val enable = IO(Input(Bool()))
+  val satp   = IO(Input(UInt(64.W)))
+  val vpn    = IO(Input(UInt(64.W)))
+  val pte    = IO(Output(UInt(64.W)))
+  val level  = IO(Output(UInt(8.W)))
+  val pf     = IO(Output(UInt(8.W)))
 }
 
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -209,13 +207,13 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.tlb(i).req(0).ready := true.B
 
     val helper = Module(new PTEHelper())
-    helper.io.clock := clock
-    helper.io.enable := io.tlb(i).req(0).valid
-    helper.io.satp := io.csr.satp.ppn
-    helper.io.vpn := io.tlb(i).req(0).bits.vpn
-    val pte = helper.io.pte.asTypeOf(new PteBundle)
-    val level = helper.io.level
-    val pf = helper.io.pf
+    helper.clock := clock
+    helper.enable := io.tlb(i).req(0).valid
+    helper.satp := io.csr.satp.ppn
+    helper.vpn := io.tlb(i).req(0).bits.vpn
+    val pte = helper.pte.asTypeOf(new PteBundle)
+    val level = helper.level
+    val pf = helper.pf
 
     io.tlb(i).resp.valid := RegNext(io.tlb(i).req(0).valid)
     assert(!io.tlb(i).resp.valid || io.tlb(i).resp.ready)
