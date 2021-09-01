@@ -115,7 +115,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
 
   // should we refill the data to load queue to wake up any missed load?
-  val should_refill_data  = Reg(Bool())
+  val should_refill_data_reg = Reg(Bool())
+  val should_refill_data = WireInit(should_refill_data_reg)
 
 
   // --------------------------------------------
@@ -196,7 +197,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     req := io.req
     grantack.valid := false.B
     // only miss req from load needs a refill to LoadQueue
-    should_refill_data := io.req.source === LOAD_SOURCE.U
+    should_refill_data_reg := io.req.source === LOAD_SOURCE.U
 
     state := s_refill_req
   }
@@ -225,7 +226,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       req := io.req
     }
 
-    should_refill_data := should_refill_data || io.req.source === LOAD_SOURCE.U
+    should_refill_data := should_refill_data_reg || io.req.source === LOAD_SOURCE.U
+    should_refill_data_reg := should_refill_data
   }
 
 
