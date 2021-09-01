@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 
 class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
@@ -61,7 +62,7 @@ class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 }
 
-class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
+class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
 
   // NOTE:
@@ -98,10 +99,18 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameter
   val otherConnections = splitN(otherPorts, sharedPorts.length)
   val sharedConnections = sharedPorts.zip(otherConnections).map{ case (s, o) => s +: o }
   val allConnections: Seq[Seq[Int]] = exclusivePorts.map(Seq(_)) ++ sharedConnections
+  val hasFastUopOutVec = allConnections.map(_.map(cfgs(_).hasFastUopOut))
+  val hasFastUopOut: Seq[Boolean] = hasFastUopOutVec.map(_.reduce(_ || _))
+  hasFastUopOutVec.zip(hasFastUopOut).foreach{ case (vec, fast) =>
+    if (fast && vec.contains(false)) {
+      println("Warning: some exu does not have fastUopOut. It has extra one-cycle latency.")
+    }
+  }
 
   val sb = new StringBuffer(s"\n${if(isFp) "fp" else "int"} wb arbiter:\n")
   for ((port, i) <- exclusivePorts.zipWithIndex) {
-    sb.append(s"[ ${cfgs(port).name} ] -> out #$i\n")
+    val hasFastUopOutS = if (hasFastUopOut(i)) s" (hasFastUopOut)" else ""
+    sb.append(s"[ ${cfgs(port).name} ] -> out$hasFastUopOutS #$i\n")
   }
   for ((port, i) <- sharedPorts.zipWithIndex) {
     sb.append(s"[ ${cfgs(port).name} ")
@@ -109,14 +118,15 @@ class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameter
     for (req <- otherConnections(i)) {
       sb.append(s"${cfgs(req).name} ")
     }
-    sb.append(s"] -> ${if(useArb) "arb ->" else ""} out #${exclusivePorts.size + i}\n")
+    val hasFastUopOutS = if (hasFastUopOut(i + exclusivePorts.length)) s" (hasFastUopOut)" else ""
+    sb.append(s"] -> ${if(useArb) "arb ->" else ""} out$hasFastUopOutS #${exclusivePorts.size + i}\n")
   }
   println(sb)
 
-  lazy val module = new WbImp(this)
+  lazy val module = new WbArbiterImp(this)
 }
 
-class WbImp(outer: Wb)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle() {
     val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput)))
@@ -127,23 +137,47 @@ class WbImp(outer: Wb)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val sharedIn = outer.sharedPorts.map(io.in(_))
 
   // exclusive ports are connected directly
-  io.out.take(exclusiveIn.size).zip(exclusiveIn).foreach{
-    case (o, i) =>
-      val arb = Module(new ExuWbArbiter(1))
-      arb.io.in.head <> i
-      o.bits := arb.io.out.bits
-      o.valid := arb.io.out.valid
-      arb.io.out.ready := true.B
+  io.out.take(exclusiveIn.size).zip(exclusiveIn).zipWithIndex.foreach{
+    case ((out, in), i) =>
+      val hasFastUopOut = outer.hasFastUopOut(i)
+      out.valid := in.valid
+      out.bits := in.bits
+      if (hasFastUopOut) {
+        // When hasFastUopOut, only uop comes at the same cycle with valid.
+        out.valid := RegNext(in.valid)
+        out.bits.uop := RegNext(in.bits.uop)
+      }
+      in.ready := true.B
   }
 
   // shared ports are connected with an arbiter
   for (i <- sharedIn.indices) {
     val out = io.out(exclusiveIn.size + i)
     val shared = outer.sharedConnections(i).map(io.in(_))
+    val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
     val arb = Module(new ExuWbArbiter(shared.size))
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
+    if (hasFastUopOut) {
+      out.valid := RegNext(arb.io.out.valid)
+      // When hasFastUopOut, only uop comes at the same cycle with valid.
+      // Other bits like data, fflags come at the next cycle after valid,
+      // and they need to be selected with the fireVec.
+      val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
+      val dataVec = VecInit(shared.map(_.bits).zip(fastVec).map{ case (d, f) => if (f) d else RegNext(d) })
+      val sel = VecInit(arb.io.in.map(_.fire)).asUInt
+      out.bits := Mux1H(RegNext(sel), dataVec)
+      // uop comes at the same cycle with valid and only RegNext is needed.
+      out.bits.uop := RegNext(arb.io.out.bits.uop)
+    }
     arb.io.out.ready := true.B
   }
+
+  for (i <- 0 until outer.numInPorts) {
+    XSPerfAccumulate(s"in_valid_$i", io.in(i).valid)
+    XSPerfAccumulate(s"in_fire_$i", io.in(i).fire)
+  }
+  XSPerfHistogram("in_count", PopCount(io.in.map(_.valid)), true.B, 0, outer.numInPorts, 1)
+  XSPerfHistogram("out_count", PopCount(io.out.map(_.valid)), true.B, 0, outer.numInPorts, 1)
 }

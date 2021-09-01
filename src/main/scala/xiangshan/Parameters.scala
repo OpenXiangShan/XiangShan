@@ -25,6 +25,8 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.mmu.{L2TLBParameters}
+import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -105,11 +107,7 @@ case class XSCoreParameters
   RefillSize: Int = 512,
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
-  PtwL3EntrySize: Int = 4096, //(256 * 16) or 512
-  PtwSPEntrySize: Int = 16,
-  PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 2048, //(256 * 8)
-  PtwMissQueueSize: Int = 8,
+  l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -141,10 +139,11 @@ case class XSCoreParameters
   useFakeL2Cache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg)
 
-  val intExuConfigs = Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg
+  val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg) ++
+    Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
@@ -241,11 +240,7 @@ trait HasXSParameter {
   val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val TlbEntrySize = coreParams.TlbEntrySize
   val TlbSPEntrySize = coreParams.TlbSPEntrySize
-  val PtwL3EntrySize = coreParams.PtwL3EntrySize
-  val PtwSPEntrySize = coreParams.PtwSPEntrySize
-  val PtwL1EntrySize = coreParams.PtwL1EntrySize
-  val PtwL2EntrySize = coreParams.PtwL2EntrySize
-  val PtwMissQueueSize = coreParams.PtwMissQueueSize
+  val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4
@@ -311,8 +306,8 @@ trait HasXSParameter {
       blockBytes = L2BlockSize,
       nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
     ),
-  )  
-  
+  )
+
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576
   val ResetTimeMin2Pow = 10 //1024

@@ -255,8 +255,8 @@ class FtqEntry(implicit p: Parameters) extends XSBundle {
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(2.W)
-  val typeTagOut = UInt(2.W)
+  val typeTagIn = UInt(1.W)
+  val typeTagOut = UInt(1.W)
   val fromInt = Bool()
   val wflags = Bool()
   val fpWen = Bool()
@@ -289,6 +289,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
+  val singleStep = Bool()
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -307,8 +308,7 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 }
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
-  val src1MoveElim = Bool()
-  val src2MoveElim = Bool()
+  val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
   val renameTime = UInt(64.W)
   val dispatchTime = UInt(64.W)
@@ -333,6 +333,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
+  val eliminatedMove = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = true) : Bool = {
     (index, rfType) match {
@@ -393,12 +394,12 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val src = Vec(3, UInt((XLEN + 1).W))
+  val src = Vec(3, UInt(XLEN.W))
 }
 
 class ExuOutput(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
-  val data = UInt((XLEN + 1).W)
+  val data = UInt(XLEN.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect
@@ -409,6 +410,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val debug = Input(Bool())
 }
 
 class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
@@ -431,6 +433,7 @@ class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
+  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr

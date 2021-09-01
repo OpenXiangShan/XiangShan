@@ -18,6 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
+import Chisel.BlackBox
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4AdapterNode, AXI4IdentityNode, AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}

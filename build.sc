@@ -17,6 +17,7 @@
 import os.Path
 import mill._
 import scalalib._
+import coursier.maven.MavenRepository
 
 trait CommonModule extends ScalaModule {
   override def scalaVersion = "2.12.10"
@@ -28,10 +29,17 @@ trait CommonModule extends ScalaModule {
   override def compileIvyDeps = Agg(macroParadise)
 
   override def scalacPluginIvyDeps = Agg(macroParadise)
+
+  override def repositoriesTask = T.task {
+    super.repositoriesTask() ++ Seq(
+      MavenRepository("https://oss.sonatype.org/content/repositories/snapshots")
+    )
+  }
+
 }
 
 val chisel = Agg(
-  ivy"edu.berkeley.cs::chisel3:3.4.3"
+  ivy"edu.berkeley.cs::chisel3:3.5-SNAPSHOT"
 )
 
 object `api-config-chipsalliance` extends CommonModule {
@@ -83,22 +91,27 @@ object difftest extends SbtModule with CommonModule {
   override def ivyDeps = super.ivyDeps() ++ chisel
 }
 
+object fudian extends CommonModule with SbtModule {
+  override def ivyDeps = super.ivyDeps() ++ chisel
+}
+
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx64G")
+  override def forkArgs = Seq("-Xmx64G", "-Xss256m")
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
     `rocket-chip`,
     `block-inclusivecache-sifive`,
     chiseltest,
-    difftest
+    difftest,
+    fudian
   )
 
   object test extends Tests {
 
-    override def forkArgs = Seq("-Xmx64G")
+    override def forkArgs = Seq("-Xmx64G", "-Xss256m")
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivy"org.scalatest::scalatest:3.2.0"

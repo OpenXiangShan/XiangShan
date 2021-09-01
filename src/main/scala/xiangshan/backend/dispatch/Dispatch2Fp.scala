@@ -46,7 +46,14 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
     io.enqIQCtrl(i).bits.srcState(0) := io.readState(3*i).resp
     io.enqIQCtrl(i).bits.srcState(1) := io.readState(3*i+1).resp
     io.enqIQCtrl(i).bits.srcState(2) := io.readState(3*i+2).resp
+
+    val numReady = io.enqIQCtrl(i).fire + PopCount(io.enqIQCtrl(i).bits.srcState.map(_ === SrcState.rdy))
+    XSPerfHistogram(s"deq_num_src_ready_$i", numReady, true.B, 0, 4, 1)
   }
+  val enqFire = io.enqIQCtrl.map(_.fire)
+  val numRegSources = io.enqIQCtrl.map(enq => PopCount(enq.bits.ctrl.srcType.map(_ === SrcType.fp)))
+  val numRegfilePorts = enqFire.zip(numRegSources).map(enq => Mux(enq._1, enq._2, 0.U)).reduce(_ + _)
+  XSPerfHistogram("regfile_ports", numRegfilePorts, true.B, 0, 12, 1)
 
   for (i <- exuParameters.FmacCnt until dpParams.FpDqDeqWidth) {
     io.fromDq(i).ready := false.B

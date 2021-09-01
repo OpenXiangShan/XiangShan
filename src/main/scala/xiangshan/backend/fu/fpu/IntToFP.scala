@@ -22,9 +22,7 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import hardfloat.INToRecFN
 import utils.{SignExt, ZeroExt}
-import xiangshan._
 
 class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
 
@@ -32,7 +30,7 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_ready, out_valid = IO(Output(Bool()))
   val kill_w, kill_r = IO(Input(Bool()))
 
-  val s_idle :: s_cvt :: s_ieee :: s_finish :: Nil = Enum(4)
+  val s_idle :: s_cvt :: s_finish :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
 
@@ -41,7 +39,7 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   in_ready := state === s_idle
   out_valid := state === s_finish
 
-  val src1 = RegEnable(io.in.src(0)(XLEN-1, 0), in_fire)
+  val src1 = RegEnable(io.in.src(0), in_fire)
   val rmReg = RegEnable(rm, in_fire)
   val ctrl = RegEnable(io.in.fpCtrl, in_fire)
 
@@ -52,9 +50,6 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
       }
     }
     is(s_cvt){
-      state := s_ieee
-    }
-    is(s_ieee){
       state := s_finish
     }
     is(s_finish){
@@ -70,15 +65,17 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   /*
       s_cvt
    */
-  val tag = ctrl.typeTagIn
+  val tag = ctrl.typeTagOut
   val typ = ctrl.typ
   val wflags = ctrl.wflags
 
   val mux = Wire(new Bundle() {
-    val data = UInt((XLEN+1).W)
+    val data = UInt(XLEN.W)
     val exc = UInt(5.W)
   })
-  mux.data := recode(src1, tag)
+
+  // fmv
+  mux.data := src1
   mux.exc := 0.U
 
   val intValue = Mux(typ(1),
@@ -87,13 +84,13 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
   )
 
   when(wflags){
-    val i2fResults = for(t <- floatTypes) yield {
-      val i2f = Module(new INToRecFN(XLEN, t.exp, t.sig))
-      i2f.io.signedIn := ~typ(0)
-      i2f.io.in := intValue
-      i2f.io.roundingMode := rmReg
-      i2f.io.detectTininess := hardfloat.consts.tininess_afterRounding
-      (sanitizeNaN(i2f.io.out, t), i2f.io.exceptionFlags)
+    val i2fResults = for(t <- FPU.ftypes) yield {
+      val i2f = Module(new fudian.IntToFP(t.expWidth, t.precision))
+      i2f.io.sign := ~typ(0)
+      i2f.io.long := typ(1)
+      i2f.io.int := intValue
+      i2f.io.rm := rmReg
+      (i2f.io.result, i2f.io.fflags)
     }
     val (data, exc) = i2fResults.unzip
     mux.data := VecInit(data)(tag)
@@ -102,9 +99,8 @@ class IntToFPDataModule(implicit p: Parameters) extends FPUDataModule {
 
   val muxReg = Reg(mux.cloneType)
   when(state === s_cvt){
-    muxReg := mux
-  }.elsewhen(state === s_ieee){
-    muxReg.data := ieee(box(muxReg.data, ctrl.typeTagOut))
+    muxReg.data := FPU.box(mux.data, ctrl.typeTagOut)
+    muxReg.exc := mux.exc
   }
 
   fflags := muxReg.exc
