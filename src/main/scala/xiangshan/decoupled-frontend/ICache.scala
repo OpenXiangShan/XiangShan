@@ -10,8 +10,8 @@ import xiangshan.cache._
 import utils._
 
 case class ICacheParameters(
-    nSets: Int = 128,
-    nWays: Int = 4,
+    nSets: Int = 256,
+    nWays: Int = 8,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
