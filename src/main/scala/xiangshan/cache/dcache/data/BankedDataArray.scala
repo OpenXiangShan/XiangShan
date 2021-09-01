@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
 import system.L1CacheErrorInfo
-import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug, XSPerfAccumulate}
 
 import scala.math.max
 
@@ -296,8 +296,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   val row_error = Wire(Vec(DCacheBanks, Bool()))
   val bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
+  val perf_multi_read = io.read(0).valid && io.read(1).valid
   io.bank_conflict_fast := bank_conflict
   io.bank_conflict_slow := RegNext(bank_conflict)
+  XSPerfAccumulate("data_array_multi_read", perf_multi_read) 
+  XSPerfAccumulate("data_array_bank_conflict", bank_conflict) 
+  XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid) 
+  XSPerfAccumulate("data_array_access_0", io.read(0).valid) 
+  XSPerfAccumulate("data_array_access_1", io.read(1).valid) 
 
   for (bank_index <- 0 until DCacheBanks) {
     //     Set Addr & Read Way Mask
