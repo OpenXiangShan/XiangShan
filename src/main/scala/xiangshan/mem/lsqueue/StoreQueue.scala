@@ -81,6 +81,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   paddrModule.io := DontCare
   val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
+  val debug_paddr = Reg(Vec(StoreQueueSize, UInt((PAddrBits).W)))
+  val debug_vaddr = Reg(Vec(StoreQueueSize, UInt((VAddrBits).W)))
+  val debug_data = Reg(Vec(StoreQueueSize, UInt((XLEN).W)))
 
   // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
@@ -204,6 +207,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wen(i) := true.B
 
+      debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
+
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
@@ -218,6 +223,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     vaddrModule.io.waddr(i) := RegNext(stWbIndex)
     vaddrModule.io.wdata(i) := RegNext(io.storeIn(i).bits.vaddr)
     vaddrModule.io.wen(i) := RegNext(io.storeIn(i).fire())
+    
+    when(vaddrModule.io.wen(i)){
+      debug_vaddr(vaddrModule.io.waddr(i)) := vaddrModule.io.wdata(i)
+    }
   }
 
   // Write data to sq
@@ -232,6 +241,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       dataModule.io.data.waddr(i) := stWbIndex
       dataModule.io.data.wdata(i) := genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
       dataModule.io.data.wen(i) := true.B
+
+      debug_data(dataModule.io.data.waddr(i)) := dataModule.io.data.wdata(i)
 
       io.roq.storeDataRoqWb(i).valid := true.B
       io.roq.storeDataRoqWb(i).bits := io.storeDataIn(i).bits.uop.roqIdx
@@ -511,16 +522,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   for (i <- 0 until StoreQueueSize) {
-    if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(i + ": pc %x va %x pa %x data %x ", 
+      uop(i).cf.pc, 
+      debug_vaddr(i), 
+      debug_paddr(i),
+      debug_data(i)
+    )
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && addrvalid(i), "a")
     PrintFlag(allocated(i) && datavalid(i), "d")
     PrintFlag(allocated(i) && commited(i), "c")
     PrintFlag(allocated(i) && pending(i), "p")
     PrintFlag(allocated(i) && mmio(i), "m")
-    XSDebug(false, true.B, " ")
-    if (i % 4 == 3 || i == StoreQueueSize - 1) XSDebug(false, true.B, "\n")
+    XSDebug(false, true.B, "\n")
   }
 
 }
