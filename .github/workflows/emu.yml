@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, fastpath-ci ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
