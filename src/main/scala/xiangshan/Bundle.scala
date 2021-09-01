@@ -23,8 +23,6 @@ import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
-// import xiangshan.frontend.HasTageParameter
-// import xiangshan.frontend.HasSCParameter
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
@@ -38,22 +36,6 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
-
-// Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket(implicit p: Parameters) extends XSBundle {
-  val instrs = Vec(PredictWidth, UInt(32.W))
-  val mask = UInt(PredictWidth.W)
-  val pdmask = UInt(PredictWidth.W)
-  // val pc = UInt(VAddrBits.W)
-  val pc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val foldpc = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
-  val ipf = Bool()
-  val acf = Bool()
-  val crossPageIPFFix = Bool()
-  val pred_taken = UInt(PredictWidth.W)
-  val ftqPtr = new FtqPtr
-}
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -76,62 +58,11 @@ object RSFeedbackType {
   def apply() = UInt(2.W)
 }
 
-// class SCMeta(val useSC: Boolean)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-//   val tageTaken = if (useSC) Bool() else UInt(0.W)
-//   val scUsed = if (useSC) Bool() else UInt(0.W)
-//   val scPred = if (useSC) Bool() else UInt(0.W)
-//   // Suppose ctrbits of all tables are identical
-//   val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-// }
-
-// class TageMeta(implicit p: Parameters) extends XSBundle with HasTageParameter {
-//   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-//   val altDiffers = Bool()
-//   val providerU = UInt(2.W)
-//   val providerCtr = UInt(3.W)
-//   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-//   val taken = Bool()
-//   val scMeta = new SCMeta(EnableSC)
-// }
-
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
   val hit    = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
 }
-
-// class BpuMeta(implicit p: Parameters) extends XSBundle with HasBPUParameter {
-//   val btbWriteWay = UInt(log2Up(BtbWays).W)
-//   val btbHit = Bool()
-//   val bimCtr = UInt(2.W)
-//   // val tageMeta = new TageMeta
-//   // for global history
-
-//   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-//   val debug_btb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-//   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-
-//   val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
-
-//   val ubtbHit = if (BPUDebug) UInt(1.W) else UInt(0.W)
-
-//   val ubtbAns = new PredictorAnswer
-//   val btbAns = new PredictorAnswer
-//   val tageAns = new PredictorAnswer
-//   val rasAns = new PredictorAnswer
-//   val loopAns = new PredictorAnswer
-
-//   // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
-//   //   this.histPtr := histPtr
-//   //   this.tageMeta := tageMeta
-//   //   this.rasSp := rasSp
-//   //   this.rasTopCtr := rasTopCtr
-//   //   this.asUInt
-//   // }
-//   def size = 0.U.asTypeOf(this).getWidth
-
-//   def fromUInt(x: UInt) = x.asTypeOf(this)
-// }
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
@@ -142,7 +73,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
   val phist = UInt(PathHistoryLength.W)
-  val predHist = new GlobalHistory
   val specCnt = Vec(numBr, UInt(10.W))
   val phNewBit = Bool()
   // need pipeline update

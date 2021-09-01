@@ -304,7 +304,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
   csrioIn.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
-  // csrioIn.perf.bpuInfo <> DontCare // TODO: reassign this
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo

@@ -345,7 +345,6 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
     XSDebug(cond, p"-----------cfiUpdate----------- \n")
     XSDebug(cond, p"[pc] ${Hexadecimal(cfiUpdate.pc)}\n")
     XSDebug(cond, p"[hist] ${Binary(cfiUpdate.hist.predHist)}\n")
-    XSDebug(cond, p"[predHist] ${Binary(cfiUpdate.predHist.predHist)}\n")
     XSDebug(cond, p"[br_hit] ${cfiUpdate.br_hit} [isMisPred] ${cfiUpdate.isMisPred}\n")
     XSDebug(cond, p"[pred_taken] ${cfiUpdate.predTaken} [taken] ${cfiUpdate.taken} [isMisPred] ${cfiUpdate.isMisPred}\n")
     XSDebug(cond, p"[target] ${Hexadecimal(cfiUpdate.target)} \n")
