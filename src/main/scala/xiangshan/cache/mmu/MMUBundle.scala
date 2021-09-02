@@ -313,7 +313,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
 class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
   val access = Flipped(new Bundle {
     val sets = Output(Vec(Width, UInt(log2Up(nSets).W)))
-    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nSets).W))))
+    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nWays).W))))
   })
 
   val refillIdx = Output(UInt(log2Up(nWays).W))
