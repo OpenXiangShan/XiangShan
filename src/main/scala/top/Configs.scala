@@ -23,12 +23,14 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import xiangshan.frontend.{ICacheParameters}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{XSDebugModuleParams, EnableJtag}

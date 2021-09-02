@@ -323,14 +323,16 @@ object TLB {
         // tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
     } else { // itlb
-      require(width == 1)
-      tlb.io.requestor(0).req.valid := in(0).req.valid
-      tlb.io.requestor(0).req.bits := in(0).req.bits
-      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready && tlb.io.requestor(0).req.ready
+      //require(width == 1)
+      (0 until width).map{ i =>
+        tlb.io.requestor(i).req.valid := in(i).req.valid
+        tlb.io.requestor(i).req.bits := in(i).req.bits
+        in(i).req.ready := !tlb.io.requestor(i).resp.bits.miss && in(i).resp.ready && tlb.io.requestor(i).req.ready
 
-      in(0).resp.valid := tlb.io.requestor(0).resp.valid && !tlb.io.requestor(0).resp.bits.miss
-      in(0).resp.bits := tlb.io.requestor(0).resp.bits
-      tlb.io.requestor(0).resp.ready := in(0).resp.ready
+        in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
+        in(i).resp.bits := tlb.io.requestor(i).resp.bits
+        tlb.io.requestor(i).resp.ready := in(i).resp.ready
+      }
     }
 
     tlb.io.ptw

@@ -22,7 +22,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.ftq.FtqPtr
+import xiangshan.frontend.FtqPtr
 import difftest._
 
 class RoqPtr(implicit p: Parameters) extends CircularQueuePtr[RoqPtr](
