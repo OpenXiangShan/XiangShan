@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
+import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace, TlbReplaceIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
@@ -127,27 +127,29 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   val sfence = RegNext(io.sfence)
   val tlbcsr = RegNext(io.tlbCsr)
-  val dtlb_ld = Module(new TLB(exuParameters.LduCnt, ldtlbParams))
-  val dtlb_st = Module(new TLB(exuParameters.StuCnt, sttlbParams))
-  dtlb_ld.io.sfence <> sfence
-  dtlb_st.io.sfence <> sfence
-  dtlb_ld.io.csr <> tlbcsr
-  dtlb_st.io.csr <> tlbcsr
+  val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt)(Module(new TLB(1, ldtlbParams)).io))
+  val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt)(Module(new TLB(1 , sttlbParams)).io))
+  dtlb_ld.map(_.sfence := sfence)
+  dtlb_st.map(_.sfence := sfence)
+  dtlb_ld.map(_.csr := tlbcsr)
+  dtlb_st.map(_.csr := tlbcsr)
   if (ldtlbParams.outReplace) {
     val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
-    dtlb_ld.io.replace <> replace_ld.io
+    replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
   }
   if (sttlbParams.outReplace) {
     val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-    dtlb_st.io.replace <> replace_st.io
+    replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
   }
 
   if (!useBTlb) {
-    io.ptw.req         <> (dtlb_ld.io.ptw.req ++ dtlb_st.io.ptw.req)
-    dtlb_ld.io.ptw.resp.bits := io.ptw.resp.bits.data
-    dtlb_st.io.ptw.resp.bits := io.ptw.resp.bits.data
-    dtlb_ld.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR
-    dtlb_st.io.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR
+    (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
+      tlb(0) <> io.ptw.req(i)
+    }
+    dtlb_ld.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
+    dtlb_st.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
+    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
+    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
   } else {
     val btlb = Module(new BridgeTLB(BTLBWidth, btlbParams))
     btlb.suggestName("btlb")
@@ -155,15 +157,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.ptw <> btlb.io.ptw
     btlb.io.sfence <> sfence
     btlb.io.csr <> tlbcsr
-    btlb.io.requestor.take(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_ld.io.ptw.req).map{case (a,b) => a <> b}
-    btlb.io.requestor.drop(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_st.io.ptw.req).map{case (a,b) => a <> b}
+    btlb.io.requestor.take(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_ld.map(_.ptw.req)).map{case (a,b) => a <> b}
+    btlb.io.requestor.drop(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_st.map(_.ptw.req)).map{case (a,b) => a <> b}
 
     val arb_ld = Module(new Arbiter(new PtwResp, exuParameters.LduCnt))
     val arb_st = Module(new Arbiter(new PtwResp, exuParameters.StuCnt))
     arb_ld.io.in <> btlb.io.requestor.take(exuParameters.LduCnt).map(_.resp)
     arb_st.io.in <> btlb.io.requestor.drop(exuParameters.LduCnt).map(_.resp)
-    dtlb_ld.io.ptw.resp <> arb_ld.io.out
-    dtlb_st.io.ptw.resp <> arb_st.io.out
+    VecInit(dtlb_ld.map(_.ptw.resp)) <> arb_ld.io.out
+    VecInit(dtlb_st.map(_.ptw.resp)) <> arb_st.io.out
   }
   io.ptw.resp.ready := true.B
 
@@ -183,7 +185,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
     // l0tlb
-    loadUnits(i).io.tlb           <> dtlb_ld.io.requestor(i)
+    loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
 
     // laod to load fast forward
     for (j <- 0 until exuParameters.LduCnt) {
@@ -216,7 +218,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin        <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq         <> lsq.io.storeIn(i)
     // l0tlb
-    stu.io.tlb          <> dtlb_st.io.requestor(i)
+    stu.io.tlb          <> dtlb_st(i).requestor(0)
 
     // Lsq to load unit's rs
     // rs.io.storeData <> lsq.io.storeDataIn(i)
@@ -311,7 +313,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
 
-  val amoTlb = dtlb_ld.io.requestor(0)
+  val amoTlb = dtlb_ld(0).requestor(0)
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready

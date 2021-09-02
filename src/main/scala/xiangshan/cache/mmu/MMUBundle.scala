@@ -316,12 +316,26 @@ class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) exte
 
   val refillIdx = Output(UInt(log2Up(nWays).W))
   val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
+
+  def apply_sep(in: Seq[ReplaceIO], vpn: UInt): Unit = {
+    for (i <- 0 until Width) {
+      this.access.sets(i) := in(i).access.sets(0)
+      this.access.touch_ways(i) := in(i).access.touch_ways(0)
+      this.chosen_set := get_idx(vpn, nSets)
+      in(i).refillIdx := this.refillIdx
+    }
+  }
 }
 
 class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   TlbBundle {
   val normalPage = new ReplaceIO(Width, q.normalNSets, q.normalNWays)
   val superPage = new ReplaceIO(Width, q.superNSets, q.superNWays)
+
+  def apply_sep(in: Seq[TlbReplaceIO], vpn: UInt) = {
+    this.normalPage.apply_sep(in.map(_.normalPage), vpn)
+    this.superPage.apply_sep(in.map(_.superPage), vpn)
+  }
 
   override def cloneType = (new TlbReplaceIO(Width, q)).asInstanceOf[this.type]
 }
