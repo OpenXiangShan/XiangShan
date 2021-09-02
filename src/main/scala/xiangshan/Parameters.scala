@@ -114,6 +114,8 @@ case class XSCoreParameters
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
+  EnableIntMoveElim: Boolean = true,
+  IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -261,6 +263,10 @@ trait HasXSParameter {
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RoqSize = coreParams.RoqSize
+  val EnableIntMoveElim = coreParams.EnableIntMoveElim
+  val IntRefCounterWidth = coreParams.IntRefCounterWidth
+  val StdFreeListSize = NRPhyRegs - 32
+  val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
