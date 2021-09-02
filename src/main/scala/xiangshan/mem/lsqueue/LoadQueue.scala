@@ -27,7 +27,7 @@ import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.ftq.FtqPtr
+import xiangshan.frontend.FtqPtr
 import xiangshan.backend.fu.fpu.FPU
 
 

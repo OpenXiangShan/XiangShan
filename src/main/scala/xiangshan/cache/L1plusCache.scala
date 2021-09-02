@@ -945,7 +945,7 @@ class FakeL1plusCache()(implicit p: Parameters) extends XSModule with HasL1plusC
   val fakeRAM = Seq.fill(8)(Module(new RAMHelper(64L * 1024 * 1024 * 1024)))
   val req_valid = RegNext(io.req.valid)
   val req_addr = RegNext((io.req.bits.addr - "h80000000".U) >> 3)
-  assert(!req_valid || req_addr(2, 0) === 0.U)
+  //assert(!req_valid || req_addr(2, 0) === 0.U)
   for ((ram, i) <- fakeRAM.zipWithIndex) {
     ram.io.clk   := clock
     ram.io.en    := req_valid

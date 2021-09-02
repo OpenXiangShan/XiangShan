@@ -19,40 +19,23 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.frontend.PreDecodeInfoForDebug
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasTageParameter
-import xiangshan.frontend.HasSCParameter
-import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
+import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.FtqRead
+import xiangshan.frontend.FtqToCtrlIO
 import utils._
 
 import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.backend.ftq.FtqPtr
-
-// Fetch FetchWidth x 32-bit insts from Icache
-class FetchPacket(implicit p: Parameters) extends XSBundle {
-  val instrs = Vec(PredictWidth, UInt(32.W))
-  val mask = UInt(PredictWidth.W)
-  val pdmask = UInt(PredictWidth.W)
-  // val pc = UInt(VAddrBits.W)
-  val pc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val foldpc = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val pd = Vec(PredictWidth, new PreDecodeInfo)
-  val ipf = Bool()
-  val acf = Bool()
-  val crossPageIPFFix = Bool()
-  val pred_taken = UInt(PredictWidth.W)
-  val ftqPtr = new FtqPtr
-}
+import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -75,105 +58,10 @@ object RSFeedbackType {
   def apply() = UInt(2.W)
 }
 
-class SCMeta(val useSC: Boolean)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-  val tageTaken = if (useSC) Bool() else UInt(0.W)
-  val scUsed = if (useSC) Bool() else UInt(0.W)
-  val scPred = if (useSC) Bool() else UInt(0.W)
-  // Suppose ctrbits of all tables are identical
-  val ctrs = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-}
-
-class TageMeta(implicit p: Parameters) extends XSBundle with HasTageParameter {
-  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-  val altDiffers = Bool()
-  val providerU = UInt(2.W)
-  val providerCtr = UInt(3.W)
-  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
-  val taken = Bool()
-  val scMeta = new SCMeta(EnableSC)
-}
-
-@chiselName
-class BranchPrediction(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  // val redirect = Bool()
-  val takens = UInt(PredictWidth.W)
-  // val jmpIdx = UInt(log2Up(PredictWidth).W)
-  val brMask = UInt(PredictWidth.W)
-  val jalMask = UInt(PredictWidth.W)
-  val targets = Vec(PredictWidth, UInt(VAddrBits.W))
-
-  // half RVI could only start at the end of a packet
-  val hasHalfRVI = Bool()
-
-  def brNotTakens = (~takens & brMask)
-
-  def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
-    (if (i == 0) false.B else ParallelORR(brNotTakens(i - 1, 0)))))
-
-  // if not taken before the half RVI inst
-  def saveHalfRVI = hasHalfRVI && !(ParallelORR(takens(PredictWidth - 2, 0)))
-
-  // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = ParallelPriorityEncoder(takens)
-
-  // only used when taken
-  def target = {
-    val generator = new PriorityMuxGenerator[UInt]
-    generator.register(takens.asBools, targets, List.fill(PredictWidth)(None))
-    generator()
-  }
-
-  def taken = ParallelORR(takens)
-
-  def takenOnBr = taken && ParallelPriorityMux(takens, brMask.asBools)
-
-  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(takens, sawNotTakenBr), ParallelORR(brNotTakens))
-}
-
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
   val hit    = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val taken  = if (!env.FPGAPlatform) Bool() else UInt(0.W)
   val target = if (!env.FPGAPlatform) UInt(VAddrBits.W) else UInt(0.W)
-}
-
-class BpuMeta(implicit p: Parameters) extends XSBundle with HasBPUParameter {
-  val btbWriteWay = UInt(log2Up(BtbWays).W)
-  val btbHit = Bool()
-  val bimCtr = UInt(2.W)
-  val tageMeta = new TageMeta
-  // for global history
-
-  val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-  val debug_btb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-  val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
-
-  val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
-
-  val ubtbHit = if (BPUDebug) UInt(1.W) else UInt(0.W)
-
-  val ubtbAns = new PredictorAnswer
-  val btbAns = new PredictorAnswer
-  val tageAns = new PredictorAnswer
-  val rasAns = new PredictorAnswer
-  val loopAns = new PredictorAnswer
-
-  // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
-  //   this.histPtr := histPtr
-  //   this.tageMeta := tageMeta
-  //   this.rasSp := rasSp
-  //   this.rasTopCtr := rasTopCtr
-  //   this.asUInt
-  // }
-  def size = 0.U.asTypeOf(this).getWidth
-
-  def fromUInt(x: UInt) = x.asTypeOf(this)
-}
-
-class Predecode(implicit p: Parameters) extends XSBundle with HasIFUConst {
-  val hasLastHalfRVI = Bool()
-  val mask = UInt(PredictWidth.W)
-  val lastHalf = Bool()
-  val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
@@ -184,14 +72,27 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
   val hist = new GlobalHistory
-  val predHist = new GlobalHistory
-  val specCnt = Vec(PredictWidth, UInt(10.W))
+  val phist = UInt(PathHistoryLength.W)
+  val specCnt = Vec(numBr, UInt(10.W))
+  val phNewBit = Bool()
   // need pipeline update
-  val sawNotTakenBranch = Bool()
+  val br_hit = Bool()
   val predTaken = Bool()
   val target = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
+  val shift = UInt((log2Ceil(numBr)+1).W)
+  val addIntoHist = Bool()
+
+  def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
+    this.hist := entry.ghist
+    this.phist := entry.phist
+    this.phNewBit := entry.phNewBit
+    this.rasSp := entry.rasSp
+    this.rasEntry := entry.rasEntry
+    this.specCnt := entry.specCnt
+    this
+  }
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -210,45 +111,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
 }
-
-class FtqEntry(implicit p: Parameters) extends XSBundle {
-  // fetch pc, pc of each inst could be generated by concatenation
-  val ftqPC = UInt(VAddrBits.W)
-  val lastPacketPC = ValidUndirectioned(UInt(VAddrBits.W))
-  // prediction metas
-  val hist = new GlobalHistory
-  val predHist = new GlobalHistory
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry()
-  val specCnt = Vec(PredictWidth, UInt(10.W))
-  val metas = Vec(PredictWidth, new BpuMeta)
-
-  val cfiIsCall, cfiIsRet, cfiIsJalr, cfiIsRVC = Bool()
-  val rvc_mask = Vec(PredictWidth, Bool())
-  val br_mask = Vec(PredictWidth, Bool())
-  val cfiIndex = ValidUndirectioned(UInt(log2Up(PredictWidth).W))
-  val valids = Vec(PredictWidth, Bool())
-
-  // backend update
-  val mispred = Vec(PredictWidth, Bool())
-  val target = UInt(VAddrBits.W)
-
-  // For perf counters
-  val pd = Vec(PredictWidth, new PreDecodeInfoForDebug(!env.FPGAPlatform))
-
-  def takens = VecInit((0 until PredictWidth).map(i => cfiIndex.valid && cfiIndex.bits === i.U))
-  def hasLastPrev = lastPacketPC.valid
-
-  override def toPrintable: Printable = {
-    p"ftqPC: ${Hexadecimal(ftqPC)} lastPacketPC: ${Hexadecimal(lastPacketPC.bits)} hasLastPrev:$hasLastPrev " +
-      p"rasSp:$rasSp specCnt:$specCnt brmask:${Binary(Cat(br_mask))} rvcmask:${Binary(Cat(rvc_mask))} " +
-      p"valids:${Binary(valids.asUInt())} cfi valid: ${cfiIndex.valid} " +
-      p"cfi index: ${cfiIndex.bits} isCall:$cfiIsCall isRet:$cfiIsRet isJalr:$cfiIsJalr, isRvc:$cfiIsRVC " +
-      p"mispred:${Binary(Cat(mispred))} target:${Hexadecimal(target)}\n"
-  }
-
-}
-
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -457,15 +319,12 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val sourceType = RSFeedbackType()
 }
 
-class FrontendToBackendIO(implicit p: Parameters) extends XSBundle {
+class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-  val fetchInfo = DecoupledIO(new FtqEntry)
+  val fromFtq = new FtqToCtrlIO
   // from backend
-  val redirect_cfiUpdate = Flipped(ValidIO(new Redirect))
-  val commit_cfiUpdate = Flipped(ValidIO(new FtqEntry))
-  val ftqEnqPtr = Input(new FtqPtr)
-  val ftqLeftOne = Input(Bool())
+  val toFtq = Flipped(new CtrlToFtqIO)
 }
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {

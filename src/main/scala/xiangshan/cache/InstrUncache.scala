@@ -102,7 +102,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
     io.mmio_acquire.valid := true.B
     io.mmio_acquire.bits  :=  edge.Get(
           fromSource      = io.id,
-          toAddress       = packetAligned(req.addr) + (beatCounter.value << log2Ceil(mmioBusBytes).U),
+          toAddress       = req.addr + (beatCounter.value << log2Ceil(mmioBusBytes).U),
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 
