@@ -40,7 +40,7 @@ case class FuConfig
 (
   name: String,
   fuGen: Parameters => FunctionUnit,
-  fuSel: FunctionUnit => Bool,
+  fuSel: MicroOp => Bool,
   fuType: UInt,
   numIntSrc: Int,
   numFpSrc: Int,
@@ -49,7 +49,8 @@ case class FuConfig
   hasRedirect: Boolean,
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
-  fastImplemented: Boolean = false
+  fastImplemented: Boolean = false,
+  hasInputBuffer: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
@@ -60,12 +61,13 @@ class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
 }
 
+class FunctionUnitInput(val len: Int)(implicit p: Parameters) extends XSBundle {
+  val src = Vec(3, UInt(len.W))
+  val uop = new MicroOp
+}
 
 class FunctionUnitIO(val len: Int)(implicit p: Parameters) extends XSBundle {
-  val in = Flipped(DecoupledIO(new Bundle() {
-    val src = Vec(3, UInt(len.W))
-    val uop = new MicroOp
-  }))
+  val in = Flipped(DecoupledIO(new FunctionUnitInput(len)))
 
   val out = DecoupledIO(new FuOutput(len))
 
