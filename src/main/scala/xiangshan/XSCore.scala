@@ -291,6 +291,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc
   memScheduler.io.extra.jalr_target <> ctrlBlock.io.jalr_target
   memScheduler.io.extra.stIssuePtr <> memBlock.io.stIssuePtr
+  memScheduler.io.extra.loadFastMatch.get <> memBlock.io.loadFastMatch
   memScheduler.io.extra.debug_int_rat <> ctrlBlock.io.debug_int_rat
   memScheduler.io.extra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
 
