@@ -237,7 +237,6 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val increaseSpecRefCounterVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
 
   for (i <- 0 until RenameWidth) {
-    allocatePhyReg(i) := DontCare
     // enqueue instr, isn't move elimination
     needAllocatingVec(i) := allocateReq(i) && canAllocate && doAllocate && !flush && !psrcOfMove(i).valid && !redirect && !walk
 
@@ -253,11 +252,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       case n => PopCount(needAllocatingVec.take(n))
     }
     val ptr = headPtr + offset
-    when (needAllocatingVec(i)) {
-      val pdest = freeList(ptr.value)
-      XSDebug(p"[$i] Allocate phy reg $pdest\n")
-      allocatePhyReg(i) := pdest
-    }
+    allocatePhyReg(i) := freeList(ptr.value)
   }
 
   for (preg <- 0 until NRPhyRegs) {

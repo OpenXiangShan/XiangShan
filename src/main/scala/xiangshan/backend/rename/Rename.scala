@@ -77,10 +77,11 @@ class Rename(implicit p: Parameters) extends XSModule {
     // when isWalk, use stepBack to restore head pointer of free list
     // (if ME enabled, stepBack of intFreeList should be useless thus optimized out)
     fl.stepBack := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
-    // walk has higher priority than allocation and thus we don't use isWalk here
-    // only when both fp and int free list and dispatch1 has enough space can we do allocation
-    fl.doAllocate := fl.canAllocate && io.out(0).ready
   }
+  // walk has higher priority than allocation and thus we don't use isWalk here
+  // only when both fp and int free list and dispatch1 has enough space can we do allocation
+  intFreeList.doAllocate := fpFreeList.canAllocate && io.out(0).ready
+  fpFreeList.doAllocate := intFreeList.canAllocate && io.out(0).ready
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && !io.roqCommits.isWalk
@@ -264,15 +265,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     * Instructions commit: update freelist and rename table
     */
   for (i <- 0 until CommitWidth) {
-    // when RenameWidth <= CommitWidth, there will be more write ports than read ports, which must be initialized
-    // normally, they are initialized in 'normal write' section
-    if (i >= RenameWidth) {
-      Seq(intRat, fpRat) foreach { case rat =>
-        rat.io.specWritePorts(i).wen   := false.B
-        rat.io.specWritePorts(i).addr  := DontCare
-        rat.io.specWritePorts(i).wdata := DontCare
-      }
-    }
 
     Seq((intRat, false), (fpRat, true)) foreach { case (rat, fp) => 
       // is valid commit req and given instruction has destination register
