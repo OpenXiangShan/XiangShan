@@ -36,6 +36,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val roqFlush = Valid(new Bundle {
     val ftqIdx = Output(new FtqPtr)
     val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
+    val replayInst = Output(Bool()) // not used for now
   })
 }
 
