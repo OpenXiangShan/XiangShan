@@ -29,7 +29,7 @@ import scala.math.max
 trait HasBankedDataArrayParameters extends {
   val DCacheReadHighPriority = false
 
-  val DCacheSets = 64
+  val DCacheSets = 256
   val DCacheWays = 8
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64
