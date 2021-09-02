@@ -25,7 +25,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
@@ -75,11 +75,12 @@ case class XSCoreParameters
       val bim = Module(new BIM()(p))
       val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
       val ras = Module(new RAS()(p))
+      val ittage = Module(new ITTage()(p))
       // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(bim, ubtb, tage, ftb, ras)
+      val preds = Seq(bim, ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -91,7 +92,8 @@ case class XSCoreParameters
       ubtb.io.in.bits.resp_in(0) := bim.io.out.resp
       tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ras.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
       
       (preds, ras.io.out.resp)
     }),

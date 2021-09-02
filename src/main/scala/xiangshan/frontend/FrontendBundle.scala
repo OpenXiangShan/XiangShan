@@ -213,6 +213,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   }
   def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_call && preds.jmp_valid
   def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_ret && preds.jmp_valid
+  def hit_taken_on_jalr = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_jalr && preds.jmp_valid
 
   def fallThroughAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
   def target(): UInt = {
