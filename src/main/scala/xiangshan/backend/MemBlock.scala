@@ -50,7 +50,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasExceptionNO
   with HasFPUParameters
   with HasExeBlockHelper
-  with HasFpLoadHelper
 {
 
   val io = IO(new Bundle {
@@ -58,6 +57,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val flush = Input(Bool())
     // in
     val issue = Vec(exuParameters.LsExuCnt, Flipped(DecoupledIO(new ExuInput)))
+    val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
     val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
     val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))
@@ -174,6 +174,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.rsFeedback    <> io.replay(i)
     loadUnits(i).io.rsIdx         := io.rsIdx(i) // TODO: beautify it
     loadUnits(i).io.isFirstIssue  := io.isFirstIssue(i) // NOTE: just for dtlb's perf cnt
+    loadUnits(i).io.loadFastMatch <> io.loadFastMatch(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> io.issue(i)
     // dcache access
@@ -183,6 +184,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
     // l0tlb
     loadUnits(i).io.tlb           <> dtlb_ld.io.requestor(i)
+
+    // laod to load fast forward
+    for (j <- 0 until exuParameters.LduCnt) {
+      loadUnits(i).io.fastpathIn(j)  <> loadUnits(j).io.fastpathOut
+    }
+
     // Lsq to load unit's rs
 
     // passdown to lsq

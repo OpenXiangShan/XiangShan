@@ -34,14 +34,6 @@ class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
   val instr_rm = io.fromFp.bits.uop.ctrl.fpu.rm
   fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
 
-  fma.io.redirectIn := io.redirect
-  fma.io.flushIn := io.flush
-  fma.io.out.ready := io.out.ready
-
-  io.out.bits.data := Mux(fma.io.out.bits.uop.ctrl.fpu.typeTagOut === S,
-    box(fma.io.out.bits.data, FType.S),
-    sanitizeNaN(fma.io.out.bits.data, FType.D)
-  )
-  // io.out.bits.data := box(fma.io.out.bits.data, fma.io.out.bits.uop.ctrl.fpu.typeTagOut)
+  io.out.bits.data := fma.io.out.bits.data
   io.out.bits.fflags := fma.fflags
 }
