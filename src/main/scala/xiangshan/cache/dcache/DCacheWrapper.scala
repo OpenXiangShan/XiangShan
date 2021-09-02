@@ -236,12 +236,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
   dataArray.dump()
   newDataArray.dump()
-  /*
-  dataArray.dump()
-  metaArray.dump()
-  */
-  val errors = dataArray.io.errors ++ metaArray.io.errors
+
+  // val errors = dataArray.io.errors ++ metaArray.io.errors
+  val errors = newDataArray.io.errors ++ metaArray.io.errors
   io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  assert(!io.error.ecc_error.valid)
 
   //----------------------------------------
   // core modules

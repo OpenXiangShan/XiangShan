@@ -161,20 +161,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     encWord(encWordBits - 1, wordBits)
   }
 
-  def getECCFromRow(row: UInt) = {
-    require(row.getWidth == rowBits)
-    VecInit((0 until rowWords).map { w =>
-      val word = row(wordBits * (w + 1) - 1, wordBits * w)
-      getECCFromEncWord(cacheParams.dataCode.encode(word))
-    })
-  }
-
-  def getECCFromWord(word: UInt) = {
-    require(word.getWidth == XLEN)
-    getECCFromEncWord(cacheParams.dataCode.encode(word))
-  }
-
-  // val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
   io.write.ready := (if (DCacheReadHighPriority) {
       !VecInit(io.read.map(_.valid)).asUInt.orR
   } else {
@@ -336,13 +322,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val ecc_bank = ecc_banks(bank_index)
     ecc_bank.io.r.req.valid := bank_addr_matchs.asUInt.orR
     ecc_bank.io.r.req.bits.apply(setIdx = bank_set_addr)
-    val ecc_resp = Wire(Vec(DCacheWays, Bits(eccBits.W)))
-    for(w <- 0 until DCacheWays){
-      ecc_resp(w) := ecc_bank.io.r.resp.data(w)
-    }
-    val ecc_resp_chosen = Wire(Bits(eccBits.W))
-    ecc_resp_chosen := Mux1H(RegNext(bank_way_en), ecc_resp)
-    bank_result(bank_index).ecc := ecc_resp_chosen
+    bank_result(bank_index).ecc := Mux1H(RegNext(bank_way_en), ecc_bank.io.r.resp.data)
 
     // use ECC to check error
     val data = bank_result(bank_index).asECCData()
@@ -373,14 +353,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     ecc_bank.io.w.req.valid := io.write.valid && io.write.bits.wmask(bank_index)
     ecc_bank.io.w.req.bits.apply(
       setIdx = sram_waddr,
-      data = getECCFromWord(io.write.bits.data(bank_index)),
+      data = getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
       waymask = io.write.bits.way_en
     )
     when(ecc_bank.io.w.req.valid) {
       XSDebug("write in ecc sram: bank %x set %x data %x waymask %x\n",
         bank_index.U,
         sram_waddr,
-        getECCFromWord(io.write.bits.data(bank_index)).asUInt,
+        getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
         io.write.bits.way_en
       );  
     }
