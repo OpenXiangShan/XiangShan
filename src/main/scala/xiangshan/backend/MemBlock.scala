@@ -25,7 +25,7 @@ import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace, TlbReplaceIO}
+import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
@@ -127,8 +127,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // dtlb
   val sfence = RegNext(io.sfence)
   val tlbcsr = RegNext(io.tlbCsr)
-  val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt)(Module(new TLB(1, ldtlbParams)).io))
-  val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt)(Module(new TLB(1 , sttlbParams)).io))
+  val dtlb_ld = VecInit(Seq.fill(exuParameters.LduCnt){
+    val tlb_ld = Module(new TLB(1, ldtlbParams))
+    tlb_ld.io // let the module have name in waveform
+  })
+  val dtlb_st = VecInit(Seq.fill(exuParameters.StuCnt){
+    val tlb_st = Module(new TLB(1 , sttlbParams))
+    tlb_st.io // let the module have name in waveform
+  })
   dtlb_ld.map(_.sfence := sfence)
   dtlb_st.map(_.sfence := sfence)
   dtlb_ld.map(_.csr := tlbcsr)
