@@ -50,37 +50,31 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
+    val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
   })
+  require(LoadPipelineWidth == exuParameters.LduCnt)
 
   val s0_uop = io.in.bits.uop
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
-  val useFastpath = false.B // TODO
-  val fastpathId = 0.U(1.W) // TODO
 
   // slow vaddr from non-load insts
-  // val s0_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
-  // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
-  val s0_vaddr_lo = io.in.bits.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi = Mux(s0_vaddr_lo(12),
-    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12), io.in.bits.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_vaddr_slow = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
-  val s0_mask_slow = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
+  val slowpath_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  val slowpath_mask = genWmask(slowpath_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // fast vaddr from load insts
-  val fastpath_src = Mux(fastpathId.asBool, io.fastpath(1).data, io.fastpath(0).data)
-  val s0_vaddr_lo_fast = fastpath_src(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi_fast = Mux(s0_vaddr_lo_fast(12),
-    Mux(imm12(11), fastpath_src(VAddrBits-1, 12), fastpath_src(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), fastpath_src(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), fastpath_src(VAddrBits-1, 12)),
-  )
-  val s0_vaddr_fast = Cat(s0_vaddr_hi_fast, s0_vaddr_lo_fast(11,0))
-  val s0_mask_fast = genWmask(s0_vaddr_lo_fast, s0_uop.ctrl.fuOpType(1,0))
+  val fastpath_vaddrs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+     io.fastpath(i).data + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  })))
+  val fastpath_masks = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+     genWmask(fastpath_vaddrs(i), s0_uop.ctrl.fuOpType(1,0))
+  })))
+  val fastpath_vaddr = Mux1H(io.loadFastMatch, fastpath_vaddrs)
+  val fastpath_mask  = Mux1H(io.loadFastMatch, fastpath_masks)
 
   // select vaddr from 2 alus
-  val s0_vaddr = Mux(useFastpath, s0_vaddr_fast, s0_vaddr_slow) 
-  val s0_mask = Mux(useFastpath, s0_mask_fast, s0_mask_slow)
+  val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr) 
+  val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask) 
+  XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
@@ -198,7 +192,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("tlb_miss", io.in.valid && s1_tlb_miss)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
-
 
 // Load Pipeline Stage 2
 // DCache resp
@@ -352,6 +345,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
+    val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -364,6 +358,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
   load_s0.io.fastpath := io.fastpathIn
+  load_s0.io.loadFastMatch := io.loadFastMatch
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 

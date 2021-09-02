@@ -333,13 +333,13 @@ object FDecode extends DecodeConstants{
 object BDecode extends DecodeConstants{
   val table: Array[(BitPat, List[BitPat])] = Array(
     // Basic bit manipulation
-    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
     
-    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, ALUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
     CLMUL   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmul, Y, N, N, N, N, N, N, SelImm.IMM_X),
     CLMULH  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulh, Y, N, N, N, N, N, N, SelImm.IMM_X),
@@ -503,12 +503,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl
 
+  val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
+
   // read src1~3 location
   cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
   cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)
   cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location
-  cs.ldest := Mux(cs.fpWen || cs.rfWen, ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
+  cs.ldest := Mux((cs.fpWen || cs.rfWen) && !(isMove && ctrl_flow.instr(RS1_MSB,RS1_LSB) === ctrl_flow.instr(RD_MSB,RD_LSB)), ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
 
   // fill in exception vector
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
@@ -534,9 +536,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  cs.isMove := BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr && 
-    cs.lsrc(0) =/= 0.U && cs.ldest =/= 0.U && 
-    cs.lsrc(0) =/= cs.ldest /* TODO these special Move instructions can be optimized */
+  cs.isMove := isMove && cs.lsrc(0) =/= 0.U /* TODO these special Move instructions can be optimized */
 
   cf_ctrl.ctrl := cs
 
