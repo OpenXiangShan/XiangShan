@@ -87,13 +87,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   for (i <- 0 until Width) {
     normalPage.r_req_apply(
       valid = io.requestor(i).req.valid,
-      wayIdx = get_idx(vpn(i), q.normalNWays),
       vpn = vpn(i),
       i = i
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
-      wayIdx = get_idx(vpn(i), q.superNWays),
       vpn = vpn(i),
       i = i
     )

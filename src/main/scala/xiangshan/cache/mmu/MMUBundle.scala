@@ -271,7 +271,6 @@ object TlbCmd {
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends  TlbBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
-      val wayIdx = Output(UInt(log2Up(nWays).W)) // setIdx is determined by vpn low bits
       val vpn = Output(UInt(vpnLen.W))
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
@@ -291,9 +290,8 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
   val sfence = Input(new SfenceBundle())
 
-  def r_req_apply(valid: Bool, wayIdx: UInt, vpn: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
-    this.r.req(i).bits.wayIdx := wayIdx
     this.r.req(i).bits.vpn := vpn
   }
 
