@@ -56,12 +56,14 @@ object MaskGen {
 object Random
 {
   def apply(mod: Int, random: UInt): UInt = {
-    if (isPow2(mod)) random(log2Ceil(mod)-1,0)
+    if (mod == 1) 0.U
+    else if (isPow2(mod)) random(log2Ceil(mod)-1,0)
     else PriorityEncoder(partition(apply(1 << log2Up(mod*8), random), mod))
   }
   def apply(mod: Int): UInt = apply(mod, randomizer)
   def oneHot(mod: Int, random: UInt): UInt = {
-    if (isPow2(mod)) UIntToOH(random(log2Up(mod)-1,0))
+    if (mod == 1) 1.U(1.W)
+    else if (isPow2(mod)) UIntToOH(random(log2Up(mod)-1,0))
     else VecInit(PriorityEncoderOH(partition(apply(1 << log2Up(mod*8), random), mod))).asUInt
   }
   def oneHot(mod: Int): UInt = oneHot(mod, randomizer)
