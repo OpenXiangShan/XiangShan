@@ -279,7 +279,7 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
     re.access(io.normalPage.access.sets, io.normalPage.access.touch_ways)
-    io.normalPage.refillIdx := re.way(io.normalPage.chosen_set)
+    io.normalPage.refillIdx := { if (q.normalNWays == 1) 0.U else re.way(io.normalPage.chosen_set) }
   }
 
   if (q.superAssociative == "fa") {
@@ -289,7 +289,7 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
     re.access(io.superPage.access.sets, io.superPage.access.touch_ways)
-    io.superPage.refillIdx := re.way(io.superPage.chosen_set)
+    io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
   }
 }
 
