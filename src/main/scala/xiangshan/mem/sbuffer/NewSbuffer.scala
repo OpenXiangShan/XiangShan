@@ -279,7 +279,8 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val empty = Cat(invalidMask).andR() && !Cat(io.in.map(_.valid)).orR()
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   val validCount = PopCount(validMask)
-  val do_eviction = RegNext(validCount >= threshold || validCount === StoreBufferSize.U, init = false.B)
+  val do_eviction = RegNext(validCount >= threshold || validCount === (StoreBufferSize-1).U, init = false.B)
+  require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
   XSDebug(p"validCount[$validCount]\n")
 
@@ -419,4 +420,18 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
       }
     }
   }
+  
+  val perf_valid_entry_count = PopCount(VecInit(stateVec.map(s => !isInvalid(s))).asUInt)
+  XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
+  XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
+  XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire())).asUInt))
+  XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt))
+  XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt))
+  XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)
+  XSPerfAccumulate("dcache_req_fire", io.dcache.req.fire())
+  XSPerfAccumulate("sbuffer_idle", sbuffer_state === x_idle)
+  XSPerfAccumulate("sbuffer_flush", sbuffer_state === x_drain_sbuffer)
+  XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
+  XSPerfAccumulate("evenCanInsert", evenCanInsert)
+  XSPerfAccumulate("oddCanInsert", oddCanInsert)
 }

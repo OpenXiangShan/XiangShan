@@ -25,9 +25,12 @@ import xiangshan._
 class AddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val src = Vec(2, Input(UInt(XLEN.W)))
-    val add = Output(UInt((XLEN+1).W))
+    val srcw = Input(UInt((XLEN/2).W))
+    val add = Output(UInt(XLEN.W))
+    val addw = Output(UInt((XLEN/2).W))
   })
-  io.add := io.src(0) +& io.src(1)
+  io.add := io.src(0) + io.src(1)
+  io.addw := io.srcw + io.src(1)(31,0)
 }
 
 class SubModule(implicit p: Parameters) extends XSModule {
@@ -41,40 +44,52 @@ class SubModule(implicit p: Parameters) extends XSModule {
 class LeftShiftModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
+    val revShamt = Input(UInt(6.W))
     val sllSrc = Input(UInt(XLEN.W))
     val sll = Output(UInt(XLEN.W))
+    val revSll = Output(UInt(XLEN.W))
   })
   io.sll := io.sllSrc << io.shamt
+  io.revSll := io.sllSrc << io.revShamt
 }
 
 class LeftShiftWordModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(5.W))
+    val revShamt = Input(UInt(5.W))
     val sllSrc = Input(UInt((XLEN/2).W))
     val sllw = Output(UInt((XLEN/2).W))
+    val revSllw = Output(UInt((XLEN/2).W))
   })
   io.sllw := io.sllSrc << io.shamt
+  io.revSllw := io.sllSrc << io.revShamt
 }
 
 class RightShiftModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(6.W))
+    val revShamt = Input(UInt(6.W))
     val srlSrc, sraSrc = Input(UInt(XLEN.W))
     val srl, sra = Output(UInt(XLEN.W))
+    val revSrl = Output(UInt(XLEN.W))
   })
   io.srl  := io.srlSrc >> io.shamt
   io.sra  := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.revSrl  := io.srlSrc >> io.revShamt
 }
 
 class RightShiftWordModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val shamt = Input(UInt(5.W))
+    val revShamt = Input(UInt(5.W))
     val srlSrc, sraSrc = Input(UInt((XLEN/2).W))
     val srlw, sraw = Output(UInt((XLEN/2).W))
+    val revSrlw = Output(UInt((XLEN/2).W))
   })
 
   io.srlw := io.srlSrc >> io.shamt
   io.sraw := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.revSrlw := io.srlSrc >> io.revShamt
 }
 
 
@@ -105,7 +120,7 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
 class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
-    val sll, srl, sra, rot, bclr, bset, binv, bext = Input(UInt(XLEN.W))
+    val sll, srl, sra, rol, ror, bclr, bset, binv, bext = Input(UInt(XLEN.W))
     val shiftRes = Output(UInt(XLEN.W))
   })
   
@@ -113,18 +128,19 @@ class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   val leftRes  = Mux(io.func(2), leftBit, io.sll)
   val rightRes = Mux(io.func(2), io.sra, Mux(io.func(1), io.bext, io.srl))
 
-  io.shiftRes := Mux(io.func(4), io.rot, Mux(io.func(3), rightRes, leftRes))
+  io.shiftRes := Mux(io.func(4), Mux(io.func(3), io.ror, io.rol), Mux(io.func(3), rightRes, leftRes))
 }
 
 class WordResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
-    val sllw, srlw, sraw, rotw, addw, subw = Input(UInt((XLEN/2).W))
+    val sllw, srlw, sraw, rolw, rorw, addw, subw = Input(UInt((XLEN/2).W))
     val wordRes = Output(UInt(XLEN.W))
   })
 
   val addsubRes = Mux(io.func(6), io.subw, io.addw)
-  val shiftRes = Mux(io.func(4), io.rotw, 
+  val shiftRes = Mux(io.func(4), 
+                  Mux(io.func(3), io.rorw, io.rolw),
                   Mux(io.func(3), 
                     Mux(io.func(2), io.sraw, io.srlw), 
                     io.sllw))
@@ -162,9 +178,12 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val addModule = Module(new AddModule)
   val shaddShamt = func(2,1)
   val add  = addModule.io.add
-  val addw = addModule.io.add
-  addModule.io.src(0) := Mux(func(0),src1(31,0), src1) << shaddShamt
+  val addw = addModule.io.addw
+  addModule.io.src(0) := (Cat(Fill(32, func(0)), Fill(32,1.U)) & src1) << shaddShamt
   addModule.io.src(1) := src2
+  addModule.io.srcw := src1(31,0)
+
+
 
   val subModule = Module(new SubModule)
   val sub  = subModule.io.sub
@@ -177,30 +196,40 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   val leftShiftModule = Module(new LeftShiftModule)
   val sll = leftShiftModule.io.sll
-  leftShiftModule.io.sllSrc := Mux(func(0), src1(31,0), src1)
-  leftShiftModule.io.shamt := Mux(func(3), revShamt, shamt)
+  val revSll = leftShiftModule.io.revSll
+  leftShiftModule.io.sllSrc := Cat(Fill(32, func(0)), Fill(32,1.U)) & src1
+  leftShiftModule.io.shamt := shamt
+  leftShiftModule.io.revShamt := revShamt
   
   val leftShiftWordModule = Module(new LeftShiftWordModule)
   val sllw = leftShiftWordModule.io.sllw
+  val revSllw = leftShiftWordModule.io.revSllw
   leftShiftWordModule.io.sllSrc := src1
-  leftShiftWordModule.io.shamt := Mux(func(3), revShamt, shamt)
+  leftShiftWordModule.io.shamt := shamt
+  leftShiftWordModule.io.revShamt := revShamt
 
   val rightShiftModule = Module(new RightShiftModule)
   val srl = rightShiftModule.io.srl
+  val revSrl = rightShiftModule.io.revSrl
   val sra = rightShiftModule.io.sra
-  rightShiftModule.io.shamt := Mux(func(3), shamt, revShamt)
+  rightShiftModule.io.shamt := shamt
+  rightShiftModule.io.revShamt := revShamt
   rightShiftModule.io.srlSrc := src1
-  rightShiftModule.io.sraSrc := src1   // 这里可以优化成 不过Mux的src1
+  rightShiftModule.io.sraSrc := src1
 
   val rightShiftWordModule = Module(new RightShiftWordModule)
   val srlw = rightShiftWordModule.io.srlw
+  val revSrlw = rightShiftWordModule.io.revSrlw
   val sraw = rightShiftWordModule.io.sraw
-  rightShiftWordModule.io.shamt := Mux(func(3), shamt, revShamt)
+  rightShiftWordModule.io.shamt := shamt
+  rightShiftWordModule.io.revShamt := revShamt
   rightShiftWordModule.io.srlSrc := src1
   rightShiftWordModule.io.sraSrc := src1
 
-  val rot = srl | sll
-  val rotw = srlw | sllw
+  val rol = revSrl | sll
+  val ror = srl | revSll
+  val rolw = revSrlw | sllw
+  val rorw = srlw | revSllw
   
   val bitShift = 1.U << src2(5, 0)
   val bset = src1 | bitShift
@@ -217,8 +246,10 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sgtu    = sub(XLEN)
   val sltu    = !sgtu
   val slt     = xor(XLEN-1) ^ sltu
+  // val maxMin  = Mux(slt ^ func(0), src2, src1)
+  // val maxMinU = Mux(sltu^ func(0), src2, src1)
   val maxMin  = Mux(slt ^ func(0), src2, src1)
-  val maxMinU = Mux(sltu^ func(0), src2, src1)
+  val maxMinU = Mux((sgtu && func(0)) || ~(sgtu && func(0)), src2, src1)
   val sextb   = SignExt(src1(7, 0), XLEN)
   val sexth   = SignExt(src1(15, 0), XLEN)
   val zexth   = ZeroExt(src1(15, 0), XLEN)
@@ -244,7 +275,8 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   shiftResSel.io.sll  := sll
   shiftResSel.io.srl  := srl
   shiftResSel.io.sra  := sra
-  shiftResSel.io.rot  := rot
+  shiftResSel.io.rol  := rol
+  shiftResSel.io.ror  := ror
   shiftResSel.io.bclr := bclr
   shiftResSel.io.binv := binv
   shiftResSel.io.bset := bset
@@ -273,7 +305,8 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   wordResSel.io.sllw := sllw
   wordResSel.io.srlw := srlw
   wordResSel.io.sraw := sraw
-  wordResSel.io.rotw := rotw
+  wordResSel.io.rolw := rolw
+  wordResSel.io.rorw := rorw
   val wordRes = wordResSel.io.wordRes
 
   val aluResSel = Module(new AluResSel)

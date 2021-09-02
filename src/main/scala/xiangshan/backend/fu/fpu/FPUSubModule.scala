@@ -31,12 +31,12 @@ trait HasUIntToSIntHelper {
 abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Input(new Bundle() {
-      val src = Vec(3, UInt(65.W))
+      val src = Vec(3, UInt(64.W))
       val fpCtrl = new FPUCtrlSignals
       val rm = UInt(3.W)
     })
     val out = Output(new Bundle() {
-      val data = UInt(65.W)
+      val data = UInt(64.W)
       val fflags = UInt(5.W)
     })
   })
@@ -45,7 +45,7 @@ abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val fflags = io.out.fflags
 }
 
-abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit(len = 65)
+abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
   with HasUIntToSIntHelper
 {
   val rm = IO(Input(UInt(3.W)))

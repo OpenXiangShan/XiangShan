@@ -91,6 +91,10 @@ object difftest extends SbtModule with CommonModule {
   override def ivyDeps = super.ivyDeps() ++ chisel
 }
 
+object fudian extends CommonModule with SbtModule {
+  override def ivyDeps = super.ivyDeps() ++ chisel
+}
+
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
@@ -101,7 +105,8 @@ object XiangShan extends CommonModule with SbtModule {
     `rocket-chip`,
     `block-inclusivecache-sifive`,
     chiseltest,
-    difftest
+    difftest,
+    fudian
   )
 
   object test extends Tests {
