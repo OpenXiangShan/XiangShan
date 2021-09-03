@@ -179,7 +179,10 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   add_pipe.io.redirectIn := io.redirectIn
   add_pipe.io.flushIn := io.flushIn
 
-  io.in.ready := Mux(fpCtrl.isAddSub, add_pipe.io.in.ready, mul_pipe.io.in.ready)
+  io.in.ready := Mux(fpCtrl.isAddSub,
+    !(mul_pipe.io.out.valid && isFMA) && add_pipe.io.in.ready,
+    mul_pipe.io.in.ready
+  )
 
   mul_pipe.io.out.ready := Mux(isFMA,
     add_pipe.io.in.ready,
