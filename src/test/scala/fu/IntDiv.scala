@@ -32,7 +32,7 @@ class SRT4DividerWrapper extends Module {
     val out_valid = Output(Bool())
     val result = Output(UInt(64.W))
   })
-  val divider = Module(new SRT4DividerDataModule(len = 64))
+  val divider = Module(new SRT16DividerDataModule(len = 64))
   divider.io.src(0) := io.dividend
   divider.io.src(1) := io.divisor
   divider.io.kill_r := false.B

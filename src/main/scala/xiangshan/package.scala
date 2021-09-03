@@ -352,7 +352,7 @@ package object xiangshan {
     def apply() = UInt(3.W)
   }
 
-  def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
+  def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
