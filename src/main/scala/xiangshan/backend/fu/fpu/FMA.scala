@@ -100,10 +100,10 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   val fpCtrl = uopIn.ctrl.fpu
   val typeTagIn = fpCtrl.typeTagIn
 
-  val src1 = FPU.unbox(
-    Mux(isFMA, mulToAdd.addend, io.in.bits.src(0)), typeTagIn
+  val src1 = FPU.unbox(io.in.bits.src(0), typeTagIn)
+  val src2 = FPU.unbox(
+    Mux(isFMA, mulToAdd.addend, io.in.bits.src(1)), typeTagIn
   )
-  val src2 = FPU.unbox(io.in.bits.src(1), typeTagIn)
 
   // TODO: reuse hardware
   val s_adder :: d_adder :: Nil = FPU.ftypes.zipWithIndex.map { case (ftype,i) =>
@@ -111,18 +111,21 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
       ftype.expWidth, 2*ftype.precision, ftype.precision
     ))
     val w = ftype.len
-    val in1 = Cat(
-      Mux(fpCtrl.fmaCmd(0), invert_sign(src1, w), src1)(ftype.len-1, 0),
-      0.U(ftype.precision.W)
+    val in1 = Mux(isFMA,
+      mulToAdd.mul_out(i).fp_prod.asUInt(),
+      Cat(src1(ftype.len - 1, 0), 0.U(ftype.precision.W))
     )
-    val in2 = Mux(isFMA,
-      Cat(src2(ftype.len-1, 0), 0.U(ftype.precision.W)),
-      mulToAdd.mul_out(i).fp_prod.asUInt()
+    val in2 = Cat(
+      Mux(fpCtrl.fmaCmd(0), invert_sign(src2, ftype.len), src2(ftype.len - 1, 0)),
+      0.U(ftype.precision.W)
     )
     fadder.io.a := in1
     fadder.io.b := in2
     fadder.io.b_inter_valid := isFMA
-    fadder.io.b_inter_flags := mulToAdd.mul_out(i).inter_flags
+    fadder.io.b_inter_flags := Mux(isFMA,
+      mulToAdd.mul_out(i).inter_flags,
+      0.U.asTypeOf(fadder.io.b_inter_flags)
+    )
     fadder.io.rm := rm
     fadder
   }
@@ -168,19 +171,19 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   mul_pipe.io.redirectIn := io.redirectIn
   mul_pipe.io.flushIn := io.flushIn
 
-  val isFMA = mul_pipe.io.out.bits.uop.ctrl.fpu.ren3
+  val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3
 
   add_pipe.mulToAdd <> mul_pipe.toAdd
   add_pipe.isFMA := isFMA
   add_pipe.rm := rm
   add_pipe.io.in <> io.in
   add_pipe.io.in.valid :=
-    io.in.valid && fpCtrl.isAddSub || mul_pipe.io.out.valid && isFMA
+    io.in.valid && fpCtrl.isAddSub || isFMA
   add_pipe.io.redirectIn := io.redirectIn
   add_pipe.io.flushIn := io.flushIn
 
   io.in.ready := Mux(fpCtrl.isAddSub,
-    !(mul_pipe.io.out.valid && isFMA) && add_pipe.io.in.ready,
+    !isFMA && add_pipe.io.in.ready,
     mul_pipe.io.in.ready
   )
 

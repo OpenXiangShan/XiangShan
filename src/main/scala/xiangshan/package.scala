@@ -547,7 +547,8 @@ package object xiangshan {
     name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    latency = UncertainLatency()
   )
 
   val f2iCfg = FuConfig(
