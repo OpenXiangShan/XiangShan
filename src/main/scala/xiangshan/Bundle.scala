@@ -113,9 +113,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool() 
-  // This inst is ld, can be load to load fast forwarded
-  // TODO: this is dirty
-  val fastfwd = Bool() 
 }
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {

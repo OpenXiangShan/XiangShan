@@ -25,8 +25,8 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
-import xiangshan.cache.mmu.{L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -141,8 +141,42 @@ case class XSCoreParameters
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
   RefillSize: Int = 512,
-  TlbEntrySize: Int = 32,
-  TlbSPEntrySize: Int = 4,
+  itlbParameters: TLBParameters = TLBParameters(
+    name = "itlb",
+    fetchi = true,
+    useDmode = false,
+    sameCycle = true,
+    normalReplacer = Some("plru"),
+    superReplacer = Some("plru"),
+    shouldBlock = true
+  ),
+  ldtlbParameters: TLBParameters = TLBParameters(
+    name = "ldtlb",
+    normalNSets = 128,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 8,
+    normalAsVictim = true,
+    outReplace = true
+  ),
+  sttlbParameters: TLBParameters = TLBParameters(
+    name = "sttlb",
+    normalNSets = 128,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 8,
+    normalAsVictim = true,
+    outReplace = true
+  ),
+  btlbParameters: TLBParameters = TLBParameters(
+    name = "btlb",
+    normalNSets = 1,
+    normalNWays = 64,
+    superNWays = 4,
+  ),
+  useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
@@ -168,7 +202,6 @@ case class XSCoreParameters
   ),
   L2Size: Int = 512 * 1024, // 512KB
   L2NWays: Int = 8,
-  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -283,9 +316,12 @@ trait HasXSParameter {
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
-  val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
-  val TlbEntrySize = coreParams.TlbEntrySize
-  val TlbSPEntrySize = coreParams.TlbSPEntrySize
+  val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val useBTlb = coreParams.useBTlb
+  val itlbParams = coreParams.itlbParameters
+  val ldtlbParams = coreParams.ldtlbParameters
+  val sttlbParams = coreParams.sttlbParameters
+  val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
@@ -302,7 +338,6 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
-  val usePTWRepeater = coreParams.usePTWRepeater
   val useFakeDCache = coreParams.useFakeDCache
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache

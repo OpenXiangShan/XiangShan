@@ -338,11 +338,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater(2))
-  val dtlbRepeater = if (usePTWRepeater) {
-    Module(new PTWRepeater(LoadPipelineWidth + StorePipelineWidth))
-  } else {
-    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
-  }
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> fenceio.sfence

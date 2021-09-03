@@ -490,7 +490,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
       inflightMask(i)
     )
   }
-  
+
   val perf_valid_entry_count = PopCount(VecInit(stateVec.map(s => !isInvalid(s))).asUInt)
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))

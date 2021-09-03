@@ -182,7 +182,7 @@ class RoqExceptionInfo(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool()
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || replayInst || singleStep
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst
   // only exceptions are allowed to writeback when enqueue
   def can_writeback = exceptionVec.asUInt.orR || singleStep
 }

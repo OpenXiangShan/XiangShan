@@ -25,6 +25,25 @@ import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+case class TLBParameters
+(
+  name: String = "none",
+  fetchi: Boolean = false, // TODO: remove it
+  useDmode: Boolean = true,
+  sameCycle: Boolean = false,
+  normalNSets: Int = 1, // when da or sa
+  normalNWays: Int = 8, // when fa or sa
+  superNSets: Int = 1,
+  superNWays: Int = 2,
+  normalReplacer: Option[String] = Some("random"),
+  superReplacer: Option[String] = Some("plru"),
+  normalAssociative: String = "fa", // "fa", "sa", "da", "sa" is not supported
+  superAssociative: String = "fa", // must be fa
+  normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
+  outReplace: Boolean = false,
+  shouldBlock: Boolean = false // only for perf, not support for io
+)
+
 case class L2TLBParameters
 (
   name: String = "l2tlb",
@@ -45,8 +64,6 @@ case class L2TLBParameters
   spReplacer: Option[String] = Some("plru"),
   // miss queue
   missQueueSize: Int = 8,
-  // sram
-  sramSinglePort: Boolean = true,
   // way size
   blockBytes: Int = 64
 )
@@ -62,24 +79,10 @@ trait HasTlbConst extends HasXSParameter {
   val pteResLen = XLEN - ppnLen - 2 - flagLen
   val asidLen = 16
 
-  def vaBundle = new Bundle {
-    val vpn  = UInt(vpnLen.W)
-    val off  = UInt(offLen.W)
-  }
-  def pteBundle = new Bundle {
-    val reserved  = UInt(pteResLen.W)
-    val ppn  = UInt(ppnLen.W)
-    val rsw  = UInt(2.W)
-    val perm = new Bundle {
-      val d    = Bool()
-      val a    = Bool()
-      val g    = Bool()
-      val u    = Bool()
-      val x    = Bool()
-      val w    = Bool()
-      val r    = Bool()
-      val v    = Bool()
-    }
+  val sramSinglePort = true
+
+  def get_idx(vpn: UInt, nSets: Int): UInt = {
+    vpn(log2Up(nSets)-1, 0)
   }
 
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {
@@ -92,11 +95,11 @@ trait HasTlbConst extends HasXSParameter {
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
+
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
-  val sramSinglePort = true // NOTE: ptwl2, ptwl3 sram single port or not
   val blockBits = l2tlbParams.blockBytes * 8
 
   val bPtwWidth = log2Up(PtwWidth)
