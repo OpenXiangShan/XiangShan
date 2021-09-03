@@ -155,7 +155,6 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Seq[Bool] = {
     if (needArbiter) {
       if(in.size == 1){
-        require(!config.hasFastUopOut)
         in.head.ready := out.ready
         out.bits.data := in.head.bits.data
         out.bits.uop := in.head.bits.uop
@@ -172,7 +171,6 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
         arb.io.out <> out
       }
     } else {
-      require(!config.hasFastUopOut)
       in.foreach(_.ready := out.ready)
       val sel = Mux1H(in.map(x => x.valid -> x))
       out.bits.data := sel.bits.data

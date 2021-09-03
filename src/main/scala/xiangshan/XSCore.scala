@@ -23,7 +23,6 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.exu.{ExuConfig, WbArbiter}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
-import xiangshan.cache.L1plusCacheWrapper
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -65,7 +64,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 {
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
-  val l1pluscache = LazyModule(new L1plusCacheWrapper())
   val ptw = LazyModule(new PTWWrapper())
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -181,7 +179,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val frontend = outer.frontend.module
   val memBlock = outer.memBlock.module
-  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val exuBlocks = outer.exuBlocks.map(_.module)
   val memScheduler = outer.memScheduler.module
@@ -215,7 +212,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val rfWriteback = VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  io.l1plus_error <> l1pluscache.io.error
+  io.l1plus_error <> DontCare
   io.icache_error <> frontend.io.error
   io.dcache_error <> memBlock.io.error
 
@@ -228,10 +225,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.sfence <> fenceio.sfence
   frontend.io.tlbCsr <> csrioIn.tlb
   frontend.io.csrCtrl <> csrioIn.customCtrl
-
-  frontend.io.icacheMemAcq <> l1pluscache.io.req
-  l1pluscache.io.resp <> frontend.io.icacheMemGrant
-  l1pluscache.io.flush := frontend.io.l1plusFlush
   frontend.io.fencei := fenceio.fencei
 
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
@@ -291,6 +284,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc
   memScheduler.io.extra.jalr_target <> ctrlBlock.io.jalr_target
   memScheduler.io.extra.stIssuePtr <> memBlock.io.stIssuePtr
+  memScheduler.io.extra.loadFastMatch.get <> memBlock.io.loadFastMatch
   memScheduler.io.extra.debug_int_rat <> ctrlBlock.io.debug_int_rat
   memScheduler.io.extra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
 
@@ -311,7 +305,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
   csrioIn.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
-  csrioIn.perf.bpuInfo <> ctrlBlock.io.perfInfo.bpuInfo
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
@@ -344,12 +337,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
-  val itlbRepeater = Module(new PTWRepeater())
-  val dtlbRepeater = if (usePTWRepeater) {
-    Module(new PTWRepeater(LoadPipelineWidth + StorePipelineWidth))
-  } else {
-    Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
-  }
+  val itlbRepeater = Module(new PTWRepeater(2))
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> fenceio.sfence
@@ -362,9 +351,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
-
-  val l1plus_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-  l1pluscache.reset := l1plus_reset_gen.io.out
 
   val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
   ptw.reset := ptw_reset_gen.io.out

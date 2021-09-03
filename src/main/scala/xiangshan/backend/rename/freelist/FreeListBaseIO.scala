@@ -14,26 +14,30 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.exu
+package xiangshan.backend.rename.freelist
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import freechips.rocketchip.tile.FType
+import chisel3.util._
 import xiangshan._
-import xiangshan.backend.fu.fpu._
+import utils._
 
-class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
-{
+trait FreeListBaseIO {
 
-  val fma = functionUnits.head.asInstanceOf[FMA]
+  // control signals from CtrlBlock
+  def flush: Bool
+  def redirect: Bool
+  def walk: Bool
 
-  val input = io.fromFp.bits
-  val fmaOut = fma.io.out.bits
-  val isRVD = !io.fromFp.bits.uop.ctrl.isRVF
-  fma.io.in.bits.src := VecInit(Seq(input.src(0), input.src(1), input.src(2)))
-  val instr_rm = io.fromFp.bits.uop.ctrl.fpu.rm
-  fma.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
+  // allocate physical registers (rename)
+  def allocateReq: Vec[Bool] // need allocating phy reg (may be refused due to lacking of free reg)
+  def allocatePhyReg: Vec[UInt] // phy dest response according to allocateReq
+  def canAllocate: Bool // free list can allocate new phy registers
+  def doAllocate: Bool // actually do the allocation (given by rename)
 
-  io.out.bits.data := fma.io.out.bits.data
-  io.out.bits.fflags := fma.fflags
+  // free old physical registers (commit)
+  def freeReq: Vec[Bool] // need to free phy reg
+  def freePhyReg: Vec[UInt] // free old p_dest reg
+
+  // walk recovery
+  def stepBack: UInt
 }

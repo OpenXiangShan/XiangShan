@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbReq, TlbResp, TlbCmd}
+import xiangshan.cache.mmu.{TlbPtwIO, TlbReq, TlbResp, TlbCmd, TlbRequestIO, TLB}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -33,29 +33,48 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val forward = new PipeLoadForwardQueryIO
 }
 
+class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
+  // load to load fast path is limited to ld (64 bit) used as vaddr src1 only 
+  val data = UInt(XLEN.W)
+  val valid = Bool()
+}
+
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
 class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
+    val fastpath = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheWordReq)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
+    val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
   })
+  require(LoadPipelineWidth == exuParameters.LduCnt)
 
   val s0_uop = io.in.bits.uop
-  // val s0_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
-  // val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
-  val s0_vaddr_lo = io.in.bits.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val s0_vaddr_hi = Mux(s0_vaddr_lo(12),
-    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12), io.in.bits.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), io.in.bits.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), io.in.bits.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_vaddr = Cat(s0_vaddr_hi, s0_vaddr_lo(11,0))
-  val s0_mask = genWmask(s0_vaddr_lo, s0_uop.ctrl.fuOpType(1,0))
+
+  // slow vaddr from non-load insts
+  val slowpath_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  val slowpath_mask = genWmask(slowpath_vaddr, s0_uop.ctrl.fuOpType(1,0))
+
+  // fast vaddr from load insts
+  val fastpath_vaddrs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+     io.fastpath(i).data + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+  })))
+  val fastpath_masks = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+     genWmask(fastpath_vaddrs(i), s0_uop.ctrl.fuOpType(1,0))
+  })))
+  val fastpath_vaddr = Mux1H(io.loadFastMatch, fastpath_vaddrs)
+  val fastpath_mask  = Mux1H(io.loadFastMatch, fastpath_masks)
+
+  // select vaddr from 2 alus
+  val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr) 
+  val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask) 
+  XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
@@ -179,6 +198,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
+    val fastpath = Output(new LoadToLoadIO)
   })
 
   val s2_uop = io.in.bits.uop
@@ -270,6 +290,10 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.in.ready := io.out.ready || !io.in.valid
 
+  // fast load to load forward
+  io.fastpath.valid := io.in.valid // for debug only
+  io.fastpath.data := rdata // raw data
+
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
     forwardData.asUInt, forwardMask.asUInt
@@ -295,10 +319,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
-    val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
+
+    val tlb = new TlbRequestIO
+    val fastpathOut = Output(new LoadToLoadIO)
+    val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
+    val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -306,14 +334,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val load_s2 = Module(new LoadUnit_S2)
 
   load_s0.io.in <> io.ldin
-  load_s0.io.dtlbReq <> io.dtlb.req
+  load_s0.io.dtlbReq <> io.tlb.req
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
+  load_s0.io.fastpath := io.fastpathIn
+  load_s0.io.loadFastMatch := io.loadFastMatch
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  load_s1.io.dtlbResp <> io.dtlb.resp
+  load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
@@ -329,6 +359,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
+  load_s2.io.fastpath <> io.fastpathOut
   io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
   io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
@@ -349,7 +380,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
   XSDebug(load_s1.io.out.valid,
-    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.dtlb.resp.bits.miss}, " +
+    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
 
   // writeback to LSQ

@@ -23,9 +23,10 @@ import xiangshan.backend.exu._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.{L2TLBParameters}
+import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -55,6 +56,7 @@ case class XSCoreParameters
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
+  PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
@@ -62,6 +64,38 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
+  branchPredictor: Function3[BranchPredictionResp, Parameters, Boolean, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) => {
+      // val loop = Module(new LoopPredictor)
+      // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
+      //                             else          Module(new Tage) }
+      //             else          { Module(new FakeTage) })
+      val ftb = Module(new FTB()(p))
+      val ubtb = Module(new MicroBTB()(p))
+      val bim = Module(new BIM()(p))
+      val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
+      val ras = Module(new RAS()(p))
+      // val tage = Module(new Tage()(p))
+      // val fake = Module(new FakePredictor()(p))
+
+      // val preds = Seq(loop, tage, btb, ubtb, bim)
+      val preds = Seq(bim, ubtb, tage, ftb, ras)
+      preds.map(_.io := DontCare)
+
+      // ubtb.io.resp_in(0)  := resp_in
+      // bim.io.resp_in(0)   := ubtb.io.resp
+      // btb.io.resp_in(0)   := bim.io.resp
+      // tage.io.resp_in(0)  := btb.io.resp
+      // loop.io.resp_in(0)  := tage.io.resp
+      bim.io.in.bits.resp_in(0)  := resp_in
+      ubtb.io.in.bits.resp_in(0) := bim.io.out.resp
+      tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
+      ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
+      ras.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      
+      (preds, ras.io.out.resp)
+    }),
+
 
   EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 48,
@@ -69,7 +103,7 @@ case class XSCoreParameters
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
-  FtqSize: Int = 48,
+  FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
@@ -80,6 +114,8 @@ case class XSCoreParameters
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
+  EnableIntMoveElim: Boolean = true,
+  IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -104,8 +140,42 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   RefillSize: Int = 512,
-  TlbEntrySize: Int = 32,
-  TlbSPEntrySize: Int = 4,
+  itlbParameters: TLBParameters = TLBParameters(
+    name = "itlb",
+    fetchi = true,
+    useDmode = false,
+    sameCycle = true,
+    normalReplacer = Some("plru"),
+    superReplacer = Some("plru"),
+    shouldBlock = true
+  ),
+  ldtlbParameters: TLBParameters = TLBParameters(
+    name = "ldtlb",
+    normalNSets = 128,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 8,
+    normalAsVictim = true,
+    outReplace = true
+  ),
+  sttlbParameters: TLBParameters = TLBParameters(
+    name = "sttlb",
+    normalNSets = 128,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 8,
+    normalAsVictim = true,
+    outReplace = true
+  ),
+  btlbParameters: TLBParameters = TLBParameters(
+    name = "btlb",
+    normalNSets = 1,
+    normalNWays = 64,
+    superNWays = 4,
+  ),
+  useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
@@ -131,7 +201,6 @@ case class XSCoreParameters
   ),
   L2Size: Int = 512 * 1024, // 512KB
   L2NWays: Int = 8,
-  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -196,6 +265,7 @@ trait HasXSParameter {
   val EnableSC = coreParams.EnableSC
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
+  val PathHistoryLength = coreParams.PathHistoryLength
   val BtbSize = coreParams.BtbSize
   // val BtbWays = 4
   val BtbBanks = PredictWidth
@@ -203,6 +273,11 @@ trait HasXSParameter {
   val JbtacSize = coreParams.JbtacSize
   val JbtacBanks = coreParams.JbtacBanks
   val RasSize = coreParams.RasSize
+
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) = {
+    coreParams.branchPredictor(resp_in, p, enableSC)
+  }
+
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
@@ -221,6 +296,10 @@ trait HasXSParameter {
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RoqSize = coreParams.RoqSize
+  val EnableIntMoveElim = coreParams.EnableIntMoveElim
+  val IntRefCounterWidth = coreParams.IntRefCounterWidth
+  val StdFreeListSize = NRPhyRegs - 32
+  val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
@@ -235,9 +314,12 @@ trait HasXSParameter {
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val RefillSize = coreParams.RefillSize
-  val DTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
-  val TlbEntrySize = coreParams.TlbEntrySize
-  val TlbSPEntrySize = coreParams.TlbSPEntrySize
+  val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val useBTlb = coreParams.useBTlb
+  val itlbParams = coreParams.itlbParameters
+  val ldtlbParams = coreParams.ldtlbParameters
+  val sttlbParams = coreParams.sttlbParameters
+  val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
@@ -254,7 +336,6 @@ trait HasXSParameter {
   // cache hierarchy configurations
   val l1BusDataWidth = 256
 
-  val usePTWRepeater = coreParams.usePTWRepeater
   val useFakeDCache = coreParams.useFakeDCache
   val useFakePTW = coreParams.useFakePTW
   val useFakeL1plusCache = coreParams.useFakeL1plusCache
