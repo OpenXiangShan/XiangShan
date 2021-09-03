@@ -32,10 +32,10 @@ import scala.util.matching.Regex
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
   //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 128,    2,    7),
-    ( 128,    4,    7),
-    ( 128,    8,    8),
-    ( 256,   16,    8))
+  val TableInfo = Seq(( 128*8,    2,    7),
+    ( 128*8,    4,    7),
+    ( 128*8,    8,    8),
+    ( 256*8,   16,    8))
   // ( 128*8,   32,    9),
   // ( 128*8,   64,    9))
   // (  64,   64,   11),
@@ -500,7 +500,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // Update logic
   val u_valid = io.update.valid
   val update = io.update.bits
-  val updateValids = VecInit(Seq.fill(ITTageBanks)(update.ftb_entry.isJalr && u_valid))
+  val updateValids = VecInit(Seq.fill(ITTageBanks)(update.ftb_entry.isJalr && u_valid && !(update.real_br_taken_mask().reduce((a,b) => a || b))))
   val updateHist = update.ghist
   val updatePhist = update.phist
 
