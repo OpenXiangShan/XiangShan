@@ -62,14 +62,16 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val aInverter = Wire(UInt(len.W)) // results of global inverter
   val dInverter = Wire(UInt(len.W))
 
-  val special = Wire(Bool())
   val finalIter = Wire(Bool())
+  val special = Wire(Bool())
 
   // reused regs
   val aNormAbsReg = RegEnable(aNormAbs, newReq | state(s_pre_0) | state(s_post_0)) // reg for normalized a & d and rem & rem+d
   val dNormAbsReg = RegEnable(dNormAbs, newReq | state(s_pre_0) | state(s_post_0))
   val quotIterReg = RegEnable(quotIter, state(s_pre_1) | state(s_iter) | state(s_post_0))
   val quotM1IterReg = RegEnable(quotM1Iter, state(s_pre_1) | state(s_iter) | state(s_post_0))
+  val specialReg = RegEnable(special, state(s_pre_1))
+  val aReg = RegEnable(a, in_fire)
 
   when(kill_r) {
     state := UIntToOH(s_idle, 7)
@@ -137,10 +139,10 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt, 
                             Mux(aTooSmall, 0.U, 
-                              Mux(dSign, -a, a)
+                              Mux(dSign, -aReg, aReg)
                             ))
   val remSpecial = Mux(dIsZero, 0.U, 
-                            Mux(aTooSmall, a, 0.U))
+                            Mux(aTooSmall, aReg, 0.U))
   val quotSpecialReg = RegEnable(quotSpecial, state(s_pre_1))
   val remSpecialReg = RegEnable(remSpecial, state(s_pre_1))
 
@@ -343,15 +345,15 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val r = aNormAbsReg
   val rPd = dNormAbsReg
   val rIsZero = ~(r.orR())
-  val needCorr = Mux(rSignReg, ~r(len), r(len)) // when we get pos rem for a<0 or neg rem for a>0
+  val needCorr = Mux(rSignReg, ~r(len) & r.orR(), r(len)) // when we get pos rem for a<0 or neg rem for a>0
   val rPreShifted = Mux(needCorr, rPd, r)
   val rightShifter = Module(new RightShifter(len, lzc_width))
   rightShifter.io.in := rPreShifted(len - 1, 0)
   rightShifter.io.shiftNum := dLZCReg
   rightShifter.io.msb := state(s_post_1) & rSignReg & rPreShifted(len)
   val rShifted = rightShifter.io.out
-  val rFinal = RegEnable(Mux(special, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
-  val qFinal = RegEnable(Mux(special, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))
+  val rFinal = RegEnable(Mux(specialReg, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
+  val qFinal = RegEnable(Mux(specialReg, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))
   
   val res = Mux(isHi, rFinal, qFinal)
   io.out_data := Mux(isW,
