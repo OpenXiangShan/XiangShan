@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.util._
 import fudian.{FCMA, FCMA_ADD, FMUL, FMULToFADD}
 import xiangshan._
+import utils._
+
 
 class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends Bundle {
   val mul_out = MixedVec(ftypes.map(t => new FMULToFADD(t.expWidth, t.precision)))
@@ -154,7 +156,6 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   }
 
   io.out.bits.data := stages.last.data
-  io.out.bits.uop := uopVec.last
   fflags := stages.last.exc
 }
 
@@ -172,32 +173,38 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   mul_pipe.io.flushIn := io.flushIn
 
   val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3
+  val isFMAReg = RegNext(isFMA)
 
   add_pipe.mulToAdd <> mul_pipe.toAdd
-  add_pipe.isFMA := isFMA
+  add_pipe.isFMA := isFMAReg
   add_pipe.rm := rm
   add_pipe.io.in <> io.in
   add_pipe.io.in.valid :=
-    io.in.valid && fpCtrl.isAddSub || isFMA
+    io.in.valid && fpCtrl.isAddSub || isFMAReg
   add_pipe.io.redirectIn := io.redirectIn
   add_pipe.io.flushIn := io.flushIn
 
   io.in.ready := Mux(fpCtrl.isAddSub,
-    !isFMA && add_pipe.io.in.ready,
+    !isFMAReg && add_pipe.io.in.ready,
     mul_pipe.io.in.ready
   )
 
-  mul_pipe.io.out.ready := Mux(isFMA,
-    add_pipe.io.in.ready,
-    io.out.ready && !add_pipe.io.out.valid
-  )
+  // For FMUL:
+  // (1) It always accept FMA from FADD (if an FMA wants FMUL, it's never blocked).
+  // (2) It has lower writeback arbitration priority than FADD (and may be blocked when FMUL.out.valid).
+  XSError(isFMA && !add_pipe.io.in.ready, "FMA should not be blocked\n")
+  mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid)
   add_pipe.io.out.ready := io.out.ready
 
-  io.out.bits := Mux(add_pipe.io.out.valid,
-    add_pipe.io.out.bits,
-    mul_pipe.io.out.bits
+  io.out.bits.uop := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.uop,
+    mul_pipe.io.out.bits.uop
   )
-  fflags := Mux(add_pipe.io.out.valid,
+  io.out.bits.data := Mux(RegNext(add_pipe.io.out.valid),
+    add_pipe.io.out.bits.data,
+    mul_pipe.io.out.bits.data
+  )
+  fflags := Mux(RegNext(add_pipe.io.out.valid),
     add_pipe.fflags,
     mul_pipe.fflags
   )
