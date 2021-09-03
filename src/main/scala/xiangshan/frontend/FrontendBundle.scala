@@ -296,6 +296,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val new_br_insert_pos = Vec(numBr, Bool())
   val old_entry = Bool()
   val meta = UInt(MaxMetaLength.W)
+  val full_target = UInt(VAddrBits.W)
   // val ghist = new GlobalHistory() This in spec_meta
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
