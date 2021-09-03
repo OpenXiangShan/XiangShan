@@ -14,26 +14,22 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.exu
+package xiangshan.backend.rename.freelist
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
-import freechips.rocketchip.tile.FType
 import xiangshan._
-import xiangshan.backend.fu.fpu._
+import utils._
 
-class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
+trait MEFreeListIO extends FreeListBaseIO {
+  // psrc of move instructions ready for elimination
+  def psrcOfMove: Vec[Valid[UInt]]
 
-  val fus = functionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
+  // instruction fits move elimination
+  def eliminatedMove: Vec[Bool]
+  // for eliminated move instruction, increase arch ref count of (new) p_dest reg
+  def multiRefPhyReg: Vec[UInt]
 
-  fus.foreach { module =>
-    val instr_rm = module.io.in.bits.uop.ctrl.fpu.rm
-    module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
-  }
-
-  require(config.hasFastUopOut)
-  io.out.bits.fflags := Mux1H(arbSelReg, fus.map(x => x.fflags))
-  io.out.bits.data := dataReg
+  // max vector from speculative reference counter
+  def maxVec: Vec[Bool]
 }

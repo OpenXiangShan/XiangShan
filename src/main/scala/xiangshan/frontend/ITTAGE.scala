@@ -32,12 +32,12 @@ import scala.util.matching.Regex
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
   //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 128*8,    2,    7),
-    ( 128*8,    4,    7),
-    ( 128*8,    8,    8),
-    ( 256*8,   16,    8))
-  // ( 128*8,   32,    9),
-  // ( 128*8,   64,    9))
+  val TableInfo = Seq(( 512,    2,    7),
+    ( 512,    4,    7),
+    ( 512,    8,    8),
+    ( 512,   16,    8),
+  ( 512,   32,    9),
+  ( 512,   64,    9))
   // (  64,   64,   11),
   // (  64,  101,   12),
   // (  64,  160,   12),

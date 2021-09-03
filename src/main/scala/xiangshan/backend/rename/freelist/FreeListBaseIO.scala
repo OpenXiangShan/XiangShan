@@ -14,26 +14,30 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.exu
+package xiangshan.backend.rename.freelist
 
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
-import freechips.rocketchip.tile.FType
 import xiangshan._
-import xiangshan.backend.fu.fpu._
+import utils._
 
-class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
+trait FreeListBaseIO {
 
-  val fus = functionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
+  // control signals from CtrlBlock
+  def flush: Bool
+  def redirect: Bool
+  def walk: Bool
 
-  fus.foreach { module =>
-    val instr_rm = module.io.in.bits.uop.ctrl.fpu.rm
-    module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
-  }
+  // allocate physical registers (rename)
+  def allocateReq: Vec[Bool] // need allocating phy reg (may be refused due to lacking of free reg)
+  def allocatePhyReg: Vec[UInt] // phy dest response according to allocateReq
+  def canAllocate: Bool // free list can allocate new phy registers
+  def doAllocate: Bool // actually do the allocation (given by rename)
 
-  require(config.hasFastUopOut)
-  io.out.bits.fflags := Mux1H(arbSelReg, fus.map(x => x.fflags))
-  io.out.bits.data := dataReg
+  // free old physical registers (commit)
+  def freeReq: Vec[Bool] // need to free phy reg
+  def freePhyReg: Vec[UInt] // free old p_dest reg
+
+  // walk recovery
+  def stepBack: UInt
 }
