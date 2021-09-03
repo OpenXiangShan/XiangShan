@@ -585,7 +585,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
     val isUpdateTaken = updateValid && update.ftb_entry.jmpValid
-    val isUpdateTarget = update.ftb_entry.getJmpTarget(update.pc)
+    val isUpdateTarget = update.full_target
     val updateMisPred = updateMisPreds(w)
     when (updateValid) {
       when (updateMeta.provider.valid) {
