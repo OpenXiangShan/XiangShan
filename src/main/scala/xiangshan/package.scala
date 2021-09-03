@@ -409,7 +409,7 @@ package object xiangshan {
   }
 
   def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
-  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
+  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def bmuGen(p: Parameters) = new Bmu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
