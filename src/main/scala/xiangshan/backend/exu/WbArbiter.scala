@@ -140,8 +140,13 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
   io.out.take(exclusiveIn.size).zip(exclusiveIn).zipWithIndex.foreach{
     case ((out, in), i) =>
       val hasFastUopOut = outer.hasFastUopOut(i)
-      out.valid := (if (hasFastUopOut) RegNext(in.valid) else in.valid)
+      out.valid := in.valid
       out.bits := in.bits
+      if (hasFastUopOut) {
+        // When hasFastUopOut, only uop comes at the same cycle with valid.
+        out.valid := RegNext(in.valid)
+        out.bits.uop := RegNext(in.bits.uop)
+      }
       in.ready := true.B
   }
 

@@ -59,14 +59,13 @@ class NaiveMultiplier(len: Int, val latency: Int)(implicit p: Parameters)
   XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")
 }
 
-class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends Module {
+class ArrayMulDataModule(len: Int) extends Module {
   val io = IO(new Bundle() {
     val a, b = Input(UInt(len.W))
-    val regEnables = Input(Vec(doReg.size, Bool()))
+    val regEnables = Input(Vec(2, Bool()))
     val result = Output(UInt((2 * len).W))
   })
   val (a, b) = (io.a, io.b)
-  val doRegSorted = doReg.sortWith(_ < _)
 
   val b_sext, bx2, neg_b, neg_bx2 = Wire(UInt((len+1).W))
   b_sext := SignExt(b, len+1)
@@ -165,9 +164,9 @@ class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends Module {
         cout2 = c2
       }
 
-      val needReg = doRegSorted.contains(depth)
+      val needReg = depth == 4
       val toNextLayer = if(needReg)
-        columns_next.map(_.map(x => RegEnable(x, io.regEnables(doRegSorted.indexOf(depth)))))
+        columns_next.map(_.map(x => RegEnable(x, io.regEnables(1))))
       else
         columns_next
 
@@ -175,19 +174,21 @@ class ArrayMulDataModule(len: Int, doReg: Seq[Int]) extends Module {
     }
   }
 
-  val (sum, carry) = addAll(cols = columns, depth = 0)
+  val columns_reg = columns.map(col => col.map(b => RegEnable(b, io.regEnables(0))))
+  val (sum, carry) = addAll(cols = columns_reg, depth = 0)
+
   io.result := sum + carry
 }
 
-class ArrayMultiplier(len: Int, doReg: Seq[Int])(implicit p: Parameters)
+class ArrayMultiplier(len: Int)(implicit p: Parameters)
   extends AbstractMultiplier(len) with HasPipelineReg {
 
-  override def latency = doReg.size
+  override def latency = 2
 
-  val mulDataModule = Module(new ArrayMulDataModule(len, doReg))
+  val mulDataModule = Module(new ArrayMulDataModule(len))
   mulDataModule.io.a := io.in.bits.src(0)
   mulDataModule.io.b := io.in.bits.src(1)
-  mulDataModule.io.regEnables := VecInit((1 to doReg.size) map (i => regEnable(i)))
+  mulDataModule.io.regEnables := VecInit((1 to latency) map (i => regEnable(i)))
   val result = mulDataModule.io.result
 
   var ctrlVec = Seq(ctrl)

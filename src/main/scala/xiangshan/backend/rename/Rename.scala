@@ -31,7 +31,7 @@ class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
   val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
 }
 
-class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -48,8 +48,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   })
 
   // create free list and rat
-  val intFreeList = Module(new AlternativeFreeList)
-  val fpFreeList = Module(new FreeList)
+  val intFreeList = Module(if (EnableIntMoveElim) new freelist.MEFreeList else new freelist.StdFreeList)
+  val fpFreeList = Module(new freelist.StdFreeList)
 
   val intRat = Module(new RenameTable(float = false))
   val fpRat = Module(new RenameTable(float = true))
@@ -61,19 +61,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     rat.io.walkWen := io.roqCommits.isWalk
   }
 
-  // connect flush and redirect ports for __float point__ free list
-  fpFreeList.io.flush := io.flush
-  fpFreeList.io.redirect := io.redirect.valid
-  fpFreeList.io.walk.valid := io.roqCommits.isWalk
-
-  // connect flush and redirect ports for __integer__ free list *(walk) is handled by dec
-  intFreeList.io.flush := io.flush
-  intFreeList.io.redirect := io.redirect.valid
-  intFreeList.io.walk := io.roqCommits.isWalk
-
-  //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
-  val canOut = io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk
-
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RoqCommitInfo: from roq)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
@@ -82,15 +69,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
 
-  // when roqCommits.isWalk, use walk.bits to restore head pointer of free list
-  fpFreeList.io.walk.bits := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(true, i)})
-
-
+  // connect [flush + redirect + walk] ports for __float point__ & __integer__ free list
+  Seq((fpFreeList, true), (intFreeList, false)).foreach{ case (fl, isFp) =>
+    fl.flush := io.flush
+    fl.redirect := io.redirect.valid
+    fl.walk := io.roqCommits.isWalk
+    // when isWalk, use stepBack to restore head pointer of free list
+    // (if ME enabled, stepBack of intFreeList should be useless thus optimized out)
+    fl.stepBack := PopCount(io.roqCommits.valid.zip(io.roqCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
+  }
   // walk has higher priority than allocation and thus we don't use isWalk here
   // only when both fp and int free list and dispatch1 has enough space can we do allocation
-  fpFreeList.io.req.doAlloc := intFreeList.io.inc.canInc && io.out(0).ready
-  intFreeList.io.inc.doInc := fpFreeList.io.req.canAlloc && io.out(0).ready
+  intFreeList.doAllocate := fpFreeList.canAllocate && io.out(0).ready
+  fpFreeList.doAllocate := intFreeList.canAllocate && io.out(0).ready
 
+  //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
+  val canOut = io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && !io.roqCommits.isWalk
 
 
   // speculatively assign the instruction with an roqIdx
@@ -125,7 +119,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val hasValid = Cat(io.in.map(_.valid)).orR
 
   val isMove = io.in.map(_.bits.ctrl.isMove)
-  val isMax = intFreeList.io.maxVec
+  val isMax = if (EnableIntMoveElim) Some(intFreeList.asInstanceOf[freelist.MEFreeList].maxVec) else None
   val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val psrc_cmp = Wire(MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W))))
 
@@ -142,8 +136,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // alloc a new phy reg
     needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
     needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.io.req.allocReqs(i) := needFpDest(i)
-    intFreeList.io.inc.req(i) := needIntDest(i)
+    fpFreeList.allocateReq(i) := needFpDest(i)
+    intFreeList.allocateReq(i) := needIntDest(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
@@ -157,7 +151,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).roqIdx := roqIdxHead + i.U
 
-    io.out(i).valid := io.in(i).valid && intFreeList.io.inc.canInc && fpFreeList.io.req.canAlloc && !io.roqCommits.isWalk
+    io.out(i).valid := io.in(i).valid && intFreeList.canAllocate && fpFreeList.canAllocate && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)
 
 
@@ -188,47 +182,51 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(2) := fpPhySrcVec(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
 
-    if (i == 0) {
-      // calculate meEnable
-      meEnable(i) := isMove(i) && !isMax(uops(i).psrc(0))      
+    if (EnableIntMoveElim) {
+
+      if (i == 0) {
+        // calculate meEnable
+        meEnable(i) := isMove(i) && !isMax.get(uops(i).psrc(0))      
+      } else {
+        // compare psrc0
+        psrc_cmp(i-1) := Cat((0 until i).map(j => {
+          uops(i).psrc(0) === uops(j).psrc(0) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
+        }) /* reverse is not necessary here */)
+  
+        // calculate meEnable
+        meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(uops(i).psrc(0)))
+      }
+      uops(i).eliminatedMove := meEnable(i) || (uops(i).ctrl.isMove && uops(i).ctrl.ldest === 0.U)
+  
+      // send psrc of eliminated move instructions to free list and label them as eliminated
+      when (meEnable(i)) {
+        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).valid := true.B
+        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).bits := uops(i).psrc(0)
+        XSInfo(io.in(i).valid && io.out(i).valid, p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} eliminated successfully! psrc:${uops(i).psrc(0)}\n")
+      } .otherwise {
+        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).valid := false.B
+        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).bits := DontCare
+        XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
+      }
+  
+      // update pdest
+      uops(i).pdest := Mux(meEnable(i), uops(i).psrc(0), // move eliminated
+                       Mux(needIntDest(i), intFreeList.allocatePhyReg(i), // normal int inst
+                       Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
+                       /* default */, fpFreeList.allocatePhyReg(i)))) // normal fp inst
     } else {
-      // compare psrc0
-      psrc_cmp(i-1) := Cat((0 until i).map(j => {
-        uops(i).psrc(0) === uops(j).psrc(0) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
-      }) /* reverse is not necessary here */)
-
-      // calculate meEnable
-      meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(uops(i).psrc(0)))
+      uops(i).eliminatedMove := DontCare
+      psrc_cmp.foreach(_ := DontCare)
+      // update pdest
+      uops(i).pdest := Mux(needIntDest(i), intFreeList.allocatePhyReg(i), // normal int inst
+                       Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
+                       /* default */, fpFreeList.allocatePhyReg(i))) // normal fp inst
     }
-    uops(i).eliminatedMove := meEnable(i)
-
-    // send psrc of eliminated move instructions to free list and label them as eliminated
-    when (meEnable(i)) {
-      intFreeList.io.inc.psrcOfMove(i).valid := true.B
-      intFreeList.io.inc.psrcOfMove(i).bits := uops(i).psrc(0)
-      XSInfo(io.in(i).valid && io.out(i).valid, p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} eliminated successfully! psrc:${uops(i).psrc(0)}\n")
-    } .otherwise {
-      intFreeList.io.inc.psrcOfMove(i).valid := false.B
-      intFreeList.io.inc.psrcOfMove(i).bits := DontCare
-      XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
-    }
-
-    // update pdest
-    uops(i).pdest := Mux(meEnable(i), uops(i).psrc(0), // move eliminated
-                     Mux(needIntDest(i), intFreeList.io.inc.pdests(i), // normal int inst
-                     Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
-                     /* default */, fpFreeList.io.req.pdests(i)))) // normal fp inst
 
     // write speculative rename table
-    intSpecWen(i) := intFreeList.io.inc.req(i) && intFreeList.io.inc.canInc && intFreeList.io.inc.doInc && !io.roqCommits.isWalk
-    // intRat.io.specWritePorts(i).wen := intSpecWen
-    // intRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
-    // intRat.io.specWritePorts(i).wdata := Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i))
-
-    fpSpecWen(i) := fpFreeList.io.req.allocReqs(i) && fpFreeList.io.req.canAlloc && fpFreeList.io.req.doAlloc && !io.roqCommits.isWalk
-    // fpRat.io.specWritePorts(i).wen := fpSpecWen
-    // fpRat.io.specWritePorts(i).addr := uops(i).ctrl.ldest
-    // fpRat.io.specWritePorts(i).wdata := fpFreeList.io.req.pdests(i)
+    // we update rat later inside commit code
+    intSpecWen(i) := intFreeList.allocateReq(i) && intFreeList.canAllocate && intFreeList.doAllocate && !io.roqCommits.isWalk
+    fpSpecWen(i) := fpFreeList.allocateReq(i) && fpFreeList.canAllocate && fpFreeList.doAllocate && !io.roqCommits.isWalk
   }
 
   // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
@@ -267,15 +265,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Instructions commit: update freelist and rename table
     */
   for (i <- 0 until CommitWidth) {
-    // when RenameWidth <= CommitWidth, there will be more write ports than read ports, which must be initialized
-    // normally, they are initialized in 'normal write' section
-    if (i >= RenameWidth) {
-      Seq(intRat, fpRat) foreach { case rat =>
-        rat.io.specWritePorts(i).wen   := false.B
-        rat.io.specWritePorts(i).addr  := DontCare
-        rat.io.specWritePorts(i).wdata := DontCare
-      }
-    }
 
     Seq((intRat, false), (fpRat, true)) foreach { case (rat, fp) => 
       // is valid commit req and given instruction has destination register
@@ -290,16 +279,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       if (fp && i < RenameWidth) {
         rat.io.specWritePorts(i).wen := (commitDestValid && io.roqCommits.isWalk) || fpSpecWen(i)
         rat.io.specWritePorts(i).addr := Mux(fpSpecWen(i), uops(i).ctrl.ldest, io.roqCommits.info(i).ldest)
-        rat.io.specWritePorts(i).wdata := Mux(fpSpecWen(i), fpFreeList.io.req.pdests(i), io.roqCommits.info(i).old_pdest)
+        rat.io.specWritePorts(i).wdata := Mux(fpSpecWen(i), fpFreeList.allocatePhyReg(i), io.roqCommits.info(i).old_pdest)
       } else if (!fp && i < RenameWidth) {
         rat.io.specWritePorts(i).wen := (commitDestValid && io.roqCommits.isWalk) || intSpecWen(i)
         rat.io.specWritePorts(i).addr := Mux(intSpecWen(i), uops(i).ctrl.ldest, io.roqCommits.info(i).ldest)
-        rat.io.specWritePorts(i).wdata := Mux(intSpecWen(i), Mux(meEnable(i), uops(i).psrc(0), intFreeList.io.inc.pdests(i)), io.roqCommits.info(i).old_pdest)
-      } else if (fp && i >= RenameWidth) {
-        rat.io.specWritePorts(i).wen := commitDestValid && io.roqCommits.isWalk
-        rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
-        rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
-      } else if (!fp && i >= RenameWidth) {
+        if (EnableIntMoveElim) {
+          rat.io.specWritePorts(i).wdata := 
+            Mux(intSpecWen(i), Mux(meEnable(i), uops(i).psrc(0), intFreeList.allocatePhyReg(i)), io.roqCommits.info(i).old_pdest)
+        } else {
+          rat.io.specWritePorts(i).wdata := 
+            Mux(intSpecWen(i), intFreeList.allocatePhyReg(i), io.roqCommits.info(i).old_pdest)
+        }
+      // when i >= RenameWidth, this write must happens during WALK process
+      } else if (i >= RenameWidth) {
         rat.io.specWritePorts(i).wen := commitDestValid && io.roqCommits.isWalk
         rat.io.specWritePorts(i).addr := io.roqCommits.info(i).ldest
         rat.io.specWritePorts(i).wdata := io.roqCommits.info(i).old_pdest
@@ -326,9 +318,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
        */
 
       if (fp) { // Float Point free list
-        fpFreeList.io.deallocReqs(i)  := commitDestValid && !io.roqCommits.isWalk
-        fpFreeList.io.deallocPregs(i) := io.roqCommits.info(i).old_pdest
-      } else { // Integer free list
+        fpFreeList.freeReq(i)  := commitDestValid && !io.roqCommits.isWalk
+        fpFreeList.freePhyReg(i) := io.roqCommits.info(i).old_pdest
+      } else if (EnableIntMoveElim) { // Integer free list
 
         // during walk process:
         // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
@@ -339,10 +331,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         // b. treat walk as normal commit except replace old_pdests with pdests and set io.walk to true
         // c. ignore pdests port when walking
 
-        intFreeList.io.dec.req(i) := commitDestValid // walk or not walk
-        intFreeList.io.dec.old_pdests(i)  := Mux(io.roqCommits.isWalk, io.roqCommits.info(i).pdest, io.roqCommits.info(i).old_pdest)
-        intFreeList.io.dec.eliminatedMove(i) := io.roqCommits.info(i).eliminatedMove
-        intFreeList.io.dec.pdests(i) := io.roqCommits.info(i).pdest
+        intFreeList.freeReq(i) := commitDestValid // walk or not walk
+        intFreeList.freePhyReg(i)  := Mux(io.roqCommits.isWalk, io.roqCommits.info(i).pdest, io.roqCommits.info(i).old_pdest)
+        intFreeList.asInstanceOf[freelist.MEFreeList].eliminatedMove(i) := io.roqCommits.info(i).eliminatedMove
+        intFreeList.asInstanceOf[freelist.MEFreeList].multiRefPhyReg(i) := io.roqCommits.info(i).pdest
+      } else {
+        intFreeList.freeReq(i) := commitDestValid && !io.roqCommits.isWalk
+        intFreeList.freePhyReg(i)  := io.roqCommits.info(i).old_pdest
       }
     }
   }
@@ -374,13 +369,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   for (i <- 0 until CommitWidth) {
     val info = io.roqCommits.info(i)
     XSDebug(io.roqCommits.isWalk && io.roqCommits.valid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
-      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} eliminatedMove:${info.eliminatedMove} " +
+      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} " + { if (EnableIntMoveElim) p"eliminatedMove:${info.eliminatedMove} " else p"" } +
       p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
   }
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
-  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.io.req.canAlloc}, intCanAlloc:${intFreeList.io.inc.canInc} dispatch1ready:${io.out(0).ready}, isWalk:${io.roqCommits.isWalk}\n")
-  XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
+  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.canAllocate}, intCanAlloc:${intFreeList.canAllocate} dispatch1ready:${io.out(0).ready}, isWalk:${io.roqCommits.isWalk}\n")
 
   intRat.io.debug_rdata <> io.debug_int_rat
   fpRat.io.debug_rdata <> io.debug_fp_rat
@@ -390,29 +384,33 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
-  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && !intFreeList.io.inc.canInc && !io.roqCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.req.canAlloc && intFreeList.io.inc.canInc && io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.canAllocate && intFreeList.canAllocate && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.canAllocate && !intFreeList.canAllocate && !io.roqCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && io.roqCommits.isWalk)
   if (!env.FPGAPlatform) {
     ExcitingUtils.addSource(io.roqCommits.isWalk, "TMA_backendiswalk")
   }
-  XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
-  XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
-  XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
-  XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
-  XSPerfAccumulate("move_elim_cancelled_cnt_limit", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)))))
-  XSPerfAccumulate("move_elim_cancelled_inc_more_than_one", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR })))
 
-  // to make sure meEnable functions as expected
-  for (i <- 0 until RenameWidth) {
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)),
-      p"ME_CANCELLED: ref counter hits max value (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR },
-      p"ME_CANCELLED: RAW dependency (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR },
-      p"ME_CANCELLED: psrc duplicates with former instruction (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+  if (EnableIntMoveElim) {
+    XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
+    XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
+    XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
+    XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
+    XSPerfAccumulate("move_elim_cancelled_cnt_limit", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax.get(io.out(i).bits.psrc(0)))))
+    XSPerfAccumulate("move_elim_cancelled_inc_more_than_one", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR })))
+
+    // to make sure meEnable functions as expected
+    for (i <- 0 until RenameWidth) {
+      XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax.get(io.out(i).bits.psrc(0)),
+        p"ME_CANCELLED: ref counter hits max value (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+      XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR },
+        p"ME_CANCELLED: RAW dependency (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+      XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR },
+        p"ME_CANCELLED: psrc duplicates with former instruction (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
+    }
+    XSDebug(VecInit(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))).asUInt().orR,
+      p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
+    XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
   }
-  XSDebug(VecInit(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))).asUInt().orR,
-    p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
 }
