@@ -871,10 +871,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
-  update.false_hit := commit_hit === h_false_hit
-  update.pc        := commit_pc_bundle.startAddr
-  update.preds.hit := commit_hit === h_hit || commit_hit === h_false_hit
-  update.meta      := commit_meta.meta
+  update.false_hit   := commit_hit === h_false_hit
+  update.pc          := commit_pc_bundle.startAddr
+  update.preds.hit   := commit_hit === h_hit || commit_hit === h_false_hit
+  update.meta        := commit_meta.meta
+  update.full_target := commit_target
   update.fromFtqRedirectSram(commit_spec_meta)
 
   val commit_real_hit = commit_hit === h_hit
