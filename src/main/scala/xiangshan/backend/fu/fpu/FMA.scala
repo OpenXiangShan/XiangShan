@@ -164,13 +164,18 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   val mul_pipe = Module(new FMUL_pipe())
   val add_pipe = Module(new FADD_pipe())
 
+
+  mul_pipe.io.redirectIn := io.redirectIn
+  mul_pipe.io.flushIn := io.flushIn
+
+  add_pipe.io.redirectIn := io.redirectIn
+  add_pipe.io.flushIn := io.flushIn
+
   val fpCtrl = io.in.bits.uop.ctrl.fpu
 
   mul_pipe.rm := rm
   mul_pipe.io.in <> io.in
   mul_pipe.io.in.valid := io.in.valid && !fpCtrl.isAddSub
-  mul_pipe.io.redirectIn := io.redirectIn
-  mul_pipe.io.flushIn := io.flushIn
 
   val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3
   val isFMAReg = RegNext(isFMA)
@@ -178,12 +183,14 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   add_pipe.mulToAdd <> mul_pipe.toAdd
   add_pipe.isFMA := isFMAReg
   add_pipe.rm := rm
-  add_pipe.io.in <> io.in
-  add_pipe.io.in.valid :=
-    io.in.valid && fpCtrl.isAddSub || isFMAReg
-  add_pipe.io.redirectIn := io.redirectIn
-  add_pipe.io.flushIn := io.flushIn
+  // For FADD, it accepts instructions from io.in and FMUL.
+  // When FMUL gives an FMA, FADD accepts this instead of io.in.
+  // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
+  add_pipe.io.in.valid := io.in.valid && fpCtrl.isAddSub || isFMAReg
+  add_pipe.io.in.bits.src := io.in.bits.src
+  add_pipe.io.in.bits.uop := Mux(isFMAReg, add_pipe.mulToAdd.uop, io.in.bits.uop)
 
+  // When the in uop is Add/Sub, we check FADD, otherwise fmul is checked.
   io.in.ready := Mux(fpCtrl.isAddSub,
     !isFMAReg && add_pipe.io.in.ready,
     mul_pipe.io.in.ready
