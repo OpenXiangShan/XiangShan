@@ -60,7 +60,7 @@ case class XSCoreParameters
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
-  RasSize: Int = 16,
+  RasSize: Int = 32,
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
