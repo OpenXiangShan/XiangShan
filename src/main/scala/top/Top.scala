@@ -24,8 +24,7 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, TLTimer, DebugModule}
-import firrtl.stage.RunFirrtlTransformAnnotation
+import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
@@ -36,6 +35,7 @@ import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import huancun.debug.TLLogger
 import huancun.{CacheParamsKey, HuanCun}
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
