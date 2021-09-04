@@ -130,6 +130,8 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val SPTagLen = vpnnLen * 2
 
   val MSHRSize = l2tlbParams.missQueueSize
+  val MemReqWidth = MSHRSize + 1
+  val bMemID = log2Up(MSHRSize + 1)
 
   def genPtwL2Idx(vpn: UInt) = {
     (vpn(vpnLen - 1, vpnnLen))(PtwL2IdxLen - 1, 0)
@@ -160,7 +162,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
-  def getVpnn(vpn: UInt, idx: Int) = {
+  def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
 

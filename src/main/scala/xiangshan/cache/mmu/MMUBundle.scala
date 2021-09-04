@@ -424,6 +424,11 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
   val csr = Input(new TlbCsrBundle)
 }
 
+class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
+  val addr = UInt(PAddrBits.W)
+  val id = UInt(bMemID.W)
+}
+
 object ValidHold {
   def apply(infire: Bool, outfire: Bool, flush: Bool = false.B ) = {
     val valid = RegInit(false.B)
