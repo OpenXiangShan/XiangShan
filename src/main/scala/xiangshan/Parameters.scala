@@ -152,7 +152,7 @@ case class XSCoreParameters
   ),
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
-    normalNSets = 128,
+    normalNSets = 256,
     normalNWays = 1,
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
@@ -162,7 +162,7 @@ case class XSCoreParameters
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
-    normalNSets = 128,
+    normalNSets = 256,
     normalNWays = 1,
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
