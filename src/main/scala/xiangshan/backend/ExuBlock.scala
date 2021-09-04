@@ -83,6 +83,16 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   val flattenFuConfigs = fuConfigs.flatMap(c => Seq.fill(c._2)(c._1))
   require(flattenFuConfigs.length == fuBlock.io.writeback.length)
 
+  // TODO: add an attribute to ExuConfig for fast wakeup
+  for (((cfg, fuOut), fastOut) <- flattenFuConfigs.zip(fuBlock.io.writeback).zip(io.fastUopOut)) {
+    if (cfg == FmacExeUnitCfg) {
+      fastOut.valid := fuOut.valid
+      fastOut.bits := fuOut.bits.uop
+      XSError(fuOut.valid && !fuOut.ready, "fastUopOut should not be blocked\n")
+      println(s"Enable fast wakeup from function unit ${cfg.name}")
+    }
+  }
+
   // Timing priority: RegNext(rs.fastUopOut) > fu.writeback > arbiter.out(--> io.rfWriteback --> rs.writeback)
   // Filter condition: allWakeupFromRS > hasExclusiveWbPort > None
   // The higher priority, the better timing.
