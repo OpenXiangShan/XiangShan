@@ -851,5 +851,8 @@ object Instructions {
   def FMV_X_S            = BitPat("b111000000000?????000?????1010011")
   def FMV_S_X            = BitPat("b111100000000?????000?????1010011")
   def FENCE_TSO          = BitPat("b100000110011?????000?????0001111")
+  def SINVAL_VMA         = BitPat("b0001011??????????000000001110011")
+  def SFENCE_W_INVAL     = BitPat("b00011000000000000000000001110011")
+  def SFENCE_INVAL_IR    = BitPat("b00011000000100000000000001110011")
   def PAUSE              = BitPat("b00000001000000000000000000001111")
 }

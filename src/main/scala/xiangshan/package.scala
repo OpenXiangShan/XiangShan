@@ -203,6 +203,7 @@ package object xiangshan {
     def fence  = "b10000".U
     def sfence = "b10001".U
     def fencei = "b10010".U
+    def nofence= "b00000".U
   }
 
   object ALUOpType {
