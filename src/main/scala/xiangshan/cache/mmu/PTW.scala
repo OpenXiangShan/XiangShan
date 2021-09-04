@@ -86,6 +86,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     val source = UInt(bPtwWidth.W)
   }, 2))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
+  val outArbFsmPort = 1
+  val outArbMqPort = 2
 
   // NOTE: when cache out but miss and fsm doesnt accept,
   val blockNewReq = false.B
@@ -123,7 +125,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   fsm.io.csr := csr
   fsm.io.sfence := sfence
   fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, false.B,
-    (0 until PtwWidth).map(i => i.U -> outArb(i).in(1).ready))
+    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbFsmPort).ready))
 
   // mem req
   def blockBytes_align(addr: UInt) = {
@@ -137,6 +139,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val mq_mem = missQueue.io.mem
   mq_mem.req_mask := waiting_resp.take(MSHRSize)
+  mq_mem.out.ready := MuxLookup(mq_mem.out.bits.source, false.B,
+    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 2))
   block_decoupled(fsm.io.mem.req, mem_arb.io.in(0), waiting_resp(fsm.io.mem.req.bits.id))
   mem_arb.io.in(1) <> mq_mem.req
@@ -191,10 +195,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
     outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(0).bits.pf := false.B
-    outArb(i).in(1).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
-    outArb(i).in(1).bits := fsm.io.resp.bits.resp
-    outArb(i).in(2).valid := mq_mem.out.valid && mq_mem.out.bits.source===i.U
-    outArb(i).in(2).bits := pte_to_ptwResp(get_part(refill_data(mq_mem.out.bits.id),
+    outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
+    outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
+    outArb(i).in(outArbMqPort).valid := mq_mem.out.valid && mq_mem.out.bits.source===i.U
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(get_part(refill_data(mq_mem.out.bits.id),
       req_addr_low(mq_mem.out.bits.id)),
       mq_mem.out.bits.vpn)
   }
