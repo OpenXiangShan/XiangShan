@@ -460,13 +460,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     for (i <- 0 until StorePipelineWidth) {
       val ptr = deqPtrExt(i).value
       val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-      fakeRAM.io.clk   := clock
-      fakeRAM.io.en    := allocated(ptr) && commited(ptr) && !mmio(ptr)
-      fakeRAM.io.rIdx  := 0.U
-      fakeRAM.io.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
-      fakeRAM.io.wdata := dataModule.io.rdata(i).data
-      fakeRAM.io.wmask := MaskExpand(dataModule.io.rdata(i).mask)
-      fakeRAM.io.wen   := allocated(ptr) && commited(ptr) && !mmio(ptr)
+      fakeRAM.clk   := clock
+      fakeRAM.en    := allocated(ptr) && commited(ptr) && !mmio(ptr)
+      fakeRAM.rIdx  := 0.U
+      fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
+      fakeRAM.wdata := dataModule.io.rdata(i).data
+      fakeRAM.wmask := MaskExpand(dataModule.io.rdata(i).mask)
+      fakeRAM.wen   := allocated(ptr) && commited(ptr) && !mmio(ptr)
     }
   }
 

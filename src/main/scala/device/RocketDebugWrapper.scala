@@ -18,10 +18,9 @@ package device
 
 import chisel3._
 import xiangshan._
-import chisel3.experimental.{IntParam, noPrefix}
+import chisel3.experimental.{ExtModule, IntParam, noPrefix}
 import chisel3.util._
-import chisel3.util.HasBlackBoxResource
-import Chisel.BlackBox
+import chisel3.util.HasExtModuleResource
 import freechips.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
@@ -29,9 +28,9 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.LogicalModuleTree
 import freechips.rocketchip.jtag._
 import freechips.rocketchip.util._
-import freechips.rocketchip.prci.{ClockSinkParameters, ClockSinkNode}
+import freechips.rocketchip.prci.{ClockSinkNode, ClockSinkParameters}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.devices.debug.{JtagDTMConfig, TLDebugModule, DebugCustomXbar, ResetCtrlIO, DebugIO, SystemJTAGIO, DebugTransportModuleJTAG, PSDIO}
+import freechips.rocketchip.devices.debug.{DebugCustomXbar, DebugIO, DebugTransportModuleJTAG, JtagDTMConfig, PSDIO, ResetCtrlIO, SystemJTAGIO, TLDebugModule}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.devices.debug._
 
@@ -112,34 +111,33 @@ object XSDebugModuleParams {
 
 case object EnableJtag extends Field[Bool]
 
-class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends BlackBox(Map("TICK_DELAY" -> IntParam(tickDelay)))
-  with HasBlackBoxResource {
-  val io = IO(new Bundle { 
-    val clock = Input(Clock())
-    val reset = Input(Bool())
-    val jtag = new JTAGIO(hasTRSTn = true)
-    val enable = Input(Bool())
-    val init_done = Input(Bool())
-    val exit = Output(UInt(32.W))
-  })
+class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule(Map("TICK_DELAY" -> IntParam(tickDelay)))
+  with HasExtModuleResource {
 
-  def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Bool, init_done: Bool, tbsuccess: Bool) = {
-    dutio.TCK := io.jtag.TCK
-    dutio.TMS := io.jtag.TMS
-    dutio.TDI := io.jtag.TDI
-    io.jtag.TDO := dutio.TDO
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Bool()))
+  val jtag = IO(new JTAGIO(hasTRSTn = true))
+  val enable = IO(Input(Bool()))
+  val init_done = IO(Input(Bool()))
+  val exit = IO(Output(UInt(32.W)))
 
-    io.clock := tbclock
-    io.reset := tbreset
+  def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Bool, done: Bool, tbsuccess: Bool) = {
+    dutio.TCK := jtag.TCK
+    dutio.TMS := jtag.TMS
+    dutio.TDI := jtag.TDI
+    jtag.TDO := dutio.TDO
 
-    io.enable    := p(EnableJtag)
-    io.init_done := init_done
+    clock := tbclock
+    reset := tbreset
+
+    enable    := p(EnableJtag)
+    init_done := done
 
     // Success is determined by the gdbserver
     // which is controlling this simulation.
-    tbsuccess := io.exit === 1.U
-    when (io.exit >= 2.U) {
-      printf("*** FAILED *** (exit code = %d)\n", io.exit >> 1.U)
+    tbsuccess := exit === 1.U
+    when (exit >= 2.U) {
+      printf("*** FAILED *** (exit code = %d)\n", exit >> 1.U)
       stop(1)
     }
   }
