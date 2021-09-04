@@ -177,7 +177,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         clientCache = if(inclusive) None else Some(
           ClientCacheParameters(
             sets = 2 * upParams.cores.head.L2CacheParams.sets,
-            ways = upParams.cores.head.L2CacheParams.ways,
+            ways = 2* upParams.cores.head.L2CacheParams.ways,
             blockBytes = 64
           )
         )
