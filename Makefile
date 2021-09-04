@@ -45,22 +45,20 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                       \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
-		--disable-all --remove-assert --infer-rw \
-		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
-		--gen-mem-verilog full \
-		$(SIM_ARGS) \
+	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                   \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F) \
+		--disable-all --remove-assert --infer-rw                 \
+		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf         \
+		--gen-mem-verilog full $(SIM_ARGS)                       \
 		--num-cores $(NUM_CORES)
-	 sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
-
-deploy: build/top.zip
-
-
-build/top.zip: $(TOP_V)
-	@zip -r $@ $< $<.conf build/*.anno.json
-
-.PHONY: deploy build/top.zip
+	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+	@git log -n 1 >> .__head__
+	@git diff >> .__diff__
+	@sed -i 's/^/\/\// ' .__head__
+	@sed -i 's/^/\/\//' .__diff__
+	@cat .__head__ .__diff__ $@ > .__out__
+	@mv .__out__ $@
+	@rm .__head__ .__diff__
 
 verilog: $(TOP_V)
 
@@ -70,11 +68,18 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)       \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F)     \
-		--num-cores $(NUM_CORES) $(SIM_ARGS)						\
-		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf \
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)   \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F) \
+		--num-cores $(NUM_CORES) $(SIM_ARGS) --infer-rw          \
+		--repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf          \
 		--gen-mem-verilog full
+	@git log -n 1 >> .__head__
+	@git diff >> .__diff__
+	@sed -i 's/^/\/\// ' .__head__
+	@sed -i 's/^/\/\//' .__diff__
+	@cat .__head__ .__diff__ $@ > .__out__
+	@mv .__out__ $@
+	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 
 sim-verilog: $(SIM_TOP_V)
