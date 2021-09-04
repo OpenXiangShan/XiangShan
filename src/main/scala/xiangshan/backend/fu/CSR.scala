@@ -134,6 +134,10 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
+    val bpuInfo = new Bundle {
+      val bpRight = UInt(XLEN.W)
+      val bpWrong = UInt(XLEN.W)
+    }
   }
   val ctrlInfo = new Bundle {
     val roqFull   = Bool()
@@ -146,10 +150,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     val lqFull = Bool()
     val dcacheMSHRFull = Bool()
   }
-  val bpuInfo = new Bundle {
-    val bpRight = UInt(XLEN.W)
-    val bpWrong = UInt(XLEN.W)
-  }
+  
   val cacheInfo = new Bundle {
     val l2MSHRFull = Bool()
     val l3MSHRFull = Bool()
@@ -553,9 +554,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val dcacheMSHRFull = RegInit(0.U(XLEN.W))
   dcacheMSHRFull := dcacheMSHRFull + RegNext(csrio.perf.memInfo.dcacheMSHRFull)
   val bpRight   = RegInit(0.U(XLEN.W))
-  bpRight := bpRight + RegNext(csrio.perf.bpuInfo.bpRight)
+  bpRight := bpRight + RegNext(csrio.perf.frontendInfo.bpuInfo.bpRight)
   val bpWrong   = RegInit(0.U(XLEN.W))
-  bpWrong := bpWrong + RegNext(csrio.perf.bpuInfo.bpWrong)
+  bpWrong := bpWrong + RegNext(csrio.perf.frontendInfo.bpuInfo.bpWrong)
 
   // CSR reg map
   val basicPrivMapping = Map(

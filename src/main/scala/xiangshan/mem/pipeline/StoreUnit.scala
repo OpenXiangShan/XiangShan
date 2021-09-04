@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbReq, TlbResp, TlbCmd}
+import xiangshan.cache.mmu.{TlbPtwIO, TlbRequestIO, TlbReq, TlbResp, TlbCmd, TLB}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
@@ -167,7 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val rsFeedback = ValidIO(new RSFeedback)
-    val dtlb = new TlbRequestIO()
+    val tlb = new TlbRequestIO()
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -180,14 +180,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val store_s3 = Module(new StoreUnit_S3)
 
   store_s0.io.in <> io.stin
-  store_s0.io.dtlbReq <> io.dtlb.req
+  store_s0.io.dtlbReq <> io.tlb.req
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
-  store_s1.io.dtlbResp <> io.dtlb.resp
+  store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.rsFeedback
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))

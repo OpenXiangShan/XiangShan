@@ -19,3 +19,6 @@
 [submodule "ready-to-run"]
 	path = ready-to-run
 	url = https://github.com/OpenXiangShan/ready-to-run
+[submodule "fudian"]
+	path = fudian
+	url = https://github.com/OpenXiangShan/fudian.git

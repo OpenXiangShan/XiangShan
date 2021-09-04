@@ -40,7 +40,7 @@ case class FuConfig
 (
   name: String,
   fuGen: Parameters => FunctionUnit,
-  fuSel: FunctionUnit => Bool,
+  fuSel: MicroOp => Bool,
   fuType: UInt,
   numIntSrc: Int,
   numFpSrc: Int,
@@ -49,7 +49,8 @@ case class FuConfig
   hasRedirect: Boolean,
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
-  fastImplemented: Boolean = false
+  fastImplemented: Boolean = false,
+  hasInputBuffer: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
@@ -60,12 +61,13 @@ class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
   val uop = new MicroOp
 }
 
+class FunctionUnitInput(val len: Int)(implicit p: Parameters) extends XSBundle {
+  val src = Vec(3, UInt(len.W))
+  val uop = new MicroOp
+}
 
 class FunctionUnitIO(val len: Int)(implicit p: Parameters) extends XSBundle {
-  val in = Flipped(DecoupledIO(new Bundle() {
-    val src = Vec(3, UInt(len.W))
-    val uop = new MicroOp
-  }))
+  val in = Flipped(DecoupledIO(new FunctionUnitInput(len)))
 
   val out = DecoupledIO(new FuOutput(len))
 
@@ -94,14 +96,14 @@ trait HasPipelineReg {
   require(latency > 0)
 
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
-  val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
+  val rdyVec = (Array.fill(latency - 1)(Wire(Bool())) :+ io.out.ready) :+ WireInit(true.B)
   val uopVec = io.in.bits.uop +: Array.fill(latency)(Reg(new MicroOp))
 
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
   val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.roqIdx.needFlush(io.redirectIn, io.flushIn))
 
-  for (i <- 0 until latency) {
+  for (i <- 0 until latency - 1) {
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
   }
 
@@ -115,8 +117,8 @@ trait HasPipelineReg {
   }
 
   io.in.ready := rdyVec(0)
-  io.out.valid := validVec.last
-  io.out.bits.uop := uopVec.last
+  io.out.valid := validVec.takeRight(2).head
+  io.out.bits.uop := uopVec.takeRight(2).head
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
 

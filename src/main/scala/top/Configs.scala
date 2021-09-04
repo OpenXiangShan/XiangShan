@@ -23,14 +23,16 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import xiangshan.frontend.{ICacheParameters}
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
-import xiangshan.cache.mmu.{L2TLBParameters}
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{XSDebugModuleParams, EnableJtag}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
@@ -107,8 +109,44 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-        TlbEntrySize = 32,
-        TlbSPEntrySize = 4,
+        itlbParameters = TLBParameters(
+          name = "itlb",
+          fetchi = true,
+          useDmode = false,
+          sameCycle = true,
+          normalReplacer = Some("plru"),
+          superReplacer = Some("plru"),
+          normalNWays = 4,
+          normalNSets = 1,
+          superNWays = 2,
+          shouldBlock = true
+        ),
+        ldtlbParameters = TLBParameters(
+          name = "ldtlb",
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          superNWays = 4,
+          normalAsVictim = true,
+          outReplace = true
+        ),
+        sttlbParameters = TLBParameters(
+          name = "sttlb",
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 4,
+          outReplace = true
+        ),
+        btlbParameters = TLBParameters(
+          name = "btlb",
+          normalNSets = 1,
+          normalNWays = 8,
+          superNWays = 2
+        ),
         l2tlbParameters = L2TLBParameters(
           l1Size = 4,
           l2nSets = 4,

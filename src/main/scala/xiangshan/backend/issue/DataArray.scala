@@ -79,6 +79,13 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     dataModule.io.wen := wen
     dataModule.io.wvec := waddr
     dataModule.io.wdata := wdata
+    for (i <- 0 until params.numEntries) {
+      val w = VecInit((0 until wen.length).map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
+      assert(RegNext(PopCount(w) <= 1.U))
+      when(PopCount(w) > 1.U) {
+        XSDebug("ERROR: RS DataArray write overlap!\n")
+      }
+    }
   }
 
 }

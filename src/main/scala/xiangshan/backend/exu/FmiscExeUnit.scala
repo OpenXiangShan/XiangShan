@@ -28,25 +28,12 @@ class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg) {
 
   val fus = functionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
 
-  val input = io.fromFp
-  val isRVF = input.bits.uop.ctrl.isRVF
-  val instr_rm = input.bits.uop.ctrl.fpu.rm
-  val (src1, src2) = (input.bits.src(0), input.bits.src(1))
-
-  functionUnits.foreach { module =>
-    module.io.in.bits.src(0) := src1
-    module.io.in.bits.src(1) := src2
-    module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
+  fus.foreach { module =>
+    val instr_rm = module.io.in.bits.uop.ctrl.fpu.rm
+    module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm.get)
   }
 
   require(config.hasFastUopOut)
   io.out.bits.fflags := Mux1H(arbSelReg, fus.map(x => x.fflags))
-  val arbUop = RegNext(io.out.bits.uop)
-  io.out.bits.data := Mux(!arbUop.ctrl.fpWen,
-    dataReg,
-    Mux(arbUop.ctrl.fpu.typeTagOut === S,
-      box(dataReg, FType.S),
-      sanitizeNaN(dataReg, FType.D)
-    )
-  )
+  io.out.bits.data := dataReg
 }
