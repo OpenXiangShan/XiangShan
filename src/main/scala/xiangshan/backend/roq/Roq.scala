@@ -688,7 +688,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     when (canEnqueue(i)) {
       if (EnableIntMoveElim) {
         eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
-        writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+        writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !io.enq.req(i).bits.cf.exceptionVec.asUInt().orR
       } else {
         writebacked(enqPtrVec(i).value) := false.B
       }
