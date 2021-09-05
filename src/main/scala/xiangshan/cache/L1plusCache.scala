@@ -257,7 +257,7 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
   val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=true, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
-  when (reset.toBool || io.flush) {
+  when (reset.asBool() || io.flush) {
     for (i <- 0 until nSets) {
       valid_array(i) := 0.U
     }
@@ -265,7 +265,7 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
   XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
   // tag write
-  val wen = io.write.valid && !reset.toBool && !io.flush
+  val wen = io.write.valid && !reset.asBool() && !io.flush
   tag_array.io.w.req.valid := wen
   tag_array.io.w.req.bits.apply(
     setIdx=waddr,
@@ -297,8 +297,8 @@ class L1plusCacheMetadataArray(implicit p: Parameters) extends L1plusCacheModule
 
   // we use single port SRAM
   // do not allow read and write in the same cycle
-  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush && tag_array.io.r.req.ready
-  io.write.ready := !reset.toBool && !io.flush && tag_array.io.w.req.ready
+  io.read.ready  := !io.write.valid && !reset.asBool() && !io.flush && tag_array.io.r.req.ready
+  io.write.ready := !reset.asBool() && !io.flush && tag_array.io.w.req.ready
 
   def dumpRead() = {
     when (io.read.fire()) {
@@ -945,22 +945,22 @@ class FakeL1plusCache()(implicit p: Parameters) extends XSModule with HasL1plusC
   val fakeRAM = Seq.fill(8)(Module(new RAMHelper(64L * 1024 * 1024 * 1024)))
   val req_valid = RegNext(io.req.valid)
   val req_addr = RegNext((io.req.bits.addr - "h80000000".U) >> 3)
-  assert(!req_valid || req_addr(2, 0) === 0.U)
+  //assert(!req_valid || req_addr(2, 0) === 0.U)
   for ((ram, i) <- fakeRAM.zipWithIndex) {
-    ram.io.clk   := clock
-    ram.io.en    := req_valid
-    ram.io.rIdx  := req_addr + i.U
-    ram.io.wIdx  := 0.U
-    ram.io.wdata := 0.U
-    ram.io.wmask := 0.U
-    ram.io.wen   := false.B
+    ram.clk   := clock
+    ram.en    := req_valid
+    ram.rIdx  := req_addr + i.U
+    ram.wIdx  := 0.U
+    ram.wdata := 0.U
+    ram.wmask := 0.U
+    ram.wen   := false.B
   }
 
   io.req.ready := true.B
 
   io.resp.valid := req_valid
   assert(!io.resp.valid || io.resp.ready)
-  io.resp.bits.data := Cat(fakeRAM.map(_.io.rdata).reverse)
+  io.resp.bits.data := Cat(fakeRAM.map(_.rdata).reverse)
   io.resp.bits.id := RegNext(io.req.bits.id)
 
   io.empty := true.B

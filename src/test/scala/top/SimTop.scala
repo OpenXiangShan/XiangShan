@@ -19,15 +19,13 @@ package top
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
-import device.{AXI4RAMWrapper, UARTIO}
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import device.{AXI4RAMWrapper, SimJTAG}
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
 import utils.GTimer
-import xiangshan.{DebugOptions, DebugOptionsKey, PerfInfoIO}
-
-class LogCtrlIO extends Bundle {
-  val log_begin, log_end = Input(UInt(64.W))
-  val log_level = Input(UInt(64.W)) // a cpp uint
-}
+import xiangshan.{DebugOptions, DebugOptionsKey}
+import chipsalliance.rocketchip.config._
+import freechips.rocketchip.devices.debug._
+import difftest._
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -51,6 +49,13 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.clock := clock.asBool()
   soc.io.reset := reset.asBool()
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
+
+  val success = Wire(Bool())
+  val jtag = Module(new SimJTAG(tickDelay=3)(p)).connect(soc.io.systemjtag.jtag, clock, reset.asBool, ~reset.asBool, success)
+  soc.io.systemjtag.reset := reset
+  soc.io.systemjtag.mfr_id := 0.U(11.W)
+  soc.io.systemjtag.part_number := 0.U(16.W)
+  soc.io.systemjtag.version := 0.U(4.W)
 
   val io = IO(new Bundle(){
     val logCtrl = new LogCtrlIO

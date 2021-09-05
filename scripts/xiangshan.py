@@ -16,10 +16,11 @@
 
 # Simple version of xiangshan python wrapper
 
-import os
 import argparse
-import sys
+import os
+import random
 import subprocess
+import sys
 
 
 class XSArgs(object):
@@ -50,8 +51,10 @@ class XSArgs(object):
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.trace = 1 if args.trace else None
+        self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
+        self.seed = random.randint(0, 9999)
         self.numa = args.numa
 
     def get_env_variables(self):
@@ -77,14 +80,16 @@ class XSArgs(object):
         makefile_args = [
             (self.threads, "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
-            (self.trace, "EMU_TRACE")
+            (self.trace, "EMU_TRACE"),
+            (self.config, "CONFIG")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
 
     def get_emu_args(self):
         emu_args = [
-            (self.max_instr, "max-instr")
+            (self.max_instr, "max-instr"),
+            (self.seed,      "seed")
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
         return args
@@ -151,7 +156,7 @@ class XiangShan(object):
         self.show()
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
-        return_code = self.__exec_cmd(f'make -C $NOOP_HOME ./build/emu -j200 SIM_ARGS="{sim_args}" {make_args}')
+        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j200 SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
     def run_emu(self, workload):
@@ -254,6 +259,7 @@ if __name__ == "__main__":
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
+    parser.add_argument('--config', nargs='?', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')

@@ -23,11 +23,17 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import xiangshan.frontend.{ICacheParameters}
+import freechips.rocketchip.devices.debug._
+import freechips.rocketchip.tile.MaxHartIdBits
+import sifive.blocks.inclusivecache.{InclusiveCache, InclusiveCacheMicroParameters, CacheParameters}
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
+import xiangshan.backend.dispatch.DispatchParameters
+import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import device.{XSDebugModuleParams, EnableJtag}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -35,6 +41,11 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case SoCParamsKey => SoCParameters(
     cores = List.tabulate(n){ i => XSCoreParameters(HartId = i) }
   )
+  case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
+  case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
+  case JtagDTMKey => JtagDTMKey
+  case MaxHartIdBits => 2
+  case EnableJtag => false.B
 })
 
 // Synthesizable minimal XiangShan
@@ -96,19 +107,58 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 4,
           nStoreReplayEntries = 4,
         ),
-        L2Size = 128 * 1024, // 128KB
-        L2NWays = 8,
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
-        TlbEntrySize = 4,
-        TlbSPEntrySize = 2,
-        PtwL1EntrySize = 2,
-        PtwL2EntrySize = 64,
-        PtwL3EntrySize = 128,
-        PtwSPEntrySize = 2,
-        useFakeL2Cache = true,
+        itlbParameters = TLBParameters(
+          name = "itlb",
+          fetchi = true,
+          useDmode = false,
+          sameCycle = true,
+          normalReplacer = Some("plru"),
+          superReplacer = Some("plru"),
+          normalNWays = 4,
+          normalNSets = 1,
+          superNWays = 2,
+          shouldBlock = true
+        ),
+        ldtlbParameters = TLBParameters(
+          name = "ldtlb",
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          superNWays = 4,
+          normalAsVictim = true,
+          outReplace = true
+        ),
+        sttlbParameters = TLBParameters(
+          name = "sttlb",
+          normalNSets = 4, // when da or sa
+          normalNWays = 1, // when fa or sa
+          normalAssociative = "sa",
+          normalReplacer = Some("setplru"),
+          normalAsVictim = true,
+          superNWays = 4,
+          outReplace = true
+        ),
+        btlbParameters = TLBParameters(
+          name = "btlb",
+          normalNSets = 1,
+          normalNWays = 8,
+          superNWays = 2
+        ),
+        l2tlbParameters = L2TLBParameters(
+          l1Size = 4,
+          l2nSets = 4,
+          l2nWays = 4,
+          l3nSets = 4,
+          l3nWays = 8,
+          spSize = 2,
+          missQueueSize = 8
+        ),
+        useFakeL2Cache = true, // disable L2 Cache
       )),
-      L3Size = 32 * 1024, // 32KB
+      L3Size = 256 * 1024, // 256KB L3 Cache
     )
   })
 )

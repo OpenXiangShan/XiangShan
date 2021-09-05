@@ -34,8 +34,9 @@ class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
 }
 
 class FwdEntry extends Bundle {
-  val valid = Bool()
-  val data = UInt(8.W)
+  val validFast = Bool() // validFast is generated the same cycle with query
+  val valid = Bool() // valid is generated 1 cycle after query request
+  val data = UInt(8.W) // data is generated 1 cycle after query request
 }
 
 // inflight miss block reqs
@@ -62,7 +63,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new SBufferWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -73,7 +74,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val exceptionAddr = new ExceptionAddrIO
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr)
-    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
   })
@@ -126,7 +126,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt
-  storeQueue.io.storeIssue <> io.storeIssue
 
   loadQueue.io.load_s1 <> io.forward
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE

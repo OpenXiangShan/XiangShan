@@ -18,6 +18,7 @@ package device
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.ExtModule
 import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
@@ -36,14 +37,12 @@ trait HasSDConst {
   def C_SIZE = NrBlock / MULT - 1
 }
 
-class SDHelper extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val ren = Input(Bool())
-    val data = Output(UInt(32.W))
-    val setAddr = Input(Bool())
-    val addr = Input(UInt(32.W))
-  })
+class SDHelper extends ExtModule with HasExtModuleInline {
+  val clk = IO(Input(Clock()))
+  val ren = IO(Input(Bool()))
+  val data = IO(Output(UInt(32.W)))
+  val setAddr = IO(Input(Bool()))
+  val addr = IO(Input(UInt(32.W)))
 
   setInline("SDHelper.v",
     s"""
@@ -80,7 +79,7 @@ class AXI4DummySD
     val sdcmd :: sdarg :: sdtout :: sdcdiv :: sdrsp0 :: sdrsp1 :: sdrsp2 :: sdrsp3 :: sdhsts :: __pad0 :: __pad1 :: __pad2 :: sdvdd :: sdedm :: sdhcfg :: sdhbct :: sddata :: __pad10 :: __pad11 :: __pad12 :: sdhblc :: Nil = range
 
     val regs = List.fill(range.size)(RegInit(0.U(32.W)))
-    val edmConst = (8 << 4).U // number of data in fifo
+    val edmConst = (8 << 4).U(32.W) // number of data in fifo
 
     val MMC_SEND_OP_COND = 1
     val MMC_ALL_SEND_CID = 2
@@ -122,12 +121,12 @@ class AXI4DummySD
     }
 
     val sdHelper = Module(new SDHelper)
-    sdHelper.io.clk := clock
-    sdHelper.io.ren := (getOffset(raddr) === 0x40.U && in.ar.fire())
-    sdHelper.io.setAddr := setAddr
-    sdHelper.io.addr := regs(sdarg)
+    sdHelper.clk := clock
+    sdHelper.ren := (getOffset(raddr) === 0x40.U && in.ar.fire())
+    sdHelper.setAddr := setAddr
+    sdHelper.addr := regs(sdarg)
 
-    def sdRead = sdHelper.io.data
+    def sdRead = sdHelper.data
 
     val mapping = Map(
       RegMap(0x00, regs(sdcmd), cmdWfn),
@@ -147,10 +146,10 @@ class AXI4DummySD
     def getOffset(addr: UInt) = addr(12, 0)
 
     val strb = Mux(waddr(2), in.w.bits.strb(7, 4), in.w.bits.strb(3, 0))
-    val rdata = Wire(UInt(64.W))
+    val rdata = Wire(UInt(32.W))
     RegMap.generate(mapping, getOffset(raddr), rdata,
-      getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(strb))
+      getOffset(waddr), in.w.fire(), in.w.bits.data(31, 0), MaskExpand(strb))
 
-    in.r.bits.data := Fill(2, rdata(31, 0))
+    in.r.bits.data := Fill(2, rdata)
   }
 }

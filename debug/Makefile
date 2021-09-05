@@ -14,7 +14,7 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-ARCH = ARCH=riscv64-noop
+ARCH = ARCH=riscv64-xs
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 

@@ -21,9 +21,10 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import system._
+import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, TLTimer}
+import device.{AXI4Plic, TLTimer, DebugModule}
 import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
@@ -32,17 +33,21 @@ import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.stage.phases.GenerateArtefacts
+import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
+import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import xiangshan.cache.prefetch.L2Prefetcher
+
 
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
   private val l2prefetcher = LazyModule(new L2Prefetcher())
-  private val l2xbar = TLXbar()
+  private val busPMU = BusPerfMonitor(enable = true)
   private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
@@ -70,21 +75,20 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   val uncache = TLXbar()
 
   if (!useFakeDCache) {
-    l2xbar := TLBuffer() := core.memBlock.dcache.clientNode
+    busPMU := TLBuffer() := core.memBlock.dcache.clientNode
   }
-  if (!useFakeL1plusCache) {
-    l2xbar := TLBuffer() := core.l1pluscache.clientNode
-  }
+  //if (!useFakeL1plusCache) {
+    busPMU := TLBuffer() := core.frontend.icache.clientNode
+  //}
   if (!useFakePTW) {
-    l2xbar := TLBuffer() := core.ptw.node
+    busPMU := TLBuffer() := core.ptw.node
   }
-  l2xbar := TLBuffer() := l2prefetcher.clientNode
+  busPMU := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
-    memory_port := l2xbar
+    memory_port := TLXbar() :=* busPMU
   }
   else {
-    l2cache.node := TLBuffer() := l2xbar
-    memory_port := l2cache.node
+    memory_port := l2cache.node := TLBuffer() := TLXbar() :=* busPMU
   }
 
   uncache := TLBuffer() := core.frontend.instrUncache.clientNode
@@ -129,6 +133,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
   lazy val dts = DTS(bindingTree)
+  lazy val json = JSON(bindingTree)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -207,7 +212,7 @@ trait HaveAXI4MemPort {
 
 
 trait HaveAXI4PeripheralPort { this: BaseXSSoc =>
-  // on-chip devices: 0x3800_000 - 0x3fff_ffff
+  // on-chip devices: 0x3800_0000 - 0x3fff_ffff 0x0000_0000 - 0x0000_0fff
   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
   val uartRange = AddressSet(0x40600000, 0xf)
   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
@@ -352,24 +357,44 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= l3cache.node :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
+  }
+
+  val debugModule = LazyModule(new DebugModule(NumCores)(p))
+  debugModule.debug.node := peripheralXbar
+  val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
+  debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+  debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
+    l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
 
   lazy val module = new LazyRawModuleImp(this) {
     ElaborationArtefacts.add("dts", dts)
+    ElaborationArtefacts.add("graphml", graphML)
+    ElaborationArtefacts.add("json", json)
+    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
+      val systemjtag = new Bundle {
+        val jtag = Flipped(new JTAGIO(hasTRSTn = false))
+        val reset = Input(Bool()) // No reset allowed on top
+        val mfr_id = Input(UInt(11.W))
+        val part_number = Input(UInt(16.W))
+        val version = Input(UInt(4.W))
+      }
+      // val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {
       val resetGen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
       resetGen.suggestName("top_reset_gen")
-      childReset := resetGen.io.out
+      childReset := resetGen.io.out | debugModule.module.io.debugIO.ndreset
     }
 
     withClockAndReset(childClock, childReset) {
@@ -383,6 +408,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         core_with_l2(i).module.io.externalInterrupt.msip := clintIntSinks(i).module.out(0)
         core_with_l2(i).module.io.externalInterrupt.mtip := clintIntSinks(i).module.out(1)
         core_with_l2(i).module.io.externalInterrupt.meip := plicIntSinks(i).module.out(0)
+        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink.module.out(i)
         beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
         beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
@@ -399,6 +425,22 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       val tick = cnt === 0.U
       cnt := Mux(tick, freq.U, cnt - 1.U)
       clint.module.io.rtcTick := tick
+
+      debugModule.module.io.resetCtrl.hartIsInReset.foreach {x => x := childReset.asBool() }
+      debugModule.module.io.clock := io.clock
+      debugModule.module.io.reset := io.reset
+
+      debugModule.module.io.debugIO.reset := io.systemjtag.reset // TODO: use synchronizer?
+      debugModule.module.io.debugIO.clock := childClock
+      debugModule.module.io.debugIO.dmactiveAck  := debugModule.module.io.debugIO.dmactive // TODO: delay 3 cycles?
+      // jtag connector
+      debugModule.module.io.debugIO.systemjtag.foreach { x =>
+        x.jtag <> io.systemjtag.jtag
+        x.reset  := io.systemjtag.reset
+        x.mfr_id := io.systemjtag.mfr_id
+        x.part_number := io.systemjtag.part_number
+        x.version := io.systemjtag.version
+      }
     }
   }
 }
