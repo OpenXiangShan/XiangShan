@@ -266,7 +266,8 @@ trait HasXSParameter {
   val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32
-  val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
+  // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
+  val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams

@@ -186,7 +186,7 @@ class Rename(implicit p: Parameters) extends XSModule {
 
       if (i == 0) {
         // calculate meEnable
-        meEnable(i) := isMove(i) && !isMax.get(uops(i).psrc(0))      
+        meEnable(i) := isMove(i) && (!isMax.get(uops(i).psrc(0)) || uops(i).ctrl.lsrc(0) === 0.U)
       } else {
         // compare psrc0
         psrc_cmp(i-1) := Cat((0 until i).map(j => {
@@ -194,7 +194,7 @@ class Rename(implicit p: Parameters) extends XSModule {
         }) /* reverse is not necessary here */)
   
         // calculate meEnable
-        meEnable(i) := isMove(i) && !(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(uops(i).psrc(0)))
+        meEnable(i) := isMove(i) && (!(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(uops(i).psrc(0))) || uops(i).ctrl.lsrc(0) === 0.U)
       }
       uops(i).eliminatedMove := meEnable(i) || (uops(i).ctrl.isMove && uops(i).ctrl.ldest === 0.U)
   
