@@ -594,7 +594,7 @@ package object xiangshan {
   val stdCfg = FuConfig(
     "std",
     fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
-    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
