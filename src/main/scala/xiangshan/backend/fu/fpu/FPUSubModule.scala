@@ -58,6 +58,11 @@ abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
     io.out.bits.data := dataModule.io.out.data
     fflags := dataModule.io.out.fflags
   }
+  def invert_sign(x: UInt, len: Int) = {
+    Cat(
+      !x(len-1), x(len-2, 0)
+    )
+  }
 }
 
 abstract class FPUPipelineModule(implicit p: Parameters)
