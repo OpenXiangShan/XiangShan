@@ -255,7 +255,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   XSPerfAccumulate(s"replay_again", cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isReplay && !fsm.io.req.ready)
   XSPerfAccumulate(s"into_fsm_no_replay", cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay && fsm.io.req.ready)
   for (i <- 0 until (MemReqWidth + 1)) {
-    XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === 1.U)
+    XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
   }
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
   XSPerfAccumulate("mem_count", mem.a.fire())
