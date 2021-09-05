@@ -80,7 +80,7 @@ class AXI4DummySD
     val sdcmd :: sdarg :: sdtout :: sdcdiv :: sdrsp0 :: sdrsp1 :: sdrsp2 :: sdrsp3 :: sdhsts :: __pad0 :: __pad1 :: __pad2 :: sdvdd :: sdedm :: sdhcfg :: sdhbct :: sddata :: __pad10 :: __pad11 :: __pad12 :: sdhblc :: Nil = range
 
     val regs = List.fill(range.size)(RegInit(0.U(32.W)))
-    val edmConst = (8 << 4).U // number of data in fifo
+    val edmConst = (8 << 4).U(32.W) // number of data in fifo
 
     val MMC_SEND_OP_COND = 1
     val MMC_ALL_SEND_CID = 2
@@ -147,10 +147,10 @@ class AXI4DummySD
     def getOffset(addr: UInt) = addr(12, 0)
 
     val strb = Mux(waddr(2), in.w.bits.strb(7, 4), in.w.bits.strb(3, 0))
-    val rdata = Wire(UInt(64.W))
+    val rdata = Wire(UInt(32.W))
     RegMap.generate(mapping, getOffset(raddr), rdata,
-      getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(strb))
+      getOffset(waddr), in.w.fire(), in.w.bits.data(31, 0), MaskExpand(strb))
 
-    in.r.bits.data := Fill(2, rdata(31, 0))
+    in.r.bits.data := Fill(2, rdata)
   }
 }
