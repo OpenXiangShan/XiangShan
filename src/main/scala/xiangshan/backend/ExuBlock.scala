@@ -83,6 +83,17 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   val flattenFuConfigs = fuConfigs.flatMap(c => Seq.fill(c._2)(c._1))
   require(flattenFuConfigs.length == fuBlock.io.writeback.length)
 
+  // TODO: add an attribute to ExuConfig for fast wakeup
+  for (((cfg, fuOut), fastOut) <- flattenFuConfigs.zip(fuBlock.io.writeback).zip(io.fastUopOut)) {
+    if (cfg == FmacExeUnitCfg) {
+      fastOut.valid := fuOut.valid
+      fastOut.bits := fuOut.bits.uop
+      XSError(fuOut.valid && !fuOut.ready, "fastUopOut should not be blocked\n")
+      println(s"Enable fast wakeup from function unit ${cfg.name}")
+    }
+  }
+
+  // Optimizations for wakeup and writeback timing
   // Timing priority: RegNext(rs.fastUopOut) > fu.writeback > arbiter.out(--> io.rfWriteback --> rs.writeback)
   // Filter condition: allWakeupFromRS > hasExclusiveWbPort > None
   // The higher priority, the better timing.
@@ -158,4 +169,24 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     }
   }
 
+  // Optimizations for load balance between different issue ports
+  // When a reservation station has at least two issue ports and
+  // the corresponding function unit does not have fixed latency (not pipelined),
+  // we let the function units alternate between each two issue ports.
+  val multiIssueFuConfigs = fuConfigs.filter(_._2 >= 2).filter(_._1.needLoadBalance).map(_._1)
+  val multiIssuePortsIdx = flattenFuConfigs.zipWithIndex.filter(x => multiIssueFuConfigs.contains(x._1))
+  val multiIssue = multiIssueFuConfigs.map(cfg => multiIssuePortsIdx.filter(_._1 == cfg).map(_._2))
+  multiIssue.foreach(ports => {
+    val numPingPong = ports.length / 2
+    for (i <- 0 until numPingPong) {
+      val index = ports.drop(2 * i).take(2)
+      println(s"Enable issue load balance between ports $index")
+      val pingpong = RegInit(false.B)
+      pingpong := !pingpong
+      when (pingpong) {
+        scheduler.io.issue(index(0)) <> fuBlock.io.issue(index(1))
+        scheduler.io.issue(index(1)) <> fuBlock.io.issue(index(0))
+      }
+    }
+  })
 }

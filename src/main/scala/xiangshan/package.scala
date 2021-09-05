@@ -547,8 +547,8 @@ package object xiangshan {
     name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4),
-    fastUopOut = true, fastImplemented = true
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    latency = UncertainLatency(), fastUopOut = true, fastImplemented = true
   )
 
   val f2iCfg = FuConfig(
@@ -594,7 +594,7 @@ package object xiangshan {
   val stdCfg = FuConfig(
     "std",
     fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
-    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(

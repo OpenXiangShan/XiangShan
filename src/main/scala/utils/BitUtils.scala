@@ -29,9 +29,11 @@ object MaskExpand {
 }
 
 object MaskData {
- def apply(oldData: UInt, newData: UInt, fullmask: UInt) = {
-   (newData & fullmask) | (oldData & ~fullmask)
- }
+  def apply(oldData: UInt, newData: UInt, fullmask: UInt) = {
+    require(oldData.getWidth <= fullmask.getWidth, s"${oldData.getWidth} < ${fullmask.getWidth}")
+    require(newData.getWidth <= fullmask.getWidth, s"${newData.getWidth} < ${fullmask.getWidth}")
+    (newData & fullmask) | (oldData & ~fullmask)
+  }
 }
 
 object SignExt {
