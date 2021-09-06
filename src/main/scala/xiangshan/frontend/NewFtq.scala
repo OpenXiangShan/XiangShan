@@ -359,8 +359,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   }
 
   val old_entry_jmp_target_modified = WireInit(oe)
-  val jalr_mispredicted = cfi_is_jalr && io.mispredict_vec(io.pd.jmpOffset)
-  when (jalr_mispredicted) {
+  val old_target = oe.getJmpTarget(io.start_addr)
+  val jalr_target_modified = cfi_is_jalr && (old_target =/= io.target) // TODO: pass full jalr target
+  when (jalr_target_modified) {
     old_entry_jmp_target_modified.setByJmpTarget(io.start_addr, io.target)
     old_entry_jmp_target_modified.always_taken := 0.U.asTypeOf(Vec(numBr, Bool()))
   }
@@ -378,7 +379,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
   val derived_from_old_entry =
     Mux(is_new_br, old_entry_modified,
-      Mux(jalr_mispredicted, old_entry_jmp_target_modified, old_entry_always_taken))
+      Mux(jalr_target_modified, old_entry_jmp_target_modified, old_entry_always_taken))
 
   
   io.new_entry := Mux(!hit, init_entry, derived_from_old_entry)
@@ -394,9 +395,9 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
 
   // for perf counters
   io.is_init_entry := !hit
-  io.is_old_entry := hit && !is_new_br && !jalr_mispredicted && !always_taken_modified
+  io.is_old_entry := hit && !is_new_br && !jalr_target_modified && !always_taken_modified
   io.is_new_br := hit && is_new_br
-  io.is_jalr_target_modified := hit && jalr_mispredicted
+  io.is_jalr_target_modified := hit && jalr_target_modified
   io.is_always_taken_modified := hit && always_taken_modified
   io.is_br_full := hit && is_new_br && br_full
 }
@@ -870,10 +871,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
-  update.false_hit := commit_hit === h_false_hit
-  update.pc        := commit_pc_bundle.startAddr
-  update.preds.hit := commit_hit === h_hit || commit_hit === h_false_hit
-  update.meta      := commit_meta.meta
+  update.false_hit   := commit_hit === h_false_hit
+  update.pc          := commit_pc_bundle.startAddr
+  update.preds.hit   := commit_hit === h_hit || commit_hit === h_false_hit
+  update.meta        := commit_meta.meta
+  update.full_target := commit_target
   update.fromFtqRedirectSram(commit_spec_meta)
 
   val commit_real_hit = commit_hit === h_hit
