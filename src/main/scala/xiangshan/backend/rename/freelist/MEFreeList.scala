@@ -282,7 +282,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
                       Mux(walk, headPtr - PopCount(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }), 
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
-  freeRegCnt := distanceBetween(tailPtrNext, headPtrNext)
+  freeRegCnt := distanceBetween(tailPtr, headPtrNext)
   canAllocate := RegNext(freeRegCnt >= RenameWidth.U)
 
   headPtr := headPtrNext
