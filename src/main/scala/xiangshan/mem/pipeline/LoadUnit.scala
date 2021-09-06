@@ -193,7 +193,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
 
-
 // Load Pipeline Stage 2
 // DCache resp
 class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {

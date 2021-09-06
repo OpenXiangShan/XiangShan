@@ -71,7 +71,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
   }
 
   for (j <- 0 until numEntries) {
-    io.refillMmask(j) := get_block_addr(io.refillMdata) === get_block_addr(data(j))
+    io.refillMmask(j) := get_refill_addr(io.refillMdata) === get_refill_addr(data(j))
   }
 
   // DataModuleTemplate should not be used when there're any write conflicts
@@ -180,7 +180,7 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: P
     val wdata = Input(Vec(numWrite, UInt(XLEN.W)))
     // masked write
     val mwmask = Input(Vec(numEntries, Bool()))
-    val refillData = Input(UInt((cfg.blockBytes * 8).W))
+    val refillData = Input(UInt(l1BusDataWidth.W))
 
     // fwdMask io
     val fwdMaskWdata = Input(Vec(numWrite, UInt(8.W)))
@@ -188,14 +188,14 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: P
     // fwdMaskWaddr = waddr
 
     // paddr io
-    // 3 bits in paddr need to be stored in CoredataModule for refilling
+    // refillOffBits - wordOffBits bits in paddr need to be stored in CoredataModule for refilling
     val paddrWdata = Input(Vec(numWrite, UInt((PAddrBits).W)))
     val paddrWen = Input(Vec(numWrite, Bool()))
   })
 
-  val data8 = Seq.fill(8)(Module(new MaskedSyncDataModuleTemplate(UInt(8.W), numEntries, numRead, numWrite, numMWrite = blockWords)))
+  val data8 = Seq.fill(8)(Module(new MaskedSyncDataModuleTemplate(UInt(8.W), numEntries, numRead, numWrite, numMWrite = refillWords)))
   val fwdMask = Reg(Vec(numEntries, UInt(8.W)))
-  val wordIndex = Reg(Vec(numEntries, UInt((blockOffBits - wordOffBits).W)))
+  val wordIndex = Reg(Vec(numEntries, UInt((refillOffBits - wordOffBits).W)))
 
   // read ports
   for (i <- 0 until numRead) {
@@ -227,16 +227,16 @@ class CoredataModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: P
 
   // select refill data
   // split dcache result into words
-  val words = VecInit((0 until blockWords) map { i => io.refillData(DataBits * (i + 1) - 1, DataBits * i)})
+  val words = VecInit((0 until refillWords) map { i => io.refillData(DataBits * (i + 1) - 1, DataBits * i)})
   // select refill data according to wordIndex (paddr)
   for (i <- 0 until 8) {
-    for (j <- 0 until blockWords) {
+    for (j <- 0 until refillWords) {
       data8(i).io.mwdata(j) := words(j)(8*(i+1)-1, 8*i)
     }
   }
 
   // gen refill wmask
-  for (j <- 0 until blockWords) {
+  for (j <- 0 until refillWords) {
     for (k <- 0 until numEntries) {
       val wordMatch = wordIndex(k) === j.U
       for (i <- 0 until 8) {
@@ -272,7 +272,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
     val refill = new Bundle() {
       val valid = Input(Bool())
       val paddr = Input(UInt(PAddrBits.W))
-      val data = Input(UInt((cfg.blockBytes * 8).W))
+      val data = Input(UInt(l1BusDataWidth.W))
       val refillMask = Input(Vec(size, Bool()))
       val matchMask = Output(Vec(size, Bool()))
     }
