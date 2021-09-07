@@ -45,6 +45,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
+    val mask = Input(Bool())
   }
 
   val csr = Input(new TlbCsrBundle)
@@ -153,7 +154,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
-  mem.req.valid := state === s_mem_req
+  mem.req.valid := state === s_mem_req && !io.mem.mask
   mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
   mem.req.bits.id := MSHRSize.U(bMemID.W)
 

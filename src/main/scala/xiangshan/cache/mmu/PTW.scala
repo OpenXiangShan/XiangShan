@@ -141,8 +141,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val mq_mem = missQueue.io.mem
   mq_mem.req_mask := waiting_resp.take(MSHRSize)
+  fsm.io.mem.mask := waiting_resp.last
+
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 2))
-  block_decoupled(fsm.io.mem.req, mem_arb.io.in(0), waiting_resp.last) // use MSHRSize as id, not param enough
+  mem_arb.io.in(0) <> fsm.io.mem.req
   mem_arb.io.in(1) <> mq_mem.req
   mem_arb.io.out.ready := mem.a.ready
 
