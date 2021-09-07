@@ -243,7 +243,7 @@ package object xiangshan {
     def bclr        = "b0_10_00_100".U
     def bset        = "b0_10_00_101".U
     def binv        = "b0_10_00_110".U
-    
+
     def srl         = "b0_10_01_001".U
     def bext        = "b0_10_01_010".U
     def sra         = "b0_10_01_100".U
@@ -259,7 +259,7 @@ package object xiangshan {
     def minu        = "b0_11_00_101".U
     def max         = "b0_11_00_110".U
     def min         = "b0_11_00_111".U
-    
+
 
 
     // RV64 32bit optype
@@ -372,7 +372,7 @@ package object xiangshan {
   }
 
   object BMUOpType {
-    
+
     def clmul       = "b0000".U
     def clmulh      = "b0010".U
     def clmulr      = "b0100".U
