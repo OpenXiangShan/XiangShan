@@ -37,27 +37,30 @@ class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val wait_id = UInt(log2Up(MSHRSize).W)
 }
 
+class L2TlbMQInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
+  val vpn = Output(UInt(vpnLen.W))
+  val source = Output(UInt(bPtwWidth.W))
+  val l3 = Valid(Output(UInt(PAddrBits.W)))
+}
+
 class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
-  val in = Flipped(Decoupled(new Bundle {
-    val vpn = Output(UInt(vpnLen.W))
-    val source = Output(UInt(bPtwWidth.W))
-    val l3 = Valid(UInt(PAddrBits.W))
-  }))
+  val in = Flipped(Decoupled(new L2TlbMQInBundle()))
   val sfence = Input(new SfenceBundle)
   val cache = Decoupled(new Bundle {
     val vpn = UInt(vpnLen.W)
     val source = UInt(bPtwWidth.W)
+  })
+  val out = DecoupledIO(new Bundle {
+    val source = Output(UInt(bPtwWidth.W))
+    val id = Output(UInt(bMemID.W))
+    val vpn = Output(UInt(vpnLen.W))
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(MSHRSize).W))
     }))
-    val out = DecoupledIO(new Bundle {
-      val source = Output(UInt(bPtwWidth.W))
-      val id = Output(UInt(bMemID.W))
-      val vpn = Output(UInt(vpnLen.W))
-    })
+
     val refill_vpn = Output(UInt(vpnLen.W))
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
@@ -136,7 +139,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
     state(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0)) := state_mem_out
   }
-  when (io.mem.out.fire()) {
+  when (io.out.fire()) {
     assert(state(mem_ptr) === state_mem_out)
     state(mem_ptr) := state_idle
   }
@@ -152,10 +155,10 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.cache.valid := ParallelOR(is_caches).asBool()
   io.cache.bits.vpn := entries(cache_ptr).vpn
   io.cache.bits.source := entries(cache_ptr).source
-  io.mem.out.valid := ParallelOR(is_having).asBool()
-  io.mem.out.bits.source := entries(mem_ptr).source
-  io.mem.out.bits.vpn := entries(mem_ptr).vpn
-  io.mem.out.bits.id := mem_ptr
+  io.out.valid := ParallelOR(is_having).asBool()
+  io.out.bits.source := entries(mem_ptr).source
+  io.out.bits.vpn := entries(mem_ptr).vpn
+  io.out.bits.id := mem_ptr
   io.mem.req.valid := mem_arb.io.out.valid
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen

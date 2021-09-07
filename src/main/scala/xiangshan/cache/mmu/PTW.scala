@@ -108,18 +108,20 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.sfence := sfence
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
-  missQueue.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !fsm.io.req.ready
-  missQueue.io.in.bits.vpn := cache.io.resp.bits.vpn
-  missQueue.io.in.bits.source := cache.io.resp.bits.source
-  missQueue.io.in.bits.l3.valid := cache.io.resp.bits.toFsm.l2Hit
-  missQueue.io.in.bits.l3.bits := cache.io.resp.bits.toFsm.ppn
+  val mq_in_arb = Module(new Arbiter(new L2TlbMQInBundle, 2))
+  mq_in_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.toFsm.l2Hit || !fsm.io.req.ready)
+  mq_in_arb.io.in(0).bits.vpn := cache.io.resp.bits.vpn
+  mq_in_arb.io.in(0).bits.source := cache.io.resp.bits.source
+  mq_in_arb.io.in(0).bits.l3.valid := cache.io.resp.bits.toFsm.l2Hit
+  mq_in_arb.io.in(0).bits.l3.bits := cache.io.resp.bits.toFsm.ppn
+  mq_in_arb.io.in(1) <> fsm.io.mq
+  missQueue.io.in <> mq_in_arb.io.out
   missQueue.io.sfence  := sfence
 
   // NOTE: missQueue req has higher priority
-  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit
+  fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit
   fsm.io.req.bits.source := cache.io.resp.bits.source
   fsm.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
-  fsm.io.req.bits.l2Hit := cache.io.resp.bits.toFsm.l2Hit
   fsm.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   fsm.io.req.bits.vpn := cache.io.resp.bits.vpn
   fsm.io.csr := csr
@@ -139,10 +141,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val mq_mem = missQueue.io.mem
   mq_mem.req_mask := waiting_resp.take(MSHRSize)
-  mq_mem.out.ready := MuxLookup(mq_mem.out.bits.source, false.B,
-    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 2))
-  block_decoupled(fsm.io.mem.req, mem_arb.io.in(0), waiting_resp(fsm.io.mem.req.bits.id))
+  block_decoupled(fsm.io.mem.req, mem_arb.io.in(0), waiting_resp.last) // use MSHRSize as id, not param enough
   mem_arb.io.in(1) <> mq_mem.req
   mem_arb.io.out.ready := mem.a.ready
 
@@ -191,16 +191,19 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.refill.bits.level := Mux(from_mq, 2.U, fsm.io.refill.level)
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
+  val mq_out = missQueue.io.out
+  mq_out.ready := MuxLookup(missQueue.io.out.bits.source, false.B,
+    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
     outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(0).bits.pf := false.B
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
-    outArb(i).in(outArbMqPort).valid := mq_mem.out.valid && mq_mem.out.bits.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(get_part(refill_data(mq_mem.out.bits.id),
-      req_addr_low(mq_mem.out.bits.id)),
-      mq_mem.out.bits.vpn)
+    outArb(i).in(outArbMqPort).valid := mq_out.valid && mq_out.bits.source===i.U
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(get_part(refill_data(mq_out.bits.id),
+      req_addr_low(mq_out.bits.id)),
+      mq_out.bits.vpn)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)

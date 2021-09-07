@@ -32,7 +32,6 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val source = UInt(bPtwWidth.W)
     val l1Hit = Bool()
-    val l2Hit = Bool()
     val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
@@ -40,6 +39,8 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val source = UInt(bPtwWidth.W)
     val resp = new PtwResp
   })
+
+  val mq = DecoupledIO(new L2TlbMQInBundle())
 
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
@@ -62,7 +63,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem = io.mem
   val satp = io.csr.satp
 
-  val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: Nil = Enum(4)
+  val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: s_missqueue :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val ppn = Reg(UInt(ppnLen.W))
@@ -71,7 +72,6 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
   val l1Hit = Reg(Bool())
-  val l2Hit = Reg(Bool())
 
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val memPteReg = RegEnable(memPte, mem.resp.fire())
@@ -82,11 +82,10 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
       when (io.req.fire()) {
         val req = io.req.bits
         state := s_mem_req
-        level := Mux(req.l2Hit, 2.U, Mux(req.l1Hit, 1.U, 0.U))
-        ppn := Mux(req.l2Hit || req.l1Hit, io.req.bits.ppn, satp.ppn)
+        level := Mux(req.l1Hit, 1.U, 0.U)
+        ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
         vpn := io.req.bits.vpn
         l1Hit := req.l1Hit
-        l2Hit := req.l2Hit
       }
     }
 
@@ -102,12 +101,11 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
           state := s_resp
           notFound := memPte.isPf(level)
         }.otherwise {
-          when (level =/= 2.U) {
+          when (level =/= (Level-2).U) { // when level is 1.U, finish
             level := levelNext
             state := s_mem_req
           }.otherwise {
-            state := s_resp
-            notFound := true.B
+            state := s_missqueue
           }
         }
       }
@@ -118,32 +116,46 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         state := s_idle
       }
     }
+
+    is (s_missqueue) {
+      when (io.mq.fire()) {
+        state := s_idle
+      }
+    }
   }
 
   when (sfence.valid) {
     state := s_idle
   }
 
-  val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
+  val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 1.U)
   val resp_pf = Reg(Bool())
   val resp_level = Reg(UInt(2.W))
   val resp_pte = Reg(new PteBundle())
   when (finish) {
-    resp_pf := level === 3.U || notFound
+    resp_pf := notFound
     resp_level := level
     resp_pte := memPte
   }
+  val source = RegEnable(io.req.bits.source, io.req.fire())
   io.resp.valid := state === s_resp
-  io.resp.bits.source := RegEnable(io.req.bits.source, io.req.fire())
+  io.resp.bits.source := source
   io.resp.bits.resp.apply(resp_pf, resp_level, resp_pte, vpn)
   io.req.ready := state === s_idle
+  assert(!io.resp.valid || resp_level =/= (Level-1).U)
+
+  io.mq.valid := state === s_missqueue
+  io.mq.bits.source := source
+  io.mq.bits.vpn := vpn
+  io.mq.bits.l3.valid := true.B
+  io.mq.bits.l3.bits := resp_pte.ppn
+  assert(!io.mq.valid || resp_level === (Level-2).U)
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
-  val l3addr = MakeAddr(Mux(l2Hit, ppn, memPteReg.ppn), getVpnn(vpn, 0))
   mem.req.valid := state === s_mem_req
-  mem.req.bits.addr := Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
-  mem.req.bits.id := MSHRSize.U
+  mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
+  mem.req.bits.id := MSHRSize.U(bMemID.W)
 
   io.refill.vpn := vpn
   io.refill.level := level
