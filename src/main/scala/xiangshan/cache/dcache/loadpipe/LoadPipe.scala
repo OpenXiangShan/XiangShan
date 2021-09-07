@@ -37,8 +37,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     val nack      = Input(Bool())
 
     // meta and data array read port
-    val data_read = DecoupledIO(new L1DataReadReq)
-    val data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
+    val debug_data_read = DecoupledIO(new L1DataReadReq)
+    val debug_data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
@@ -120,17 +120,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_hit_coh = s1_hit_meta.coh
 
   // data read
-  io.data_read.valid := s1_fire && !s1_nack
-  io.data_read.bits.addr := s1_addr
-  io.data_read.bits.way_en := s1_tag_match_way
+  io.debug_data_read.valid := s1_fire && !s1_nack
+  io.debug_data_read.bits.addr := s1_addr
+  io.debug_data_read.bits.way_en := s1_tag_match_way
   // only needs to read the specific row
-  io.data_read.bits.rmask := UIntToOH(get_row(s1_addr))
+  io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_addr))
 
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_addr
   io.banked_data_read.bits.way_en := s1_tag_match_way
   // only needs to read the specific row
-  // io.data_read.bits.rmask := UIntToOH(get_row(s1_addr))
+  // io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_addr))
 
   io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
@@ -169,12 +169,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
   // Bank conflict on data arrays
-  val s2_nack_data = RegEnable(!io.data_read.ready, s1_fire)
+  val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
   // select the row we are interested in
-  val data_resp = io.data_resp
-  val s2_data = data_resp(get_row(s2_addr))
+  val debug_data_resp = io.debug_data_resp
+  val s2_data = debug_data_resp(get_row(s2_addr))
 
   val banked_data_resp = io.banked_data_resp
   val bank_addr = addrToDCacheBank(s2_addr)
@@ -307,5 +307,5 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss)
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire() && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
-  XSPerfAccumulate("ideal_ld_fast_wakeup", io.data_read.fire() && s1_tag_match)
+  XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 }

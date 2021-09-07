@@ -88,9 +88,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     val amo_resp   = ValidIO(new MainPipeResp)
 
     // meta/data read/write
-    val data_read  = DecoupledIO(new L1DataReadReq)
-    val data_resp  = Input(Vec(blockRows, Bits(encRowBits.W)))
-    val data_write = DecoupledIO(new L1DataWriteReq)
+    val debug_data_read  = DecoupledIO(new L1DataReadReq)
+    val debug_data_resp  = Input(Vec(blockRows, Bits(encRowBits.W)))
+    val debug_data_write = DecoupledIO(new L1DataWriteReq)
     val banked_data_read  = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_write = DecoupledIO(new L1BankedDataWriteReq)
     val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
@@ -125,9 +125,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.store_resp.valid := false.B
   io.amo_resp.valid := false.B
 
-  io.data_read.valid := false.B
-  io.data_write.valid := false.B
-  io.data_write.bits := DontCare
+  io.debug_data_read.valid := false.B
+  io.debug_data_write.valid := false.B
+  io.debug_data_write.bits := DontCare
   io.meta_read.valid := false.B
   io.meta_write.valid := false.B
   io.meta_write.bits := DontCare
@@ -176,7 +176,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   assert(!RegNext(s0_fire && s0_req.miss && !full_overwrite), "miss req should full overwrite")
 
   val meta_ready = io.meta_read.ready
-  val data_ready = io.data_read.ready
+  val data_ready = io.banked_data_read.ready
   io.req.ready := meta_ready && !set_conflict && s1_ready //&& !(s3_valid && update_meta)
 
   io.meta_read.valid := io.req.valid && !set_conflict && s1_ready
@@ -229,7 +229,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   // read data, get meta, check hit or miss
   val s1_valid = RegInit(false.B)
   val s1_need_data = RegEnable(need_data, s0_fire)
-  val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.data_read.ready)
+  val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.banked_data_read.ready)
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_set = get_idx(s1_req.addr)
 
@@ -285,11 +285,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_coh           = Mux(s1_need_replacement, s1_repl_coh,  s1_hit_coh)
 
   // read data
-  // io.data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
-  io.data_read.valid := s1_fire && s1_need_data
-  io.data_read.bits.rmask := s1_rmask
-  io.data_read.bits.way_en := s1_way_en
-  io.data_read.bits.addr := s1_req.addr
+  // io.debug_data_read.valid := s1_valid/* && s2_ready*/ && s1_need_data && !(s3_valid && need_write_data)
+  io.debug_data_read.valid := s1_fire && s1_need_data
+  io.debug_data_read.bits.rmask := s1_rmask
+  io.debug_data_read.bits.way_en := s1_way_en
+  io.debug_data_read.bits.addr := s1_req.addr
 
   io.banked_data_read.valid := s1_fire && s1_need_data
   io.banked_data_read.bits.way_en := s1_way_en
@@ -351,29 +351,39 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
       s2_tag_match, s2_has_permission, s2_hit, s2_need_replacement, s2_way_en, s2_coh.state)
   }
 
-  val data_resp = WireInit(VecInit(Seq.fill(blockRows)(0.U(encRowBits.W))))
-  data_resp := Mux(RegNext(s1_fire), io.data_resp, RegNext(data_resp))
+  val debug_data_resp = WireInit(VecInit(Seq.fill(blockRows)(0.U(encRowBits.W))))
+  val banked_data_resp = Wire(io.banked_data_resp.cloneType)
+  debug_data_resp := Mux(RegNext(s1_fire), io.debug_data_resp, RegNext(debug_data_resp))
+  banked_data_resp := Mux(RegNext(s1_fire), io.banked_data_resp, RegNext(banked_data_resp))
 
   // generate write data
-  val s2_store_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
+  val debug_s2_store_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
+  val s2_store_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
 
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
-  val s2_data_decoded = (0 until blockRows) map { r =>
+  val debug_s2_data_decoded = (0 until blockRows) map { r =>
     (0 until rowWords) map { w =>
-      val data = data_resp(r)(encWordBits * (w + 1) - 1, encWordBits * w)
+      val data = debug_data_resp(r)(encWordBits * (w + 1) - 1, encWordBits * w)
       val decoded = cacheParams.dataCode.decode(data)
       assert(!RegNext(s2_valid && s2_hit && s2_rmask(r) && decoded.uncorrectable))
       data(wordBits - 1, 0)
     }
   }
+  
+  val s2_data = WireInit(VecInit((0 until DCacheBanks).map(i => {
+    val decoded = cacheParams.dataCode.decode(banked_data_resp(i).asECCData())
+    // assert(!RegNext(s2_valid && s2_hit && decoded.uncorrectable))
+    // TODO: trigger ecc error
+    banked_data_resp(i).raw_data
+  })))
 
   for (i <- 0 until blockRows) {
-    s2_store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
-      val old_data = s2_data_decoded(i)(w)
+    debug_s2_store_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
+      val old_data = debug_s2_data_decoded(i)(w)
       val new_data = s2_req.store_data(rowBits * (i + 1) - 1, rowBits * i)(wordBits * (w + 1) - 1, wordBits * w)
       // for amo hit, we should use read out SRAM data
       // do not merge with store data
@@ -384,10 +394,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     })
   }
 
+  for (i <- 0 until DCacheBanks) {
+    val old_data = s2_data(i)
+    val new_data = getDataOfBank(i, s2_req.store_data)
+    // for amo hit, we should use read out SRAM data
+    // do not merge with store data
+    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), getMaskOfBank(i, s2_req.store_mask))
+    s2_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
+  }
+
   // AMO hits
-  val s2_amo_row_data  = s2_store_data_merged(s2_amo_row)
-  val s2_amo_word_data = VecInit((0 until rowWords) map (w => s2_amo_row_data(wordBits * (w + 1) - 1, wordBits * w)))
-  val s2_data_word = s2_amo_word_data(s2_amo_word)
+  val debug_s2_amo_row_data  = debug_s2_store_data_merged(s2_amo_row)
+  val debug_s2_amo_word_data = VecInit((0 until rowWords) map (w => debug_s2_amo_row_data(wordBits * (w + 1) - 1, wordBits * w)))
+  val debug_s2_data_word = debug_s2_amo_word_data(s2_amo_word)
+  val s2_data_word = s2_store_data_merged(Cat(s2_amo_row, s2_amo_word))
 
   dump_pipeline_reqs("MainPipe s2", s2_valid, s2_req)
 
@@ -408,7 +428,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s3_amo_word_addr = RegEnable(s2_amo_word_addr, s2_fire)
   val s3_data_word = RegEnable(s2_data_word, s2_fire)
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire)
-  val s3_data_decoded = RegEnable(VecInit(s2_data_decoded.flatten).asUInt, s2_fire)
+  val debug_s3_store_data_merged = RegEnable(debug_s2_store_data_merged, s2_fire)
+  val s3_data_decoded = RegEnable(VecInit(debug_s2_data_decoded.flatten).asUInt, s2_fire)
+  val s3_data = RegEnable(s2_data, s2_fire)
 
   s3_s0_set_conflict := s3_valid && get_idx(s3_req.addr) === get_idx(s0_req.addr)
 
@@ -558,10 +580,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   amoalu.io.rhs  := s3_req.amo_data
 
   // merge amo write data
-  val s3_amo_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
+  val debug_s3_amo_data_merged = Wire(Vec(blockRows, UInt(rowBits.W)))
   for (i <- 0 until blockRows) {
-    s3_amo_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
-      val old_data = s3_store_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
+    debug_s3_amo_data_merged(i) := Cat((0 until rowWords).reverse map { w =>
+      val old_data = debug_s3_store_data_merged(i)(wordBits * (w + 1) - 1, wordBits * w)
       val new_data = amoalu.io.out
       val wmask = Mux(s3_can_do_amo_write && i.U === s3_amo_row && w.U === s3_amo_word,
         ~0.U(wordBytes.W), 0.U(wordBytes.W))
@@ -570,12 +592,21 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     })
   }
 
-  io.data_write.valid := s3_fire && need_write_data
-  io.data_write.bits.rmask := DontCare
-  io.data_write.bits.way_en := s3_way_en
-  io.data_write.bits.addr := s3_req.addr
-  io.data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
-  io.data_write.bits.data := s3_amo_data_merged
+  val s3_amo_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
+  for (i <- 0 until DCacheBanks) {
+    val old_data = s3_store_data_merged(i)
+    val new_data = amoalu.io.out
+    val wmask = Mux(s3_can_do_amo_write && Cat(s3_amo_row, s3_amo_word) === i.U,
+      ~0.U(wordBytes.W), 0.U(wordBytes.W))
+    s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
+  }
+
+  io.debug_data_write.valid := s3_fire && need_write_data
+  io.debug_data_write.bits.rmask := DontCare
+  io.debug_data_write.bits.way_en := s3_way_en
+  io.debug_data_write.bits.addr := s3_req.addr
+  io.debug_data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
+  io.debug_data_write.bits.data := debug_s3_amo_data_merged
 
   val banked_wmask = VecInit(wmask.map(i => Cat(i.orR, i.orR))).asUInt
   io.banked_data_write.valid := s3_fire && need_write_data
@@ -606,14 +637,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   wb_req.param := writeback_param
   wb_req.voluntary := miss_writeback
   wb_req.hasData := writeback_data
-  wb_req.data := s3_data_decoded
+  wb_req.data := s3_data.asUInt
 
   // for write has higher priority than read, meta/data array ready is not needed
   s3_fire := s3_valid && (!need_writeback || io.wb_req.ready)/* &&
                          (!update_meta || io.meta_write.ready) &&
-                         (!need_write_data || io.data_write.ready)*/
+                         (!need_write_data || io.debug_data_write.ready)*/
 
-  // Technically, load fast wakeup should be disabled when data_write.valid is true,
+  // Technically, load fast wakeup should be disabled when debug_data_write.valid is true,
   // but for timing purpose, we loose the condition to s3_valid, ignoring whether wb is ready or not.
   for (i <- 0 until (LoadPipelineWidth - 1)) {
     io.disable_ld_fast_wakeup(i) := need_write_data && s3_valid
@@ -715,7 +746,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("pipe_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
 
   XSPerfAccumulate("pipe_blocked_by_wbu", s3_valid && need_writeback && !io.wb_req.ready)
-  XSPerfAccumulate("pipe_blocked_by_nack_data", s1_valid && s1_need_data && !io.data_read.ready)
+  XSPerfAccumulate("pipe_blocked_by_nack_data", s1_valid && s1_need_data && !io.banked_data_read.ready)
   XSPerfAccumulate("pipe_reject_req_for_nack_meta", s0_valid && !meta_ready)
   XSPerfAccumulate("pipe_reject_req_for_set_conflict", s0_valid && set_conflict)
 

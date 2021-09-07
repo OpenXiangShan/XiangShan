@@ -231,16 +231,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val dataArray = Module(new DuplicatedDataArray)
-  val newDataArray = Module(new BankedDataArray)
+  val debugDataArray = Module(new DuplicatedDataArray)
+  val bankedDataArray = Module(new BankedDataArray)
   val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
-  dataArray.dump()
-  newDataArray.dump()
+  debugDataArray.dump()
+  bankedDataArray.dump()
 
-  // val errors = dataArray.io.errors ++ metaArray.io.errors
-  val errors = newDataArray.io.errors ++ metaArray.io.errors
+  // val errors = debugDataArray.io.errors ++ metaArray.io.errors
+  val errors = bankedDataArray.io.errors ++ metaArray.io.errors
   io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
-  assert(!io.error.ecc_error.valid)
+  // assert(!io.error.ecc_error.valid)
 
   //----------------------------------------
   // core modules
@@ -279,27 +279,27 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val DataWritePortCount = 1
   val MainPipeDataWritePort = 0
 
-  dataArray.io.write <> mainPipe.io.data_write
-  newDataArray.io.write <> mainPipe.io.banked_data_write
+  debugDataArray.io.write <> mainPipe.io.debug_data_write
+  bankedDataArray.io.write <> mainPipe.io.banked_data_write
 
   // give priority to MainPipe
   val DataReadPortCount = 2
   val MainPipeDataReadPort = 0
   val LoadPipeDataReadPort = 1
 
-  val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
+  val debug_dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
-  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.data_read
-  dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.data_read
+  debug_dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.debug_data_read
+  debug_dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.debug_data_read
 
-  dataArray.io.read(LoadPipelineWidth - 1) <> dataReadArb.io.out
+  debugDataArray.io.read(LoadPipelineWidth - 1) <> debug_dataReadArb.io.out
 
-  dataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.data_resp
-  dataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.data_resp
+  debugDataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.debug_data_resp
+  debugDataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.debug_data_resp
 
   for (w <- 0 until (LoadPipelineWidth - 1)) {
-    dataArray.io.read(w) <> ldu(w).io.data_read
-    dataArray.io.resp(w) <> ldu(w).io.data_resp
+    debugDataArray.io.read(w) <> ldu(w).io.debug_data_read
+    debugDataArray.io.resp(w) <> ldu(w).io.debug_data_resp
   }
 
   val bankedDataReadArb = Module(new Arbiter(new L1BankedDataReadReq, DataReadPortCount))
@@ -307,17 +307,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.banked_data_read
   bankedDataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.banked_data_read
 
-  newDataArray.io.read(0) <> ldu(0).io.banked_data_read
-  newDataArray.io.read(1) <> bankedDataReadArb.io.out
+  bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
+  bankedDataArray.io.read(1) <> bankedDataReadArb.io.out
 
-  newDataArray.io.resp(0) <> ldu(0).io.banked_data_resp
-  newDataArray.io.resp(1) <> ldu(1).io.banked_data_resp
-  newDataArray.io.resp(1) <> mainPipe.io.banked_data_resp
+  bankedDataArray.io.resp(0) <> ldu(0).io.banked_data_resp
+  bankedDataArray.io.resp(1) <> ldu(1).io.banked_data_resp
+  bankedDataArray.io.resp(1) <> mainPipe.io.banked_data_resp
 
   ldu(0).io.bank_conflict_fast := false.B
-  ldu(1).io.bank_conflict_fast := newDataArray.io.bank_conflict_fast
+  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast
   ldu(0).io.bank_conflict_slow := false.B
-  ldu(1).io.bank_conflict_slow := newDataArray.io.bank_conflict_slow
+  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow
 
   //----------------------------------------
   // load pipe
@@ -335,7 +335,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     } else {
       ldu(w).io.disable_ld_fast_wakeup := 
         mainPipe.io.disable_ld_fast_wakeup(w) || 
-        newDataArray.io.bank_conflict_fast // load pipe 1 fast wake up should be disabled when bank conflict
+        bankedDataArray.io.bank_conflict_fast // load pipe 1 fast wake up should be disabled when bank conflict
     }
   }
 

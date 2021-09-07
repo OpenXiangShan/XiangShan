@@ -54,6 +54,16 @@ trait HasBankedDataArrayParameters extends {
     require(addr.getWidth >= DCacheTagOffset)
     addr(DCacheTagOffset-1, DCacheSetOffset)
   }
+
+  def getDataOfBank(bank: Int, data: UInt) = {
+    require(data.getWidth >= (bank+1)*DCacheSRAMRowBits)
+    data(DCacheSRAMRowBits * (bank + 1) - 1, DCacheSRAMRowBits * bank)
+  }
+
+  def getMaskOfBank(bank: Int, data: UInt) = {
+    require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
+    data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
+  }
 }
 
 //           Physical Address
