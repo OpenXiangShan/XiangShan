@@ -302,22 +302,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     debugDataArray.io.resp(w) <> ldu(w).io.debug_data_resp
   }
 
-  val bankedDataReadArb = Module(new Arbiter(new L1BankedDataReadReq, DataReadPortCount))
-
-  bankedDataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.banked_data_read
-  bankedDataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.banked_data_read
-
   bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
-  bankedDataArray.io.read(1) <> bankedDataReadArb.io.out
+  bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
+  bankedDataArray.io.readline <> mainPipe.io.banked_data_read
 
-  bankedDataArray.io.resp(0) <> ldu(0).io.banked_data_resp
-  bankedDataArray.io.resp(1) <> ldu(1).io.banked_data_resp
-  bankedDataArray.io.resp(1) <> mainPipe.io.banked_data_resp
+  ldu(0).io.banked_data_resp := bankedDataArray.io.resp
+  ldu(1).io.banked_data_resp := bankedDataArray.io.resp
+  mainPipe.io.banked_data_resp := bankedDataArray.io.resp
 
-  ldu(0).io.bank_conflict_fast := false.B
-  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast
-  ldu(0).io.bank_conflict_slow := false.B
-  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow
+  ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
+  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
+  ldu(0).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(0)
+  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(1)
 
   //----------------------------------------
   // load pipe
@@ -330,13 +326,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
 
-    if (w == 0) {
-      ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup(w)
-    } else {
-      ldu(w).io.disable_ld_fast_wakeup := 
-        mainPipe.io.disable_ld_fast_wakeup(w) || 
-        bankedDataArray.io.bank_conflict_fast // load pipe 1 fast wake up should be disabled when bank conflict
-    }
+    ldu(w).io.disable_ld_fast_wakeup := 
+      mainPipe.io.disable_ld_fast_wakeup(w) || 
+      bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
   //----------------------------------------
