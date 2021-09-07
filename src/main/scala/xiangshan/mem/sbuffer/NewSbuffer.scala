@@ -217,6 +217,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val need_uarch_drain = WireInit(false.B)
   val do_uarch_drain = RegNext(need_uarch_drain)
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
+  // assert(!need_uarch_drain)
 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
@@ -332,7 +333,9 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
       }
     }
     is(x_drain_sbuffer){
-      when(sbuffer_empty){
+      when(io.flush.valid){
+        sbuffer_state := x_drain_all
+      }.elsewhen(sbuffer_empty){
         sbuffer_state := x_idle
       }
     }
