@@ -28,7 +28,7 @@ import scala.math.min
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
-  val numEntries = 2048
+  val numEntries = 4096
   val numWays    = 4
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20

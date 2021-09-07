@@ -25,8 +25,8 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -60,7 +60,7 @@ case class XSCoreParameters
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
-  RasSize: Int = 16,
+  RasSize: Int = 32,
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
@@ -75,11 +75,12 @@ case class XSCoreParameters
       val bim = Module(new BIM()(p))
       val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
       val ras = Module(new RAS()(p))
+      val ittage = Module(new ITTage()(p))
       // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(bim, ubtb, tage, ftb, ras)
+      val preds = Seq(bim, ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -91,7 +92,8 @@ case class XSCoreParameters
       ubtb.io.in.bits.resp_in(0) := bim.io.out.resp
       tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ras.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
       
       (preds, ras.io.out.resp)
     }),
@@ -300,7 +302,8 @@ trait HasXSParameter {
   val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32
-  val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
+  // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
+  val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
