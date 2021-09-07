@@ -34,6 +34,7 @@ class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = UInt(vpnLen.W)
   val source = UInt(bPtwWidth.W)
   val ppn = UInt(ppnLen.W)
+  val wait_id = UInt(log2Up(MSHRSize).W)
 }
 
 class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
@@ -66,7 +67,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
 class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbMQIO())
 
-  val state_idle :: state_cache :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(5)
+  val state_idle :: state_cache :: state_cache_next :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(6)
 
   val state = RegInit(VecInit(Seq.fill(MSHRSize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
@@ -90,16 +91,49 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
 
+  // duplicate req
+  // to_wait: wait for the last to access mem, set to mem_resp
+  // to_cache: the last is back just right now, set to mem_cache
+  val (to_wait, to_cache, wait_id) = {
+    val dup_vec = state.indices.map(i =>
+      io.in.bits.l3.valid && (dropL3SectorBits(io.in.bits.vpn) === dropL3SectorBits(entries(i).vpn))
+    )
+    val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m}
+    val dup_vec_wait = VecInit(dup_vec.zip(is_waiting).map{case (d, w) => d && w})
+    val dup_vec_having = dup_vec.zip(is_having).map{case (d, h) => d && h}
+    val dup_wait = Cat(dup_vec_wait).orR
+    val wait_id = ParallelMux(dup_vec_wait zip entries.map(_.wait_id))
+    val dup_wait_resp = io.mem.resp.valid && dup_vec_wait(io.mem.resp.bits.id)
+    val wait = Cat(dup_vec_mem).orR || (dup_wait && !dup_wait_resp)
+    val having = Cat(dup_vec_having).orR || dup_wait_resp
+    (wait, having, wait_id)
+  }
+  for (i <- 0 until MSHRSize) {
+    when (state(i) === state_cache_next) {
+      state(i) := state_cache
+    }
+  }
   when (io.in.fire()) {
-    state(enq_ptr) := Mux(io.in.bits.l3.valid, state_mem_req, state_cache)
+    state(enq_ptr) := Mux(to_cache, state_cache_next,
+                      Mux(to_wait, state_mem_waiting,
+                      Mux(io.in.bits.l3.valid, state_mem_req, state_cache)))
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
+    entries(enq_ptr).wait_id := wait_id
   }
   when (mem_arb.io.out.fire()) {
     state(mem_arb.io.chosen) := state_mem_waiting
+    entries(mem_arb.io.chosen).wait_id := mem_arb.io.chosen
   }
   when (io.mem.resp.fire()) {
+    state.indices.map{i =>
+      when (state(i) === state_mem_waiting &&
+        io.mem.resp.bits.id === entries(i).wait_id &&
+        i.U =/= entries(i).wait_id) {
+        state(i) := state_cache
+      }
+    }
     state(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0)) := state_mem_out
   }
   when (io.mem.out.fire()) {

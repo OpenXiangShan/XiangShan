@@ -156,6 +156,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     genPtwL3Idx(vpn)(PtwL3SectorIdxLen - 1, 0)
   }
 
+  def dropL3SectorBits(vpn: UInt) = {
+    vpn(vpn.getWidth-1, PtwL3SectorIdxLen)
+  }
+
   def genPtwL3SetIdx(vpn: UInt) = {
     genPtwL3Idx(vpn)(PtwL3SetIdxLen + PtwL3SectorIdxLen - 1, PtwL3SectorIdxLen)
   }
