@@ -192,7 +192,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.refill.valid := RegNext(mem_resp_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
   cache.io.refill.bits.ptes := refill_data(RegNext(mem.d.bits.source)).asUInt
   cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
-  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, fsm.io.refill.level)
+  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
   val mq_out = missQueue.io.out

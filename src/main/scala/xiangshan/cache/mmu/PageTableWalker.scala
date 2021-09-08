@@ -64,20 +64,17 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem = io.mem
   val satp = io.csr.satp
 
-  val s_idle :: s_mem_req :: s_mem_resp :: s_check_pte :: s_resp :: s_missqueue :: Nil = Enum(6)
+  val s_idle :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val ppn = Reg(UInt(ppnLen.W))
   val vpn = Reg(UInt(vpnLen.W))
   val levelNext = level + 1.U
-
-  val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
   val l1Hit = Reg(Bool())
-
-  // resp valid will arrive before memPte, the memPte just hold in outer module
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
+  io.req.ready := state === s_idle
 
-  val notFound = WireInit(false.B)
+  val pageFault = WireInit(false.B)
   switch (state) {
     is (s_idle) {
       when (io.req.fire()) {
@@ -104,27 +101,19 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
     is (s_check_pte) {
       when (memPte.isLeaf() || memPte.isPf(level)) {
-        state := s_resp
-        notFound := memPte.isPf(level)
+        when (io.resp.fire()) {
+          state := s_idle
+        }
+        pageFault := memPte.isPf(level)
       }.otherwise {
         when (level =/= (Level-2).U) { // when level is 1.U, finish
           level := levelNext
           state := s_mem_req
         }.otherwise {
-          state := s_missqueue
+          when (io.mq.fire()) {
+            state := s_idle
+          }
         }
-      }
-    }
-
-    is (s_resp) {
-      when (io.resp.fire()) {
-        state := s_idle
-      }
-    }
-
-    is (s_missqueue) {
-      when (io.mq.fire()) {
-        state := s_idle
       }
     }
   }
@@ -133,28 +122,21 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     state := s_idle
   }
 
-  val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 1.U)
-  val resp_pf = Reg(Bool())
-  val resp_level = Reg(UInt(2.W))
-  val resp_pte = Reg(new PteBundle())
-  when (finish) {
-    resp_pf := notFound
-    resp_level := level
-    resp_pte := memPte
-  }
+  val is_pte = memPte.isLeaf() || memPte.isPf(level)
+  val find_pte = is_pte
+  val to_find_pte = level === 1.U && !is_pte
   val source = RegEnable(io.req.bits.source, io.req.fire())
-  io.resp.valid := state === s_resp
+  io.resp.valid := state === s_check_pte && find_pte
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(resp_pf, resp_level, resp_pte, vpn)
-  io.req.ready := state === s_idle
-  assert(!io.resp.valid || resp_level =/= (Level-1).U)
+  io.resp.bits.resp.apply(pageFault, level, memPte, vpn)
 
-  io.mq.valid := state === s_missqueue
+  io.mq.valid := state === s_check_pte && to_find_pte
   io.mq.bits.source := source
   io.mq.bits.vpn := vpn
   io.mq.bits.l3.valid := true.B
-  io.mq.bits.l3.bits := resp_pte.ppn
-  assert(!io.mq.valid || resp_level === (Level-2).U)
+  io.mq.bits.l3.bits := memPte.ppn
+
+  assert(level =/= 2.U || level =/= 3.U)
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
@@ -165,7 +147,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.refill.vpn := vpn
   io.refill.level := level
 
-  XSDebug(p"[fsm] state:${state} level:${level} notFound:${notFound}\n")
+  XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())
