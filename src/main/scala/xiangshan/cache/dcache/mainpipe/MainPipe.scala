@@ -429,7 +429,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s3_data_word = RegEnable(s2_data_word, s2_fire)
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire)
   val debug_s3_store_data_merged = RegEnable(debug_s2_store_data_merged, s2_fire)
-  val s3_data_decoded = RegEnable(VecInit(debug_s2_data_decoded.flatten).asUInt, s2_fire)
+  val debug_s3_data_decoded = RegEnable(VecInit(debug_s2_data_decoded.flatten).asUInt, s2_fire)
   val s3_data = RegEnable(s2_data, s2_fire)
 
   s3_s0_set_conflict := s3_valid && get_idx(s3_req.addr) === get_idx(s0_req.addr)
@@ -638,6 +638,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   wb_req.voluntary := miss_writeback
   wb_req.hasData := writeback_data
   wb_req.data := s3_data.asUInt
+  assert(RegNext(!io.wb_req.valid || (debug_s3_data_decoded.asUInt === s3_data.asUInt)))
 
   // for write has higher priority than read, meta/data array ready is not needed
   s3_fire := s3_valid && (!need_writeback || io.wb_req.ready)/* &&

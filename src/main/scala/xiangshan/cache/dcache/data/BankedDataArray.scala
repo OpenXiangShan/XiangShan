@@ -27,7 +27,7 @@ import scala.math.max
 
 // TODO: refactor dcache parameter system
 trait HasBankedDataArrayParameters extends {
-  val DCacheSets = 256
+  val DCacheSets = 64
   val DCacheWays = 8
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64
