@@ -237,12 +237,12 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val binv = src1 ^ bitShift
   val bext = srl(0)
 
-  val andn    = ~(src1 & src2)
-  val orn     = ~(src1 | src2)
-  val xnor    = ~(src1 ^ src2)
-  val and     = ~andn
-  val or      = ~orn
-  val xor     = ~xnor
+  val andn    = src1 & ~src2
+  val orn     = src1 | ~src2
+  val xnor    = src1 ^ ~src2
+  val and     = src1 & src2
+  val or      = src1 | src2
+  val xor     = src1 ^ src2
   val sgtu    = sub(XLEN)
   val sltu    = !sgtu
   val slt     = xor(XLEN-1) ^ sltu
