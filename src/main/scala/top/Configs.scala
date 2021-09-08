@@ -31,6 +31,7 @@ import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameter
 import xiangshan.cache.mmu.L2TLBParameters
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun.{CacheParameters, ClientCacheParameters}
+import huancun.prefetch._
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -152,7 +153,8 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
           level = 2,
           ways = ways,
           sets = l2sets,
-          inclusive = inclusive
+          inclusive = inclusive,
+          prefetch = Some(BOPParameters())
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,
@@ -195,4 +197,8 @@ class MinimalL3DebugConfig(n: Int = 1) extends Config(
 
 class DefaultL3DebugConfig(n: Int = 1) extends Config(
   new WithL3DebugConfig ++ new DefaultConfig(n)
+)
+
+class NonInclusiveL3Config(n: Int = 1) extends Config(
+  new WithNKBL3(4096, inclusive = false, banks = 4) ++ new WithNKBL2(512) ++ new DefaultConfig(n)
 )
