@@ -38,6 +38,17 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters) ex
   protected def destToRs1: Bool = instr1Rd === instr2Rs1
   protected def destToRs2: Bool = instr1Rd === instr2Rs2
 
+  protected def getBaseCS(pat: BitPat): CtrlSignals = {
+    val allDecodeTable = XDecode.table ++ X64Decode.table ++ BDecode.table
+    val baseTable = allDecodeTable.filter(_._1 == pat).map(_._2).head
+    val cs = Wire(new CtrlSignals)
+    cs := DontCare
+    cs.decode(baseTable)
+    // For simple instruction fusions, we assume their destination registers are the same.
+    cs.ldest := instr1Rd
+    cs
+  }
+
   def isValid: Bool
   // TODO: optimize timing
   def target: CtrlSignals
@@ -55,13 +66,9 @@ class FusedAdduw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val adduwTable = XDecode.table.filter(_._1 == Instructions.ADDU_W).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(adduwTable)
+    val cs = getBaseCS(Instructions.ADDU_W)
     cs.lsrc(0) := instr1Rs1
     cs.lsrc(1) := 0.U
-    cs.ldest := instr1Rd
     cs
   }
 
@@ -77,13 +84,8 @@ class FusedZexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val zexthTable = XDecode.table.filter(_._1 == Instructions.ZEXT_H).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(zexthTable)
+    val cs = getBaseCS(Instructions.ZEXT_H)
     cs.lsrc(0) := instr1Rs1
-    cs.lsrc(1) := 0.U
-    cs.ldest := instr1Rd
     cs
   }
 
@@ -109,13 +111,8 @@ class FusedSexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val sexthTable = XDecode.table.filter(_._1 == Instructions.SEXT_H).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(sexthTable)
+    val cs = getBaseCS(Instructions.SEXT_H)
     cs.lsrc(0) := instr1Rs1
-    cs.lsrc(1) := 0.U
-    cs.ldest := instr1Rd
     cs
   }
 
@@ -131,13 +128,9 @@ class FusedSh1add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   def target: CtrlSignals = {
-    val sh1addTable = XDecode.table.filter(_._1 == Instructions.SH1ADD).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(sh1addTable)
+    val cs = getBaseCS(Instructions.SH1ADD)
     cs.lsrc(0) := instr1Rs1
     cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
-    cs.ldest := instr1Rd
     cs
   }
 
@@ -153,13 +146,9 @@ class FusedSh2add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   def target: CtrlSignals = {
-    val sh2addTable = XDecode.table.filter(_._1 == Instructions.SH2ADD).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(sh2addTable)
+    val cs = getBaseCS(Instructions.SH2ADD)
     cs.lsrc(0) := instr1Rs1
     cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
-    cs.ldest := instr1Rd
     cs
   }
 
@@ -175,17 +164,190 @@ class FusedSh3add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   def target: CtrlSignals = {
-    val sh3addTable = XDecode.table.filter(_._1 == Instructions.SH3ADD).map(_._2).head
-    val cs = Wire(new CtrlSignals)
-    cs := DontCare
-    cs.decode(sh3addTable)
+    val cs = getBaseCS(Instructions.SH3ADD)
     cs.lsrc(0) := instr1Rs1
     cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
-    cs.ldest := instr1Rd
     cs
   }
 
   def fusionName: String = "slli3_add"
+}
+
+// Case: shift zero-extended word left by one
+// Source: `slli r1, r0, 32` + `srli r1, r0, 31`
+// Target: `szewl1 r1, r0` (customized internal opcode)
+class FusedSzewl1(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SLLI && instr(0)(25, 20) === 32.U
+  def inst2Cond = instr(1) === Instructions.SRLI && instr(1)(25, 20) === 31.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.ZEXT_H)
+    // replace the fuOpType with szewl1
+    cs.fuOpType := ALUOpType.szewl1
+    cs.lsrc(0) := instr1Rs1
+    cs
+  }
+
+  def fusionName: String = "slli32_srli31"
+}
+
+// Case: shift zero-extended word left by two
+// Source: `slli r1, r0, 32` + `srli r1, r0, 30`
+// Target: `szewl2 r1, r0` (customized internal opcode)
+class FusedSzewl2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SLLI && instr(0)(25, 20) === 32.U
+  def inst2Cond = instr(1) === Instructions.SRLI && instr(1)(25, 20) === 30.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.ZEXT_H)
+    // replace the fuOpType with szewl2
+    cs.fuOpType := ALUOpType.szewl2
+    cs.lsrc(0) := instr1Rs1
+    cs
+  }
+
+  def fusionName: String = "slli32_srli30"
+}
+
+// Case: get the second byte
+// Source: `srli r1, r0, 8` + `andi r1, r1, 255`
+// Target: `byte2 r1, r0` (customized internal opcode)
+class FusedByte2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SRLI && instr(0)(25, 20) === 8.U
+  def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 255.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.ZEXT_H)
+    // replace the fuOpType with byte2
+    cs.fuOpType := ALUOpType.byte2
+    cs.lsrc(0) := instr1Rs1
+    cs
+  }
+
+  def fusionName: String = "srli8_andi255"
+}
+
+// Case: shift left by four and add
+// Source: `slli r1, r0, 4` + `add r1, r1, r2`
+// Target: `sh4add r1, r0, r2` (customized internal opcode)
+class FusedSh4add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SLLI && instr(0)(25, 20) === 4.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with sh4add
+    cs.fuOpType := ALUOpType.sh4add
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "slli4_add"
+}
+
+// Case: shift right by 30 and add
+// Source: `srli r1, r0, 30` + `add r1, r1, r2`
+// Target: `sr30add r1, r0, r2` (customized internal opcode)
+class FusedSr30add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SRLI && instr(0)(25, 20) === 30.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with sr30add
+    cs.fuOpType := ALUOpType.sr30add
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "srli30_add"
+}
+
+// Case: shift right by 31 and add
+// Source: `srli r1, r0, 31` + `add r1, r1, r2`
+// Target: `sr31add r1, r0, r2` (customized internal opcode)
+class FusedSr31add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SRLI && instr(0)(25, 20) === 31.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with sr31add
+    cs.fuOpType := ALUOpType.sr31add
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "srli31_add"
+}
+
+// Case: shift right by 32 and add
+// Source: `srli r1, r0, 32` + `add r1, r1, r2`
+// Target: `sr32add r1, r0, r2` (customized internal opcode)
+class FusedSr32add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SRLI && instr(0)(25, 20) === 32.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with sr32add
+    cs.fuOpType := ALUOpType.sr32add
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "srli32_add"
+}
+
+// Case: add one if odd, otherwise unchanged
+// Source: `andi r1, r0, 1`` + `add r1, r1, r2`
+// Target: `oddadd r1, r0, r2` (customized internal opcode)
+class FusedOddadd(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.ANDI && instr(0)(31, 20) === 1.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with oddadd
+    cs.fuOpType := ALUOpType.oddadd
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "andi1_add"
+}
+
+// Case: add one if odd (in word format), otherwise unchanged
+// Source: `andi r1, r0, 1`` + `addw r1, r1, r2`
+// Target: `oddaddw r1, r0, r2` (customized internal opcode)
+class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.ANDI && instr(0)(31, 20) === 1.U
+  def inst2Cond = instr(1) === Instructions.ADDW
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with oddaddw
+    cs.fuOpType := ALUOpType.oddaddw
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "andi1_addw"
 }
 
 class FusionDecoder(implicit p: Parameters) extends XSModule {
@@ -210,17 +372,28 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedSh1add(pair),
       new FusedSh2add(pair),
       new FusedSh3add(pair),
+      new FusedSzewl1(pair),
+      new FusedSzewl2(pair),
+      new FusedByte2(pair),
+      new FusedSh4add(pair),
+      new FusedSr30add(pair),
+      new FusedSr31add(pair),
+      new FusedSr32add(pair),
+      new FusedOddadd(pair),
+      new FusedOddaddw(pair),
     )
     val pairValid = VecInit(pair.map(_.valid)).asUInt().andR
     val thisCleared = io.clear(i)
     val fusionVec = VecInit(fusionList.map(_.isValid))
     out.valid := pairValid && !thisCleared && fusionVec.asUInt().orR()
-    out.bits := PriorityMux(fusionVec, fusionList.map(_.target))
+    XSError(PopCount(fusionVec) > 1.U, "more then one fusion matched\n")
+    out.bits := Mux1H(fusionVec, fusionList.map(_.target))
     // TODO: assume every instruction fusion clears the second instruction now
     io.clear(i + 1) := out.valid
     fusionList.zip(fusionVec).foreach { case (f, v) =>
-      XSPerfAccumulate(s"${f.fusionName}_$i", pairValid && !thisCleared && v)
+      XSPerfAccumulate(s"case_${f.fusionName}_$i", pairValid && !thisCleared && v && out.ready)
     }
+    XSPerfAccumulate(s"conflict_fusion_$i", pairValid && thisCleared && fusionVec.asUInt().orR() && out.ready)
   }
 
   XSPerfAccumulate("fused_instr", PopCount(io.out.map(_.fire)))

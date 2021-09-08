@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{LookupTreeDefault, LookupTree, ParallelMux, SignExt, ZeroExt}
+import utils.{LookupTree, LookupTreeDefault, ParallelMux, SignExt, ZeroExt}
 import xiangshan._
 
 class AddModule(implicit p: Parameters) extends XSModule {
@@ -30,6 +30,7 @@ class AddModule(implicit p: Parameters) extends XSModule {
     val addw = Output(UInt((XLEN/2).W))
   })
   io.add := io.src(0) + io.src(1)
+  // TODO: why this extra adder?
   io.addw := io.srcw + io.src(1)(31,0)
 }
 
@@ -97,6 +98,7 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt())
     val andn, orn, xnor, and, or, xor, sextb, sexth, zexth, rev8, orcb = Input(UInt(XLEN.W))
+    val src = Input(UInt(XLEN.W))
     val miscRes = Output(UInt(XLEN.W))
   })
 
@@ -111,7 +113,10 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
     ALUOpType.sext_h -> io.sexth,
     ALUOpType.zext_h -> io.zexth,
     ALUOpType.orc_b  -> io.orcb,
-    ALUOpType.rev8   -> io.rev8
+    ALUOpType.rev8   -> io.rev8,
+    ALUOpType.szewl1 -> Cat(0.U(31.W), io.src(31, 0), 0.U(1.W)),
+    ALUOpType.szewl2 -> Cat(0.U(30.W), io.src(31, 0), 0.U(2.W)),
+    ALUOpType.byte2  -> Cat(0.U(56.W), io.src(15, 8))
   ).map(x => (x._1(3, 0) === io.func(3, 0), x._2)))
 
   io.miscRes := miscRes
@@ -182,8 +187,20 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   addModule.io.src(0) := (Cat(Fill(32, func(0)), Fill(32,1.U)) & src1) << shaddShamt
   addModule.io.src(1) := src2
   addModule.io.srcw := src1(31,0)
-
-
+  // TODO: use decoder or other libraries to optimize timing
+  when (func(4)) {
+    addModule.io.src(0) := ZeroExt(src1(0), XLEN)
+    addModule.io.srcw := ZeroExt(src1(0), XLEN)
+  }
+  when (func(3)) {
+    val sourceVec = VecInit(Seq(
+      Cat(src1(59, 0), 0.U(4.W)),
+      ZeroExt(src1(63, 30), XLEN),
+      ZeroExt(src1(63, 31), XLEN),
+      ZeroExt(src1(63, 32), XLEN)
+    ))
+    addModule.io.src(0) := sourceVec(func(2, 1))
+  }
 
   val subModule = Module(new SubModule)
   val sub  = subModule.io.sub
@@ -296,6 +313,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   miscResSel.io.zexth   := zexth
   miscResSel.io.rev8    := rev8
   miscResSel.io.orcb    := orcb
+  miscResSel.io.src     := src1
   val miscRes = miscResSel.io.miscRes
 
   val wordResSel = Module(new WordResultSelect)

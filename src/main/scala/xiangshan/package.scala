@@ -216,8 +216,14 @@ package object xiangshan {
     def sext_b      = "b0_00_01_000".U
     def sext_h      = "b0_00_01_001".U
     def zext_h      = "b0_00_01_010".U
+    // TOOD: optimize it
+    def szewl1      = "b0_00_01_011".U
     def orc_b       = "b0_00_01_100".U
     def rev8        = "b0_00_01_101".U
+    // TOOD: optimize it
+    def szewl2      = "b0_00_01_110".U
+    // TOOD: optimize it
+    def byte2       = "b0_00_01_111".U
 
     def beq         = "b0_00_10_000".U
     def bne         = "b0_00_10_001".U
@@ -229,13 +235,17 @@ package object xiangshan {
     // add & sub optype
     def add_uw       = "b0_01_00_000".U
     def add          = "b0_01_00_001".U
+    def oddadd       = "b0_01_10_001".U
     def sh1add_uw    = "b0_01_00_010".U
     def sh1add       = "b0_01_00_011".U
     def sh2add_uw    = "b0_01_00_100".U
     def sh2add       = "b0_01_00_101".U
     def sh3add_uw    = "b0_01_00_110".U
     def sh3add       = "b0_01_00_111".U
-
+    def sh4add       = "b0_01_01_001".U
+    def sr30add      = "b0_01_01_011".U
+    def sr31add      = "b0_01_01_101".U
+    def sr32add      = "b0_01_01_111".U
 
     // shift optype
     def slli_uw     = "b0_10_00_000".U
@@ -264,6 +274,7 @@ package object xiangshan {
 
     // RV64 32bit optype
     def addw        = "b1_01_00_001".U
+    def oddaddw     = "b1_01_10_001".U
     def subw        = "b1_11_00_000".U
     def sllw        = "b1_10_00_000".U
     def srlw        = "b1_10_01_001".U
