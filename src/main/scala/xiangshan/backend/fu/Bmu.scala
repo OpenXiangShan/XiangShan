@@ -19,7 +19,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
   }
   def clzi(msb: Int, left: UInt, right: UInt): UInt = {
     Mux(left(msb),
-      Cat(left(msb) & right(msb), !right(msb), if(msb==1)right(0) else right(msb-1, 0)),
+      Cat(left(msb) && right(msb), !right(msb), if(msb==1)right(0) else right(msb-1, 0)),
       left)
   }
   
