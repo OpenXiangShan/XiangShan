@@ -160,4 +160,13 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+
+  // time out assert
+  val wait_counter = RegInit(0.U(32.W))
+  when (state =/= s_idle) {
+    wait_counter := wait_counter + 1.U
+  }.otherwise {
+    wait_counter := 0.U
+  }
+  assert(wait_counter <= 2000.U, "page table walker time out")
 }

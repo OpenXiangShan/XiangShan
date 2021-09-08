@@ -191,4 +191,15 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   XSPerfAccumulate("mem_count", io.mem.req.fire())
   XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
+
+  // time out assert
+  for (i <- 0 until MSHRSize) {
+    val wait_counter = RegInit(0.U(32.W))
+    when (state(i) =/= state_idle) {
+      wait_counter := wait_counter + 1.U
+    }.otherwise {
+      wait_counter := 0.U
+    }
+    assert(wait_counter <= 2000.U, s"missqueue time out no out ${i}")
+  }
 }

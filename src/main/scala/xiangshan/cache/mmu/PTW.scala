@@ -268,6 +268,26 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   // print configs
   println(s"${l2tlbParams.name}: one ptw, miss queue size ${l2tlbParams.missQueueSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
+
+  // time out assert
+  for (i <- 0 until MSHRSize + 1) {
+    val wait_counter = RegInit(0.U(32.W))
+    when (waiting_resp(i)) {
+      wait_counter := wait_counter  + 1.U
+    }.otherwise {
+      wait_counter := 0.U
+    }
+    assert(wait_counter <= 2000.U, "ptw mem resp time out wait_resp")
+  }
+  for (i <- 0 until MSHRSize + 1) {
+    val wait_counter = RegInit(0.U(32.W))
+    when (sfence_latch(i)) {
+      wait_counter := wait_counter  + 1.U
+    }.otherwise {
+      wait_counter := 0.U
+    }
+    assert(wait_counter <= 2000.U, "ptw mem resp time out sfence_latch")
+  }
 }
 
 class PTEHelper() extends ExtModule {
