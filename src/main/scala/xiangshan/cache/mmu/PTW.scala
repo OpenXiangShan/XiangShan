@@ -138,6 +138,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   }
   val waiting_resp = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
   val sfence_latch = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
+  for (i <- waiting_resp.indices) {
+    assert(!sfence_latch(i) || waiting_resp(i)) // when sfence_latch wait for mem resp, waiting_resp should be true
+  }
 
   val mq_mem = missQueue.io.mem
   mq_mem.req_mask := waiting_resp.take(MSHRSize)
@@ -153,7 +156,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     req_addr_low(mem_arb.io.out.bits.id) := mem_arb.io.out.bits.addr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
     waiting_resp(mem_arb.io.out.bits.id) := true.B
   }
-
+  // mem read
   val memRead =  edge.Get(
     fromSource = mem_arb.io.out.bits.id,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
@@ -163,34 +166,33 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid
   mem.d.ready := true.B
-
-  // refill management
+  // mem -> data buffer
   val refill_data = Reg(Vec(MemReqWidth, Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W))))
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
-  val refill_done = refill_helper._3
-  val refill_valid = RegNext(refill_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
-  val refill_from_mq = from_missqueue(mem.d.bits.source)
+  val mem_resp_done = refill_helper._3
+  val mem_resp_from_mq = from_missqueue(mem.d.bits.source)
   when (mem.d.valid) {
     assert(mem.d.bits.source <= MSHRSize.U)
     refill_data(mem.d.bits.source)(refill_helper._4) := mem.d.bits.data
-
   }
-  when (refill_done) {
+  // mem -> control signal
+  when (mem_resp_done) {
     waiting_resp(mem.d.bits.source) := false.B
     sfence_latch(mem.d.bits.source) := false.B
   }
-  mq_mem.resp.valid := refill_done && refill_from_mq
+  // mem -> miss queue
+  mq_mem.resp.valid := mem_resp_done && mem_resp_from_mq
   mq_mem.resp.bits.id := mem.d.bits.source
-
-  // refill fsm and cache
-  val from_mq = RegNext(refill_from_mq)
+  // mem -> fsm
   fsm.io.mem.req.ready := mem.a.ready
-  fsm.io.mem.resp.valid := refill_valid && !from_mq
+  fsm.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
   fsm.io.mem.resp.bits := get_part(refill_data(MSHRSize), req_addr_low(MSHRSize))
-  cache.io.refill.valid := refill_valid
+  // mem -> cache
+  val refill_from_mq = RegNext(mem_resp_from_mq)
+  cache.io.refill.valid := RegNext(mem_resp_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
   cache.io.refill.bits.ptes := refill_data(RegNext(mem.d.bits.source)).asUInt
-  cache.io.refill.bits.vpn  := Mux(from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
-  cache.io.refill.bits.level := Mux(from_mq, 2.U, fsm.io.refill.level)
+  cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
+  cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, fsm.io.refill.level)
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
   val mq_out = missQueue.io.out
@@ -216,7 +218,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   // sfence
   when (io.sfence.valid) {
     for (i <- 0 until MemReqWidth) {
-      when ((waiting_resp(i) && !(refill_done && mem.d.bits.source =/= i.U)) ||
+      when ((waiting_resp(i) && !(mem_resp_done && mem.d.bits.source =/= i.U)) ||
         (mem.a.fire() && mem_arb.io.out.bits.id === i.U)) {
         sfence_latch(i) := true.B
       }

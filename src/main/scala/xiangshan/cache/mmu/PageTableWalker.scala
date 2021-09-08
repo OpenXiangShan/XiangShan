@@ -64,7 +64,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem = io.mem
   val satp = io.csr.satp
 
-  val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: s_missqueue :: Nil = Enum(5)
+  val s_idle :: s_mem_req :: s_mem_resp :: s_check_pte :: s_resp :: s_missqueue :: Nil = Enum(6)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val ppn = Reg(UInt(ppnLen.W))
@@ -74,8 +74,8 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
   val l1Hit = Reg(Bool())
 
+  // resp valid will arrive before memPte, the memPte just hold in outer module
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  val memPteReg = RegEnable(memPte, mem.resp.fire())
 
   val notFound = WireInit(false.B)
   switch (state) {
@@ -97,17 +97,21 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
 
     is (s_mem_resp) {
-      when (mem.resp.fire()) {
-        when (memPte.isLeaf() || memPte.isPf(level)) {
-          state := s_resp
-          notFound := memPte.isPf(level)
+      when(mem.resp.fire()) {
+        state := s_check_pte
+      }
+    }
+
+    is (s_check_pte) {
+      when (memPte.isLeaf() || memPte.isPf(level)) {
+        state := s_resp
+        notFound := memPte.isPf(level)
+      }.otherwise {
+        when (level =/= (Level-2).U) { // when level is 1.U, finish
+          level := levelNext
+          state := s_mem_req
         }.otherwise {
-          when (level =/= (Level-2).U) { // when level is 1.U, finish
-            level := levelNext
-            state := s_mem_req
-          }.otherwise {
-            state := s_missqueue
-          }
+          state := s_missqueue
         }
       }
     }
@@ -153,7 +157,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   assert(!io.mq.valid || resp_level === (Level-2).U)
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
+  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
   mem.req.valid := state === s_mem_req && !io.mem.mask
   mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
   mem.req.bits.id := MSHRSize.U(bMemID.W)
