@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import freechips.rocketchip.tilelink._
+import bus.tilelink.TLMessages._
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -46,24 +47,25 @@ class MissReq(implicit p: Parameters) extends DCacheBundle
     XSDebug("MissReq source: %d cmd: %d addr: %x store_data: %x store_mask: %x word_idx: %d amo_data: %x amo_mask: %x coh: %d id: %d\n",
       source, cmd, addr, store_data, store_mask, word_idx, amo_data, amo_mask, coh.state, id)
   }
+
+  def isLoad = source === LOAD_SOURCE.U
+  def isStore = source === STORE_SOURCE.U
 }
 
 // One miss entry deals with one missed block
-class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
-{
+class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
     // MSHR ID
     val id = Input(UInt())
 
     // client requests
-    val req_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
     // this entry is busy, but it can merge the new req
     val secondary_ready = Output(Bool())
     // this entry is busy and it can not merge the new req
     val secondary_reject = Output(Bool())
-    val req    = Input((new MissReq))
+    val req    = Flipped(ValidIO(new MissReq))
     val refill = ValidIO(new Refill)
 
     // bus
@@ -82,50 +84,132 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val state  = Output(UInt(5.W))
   })
 
-  // old MSHR:
-  // 1. receive req
-  // 2. send acquire req
-  // 3. receive grant resp
-  // 4. let main pipe do refill and replace
-  // 5. wait for resp
-  // 6. send finish to end the tilelink transaction
-  //    We only send finish after data is written into cache.
-  //    This prevents L2 from probing the block down.
-  //    See Tilelink spec 1.8.1 page 69
-  //    A slave should not issue a Probe if there is a pending GrantAck on the block. Once the Probe is
-  //    issued, the slave should not issue further Probes on that block until it receives a ProbeAck.
-
-  // new MSHR:
-  // send finish to end the transaction before sending pipe_req
-  val s_invalid :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_main_pipe_req :: s_main_pipe_resp :: s_release_entry :: Nil = Enum(7)
-
-  val state = RegInit(s_invalid)
-  tma_io.state := state
-
-  // --------------------------------------------
-  // internal registers
   val req = Reg(new MissReq)
-  tma_io.req := req
+  val req_valid = RegInit(false.B)
 
-  // param of grant
-  val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+  val s_acquire = RegInit(true.B)
+  val s_grantack = RegInit(true.B)
+  val s_pipe_req = RegInit(true.B)
+  val w_grantfirst = RegInit(true.B)
+  val w_grantlast = RegInit(true.B)
+  val w_pipe_resp = RegInit(true.B)
 
-  // recording the source/sink info from Grant
-  // so that we can use it grantack
-  val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
+  val no_schedule = s_grantack && s_pipe_req
+  val no_wait = w_pipe_resp
+  val release_entry = no_schedule && no_wait
+
+  val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
+  val data_not_refilled = !w_grantlast
 
   // should we refill the data to load queue to wake up any missed load?
   val should_refill_data_reg = Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
 
+  val full_overwrite = req.isStore && req.store_mask.andR
 
-  // --------------------------------------------
-  // merge reqs
-  // see whether we can merge requests
-  // do not count s_invalid state in
-  // since we can not merge request at that state
-  val acquire_not_sent = state === s_refill_req && !io.mem_acquire.ready
-  val data_not_refilled = state === s_refill_req || state === s_refill_resp
+  val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
+  val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+
+  when (io.req.valid && io.primary_ready) {
+    req_valid := true.B
+    req := io.req.bits
+
+    s_acquire := false.B
+    s_grantack := false.B
+    s_pipe_req := false.B
+    w_grantfirst := false.B
+    w_grantlast := false.B
+    w_pipe_resp := false.B
+
+    should_refill_data_reg := io.req.bits.isLoad
+  }.elsewhen (release_entry) {
+    req_valid := false.B
+  }
+
+  when (io.req.valid && io.secondary_ready) {
+    // The merged reqs should never have higher permissions
+    // which means the cache silently upgrade the permission of our block
+    // without merge with this miss queue request!
+    // Either our req come in with stale meta, or the req that upgrade the permission does not merge with this req.
+    // Both cases are bugs of DCache.
+    //
+    // DCache can silently drop permission(eg, probed or evicted)
+    // it should never silently upgrade permissions.
+    assert (io.req.bits.coh.state <= req.coh.state)
+    // use the most uptodate meta
+    req.coh := io.req.bits.coh
+
+    // when merging with store
+    // we should remember its info into our req
+    // or we will not be able to replay store
+    when (io.req.bits.isStore) {
+      req := io.req.bits
+    }
+
+    should_refill_data := should_refill_data_reg || io.req.bits.isLoad
+    should_refill_data_reg := should_refill_data
+  }
+
+  // set state regs
+  when (io.mem_acquire.fire()) {
+    s_acquire := true.B
+  }
+
+  val refill_data = Reg(Vec(blockRows, UInt(rowBits.W)))
+  val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
+  val new_mask = Wire(Vec(blockRows, UInt(rowBytes.W)))
+  def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
+    val full_wmask = FillInterleaved(8, wmask)
+    (~full_wmask & old_data | full_wmask & new_data)
+  }
+  for (i <- 0 until blockRows) {
+    new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
+    // we only need to merge data for Store
+    new_mask(i) := Mux(req.isStore, req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
+  }
+  when (io.mem_grant.fire()) {
+    w_grantfirst := true.B
+    grant_param := io.mem_grant.bits.param
+    when (edge.hasData(io.mem_grant.bits)) {
+      // GrantData
+      for (i <- 0 until beatRows) {
+        val idx = (refill_count << log2Floor(beatRows)) + i.U
+        val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+        refill_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+      }
+
+      w_grantlast := w_grantlast || refill_done
+    }.otherwise {
+      // Grant
+
+      // since we do not sync between MissQueue and WritebackQueue
+      // for a AcquireBlock BtoT, we can not protect our block from being replaced by another miss and written back by WritebackQueue
+      // so AcquireBlock BtoT, we need L2 to give us GrantData, not Grant.
+      // So that whether our block is replaced or not, we can always refill the block with valid data
+      // So, if we enters here
+      // we must be a AcquirePerm, not a AcquireBlock!!!
+      assert (full_overwrite)
+      // when we only acquire perm, not data
+      // use Store's data
+      for (i <- 0 until blockRows) {
+        refill_data(i) := new_data(i)
+      }
+
+      w_grantlast := true.B
+    }
+  }
+
+  when (io.mem_finish.fire()) {
+    s_grantack := true.B
+  }
+
+  when (io.pipe_req.fire()) {
+    s_pipe_req := true.B
+  }
+
+  when (io.pipe_resp.valid) {
+    w_pipe_resp := true.B
+  }
 
   def can_merge(new_req: MissReq): Bool = {
     // caution: do not merge with AMO
@@ -149,169 +233,16 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   def should_reject(new_req: MissReq): Bool = {
     val block_match = req.addr === new_req.addr
     // do not reject any req when we are in s_invalid
-    block_match && !can_merge(new_req) && state =/= s_invalid
+    block_match && !can_merge(new_req) && req_valid
   }
 
-  io.primary_ready    := state === s_invalid
-  io.secondary_ready  := should_merge(io.req)
-  io.secondary_reject := should_reject(io.req)
+  io.primary_ready := !req_valid
+  io.secondary_ready := should_merge(io.req.bits)
+  io.secondary_reject := should_reject(io.req.bits)
 
   // should not allocate, merge or reject at the same time
   // one at a time
   OneHot.checkOneHot(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject))
-
-
-  // --------------------------------------------
-  // assign default values to output signals
-  io.refill.valid := false.B
-  io.refill.bits  := DontCare
-
-  io.mem_acquire.valid   := false.B
-  io.mem_acquire.bits    := DontCare
-  io.mem_grant.ready     := false.B
-  io.mem_finish.valid    := false.B
-  io.mem_finish.bits     := DontCare
-
-  io.pipe_req.valid := false.B
-  io.pipe_req.bits  := DontCare
-
-  io.block_addr.valid := state === s_mem_finish || state === s_main_pipe_req || state === s_main_pipe_resp
-  io.block_addr.bits := req.addr
-
-  when (state =/= s_invalid) {
-    XSDebug("entry: %d state: %d\n", io.id, state)
-    req.dump()
-  }
-
-
-  // --------------------------------------------
-  // State Machine
-
-  // --------------------------------------------
-  // receive requests
-  // primary request: allocate for a new request
-  when (io.req_valid && io.primary_ready) {
-    assert (state === s_invalid)
-
-    // re init some fields
-    req := io.req
-    grantack.valid := false.B
-    // only miss req from load needs a refill to LoadQueue
-    should_refill_data_reg := io.req.source === LOAD_SOURCE.U
-
-    state := s_refill_req
-  }
-
-  // secondary request: merge with existing request
-  when (io.req_valid && io.secondary_ready) {
-    // The merged reqs should never have higher permissions
-    // which means the cache silently upgrade the permission of our block
-    // without merge with this miss queue request!
-    // Either our req come in with stale meta, or the req that upgrade the permission does not merge with this req.
-    // Both cases are bugs of DCache.
-    //
-    // DCache can silently drop permission(eg, probed or evicted)
-    // it should never silently upgrade permissions.
-    //
-    // TODO: please check Tilelink Metadata.scala
-    // and make sure that lower permission are encoded as smaller number
-    assert (io.req.coh.state <= req.coh.state)
-    // use the most uptodate meta
-    req.coh := io.req.coh
-
-    // when merging with store
-    // we should remember its info into our req
-    // or we will not be able to replay store
-    when (io.req.source === STORE_SOURCE.U) {
-      req := io.req
-    }
-
-    should_refill_data := should_refill_data_reg || io.req.source === LOAD_SOURCE.U
-    should_refill_data_reg := should_refill_data
-  }
-
-
-  // --------------------------------------------
-  // refill
-
-  // for full overwrite, we can use AcquirePerm to save memory bandwidth
-  val full_overwrite = req.source === STORE_SOURCE.U && req.store_mask.andR
-  when (state === s_refill_req) {
-
-    val grow_param = req.coh.onAccess(req.cmd)._2
-    val acquireBlock = edge.AcquireBlock(
-      fromSource      = io.id,
-      toAddress       = req.addr,
-      lgSize          = (log2Up(cfg.blockBytes)).U,
-      growPermissions = grow_param)._2
-    val acquirePerm = edge.AcquirePerm(
-      fromSource      = io.id,
-      toAddress       = req.addr,
-      lgSize          = (log2Up(cfg.blockBytes)).U,
-      growPermissions = grow_param)._2
-
-    io.mem_acquire.valid := true.B
-    io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
-
-    when (io.mem_acquire.fire()) {
-      state := s_refill_resp
-    }
-  }
-
-  val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
-
-  // raw data
-  val refill_data = Reg(Vec(blockRows, UInt(rowBits.W)))
-  val new_data    = Wire(Vec(blockRows, UInt(rowBits.W)))
-  val new_mask    = Wire(Vec(blockRows, UInt(rowBytes.W)))
-
-  for (i <- 0 until blockRows) {
-    new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
-    // we only need to merge data for Store
-    new_mask(i) := Mux(req.source === STORE_SOURCE.U,
-      req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U(rowBytes.W))
-  }
-
-  def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
-    val full_wmask = FillInterleaved(8, wmask)
-    ((~full_wmask & old_data) | (full_wmask & new_data))
-  }
-
-  when (state === s_refill_resp) {
-    io.mem_grant.ready := true.B
-    when (io.mem_grant.fire()) {
-      when (edge.hasData(io.mem_grant.bits)) {
-        // GrantData
-        for (i <- 0 until beatRows) {
-          val idx = (refill_count << log2Floor(beatRows)) + i.U
-          refill_data(idx) := mergePutData(io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i), new_data(idx), new_mask(idx))
-        }
-      } .otherwise {
-        // Grant
-
-        // since we do not sync between MissQueue and WritebackQueue
-        // for a AcquireBlock BtoT, we can not protect our block from being replaced by another miss and written back by WritebackQueue
-        // so AcquireBlock BtoT, we need L2 to give us GrantData, not Grant.
-        // So that whether our block is replaced or not, we can always refill the block with valid data
-        // So, if we enters here
-        // we must be a AcquirePerm, not a AcquireBlock!!!
-        assert (full_overwrite)
-        // when we only acquire perm, not data
-        // use Store's data
-        for (i <- 0 until blockRows) {
-          refill_data(i) := new_data(i)
-        }
-      }
-    }
-
-    when (refill_done) {
-      grantack.valid := edge.isRequest(io.mem_grant.bits)
-      grantack.bits := edge.GrantAck(io.mem_grant.bits)
-      grant_param := io.mem_grant.bits.param
-
-      state := s_mem_finish
-    }
-  }
 
   // put should_refill_data out of RegNext
   // so that when load miss are merged at refill_done
@@ -323,85 +254,57 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val data = refill_data.asUInt
     data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
   })))
-  // val refill_addr_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i =>
-  //   req.addr + (i << refillOffBits)
-  // )))
-  io.refill.valid := RegNext(state === s_refill_resp && io.mem_grant.fire()) && should_refill_data
+  io.refill.valid := RegNext(!w_grantlast && s_acquire && io.mem_grant.fire()) && should_refill_data
   io.refill.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill.bits.data := refill_data_splited(RegNext(refill_count))
-  when(io.refill.fire()){
-    io.refill.bits.dump()
-    XSDebug("refill_count %d\n", RegNext(refill_count));
-  }
-  val refill_finished = RegNext(state === s_refill_resp && refill_done) && should_refill_data
 
-  when (state === s_main_pipe_req) {
-    io.pipe_req.valid := true.B
-    val pipe_req = io.pipe_req.bits
-    pipe_req.miss := true.B
-    pipe_req.miss_id := io.id
-    pipe_req.miss_param := grant_param
+  io.mem_acquire.valid := !s_acquire
+  val grow_param = req.coh.onAccess(req.cmd)._2
+  val acquireBlock = edge.AcquireBlock(
+    fromSource = io.id,
+    toAddress = req.addr,
+    lgSize = (log2Up(cfg.blockBytes)).U,
+    growPermissions = grow_param
+  )._2
+  val acquirePerm = edge.AcquirePerm(
+    fromSource = io.id,
+    toAddress = req.addr,
+    lgSize = (log2Up(cfg.blockBytes)).U,
+    growPermissions = grow_param
+  )._2
+  io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
+  io.mem_grant.ready := !w_grantlast && s_acquire
+  val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
+  val is_grant = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
+  io.mem_finish.valid := !s_grantack && w_grantfirst && is_grant
+  io.mem_finish.bits := grantack
 
-    pipe_req.probe := false.B
-    pipe_req.probe_param := DontCare
+  io.pipe_req.valid := !s_pipe_req && w_grantlast
+  val pipe_req = io.pipe_req.bits
+  pipe_req.miss := true.B
+  pipe_req.miss_id := io.id
+  pipe_req.miss_param := grant_param
 
-    pipe_req.source := req.source
-    pipe_req.cmd    := req.cmd
-    pipe_req.addr   := req.addr
-    pipe_req.store_data := refill_data.asUInt
-    // full overwrite
-    pipe_req.store_mask := Fill(cfg.blockBytes, "b1".U)
-    pipe_req.word_idx := req.word_idx
-    pipe_req.amo_data   := req.amo_data
-    pipe_req.amo_mask   := req.amo_mask
-    pipe_req.id     := req.id
+  pipe_req.probe := false.B
+  pipe_req.probe_param := DontCare
 
-    when (io.pipe_req.fire()) {
-      state := s_main_pipe_resp
-    }
-  }
+  pipe_req.source := req.source
+  pipe_req.cmd    := req.cmd
+  pipe_req.addr   := req.addr
+  pipe_req.store_data := refill_data.asUInt
+  // full overwrite
+  pipe_req.store_mask := Fill(cfg.blockBytes, "b1".U)
+  pipe_req.word_idx := req.word_idx
+  pipe_req.amo_data   := req.amo_data
+  pipe_req.amo_mask   := req.amo_mask
+  pipe_req.id     := req.id
 
-  when (state === s_main_pipe_resp) {
-    when (io.pipe_resp.fire()) {
-      state := s_release_entry
-    }
-  }
+  io.block_addr.valid := req_valid && w_grantlast && !release_entry
+  io.block_addr.bits := req.addr
 
-  when (state === s_mem_finish) {
-    io.mem_finish.valid := grantack.valid
-    io.mem_finish.bits  := grantack.bits
-
-    when (io.mem_finish.fire()) {
-      grantack.valid := false.B
-      state := s_main_pipe_req
-    }
-  }
-
-  when (state === s_release_entry) {
-    state := s_invalid
-  }
-
-  XSPerfAccumulate("miss_req", io.req_valid && io.primary_ready)
-  XSPerfAccumulate("miss_penalty", BoolStopWatch(io.req_valid && io.primary_ready, state === s_release_entry))
-  XSPerfAccumulate("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req_valid && io.primary_ready, io.refill.valid, true))
-  XSPerfAccumulate("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
-  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
-  XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_refill_resp)
-  XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
-
-
-  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(io.req_valid && io.primary_ready, state === s_release_entry)
-  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
-
-  val load_miss_begin = io.req_valid && (io.primary_ready || io.secondary_ready) && io.req.source === LOAD_SOURCE.U
-  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
-  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
-
-  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
-  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
+  tma_io.req := req
+  tma_io.state := DontCare // TODO
 }
-
 
 class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
 {
@@ -464,12 +367,12 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     entry.io.id := i.U(log2Up(cfg.nMissEntries).W)
 
     // entry req
-    entry.io.req_valid  := (i.U === entry_idx) && accept && io.req.valid
+    entry.io.req.valid  := (i.U === entry_idx) && accept && io.req.valid
     primary_ready(i)    := entry.io.primary_ready
     secondary_ready(i)  := entry.io.secondary_ready
     secondary_reject(i) := entry.io.secondary_reject
     probe_block_vec(i)  := entry.io.block_addr.valid && entry.io.block_addr.bits === io.probe_req
-    entry.io.req        := io.req.bits
+    entry.io.req.bits   := io.req.bits
 
     // entry refill
     refill_arb.io.in(i).valid := entry.io.refill.valid
