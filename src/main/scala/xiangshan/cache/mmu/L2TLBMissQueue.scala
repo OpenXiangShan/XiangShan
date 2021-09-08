@@ -82,6 +82,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
+  val is_cache_next = state.map(_ === state_cache_next)
 
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
@@ -113,13 +114,13 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val dup_vec = state.indices.map(i =>
     io.in.bits.l3.valid && (dropLowVpnIn === dropLowVpn(i))
   )
-  val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m}
-  val dup_vec_wait = VecInit(dup_vec.zip(is_waiting).map{case (d, w) => d && w})
-  val dup_vec_having = dup_vec.zip(is_having).map{case (d, h) => d && h}
-  val dup_wait = Cat(dup_vec_wait).orR
-  val wait_id = ParallelMux(dup_vec_wait zip entries.map(_.wait_id))
-  val dup_wait_resp = io.mem.resp.valid && dup_vec_wait(io.mem.resp.bits.id)
-  val to_wait = Cat(dup_vec_mem).orR || (dup_wait && !dup_wait_resp)
+  val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m} // already some req are state_mem_req
+  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // already some req are state_mem_wait
+  val dup_vec_wait_id = dup_vec_mem.zip(dup_vec_wait).map{case (a, b) => a || b} // get the wait_id from above reqs
+  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && (is_having(i) || is_caches_low(i) || is_cache_next(i))}
+  val wait_id = ParallelMux(dup_vec_wait_id zip entries.map(_.wait_id))
+  val dup_wait_resp = io.mem.resp.valid && VecInit(dup_vec_wait)(io.mem.resp.bits.id)
+  val to_wait = Cat(dup_vec_mem).orR || (Cat(dup_vec_wait).orR && !dup_wait_resp)
   val to_cache = Cat(dup_vec_having).orR || dup_wait_resp
 
   for (i <- 0 until MSHRSize) {
@@ -135,7 +136,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
-    entries(enq_ptr).wait_id := wait_id
+    entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
   }
   when (mem_arb.io.out.fire()) {
     state(mem_arb.io.chosen) := state_mem_waiting
