@@ -33,17 +33,17 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   // to LoadUnit
   for (i <- 0 until LoadPipelineWidth) {
     val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-    fakeRAM.io.clk   := clock
-    fakeRAM.io.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.io.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
-    fakeRAM.io.wIdx  := 0.U
-    fakeRAM.io.wdata := 0.U
-    fakeRAM.io.wmask := 0.U
-    fakeRAM.io.wen   := false.B
+    fakeRAM.clk   := clock
+    fakeRAM.en    := io.lsu.load(i).resp.valid && !reset.asBool
+    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
+    fakeRAM.wIdx  := 0.U
+    fakeRAM.wdata := 0.U
+    fakeRAM.wmask := 0.U
+    fakeRAM.wen   := false.B
 
     io.lsu.load(i).req.ready := true.B
     io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
-    io.lsu.load(i).resp.bits.data := fakeRAM.io.rdata
+    io.lsu.load(i).resp.bits.data := fakeRAM.rdata
     io.lsu.load(i).resp.bits.miss := false.B
     io.lsu.load(i).resp.bits.replay := false.B
     io.lsu.load(i).resp.bits.id := DontCare
@@ -60,16 +60,16 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
   // to atomics
   val amoHelper = Module(new AMOHelper)
-  amoHelper.io.clock := clock
-  amoHelper.io.enable := io.lsu.atomics.req.valid && !reset.asBool
-  amoHelper.io.cmd := io.lsu.atomics.req.bits.cmd
-  amoHelper.io.addr := io.lsu.atomics.req.bits.addr
-  amoHelper.io.wdata := io.lsu.atomics.req.bits.data
-  amoHelper.io.mask := io.lsu.atomics.req.bits.mask
+  amoHelper.clock := clock
+  amoHelper.enable := io.lsu.atomics.req.valid && !reset.asBool
+  amoHelper.cmd := io.lsu.atomics.req.bits.cmd
+  amoHelper.addr := io.lsu.atomics.req.bits.addr
+  amoHelper.wdata := io.lsu.atomics.req.bits.data
+  amoHelper.mask := io.lsu.atomics.req.bits.mask
   io.lsu.atomics.req.ready := true.B
   io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
   assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
-  io.lsu.atomics.resp.bits.data := amoHelper.io.rdata
+  io.lsu.atomics.resp.bits.data := amoHelper.rdata
   io.lsu.atomics.resp.bits.replay := false.B
   io.lsu.atomics.resp.bits.id := 1.U
 }

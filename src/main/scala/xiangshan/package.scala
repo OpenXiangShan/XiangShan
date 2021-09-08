@@ -409,7 +409,7 @@ package object xiangshan {
   }
 
   def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
-  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
+  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def bmuGen(p: Parameters) = new Bmu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
@@ -422,28 +422,28 @@ package object xiangshan {
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
 
-  def f2iSel(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.rfWen
+  def f2iSel(uop: MicroOp): Bool = {
+    uop.ctrl.rfWen
   }
 
-  def i2fSel(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.fpu.fromInt
+  def i2fSel(uop: MicroOp): Bool = {
+    uop.ctrl.fpu.fromInt
   }
 
-  def f2fSel(x: FunctionUnit): Bool = {
-    val ctrl = x.io.in.bits.uop.ctrl.fpu
+  def f2fSel(uop: MicroOp): Bool = {
+    val ctrl = uop.ctrl.fpu
     ctrl.fpWen && !ctrl.div && !ctrl.sqrt
   }
 
-  def fdivSqrtSel(x: FunctionUnit): Bool = {
-    val ctrl = x.io.in.bits.uop.ctrl.fpu
+  def fdivSqrtSel(uop: MicroOp): Bool = {
+    val ctrl = uop.ctrl.fpu
     ctrl.div || ctrl.sqrt
   }
 
   val aluCfg = FuConfig(
     name = "alu",
     fuGen = aluGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.alu,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.alu,
     fuType = FuType.alu,
     numIntSrc = 2,
     numFpSrc = 0,
@@ -455,7 +455,7 @@ package object xiangshan {
   val jmpCfg = FuConfig(
     name = "jmp",
     fuGen = jmpGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.jmp,
     fuType = FuType.jmp,
     numIntSrc = 1,
     numFpSrc = 0,
@@ -467,7 +467,7 @@ package object xiangshan {
   val fenceCfg = FuConfig(
     name = "fence",
     fuGen = fenceGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     UncertainLatency() // TODO: need rewrite latency structure, not just this value
   )
@@ -475,7 +475,7 @@ package object xiangshan {
   val csrCfg = FuConfig(
     name = "csr",
     fuGen = csrGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.csr,
     fuType = FuType.csr,
     numIntSrc = 1,
     numFpSrc = 0,
@@ -501,7 +501,7 @@ package object xiangshan {
   val divCfg = FuConfig(
     name = "div",
     fuGen = dividerGen,
-    fuSel = (x: FunctionUnit) => MDUOpType.isDiv(x.io.in.bits.uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => MDUOpType.isDiv(uop.ctrl.fuOpType),
     FuType.div,
     2,
     0,
@@ -516,7 +516,7 @@ package object xiangshan {
   val mulCfg = FuConfig(
     name = "mul",
     fuGen = multiplierGen,
-    fuSel = (x: FunctionUnit) => MDUOpType.isMul(x.io.in.bits.uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => MDUOpType.isMul(uop.ctrl.fuOpType),
     FuType.mul,
     2,
     0,
@@ -531,7 +531,7 @@ package object xiangshan {
   val bmuCfg = FuConfig(
     name = "bmu",
     fuGen = bmuGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.bmu,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bmu,
     fuType = FuType.bmu,
     numIntSrc = 2,
     numFpSrc = 0,
@@ -547,8 +547,8 @@ package object xiangshan {
     name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4),
-    fastUopOut = true, fastImplemented = true
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    latency = UncertainLatency(), fastUopOut = true, fastImplemented = true
   )
 
   val f2iCfg = FuConfig(
@@ -572,7 +572,7 @@ package object xiangshan {
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
-    fastUopOut = true, fastImplemented = false
+    fastUopOut = true, fastImplemented = false, hasInputBuffer = true
   )
 
   val lduCfg = FuConfig(
@@ -594,7 +594,7 @@ package object xiangshan {
   val stdCfg = FuConfig(
     "std",
     fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
-    writeIntRf = false, writeFpRf = false, hasRedirect = false, UncertainLatency()
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(

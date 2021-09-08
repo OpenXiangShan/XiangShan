@@ -19,6 +19,7 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -52,19 +53,19 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val ptes = UInt(blockBits.W)
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
-    val memAddr = Input(UInt(PAddrBits.W))
+    val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
   }))
   val sfence = Input(new SfenceBundle)
-  val refuseRefill = Input(Bool())
 }
 
+
+@chiselName
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PtwCacheIO)
 
   // TODO: four caches make the codes dirty, think about how to deal with it
 
   val sfence = io.sfence
-  val refuseRefill = io.refuseRefill
   val refill = io.refill.bits
 
   val first_valid = io.req.valid
@@ -291,12 +292,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   val memRdata = refill.ptes
-  val memSelData = get_part(memRdata, refill.memAddr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8)))
+  val memSelData = get_part(memRdata, refill.addr_low)
   val memPtes = (0 until (l2tlbParams.blockBytes/(XLEN/8))).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
   val memPte = memSelData.asTypeOf(new PteBundle)
 
+  memPte.suggestName("memPte")
+
   // TODO: handle sfenceLatch outsize
-  when (io.refill.valid && !memPte.isPf(refill.level) && !(sfence.valid || refuseRefill)) {
+  when (io.refill.valid && !memPte.isPf(refill.level) && !sfence.valid ) {
     when (refill.level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(l2tlbParams.l1Size)-1,0) // TODO: may be LRU
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
@@ -387,7 +390,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       victimWayOH.suggestName(s"l3_victimWayOH")
       rfvOH.suggestName(s"l3_rfvOH")
     }
-
     when ((refill.level === 0.U || refill.level === 1.U) && memPte.isLeaf()) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)

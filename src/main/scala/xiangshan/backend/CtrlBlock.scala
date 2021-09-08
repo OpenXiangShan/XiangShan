@@ -36,6 +36,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val roqFlush = Valid(new Bundle {
     val ftqIdx = Output(new FtqPtr)
     val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
+    val replayInst = Output(Bool()) // not used for now
   })
 }
 
@@ -252,8 +253,14 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   flushRedirect.bits.interrupt := true.B
   flushRedirect.bits.cfiUpdate.target := Mux(io.roqio.toCSR.isXRet || roq.io.exception.valid,
     io.roqio.toCSR.trapTarget,
-    flushPC + 4.U // flush pipe
+    Mux(RegEnable(roq.io.flushOut.bits.replayInst, flush),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    )
   )
+  when (flushRedirect.valid && RegEnable(roq.io.flushOut.bits.replayInst, flush)) {
+    XSDebug("replay inst (%x) from rob\n", flushPC);
+  }
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)

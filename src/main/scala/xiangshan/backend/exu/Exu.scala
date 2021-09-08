@@ -89,6 +89,7 @@ case class ExuConfig
   val allWakeupFromRS = !hasUncertainlatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
   val wakeupFromExu = !wakeupFromRS
   val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
+  val needLoadBalance = hasUncertainlatency && !wakeupFromRS
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
@@ -97,16 +98,6 @@ case class ExuConfig
 
 abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModule {
 
-  val functionUnits = config.fuConfigs.map(cfg => {
-    val mod = Module(cfg.fuGen(p))
-    mod.suggestName(cfg.name)
-    mod
-  })
-
-  val fuSel = functionUnits.zip(config.fuConfigs.map(_.fuSel)).map {
-    case (fu, sel) => sel(fu)
-  }
-
   val io = IO(new Bundle() {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
@@ -114,44 +105,52 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
     val flush = Input(Bool())
     val out = DecoupledIO(new ExuOutput)
   })
+
   val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
   val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
   val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
   val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
 
-  for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(functionUnits.zip(fuSel))) {
+  val functionUnits = config.fuConfigs.map(cfg => {
+    val mod = Module(cfg.fuGen(p))
+    mod.suggestName(cfg.name)
+    mod
+  })
 
-    val in = if (fuCfg.numIntSrc > 0) {
+  val fuIn = config.fuConfigs.map(fuCfg =>
+    if (fuCfg.numIntSrc > 0) {
       assert(fuCfg.numFpSrc == 0 || config == StdExeUnitCfg)
       io.fromInt
     } else {
       assert(fuCfg.numFpSrc > 0)
       io.fromFp
     }
+  )
+  val fuSel = fuIn.zip(config.fuConfigs).map { case (in, cfg) => cfg.fuSel(in.bits.uop) }
 
-    val src1 = in.bits.src(0)
-    val src2 = in.bits.src(1)
-    val src3 = in.bits.src(2)
-
-    fu.io.in.valid := in.valid && sel
-    fu.io.in.bits.uop := in.bits.uop
-    fu.io.in.bits.src.foreach(_ <> DontCare)
-    if (fuCfg.srcCnt > 0) {
-      fu.io.in.bits.src(0) := src1
-    }
-    if (fuCfg.srcCnt > 1 || fuCfg == jmpCfg) { // jump is special for jalr target
-      fu.io.in.bits.src(1) := src2
-    }
-    if (fuCfg.srcCnt > 2) {
-      fu.io.in.bits.src(2) := src3
-    }
+  val fuInReady = config.fuConfigs.zip(fuIn).zip(functionUnits.zip(fuSel)).map { case ((fuCfg, in), (fu, sel)) =>
     fu.io.redirectIn := io.redirect
     fu.io.flushIn := io.flush
+
+    if (fuCfg.hasInputBuffer) {
+      val buffer = Module(new InputBuffer(8))
+      buffer.io.redirect <> io.redirect
+      buffer.io.flush <> io.flush
+      buffer.io.in.valid := in.valid && sel
+      buffer.io.in.bits.uop := in.bits.uop
+      buffer.io.in.bits.src := in.bits.src
+      buffer.io.out <> fu.io.in
+      buffer.io.in.ready
+    }
+    else {
+      fu.io.in.valid := in.valid && sel
+      fu.io.in.bits.uop := in.bits.uop
+      fu.io.in.bits.src := in.bits.src
+      fu.io.in.ready
+    }
   }
 
-
   val needArbiter = !(config.latency.latencyVal.nonEmpty && (config.latency.latencyVal.get == 0))
-
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Seq[Bool] = {
     if (needArbiter) {
       if(in.size == 1){
@@ -196,23 +195,23 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
   }
 
   val readIntFu = config.fuConfigs
-    .zip(functionUnits.zip(fuSel))
+    .zip(fuInReady.zip(fuSel))
     .filter(_._1.numIntSrc > 0)
     .map(_._2)
 
   val readFpFu = config.fuConfigs
-    .zip(functionUnits.zip(fuSel))
+    .zip(fuInReady.zip(fuSel))
     .filter(_._1.numFpSrc > 0)
     .map(_._2)
 
-  def inReady(s: Seq[(FunctionUnit, Bool)]): Bool = {
+  def inReady(s: Seq[(Bool, Bool)]): Bool = {
     if (s.size == 1) {
-      s.head._1.io.in.ready
+      s.head._1
     } else {
       if (needArbiter) {
-        Cat(s.map(x => x._1.io.in.ready && x._2)).orR()
+        Cat(s.map(x => x._1 && x._2)).orR()
       } else {
-        Cat(s.map(x => x._1.io.in.ready)).andR()
+        Cat(s.map(x => x._1)).andR()
       }
     }
   }

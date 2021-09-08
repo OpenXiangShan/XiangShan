@@ -19,25 +19,24 @@ package device
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import Chisel.BlackBox
-import freechips.rocketchip.amba.axi4.{AXI4SlaveNode, AXI4EdgeParameters, AXI4MasterNode}
+import chisel3.experimental.ExtModule
+import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4SlaveNode}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp, RegionType}
 import top.HaveAXI4MemPort
 import xiangshan.HasXSParameter
 import utils.MaskExpand
 
-class RAMHelper(memByte: BigInt) extends BlackBox {
+class RAMHelper(memByte: BigInt) extends ExtModule {
   val DataBits = 64
-  val io = IO(new Bundle {
-    val clk   = Input(Clock())
-    val en    = Input(Bool())
-    val rIdx  = Input(UInt(DataBits.W))
-    val rdata = Output(UInt(DataBits.W))
-    val wIdx  = Input(UInt(DataBits.W))
-    val wdata = Input(UInt(DataBits.W))
-    val wmask = Input(UInt(DataBits.W))
-    val wen   = Input(Bool())
-  })
+
+  val clk   = IO(Input(Clock()))
+  val en    = IO(Input(Bool()))
+  val rIdx  = IO(Input(UInt(DataBits.W)))
+  val rdata = IO(Output(UInt(DataBits.W)))
+  val wIdx  = IO(Input(UInt(DataBits.W)))
+  val wdata = IO(Input(UInt(DataBits.W)))
+  val wmask = IO(Input(UInt(DataBits.W)))
+  val wen   = IO(Input(Bool()))
 }
 
 class AXI4RAM
@@ -72,15 +71,15 @@ class AXI4RAM
     val rdata = if (useBlackBox) {
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
-        mem.io.clk   := clock
-        mem.io.en    := !reset.asBool() && ((state === s_rdata) || (state === s_wdata))
-        mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
-        mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
-        mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
-        mem.io.wmask := MaskExpand(in.w.bits.strb((i + 1) * 8 - 1, i * 8))
-        mem.io.wen   := wen
+        mem.clk   := clock
+        mem.en    := !reset.asBool() && ((state === s_rdata) || (state === s_wdata))
+        mem.rIdx  := (rIdx << log2Up(split)) + i.U
+        mem.wIdx  := (wIdx << log2Up(split)) + i.U
+        mem.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
+        mem.wmask := MaskExpand(in.w.bits.strb((i + 1) * 8 - 1, i * 8))
+        mem.wen   := wen
       }
-      val rdata = mems.map {mem => mem.io.rdata}
+      val rdata = mems.map {mem => mem.rdata}
       Cat(rdata.reverse)
     } else {
       val mem = Mem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))

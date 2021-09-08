@@ -18,8 +18,8 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.ExtModule
 import chisel3.util._
-import Chisel.BlackBox
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -162,7 +162,7 @@ class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
 class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
-  val data   = UInt((cfg.blockBytes * 8).W)
+  val data   = UInt(l1BusDataWidth.W)
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
   }
@@ -457,16 +457,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.mshrFull := missQueue.io.full
 }
 
-class AMOHelper() extends BlackBox {
-  val io = IO(new Bundle {
-    val clock  = Input(Clock())
-    val enable = Input(Bool())
-    val cmd    = Input(UInt(5.W))
-    val addr   = Input(UInt(64.W))
-    val wdata  = Input(UInt(64.W))
-    val mask   = Input(UInt(8.W))
-    val rdata  = Output(UInt(64.W))
-  })
+class AMOHelper() extends ExtModule {
+//  val io = IO(new Bundle {
+    val clock  = IO(Input(Clock()))
+    val enable = IO(Input(Bool()))
+    val cmd    = IO(Input(UInt(5.W)))
+    val addr   = IO(Input(UInt(64.W)))
+    val wdata  = IO(Input(UInt(64.W)))
+    val mask   = IO(Input(UInt(8.W)))
+    val rdata  = IO(Output(UInt(64.W)))
+//  })
 }
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {

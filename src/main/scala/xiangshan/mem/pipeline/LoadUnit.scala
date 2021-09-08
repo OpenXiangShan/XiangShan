@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbReq, TlbResp, TlbCmd}
+import xiangshan.cache.mmu.{TlbPtwIO, TlbReq, TlbResp, TlbCmd, TlbRequestIO, TLB}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -134,6 +134,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
+    val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
   })
@@ -154,20 +155,27 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
 
   // load forward query datapath
-  io.sbuffer.valid := io.in.valid
+  io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
+  io.sbuffer.vaddr := io.in.bits.vaddr
   io.sbuffer.paddr := s1_paddr
   io.sbuffer.uop := s1_uop
   io.sbuffer.sqIdx := s1_uop.sqIdx
   io.sbuffer.mask := s1_mask
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.lsq.valid := io.in.valid
+  io.lsq.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
+  io.lsq.vaddr := io.in.bits.vaddr
   io.lsq.paddr := s1_paddr
   io.lsq.uop := s1_uop
   io.lsq.sqIdx := s1_uop.sqIdx
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
+
+  // Generate forwardMaskFast to wake up insts earlier
+  val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
+  io.fullForwardFast := (~forwardMaskFast & s1_mask) === 0.U
+
 
   io.out.valid := io.in.valid// && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
@@ -184,7 +192,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("tlb_miss", io.in.valid && s1_tlb_miss)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
 }
-
 
 // Load Pipeline Stage 2
 // DCache resp
@@ -211,24 +218,17 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
+  // val cnt = RegInit(127.U)
+  // cnt := cnt + io.in.valid.asUInt
+  // val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid || cnt === 0.U
+
+  val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
+
+  // assert(!s2_forward_fail)
+
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
-
-  // feedback tlb result to RS
-  io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
-  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
-  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
-    Mux(io.lsq.dataInvalid,
-      RSFeedbackType.dataInvalid,
-      RSFeedbackType.mshrFull
-    )
-  )
-
-  // s2_cache_replay is quite slow to generate, send it separately to LQ
-  io.needReplayFromRS := s2_cache_replay
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -273,16 +273,21 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to roq (via int port)
-  io.out.bits.miss := s2_cache_miss && !s2_exception
+  if (EnableFastForward) {
+    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
+  } else {
+    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
+  }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
+  io.out.bits.uop.cf.replayInst := s2_forward_fail && !s2_mmio // if forward fail, repaly this inst
   io.out.bits.mmio := s2_mmio
-
-  // For timing reasons, we can not let
+  
+  // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
   // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
   // and dcache query is no longer needed.
   // Such inst will be writebacked from load queue.
-  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception
+  io.dataForwarded := s2_cache_miss && fullForward && !s2_exception && !s2_forward_fail
   // io.out.bits.forwardX will be send to lq
   io.out.bits.forwardMask := forwardMask
   // data retbrived from dcache is also included in io.out.bits.forwardData
@@ -290,9 +295,26 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.in.ready := io.out.ready || !io.in.valid
 
+
+  // feedback tlb result to RS
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
+    Mux(io.lsq.dataInvalid,
+      RSFeedbackType.dataInvalid,
+      RSFeedbackType.mshrFull
+    )
+  )
+
+  // s2_cache_replay is quite slow to generate, send it separately to LQ
+  io.needReplayFromRS := s2_cache_replay && !fullForward
+
   // fast load to load forward
   io.fastpath.valid := io.in.valid // for debug only
   io.fastpath.data := rdata // raw data
+
 
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
@@ -319,10 +341,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
-    val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
+
+    val tlb = new TlbRequestIO
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
@@ -333,7 +356,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val load_s2 = Module(new LoadUnit_S2)
 
   load_s0.io.in <> io.ldin
-  load_s0.io.dtlbReq <> io.dtlb.req
+  load_s0.io.dtlbReq <> io.tlb.req
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.rsIdx := io.rsIdx
   load_s0.io.isFirstIssue := io.isFirstIssue
@@ -342,7 +365,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
-  load_s1.io.dtlbResp <> io.dtlb.resp
+  load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
@@ -353,10 +376,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
+  load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2
   load_s2.io.lsq.dataInvalid <> io.lsq.forward.dataInvalid
+  load_s2.io.lsq.matchInvalid <> io.lsq.forward.matchInvalid
   load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
   load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
+  load_s2.io.sbuffer.forwardMaskFast <> io.sbuffer.forwardMaskFast // should not be used in load_s2
   load_s2.io.sbuffer.dataInvalid <> io.sbuffer.dataInvalid // always false
+  load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   load_s2.io.fastpath <> io.fastpathOut
   io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
@@ -371,15 +398,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // load_s2.io.dcacheResp.bits.data := Mux1H(RegNext(io.dcache.s1_hit_way), RegNext(io.dcache.s1_data))
   // assert(load_s2.io.dcacheResp.bits.data === io.dcache.resp.bits.data)
 
-  io.fastUop.valid := io.dcache.s1_hit_way.orR && !io.dcache.s1_disable_fast_wakeup && load_s1.io.in.valid &&
-    !load_s1.io.dcacheKill && !io.lsq.forward.dataInvalidFast
+  io.fastUop.valid := io.dcache.s1_hit_way.orR && // dcache hit
+    !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
+    load_s1.io.in.valid && // valid laod request
+    !load_s1.io.dcacheKill && // not mmio or tlb miss
+    !io.lsq.forward.dataInvalidFast // forward failed
   io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
   XSDebug(load_s1.io.out.valid,
-    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.dtlb.resp.bits.miss}, " +
+    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
 
   // writeback to LSQ

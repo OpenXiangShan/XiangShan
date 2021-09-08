@@ -19,6 +19,7 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -41,22 +42,19 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   })
 
   val mem = new Bundle {
-    val req = DecoupledIO(new Bundle {
-      val addr = UInt(PAddrBits.W)
-    })
+    val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
   }
 
   val csr = Input(new TlbCsrBundle)
   val sfence = Input(new SfenceBundle)
-  val sfenceLatch = Output(Bool())
   val refill = Output(new Bundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
-    val memAddr = UInt(PAddrBits.W)
   })
 }
 
+@chiselName
 class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PtwFsmIO)
 
@@ -71,7 +69,6 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val vpn = Reg(UInt(vpnLen.W))
   val levelNext = level + 1.U
 
-  val sfenceLatch = RegEnable(false.B, init = false.B, mem.resp.valid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
   val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
@@ -125,16 +122,13 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (sfence.valid) {
     state := s_idle
-    when (state === s_mem_resp && !mem.resp.fire() || state === s_mem_req && mem.req.fire()) {
-      sfenceLatch := true.B
-    }
   }
 
   val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
   val resp_pf = Reg(Bool())
   val resp_level = Reg(UInt(2.W))
   val resp_pte = Reg(new PteBundle())
-  when (finish && !sfenceLatch) {
+  when (finish) {
     resp_pf := level === 3.U || notFound
     resp_level := level
     resp_pte := memPte
@@ -147,15 +141,14 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
   val l3addr = MakeAddr(Mux(l2Hit, ppn, memPteReg.ppn), getVpnn(vpn, 0))
-  mem.req.valid := state === s_mem_req && !sfenceLatch
+  mem.req.valid := state === s_mem_req
   mem.req.bits.addr := Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
+  mem.req.bits.id := MSHRSize.U
 
   io.refill.vpn := vpn
   io.refill.level := level
-  io.refill.memAddr := memAddrReg
-  io.sfenceLatch := sfenceLatch
 
-  XSDebug(p"[fsm] state:${state} level:${level} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
+  XSDebug(p"[fsm] state:${state} level:${level} notFound:${notFound}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())
