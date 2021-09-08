@@ -304,6 +304,26 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   tma_io.req := req
   tma_io.state := DontCare // TODO
+
+  XSPerfAccumulate("miss_req", io.req.valid && io.primary_ready)
+  XSPerfAccumulate("miss_penalty", BoolStopWatch(io.req.valid && io.primary_ready, release_entry))
+  XSPerfAccumulate("load_miss_penalty_to_use", should_refill_data && BoolStopWatch(io.req.valid && io.primary_ready, io.refill.valid, true))
+  XSPerfAccumulate("pipeline_penalty", BoolStopWatch(io.pipe_req.fire(), io.pipe_resp.fire()))
+  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
+  XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  XSPerfAccumulate("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
+
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(io.req.valid && io.primary_ready, release_entry)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
+
+  val load_miss_begin = io.req.valid && io.primary_ready && io.req.bits.isLoad
+  val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
+
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
 }
 
 class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
