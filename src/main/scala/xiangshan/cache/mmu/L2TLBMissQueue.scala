@@ -97,20 +97,20 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
   // to_cache: the last is back just right now, set to mem_cache
-  val (to_wait, to_cache, wait_id) = {
-    val dup_vec = state.indices.map(i =>
-      io.in.bits.l3.valid && (dropL3SectorBits(io.in.bits.vpn) === dropL3SectorBits(entries(i).vpn))
-    )
-    val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m}
-    val dup_vec_wait = VecInit(dup_vec.zip(is_waiting).map{case (d, w) => d && w})
-    val dup_vec_having = dup_vec.zip(is_having).map{case (d, h) => d && h}
-    val dup_wait = Cat(dup_vec_wait).orR
-    val wait_id = ParallelMux(dup_vec_wait zip entries.map(_.wait_id))
-    val dup_wait_resp = io.mem.resp.valid && dup_vec_wait(io.mem.resp.bits.id)
-    val wait = Cat(dup_vec_mem).orR || (dup_wait && !dup_wait_resp)
-    val having = Cat(dup_vec_having).orR || dup_wait_resp
-    (wait, having, wait_id)
-  }
+  val dropLowVpn = entries.map(a => dropL3SectorBits(a.vpn))
+  val dropLowVpnIn = dropL3SectorBits(io.in.bits.vpn)
+  val dup_vec = state.indices.map(i =>
+    io.in.bits.l3.valid && (dropLowVpnIn === dropLowVpn(i))
+  )
+  val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m}
+  val dup_vec_wait = VecInit(dup_vec.zip(is_waiting).map{case (d, w) => d && w})
+  val dup_vec_having = dup_vec.zip(is_having).map{case (d, h) => d && h}
+  val dup_wait = Cat(dup_vec_wait).orR
+  val wait_id = ParallelMux(dup_vec_wait zip entries.map(_.wait_id))
+  val dup_wait_resp = io.mem.resp.valid && dup_vec_wait(io.mem.resp.bits.id)
+  val to_wait = Cat(dup_vec_mem).orR || (dup_wait && !dup_wait_resp)
+  val to_cache = Cat(dup_vec_having).orR || dup_wait_resp
+
   for (i <- 0 until MSHRSize) {
     when (state(i) === state_cache_next) {
       state(i) := state_cache
