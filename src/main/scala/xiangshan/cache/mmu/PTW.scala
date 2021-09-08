@@ -90,13 +90,11 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   val outArbMqPort = 2
 
   // NOTE: when cache out but miss and fsm doesnt accept,
-  val blockNewReq = false.B
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
-  arb1.io.out.ready := arb2.io.in(1).ready && !blockNewReq
+  arb1.io.out.ready := arb2.io.in(1).ready
 
-  val blockMissQueue = !fsm.io.req.ready
-  block_decoupled(missQueue.io.cache, arb2.io.in(0), blockMissQueue)
-  arb2.io.in(1).valid := arb1.io.out.valid && !blockNewReq
+  arb2.io.in(0) <> missQueue.io.cache
+  arb2.io.in(1).valid := arb1.io.out.valid
   arb2.io.in(1).bits.vpn := arb1.io.out.bits.vpn
   arb2.io.in(1).bits.source := arb1.io.chosen
   arb2.io.out.ready := cache.io.req.ready
@@ -117,6 +115,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   mq_in_arb.io.in(1) <> fsm.io.mq
   missQueue.io.in <> mq_in_arb.io.out
   missQueue.io.sfence  := sfence
+  missQueue.io.fsm_done := fsm.io.req.ready
 
   // NOTE: missQueue req has higher priority
   fsm.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit
