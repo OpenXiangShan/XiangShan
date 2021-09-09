@@ -52,6 +52,9 @@ jobs:
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
+          mkdir -p /bigdata/ci-emu-copy/${HEAD_SHA}
+          cp $GITHUB_WORKSPACE/build/emu /bigdata/ci-emu-copy/${HEAD_SHA}/emu-basics
+          cp $GITHUB_WORKSPACE/build/SimTop.v /bigdata/ci-emu-copy/${HEAD_SHA}/SimTop-basics.v
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci cputest 2> /dev/zero
@@ -95,6 +98,9 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /home/ci-runner/xsenv/DRAMsim3            \
             --disable-log --with-dramsim3 --threads 16
+          mkdir -p /bigdata/ci-emu-copy/${HEAD_SHA}
+          cp $GITHUB_WORKSPACE/build/emu /bigdata/ci-emu-copy/${HEAD_SHA}/emu-performance
+          cp $GITHUB_WORKSPACE/build/SimTop.v /bigdata/ci-emu-copy/${HEAD_SHA}/SimTop-performance.v
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
