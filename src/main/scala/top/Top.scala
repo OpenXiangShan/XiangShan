@@ -39,14 +39,12 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import xiangshan.cache.prefetch.L2Prefetcher
 
 
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-  private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val busPMU = BusPerfMonitor(enable = true)
   private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
     CacheParameters(
@@ -83,7 +81,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   if (!useFakePTW) {
     busPMU := TLBuffer() := core.ptw.node
   }
-  busPMU := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
     memory_port := TLXbar() :=* busPMU
   }
@@ -103,13 +100,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
-    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
-    if (useFakeL2Cache) {
-      l2prefetcher.module.io.in := DontCare
-    }
-    else {
-      l2prefetcher.module.io.in <> l2cache.module.io
-    }
+
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
@@ -118,7 +109,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.reset := core_reset_gen.io.out
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    l2prefetcher.module.reset := l2_reset_gen.io.out
     if (!useFakeL2Cache) {
       l2cache.module.reset := l2_reset_gen.io.out
     }
@@ -326,7 +316,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   }
   plic.intnode := beu.intNode
   plic.intnode := plicSource.sourceNode
-  
+
   plic.node := peripheralXbar
 
   val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(

@@ -24,7 +24,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.prefetch._
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -369,28 +369,6 @@ trait HasXSParameter {
     )
   )
 
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "bop", // "stream" or "bop"
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "dcache"
-    ),
-    bopParams = BOPParameters(
-      rrTableEntries = 256,
-      rrTagBits = 12,
-      scoreBits = 5,
-      roundMax = 50,
-      badScore = 1,
-      blockBytes = L2BlockSize,
-      nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
-    ),
-  )
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576

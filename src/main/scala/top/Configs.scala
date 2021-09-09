@@ -31,7 +31,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.prefetch._
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{XSDebugModuleParams, EnableJtag}
 

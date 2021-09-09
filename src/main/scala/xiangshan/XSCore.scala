@@ -349,7 +349,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.csr <> csrioIn.tlb
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
   val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
