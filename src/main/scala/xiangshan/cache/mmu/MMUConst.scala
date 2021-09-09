@@ -56,8 +56,8 @@ case class L2TLBParameters
   l2nWays: Int = 4,
   l2Replacer: Option[String] = Some("setplru"),
   // l3
-  l3nSets: Int = 128,
-  l3nWays: Int = 4,
+  l3nSets: Int = 64,
+  l3nWays: Int = 8,
   l3Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
