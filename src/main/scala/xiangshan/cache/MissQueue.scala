@@ -314,7 +314,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerfAccumulate("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
 
-  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(io.req.valid && io.primary_ready, release_entry)
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(io.req.valid && io.primary_ready), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
 
   val load_miss_begin = io.req.valid && io.primary_ready && io.req.bits.isLoad
