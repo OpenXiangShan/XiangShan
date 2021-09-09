@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{LookupTreeDefault, LookupTree, ParallelMux, SignExt, ZeroExt}
+import utils.{LookupTree, LookupTreeDefault, ParallelMux, SignExt, ZeroExt}
 import xiangshan._
 
 class AddModule(implicit p: Parameters) extends XSModule {
@@ -30,6 +30,7 @@ class AddModule(implicit p: Parameters) extends XSModule {
     val addw = Output(UInt((XLEN/2).W))
   })
   io.add := io.src(0) + io.src(1)
+  // TODO: why this extra adder?
   io.addw := io.srcw + io.src(1)(31,0)
 }
 
@@ -95,26 +96,35 @@ class RightShiftWordModule(implicit p: Parameters) extends XSModule {
 
 class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val func = Input(UInt())
-    val andn, orn, xnor, and, or, xor, sextb, sexth, zexth, rev8, orcb = Input(UInt(XLEN.W))
+    val func = Input(UInt(5.W))
+    val andn, orn, xnor, and, or, xor, orh48, sextb, sexth, zexth, rev8, orcb = Input(UInt(XLEN.W))
+    val src = Input(UInt(XLEN.W))
     val miscRes = Output(UInt(XLEN.W))
   })
 
+  val logicResSel = ParallelMux(List(
+    ALUOpType.andn  -> io.andn,
+    ALUOpType.and   -> io.and,
+    ALUOpType.orn   -> io.orn,
+    ALUOpType.or    -> io.or,
+    ALUOpType.xnor  -> io.xnor,
+    ALUOpType.xor   -> io.xor,
+    ALUOpType.orh48 -> io.orh48
+  ).map(x => (x._1(2, 0) === io.func(2, 0), x._2)))
+  val maskedLogicRes = Cat(Fill(63, ~io.func(3)), 1.U(1.W)) & logicResSel
+
   val miscRes = ParallelMux(List(
-    ALUOpType.andn -> io.andn,
-    ALUOpType.and  -> io.and,
-    ALUOpType.orn  -> io.orn,
-    ALUOpType.or   -> io.or,
-    ALUOpType.xnor -> io.xnor,
-    ALUOpType.xor  -> io.xor,
     ALUOpType.sext_b -> io.sextb,
     ALUOpType.sext_h -> io.sexth,
     ALUOpType.zext_h -> io.zexth,
     ALUOpType.orc_b  -> io.orcb,
-    ALUOpType.rev8   -> io.rev8
-  ).map(x => (x._1(3, 0) === io.func(3, 0), x._2)))
+    ALUOpType.rev8   -> io.rev8,
+    ALUOpType.szewl1 -> Cat(0.U(31.W), io.src(31, 0), 0.U(1.W)),
+    ALUOpType.szewl2 -> Cat(0.U(30.W), io.src(31, 0), 0.U(2.W)),
+    ALUOpType.byte2  -> Cat(0.U(56.W), io.src(15, 8))
+  ).map(x => (x._1(2, 0) === io.func(2, 0), x._2)))
 
-  io.miscRes := miscRes
+  io.miscRes := Mux(io.func(3) && !io.func(4), miscRes, maskedLogicRes)
 }
 
 class ShiftResultSelect(implicit p: Parameters) extends XSModule {
@@ -173,17 +183,37 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   })
   val (src1, src2, func) = (io.src(0), io.src(1), io.func)
 
-  val isW = ALUOpType.isWordOp(func)
-
   val addModule = Module(new AddModule)
+  // For 64-bit adder:
+  // BITS(2, 1): shamt (0, 1, 2, 3)
+  // BITS(3   ): different fused cases
   val shaddShamt = func(2,1)
-  val add  = addModule.io.add
-  val addw = addModule.io.addw
   addModule.io.src(0) := (Cat(Fill(32, func(0)), Fill(32,1.U)) & src1) << shaddShamt
   addModule.io.src(1) := src2
+  // TODO: use decoder or other libraries to optimize timing
+  when (func(4)) {
+    addModule.io.src(0) := ZeroExt(src1(0), XLEN)
+  }
+  when (func(3)) {
+    val sourceVec = VecInit(Seq(
+      Cat(src1(59, 0), 0.U(4.W)),
+      ZeroExt(src1(63, 30), XLEN),
+      ZeroExt(src1(63, 31), XLEN),
+      ZeroExt(src1(63, 32), XLEN)
+    ))
+    addModule.io.src(0) := sourceVec(func(2, 1))
+  }
+  val add = addModule.io.add
+  // For 32-bit adder:
+  // BITS(4   ): different fused cases
+  // BITS(2, 1): result mask (ffffffff, 0x1, 0xff)
   addModule.io.srcw := src1(31,0)
-
-
+  when (func(4)) {
+    addModule.io.srcw := ZeroExt(src1(0), XLEN)
+  }
+  val byteMask = Cat(Fill(56, ~func(1)), 0xff.U(8.W))
+  val bitMask = Cat(Fill(63, ~func(2)), 0x1.U(1.W))
+  val addw = addModule.io.addw & byteMask & bitMask
 
   val subModule = Module(new SubModule)
   val sub  = subModule.io.sub
@@ -243,6 +273,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val and     = src1 & src2
   val or      = src1 | src2
   val xor     = src1 ^ src2
+  val orh48   = Cat(src1(63, 8), 0.U(8.W)) | src2
   val sgtu    = sub(XLEN)
   val sltu    = !sgtu
   val slt     = xor(XLEN-1) ^ sltu
@@ -284,18 +315,20 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val shiftRes = shiftResSel.io.shiftRes
 
   val miscResSel = Module(new MiscResultSelect)
-  miscResSel.io.func    := func(3, 0)
+  miscResSel.io.func    := func(4, 0)
   miscResSel.io.andn    := andn
   miscResSel.io.orn     := orn
   miscResSel.io.xnor    := xnor
   miscResSel.io.and     := and
   miscResSel.io.or      := or
   miscResSel.io.xor     := xor
+  miscResSel.io.orh48   := orh48
   miscResSel.io.sextb   := sextb
   miscResSel.io.sexth   := sexth
   miscResSel.io.zexth   := zexth
   miscResSel.io.rev8    := rev8
   miscResSel.io.orcb    := orcb
+  miscResSel.io.src     := src1
   val miscRes = miscResSel.io.miscRes
 
   val wordResSel = Module(new WordResultSelect)

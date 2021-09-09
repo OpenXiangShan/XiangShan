@@ -492,12 +492,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
-  var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
+  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
   cs.singleStep := false.B
+
+  cs.isFused := 0.U
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
