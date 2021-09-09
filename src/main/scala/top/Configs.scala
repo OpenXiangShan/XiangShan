@@ -57,8 +57,8 @@ class MinimalConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
-        DecodeWidth = 6,
-        RenameWidth = 6,
+        DecodeWidth = 2,
+        RenameWidth = 2,
         FetchWidth = 4,
         IssQueSize = 8,
         NRPhyRegs = 64,
@@ -176,3 +176,4 @@ class MinimalSimConfig(n: Int = 1) extends Config(
     )
   })
 )
+
