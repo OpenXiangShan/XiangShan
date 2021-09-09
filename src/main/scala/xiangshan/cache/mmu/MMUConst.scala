@@ -63,7 +63,7 @@ case class L2TLBParameters
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
   // miss queue
-  missQueueSize: Int = 8,
+  missQueueSize: Int = 9,
   // way size
   blockBytes: Int = 64
 )
@@ -154,6 +154,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def genPtwL3SectorIdx(vpn: UInt) = {
     genPtwL3Idx(vpn)(PtwL3SectorIdxLen - 1, 0)
+  }
+
+  def dropL3SectorBits(vpn: UInt) = {
+    vpn(vpn.getWidth-1, PtwL3SectorIdxLen)
   }
 
   def genPtwL3SetIdx(vpn: UInt) = {
