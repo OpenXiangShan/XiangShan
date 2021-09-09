@@ -205,7 +205,8 @@ case class XSCoreParameters
     name = "l2",
     level = 2,
     ways = 8,
-    sets = 1024 // default 512KB L2
+    sets = 1024, // default 512KB L2
+    prefetch = Some(huancun.prefetch.BOPParameters())
   ),
   usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
