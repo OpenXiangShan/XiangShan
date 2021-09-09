@@ -404,7 +404,6 @@ class FusedLogiclsb(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(im
   def fusionName: String = "logic_andi1"
 }
 
-
 // Case: OR(Cat(src1(63, 8), 0.U(8.W)), src2)
 // Source: `andi r1, r0, -256`` + `or r1, r1, r2`
 class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
@@ -422,6 +421,30 @@ class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
   }
 
   def fusionName: String = "andi_f00_or"
+}
+
+// Case: mul 7bit data with 32-bit data
+// Source: `andi r1, r0, 127`` + `mulw r1, r1, r2`
+// Target: `mulw7 r1, r0, r2`
+class FusedMulw7(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends BaseFusionCase(pair, csPair) {
+  require(csPair.isDefined)
+
+  def inst1Cond = instr(0) === Instructions.ANDI && instr(0)(31, 20) === 127.U
+  def inst2Cond = instr(1) === Instructions.MULW
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    // use MULW as the base
+    val cs = WireInit(csPair.get(1))
+    // replace the fuOpType with mulw7
+    cs.fuOpType := MDUOpType.mulw7
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "andi127_mulw"
 }
 
 class FusionDecoder(implicit p: Parameters) extends XSModule {
@@ -461,6 +484,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedAddwbit(pair, Some(cs)),
       new FusedLogiclsb(pair, Some(cs)),
       new FusedOrh48(pair),
+      new FusedMulw7(pair, Some(cs))
     )
     val pairValid = VecInit(pair.map(_.valid)).asUInt().andR
     val thisCleared = io.clear(i)

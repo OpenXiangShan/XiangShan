@@ -278,8 +278,6 @@ package object xiangshan {
     def max         = "b0_11_00_110".U
     def min         = "b0_11_00_111".U
 
-
-
     // RV64 32bit optype
     def addw        = "b1_01_00_001".U
     def addwbyte    = "b1_01_00_011".U
@@ -312,40 +310,27 @@ package object xiangshan {
     def mulhu  = "b00011".U
     def mulw   = "b00100".U
 
+    def mulw7  = "b01100".U
+
     // div
     // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | opcode(1bit) |
-    def div    = "b01000".U
-    def divu   = "b01010".U
-    def rem    = "b01001".U
-    def remu   = "b01011".U
+    def div    = "b10000".U
+    def divu   = "b10010".U
+    def rem    = "b10001".U
+    def remu   = "b10011".U
 
-    def divw   = "b01100".U
-    def divuw  = "b01110".U
-    def remw   = "b01101".U
-    def remuw  = "b01111".U
+    def divw   = "b10100".U
+    def divuw  = "b10110".U
+    def remw   = "b10101".U
+    def remuw  = "b10111".U
 
-    // fence
-    // bit encoding: | type (2bit) | padding(1bit)(zero) | opcode(2bit) |
-    def fence    = "b10000".U
-    def sfence   = "b10001".U
-    def fencei   = "b10010".U
-
-    // the highest bits are for instruction types
-    def typeMSB = 4
-    def typeLSB = 3
-
-    def MulType     = "b00".U
-    def DivType     = "b01".U
-    def FenceType   = "b10".U
-
-    def isMul(op: UInt)     = op(typeMSB, typeLSB) === MulType
-    def isDiv(op: UInt)     = op(typeMSB, typeLSB) === DivType
-    def isFence(op: UInt)   = op(typeMSB, typeLSB) === FenceType
+    def isMul(op: UInt) = !op(4)
+    def isDiv(op: UInt) = op(4)
 
     def isDivSign(op: UInt) = isDiv(op) && !op(1)
     def isW(op: UInt) = op(2)
-    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1,0)=/=0.U)
-    def getMulOp(op: UInt) = op(1,0)
+    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1, 0) =/= 0.U)
+    def getMulOp(op: UInt) = op(1, 0)
   }
 
   object LSUOpType {
