@@ -500,6 +500,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   XSPerfAccumulate("miss_req", io.req.fire())
+  XSPerfAccumulate("miss_req_allocate", io.req.fire() && allocate)
+  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && !reject && io.req.bits.isLoad)
+  XSPerfAccumulate("miss_req_reject_load", io.req.valid && reject && io.req.bits.isLoad)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~primary_ready.asUInt)
