@@ -72,6 +72,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     d.valid := in.valid
     d.bits := in.bits.instr
   }
+  fusionDecoder.io.dec := decoders.map(_.io.deq.cf_ctrl.ctrl)
   fusionDecoder.io.out.zip(io.out.dropRight(1)).zipWithIndex.foreach{ case ((d, out), i) =>
     d.ready := out.ready
     when (d.valid) {

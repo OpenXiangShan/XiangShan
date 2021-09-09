@@ -212,6 +212,14 @@ package object xiangshan {
     def orn         = "b0_00_00_011".U
     def xor         = "b0_00_00_100".U
     def xnor        = "b0_00_00_101".U
+    def orh48       = "b0_00_00_110".U
+
+    def andlsb      = "b0_00_11_000".U
+    def andnlsb     = "b0_00_11_001".U
+    def orlsb       = "b0_00_11_010".U
+    def ornlsb      = "b0_00_11_011".U
+    def xorlsb      = "b0_00_11_100".U
+    def xnorlsb     = "b0_00_11_101".U
 
     def sext_b      = "b0_00_01_000".U
     def sext_h      = "b0_00_01_001".U
@@ -274,6 +282,8 @@ package object xiangshan {
 
     // RV64 32bit optype
     def addw        = "b1_01_00_001".U
+    def addwbyte    = "b1_01_00_011".U
+    def addwbit     = "b1_01_00_101".U
     def oddaddw     = "b1_01_10_001".U
     def subw        = "b1_11_00_000".U
     def sllw        = "b1_10_00_000".U
@@ -283,6 +293,9 @@ package object xiangshan {
     def rorw        = "b1_10_11_000".U
 
     def isWordOp(func: UInt) = func(7)
+    def isAddw(func: UInt) = func(7, 5) === "b101".U
+    def isLogic(func: UInt) = func(7, 3) === "b00000".U
+    def logicToLSB(func: UInt) = Cat(func(7, 5), "b11".U(2.W), func(2, 0))
     def isBranch(func: UInt) = func(6, 3) === "b0010".U
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)

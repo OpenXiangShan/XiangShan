@@ -23,7 +23,8 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends DecodeUnitConstants {
+abstract class BaseFusionCase(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]] = None)(implicit p: Parameters)
+  extends DecodeUnitConstants {
   require(pair.length == 2)
 
   protected def instr: Seq[UInt] = pair.map(_.bits)
@@ -350,10 +351,84 @@ class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
   def fusionName: String = "andi1_addw"
 }
 
+// Case: addw and extract its lower 8 bits (fused into addwbyte)
+class FusedAddwbyte(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends BaseFusionCase(pair, csPair) {
+  require(csPair.isDefined)
+
+  // the first instruction is a addw
+  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isAddw(csPair.get(0).fuOpType)
+  def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 0xff.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // replace the fuOpType with addwbyte
+    cs.fuOpType := ALUOpType.addwbyte
+    cs
+  }
+
+  def fusionName: String = "andw_andi255"
+}
+
+// Case: addw and extract its lower 1 bit (fused into addwbit)
+class FusedAddwbit(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends FusedAddwbyte(pair, csPair) {
+  override def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 0x1.U
+  override def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // replace the fuOpType with addwbit
+    cs.fuOpType := ALUOpType.addwbit
+    cs
+  }
+  override def fusionName: String = "andw_andi1"
+}
+
+// Case: logic operation and extract its LSB
+class FusedLogiclsb(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends BaseFusionCase(pair, csPair) {
+  require(csPair.isDefined)
+
+  // the first instruction is a logic
+  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isLogic(csPair.get(0).fuOpType)
+  def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 1.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // change the opType to lsb format
+    cs.fuOpType := ALUOpType.logicToLSB(csPair.get(0).fuOpType)
+    cs
+  }
+
+  def fusionName: String = "logic_andi1"
+}
+
+
+// Case: OR(Cat(src1(63, 8), 0.U(8.W)), src2)
+// Source: `andi r1, r0, -256`` + `or r1, r1, r2`
+class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.ANDI && instr(0)(31, 20) === 0xf00.U
+  def inst2Cond = instr(1) === Instructions.OR
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.OR)
+    // replace the fuOpType with orh48
+    cs.fuOpType := ALUOpType.orh48
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "andi_f00_or"
+}
+
 class FusionDecoder(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // detect instruction fusions in these instructions
     val in = Vec(DecodeWidth, Flipped(ValidIO(UInt(32.W))))
+    val dec = Vec(DecodeWidth, Input(new CtrlSignals()))
     // whether an instruction fusion is found
     val out = Vec(DecodeWidth - 1, DecoupledIO(new CtrlSignals))
     // fused instruction needs to be cleared
@@ -363,7 +438,8 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
   io.clear.head := false.B
 
   val instrPairs = io.in.dropRight(1).zip(io.in.drop(1)).map(x => Seq(x._1, x._2))
-  instrPairs.zip(io.out).zipWithIndex.foreach{ case ((pair, out), i) =>
+  val csPairs = io.dec.dropRight(1).zip(io.dec.drop(1)).map(x => Seq(x._1, x._2))
+  instrPairs.zip(csPairs).zip(io.out).zipWithIndex.foreach{ case (((pair, cs), out), i) =>
     val fusionList = Seq(
       new FusedAdduw(pair),
       new FusedZexth(pair),
@@ -381,6 +457,10 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedSr32add(pair),
       new FusedOddadd(pair),
       new FusedOddaddw(pair),
+      new FusedAddwbyte(pair, Some(cs)),
+      new FusedAddwbit(pair, Some(cs)),
+      new FusedLogiclsb(pair, Some(cs)),
+      new FusedOrh48(pair),
     )
     val pairValid = VecInit(pair.map(_.valid)).asUInt().andR
     val thisCleared = io.clear(i)
