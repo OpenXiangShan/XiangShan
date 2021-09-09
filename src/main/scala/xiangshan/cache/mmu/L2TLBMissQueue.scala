@@ -203,4 +203,5 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
     assert(wait_counter <= 2000.U, s"missqueue time out no out ${i}")
   }
+  assert(!io.in.valid || io.in.ready, "when io.in.valid, should always ready")
 }

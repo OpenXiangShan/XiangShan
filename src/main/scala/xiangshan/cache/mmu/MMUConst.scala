@@ -63,7 +63,7 @@ case class L2TLBParameters
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
   // miss queue
-  missQueueSize: Int = 8,
+  missQueueSize: Int = 9,
   // way size
   blockBytes: Int = 64
 )
