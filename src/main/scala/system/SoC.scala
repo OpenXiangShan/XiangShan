@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import huancun.CacheParameters
+import huancun.{CacheParameters, HCCacheParameters}
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -31,7 +31,7 @@ case class SoCParameters
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
   L3NBanks: Int = 1,
-  L3CacheParams: CacheParameters = CacheParameters(
+  L3CacheParams: HCCacheParameters = HCCacheParameters(
     name = "l3",
     level = 3,
     ways = 8,

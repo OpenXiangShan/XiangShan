@@ -30,7 +30,7 @@ import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
 import xiangshan.cache.mmu.L2TLBParameters
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{CacheParameters, ClientCacheParameters}
+import huancun.{CacheParameters, HCCacheParameters}
 import huancun.prefetch._
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
@@ -148,7 +148,7 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
     val l2sets = n * 1024 / ways / 64
     upParams.copy(
       cores = upParams.cores.map(p => p.copy(
-        L2CacheParams = CacheParameters(
+        L2CacheParams = HCCacheParameters(
           name = "L2",
           level = 2,
           ways = ways,
@@ -170,19 +170,16 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
     val sets = n * 1024 / banks / ways / 64
     upParams.copy(
       L3NBanks = banks,
-      L3CacheParams = CacheParameters(
+      L3CacheParams = HCCacheParameters(
         name = "L3",
         level = 3,
         ways = ways,
         sets = sets,
         inclusive = inclusive,
-        clientCache = if(inclusive) None else Some(
-          ClientCacheParameters(
-            sets = 2 * upParams.cores.head.L2CacheParams.sets,
-            ways = 2* upParams.cores.head.L2CacheParams.ways,
-            blockBytes = 64
-          )
-        )
+        clientCaches = upParams.cores.map{ core =>
+          val l2params = core.L2CacheParams.toCacheParams
+          l2params.copy(ways = 2 * l2params.ways)
+        }
       )
     )
 })

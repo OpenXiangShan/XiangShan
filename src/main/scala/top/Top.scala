@@ -36,7 +36,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import huancun.debug.TLLogger
-import huancun.{CacheParamsKey, HuanCun}
+import huancun.{HCCacheParamsKey, HuanCun}
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
@@ -45,7 +45,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   private val busPMU = BusPerfMonitor(enable = true)
   private val l2cache = if(useFakeL2Cache) null else
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case CacheParamsKey => coreParams.L2CacheParams
+      case HCCacheParamsKey => coreParams.L2CacheParams
     })))
 
   val memory_port = TLIdentityNode()
@@ -298,7 +298,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   plic.node := peripheralXbar
 
   val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case CacheParamsKey => soc.L3CacheParams
+    case HCCacheParamsKey => soc.L3CacheParams
   })))
 
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null

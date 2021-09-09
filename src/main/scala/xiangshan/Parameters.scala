@@ -20,14 +20,11 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, ICacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.prefetch._
 import xiangshan.cache.mmu.L2TLBParameters
-import freechips.rocketchip.diplomacy.AddressSet
-import huancun.CacheParameters
+import huancun.{CacheParameters, HCCacheParameters}
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -130,7 +127,7 @@ case class XSCoreParameters
     nReleaseEntries = 16,
     nStoreReplayEntries = 16
   ),
-  L2CacheParams: CacheParameters = CacheParameters(
+  L2CacheParams: HCCacheParameters = HCCacheParameters(
     name = "l2",
     level = 2,
     ways = 8,
@@ -283,29 +280,6 @@ trait HasXSParameter {
       reallocStreamOnMissInstantly = true,
       cacheName = "icache"
     )
-  )
-
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "bop", // "stream" or "bop"
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "dcache"
-    ),
-    bopParams = BOPParameters(
-      rrTableEntries = 256,
-      rrTagBits = 12,
-      scoreBits = 5,
-      roundMax = 50,
-      badScore = 1,
-      blockBytes = L2BlockSize,
-      nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
-    ),
   )
 
   // load violation predict
