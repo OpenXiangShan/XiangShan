@@ -134,6 +134,10 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
+    val bpuInfo = new Bundle {
+      val bpRight = UInt(XLEN.W)
+      val bpWrong = UInt(XLEN.W)
+    }
   }
   val ctrlInfo = new Bundle {
     val roqFull   = Bool()
@@ -146,10 +150,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     val lqFull = Bool()
     val dcacheMSHRFull = Bool()
   }
-  val bpuInfo = new Bundle {
-    val bpRight = UInt(XLEN.W)
-    val bpWrong = UInt(XLEN.W)
-  }
+  
   val cacheInfo = new Bundle {
     val l2MSHRFull = Bool()
     val l3MSHRFull = Bool()
@@ -301,7 +302,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 // | prv      | 2 bits
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
-  val dcsrMask = GenMask(15) | GenMask(13, 11) | GenMask(2, 0)// Dcsr write mask
+  val dcsrMask = ZeroExt(GenMask(15) | GenMask(13, 11) | GenMask(2, 0), XLEN)// Dcsr write mask
   def dcsrUpdateSideEffect(dcsr: UInt): UInt = {
     val dcsrOld = WireInit(dcsr.asTypeOf(new DcsrStruct))
     val dcsrNew = dcsr | (dcsrOld.prv(0) | dcsrOld.prv(1)).asUInt // turn 10 priv into 11
@@ -319,8 +320,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
-  val mipReg  = RegInit(0.U.asTypeOf(new Interrupt).asUInt)
-  val mipFixMask = GenMask(9) | GenMask(5) | GenMask(1)
+  val mipReg  = RegInit(0.U(XLEN.W))
+  val mipFixMask = ZeroExt(GenMask(9) | GenMask(5) | GenMask(1), XLEN)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt()
@@ -391,7 +392,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "hc6122".U
+  val sstatusWmask = "hc6122".U(XLEN.W)
   // Sstatus Write Mask
   // -------------------------------------------------------
   //    19           9   5     2
@@ -404,10 +405,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
   val sipMask = "h222".U & mideleg
-  val sipWMask = "h2".U // ssip is writeable in smode
+  val sipWMask = "h2".U(XLEN.W) // ssip is writeable in smode
   val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
-  val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
+  val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
@@ -553,9 +554,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val dcacheMSHRFull = RegInit(0.U(XLEN.W))
   dcacheMSHRFull := dcacheMSHRFull + RegNext(csrio.perf.memInfo.dcacheMSHRFull)
   val bpRight   = RegInit(0.U(XLEN.W))
-  bpRight := bpRight + RegNext(csrio.perf.bpuInfo.bpRight)
+  bpRight := bpRight + RegNext(csrio.perf.frontendInfo.bpuInfo.bpRight)
   val bpWrong   = RegInit(0.U(XLEN.W))
-  bpWrong := bpWrong + RegNext(csrio.perf.bpuInfo.bpWrong)
+  bpWrong := bpWrong + RegNext(csrio.perf.frontendInfo.bpuInfo.bpWrong)
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -604,16 +605,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Srnctl, srnctl),
 
     //--- Machine Information Registers ---
-    MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
-    MaskedRegMap(Marchid, marchid, 0.U, MaskedRegMap.Unwritable),
-    MaskedRegMap(Mimpid, mimpid, 0.U, MaskedRegMap.Unwritable),
-    MaskedRegMap(Mhartid, mhartid, 0.U, MaskedRegMap.Unwritable),
+    MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Marchid, marchid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Mimpid, mimpid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
-    MaskedRegMap(Medeleg, medeleg, "hf3ff".U),
-    MaskedRegMap(Mideleg, mideleg, "h222".U),
+    MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
+    MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
     MaskedRegMap(Mcounteren, mcounteren),
@@ -623,7 +624,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
-    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
+    MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),

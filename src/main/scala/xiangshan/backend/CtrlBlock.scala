@@ -25,23 +25,33 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.rename.{BusyTable, Rename}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.ftq.{Ftq, FtqRead, HasFtqHelper}
+import xiangshan.frontend.{FtqRead, FtqToCtrlIO, FtqPtr}
 import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqLsqIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
+class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
+  val roq_commits = Vec(CommitWidth, Valid(new RoqCommitInfo))
+  val stage2Redirect = Valid(new Redirect)
+  val stage3Redirect = ValidIO(new Redirect)
+  val roqFlush = Valid(new Bundle {
+    val ftqIdx = Output(new FtqPtr)
+    val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
+    val replayInst = Output(Bool()) // not used for now
+  })
+}
+
 class RedirectGenerator(implicit p: Parameters) extends XSModule
-  with HasCircularQueuePtrHelper with HasFtqHelper {
+  with HasCircularQueuePtrHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val stage1FtqRead = Vec(numRedirect + 1, new FtqRead)
-    val stage2FtqRead = new FtqRead
+    val stage1PcRead = Vec(numRedirect+1, new FtqRead(UInt(VAddrBits.W)))
     val stage2Redirect = ValidIO(new Redirect)
     val stage3Redirect = ValidIO(new Redirect)
     val memPredUpdate = Output(new MemPredUpdateReq)
-    val memPredFtqRead = new FtqRead // read req send form stage 2
+    val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
   })
   /*
         LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
@@ -74,9 +84,11 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     resultOnehot
   }
 
-  for((ptr, redirect) <- io.stage1FtqRead.map(_.ptr).zip(
-    io.exuMispredict.map(_.bits.redirect) :+ io.loadReplay.bits
-  )){ ptr := redirect.ftqIdx }
+  val redirects = io.exuMispredict.map(_.bits.redirect) :+ io.loadReplay.bits
+  val stage1FtqReadPcs = 
+    (io.stage1PcRead zip redirects).map{ case (r, redirect) => 
+      r(redirect.ftqIdx, redirect.ftqOffset)
+    }
 
   def getRedirect(exuOut: Valid[ExuOutput]): ValidIO[Redirect] = {
     val redirect = Wire(Valid(new Redirect))
@@ -104,22 +116,10 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
   io.stage2Redirect.bits := s1_redirect_bits_reg
   io.stage2Redirect.bits.cfiUpdate := DontCare
-  // at stage2, we read ftq to get pc
-  io.stage2FtqRead.ptr := s1_redirect_bits_reg.ftqIdx
 
   val s1_isReplay = s1_redirect_onehot.last
   val s1_isJump = s1_redirect_onehot.head
-  val ftqRead = Mux1H(s1_redirect_onehot, io.stage1FtqRead).entry
-  val cfiUpdate_pc = Cat(
-    ftqRead.ftqPC.head(VAddrBits - s1_redirect_bits_reg.ftqOffset.getWidth - instOffsetBits),
-    s1_redirect_bits_reg.ftqOffset,
-    0.U(instOffsetBits.W)
-  )
-  val real_pc = GetPcByFtq(
-    ftqRead.ftqPC, s1_redirect_bits_reg.ftqOffset,
-    ftqRead.lastPacketPC.valid,
-    ftqRead.lastPacketPC.bits
-  )
+  val real_pc = Mux1H(s1_redirect_onehot, stage1FtqReadPcs)
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
   val target = Mux(s1_isReplay,
@@ -131,14 +131,9 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   )
 
   // get pc from ftq
-  io.memPredFtqRead.ptr := s1_redirect_bits_reg.stFtqIdx
   // valid only if redirect is caused by load violation
   // store_pc is used to update store set
-  val memPredFtqRead = io.memPredFtqRead.entry
-  val store_pc = GetPcByFtq(memPredFtqRead.ftqPC, RegNext(s1_redirect_bits_reg).stFtqOffset,
-    memPredFtqRead.lastPacketPC.valid,
-    memPredFtqRead.lastPacketPC.bits
-  )
+  val store_pc = io.memPredPcRead(s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
   // update load violation predictor if load violation redirect triggered
   io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg, init = false.B)
@@ -150,40 +145,27 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
 
-
-  val s2_br_mask = RegEnable(ftqRead.br_mask, enable = s1_redirect_valid_reg)
-  val s2_sawNotTakenBranch = RegEnable(VecInit((0 until PredictWidth).map{ i =>
-      if(i == 0) false.B else Cat(ftqRead.br_mask.take(i)).orR()
-    })(s1_redirect_bits_reg.ftqOffset), enable = s1_redirect_valid_reg)
-  val s2_hist = RegEnable(ftqRead.hist, enable = s1_redirect_valid_reg)
   val s2_target = RegEnable(target, enable = s1_redirect_valid_reg)
   val s2_pd = RegEnable(s1_pd, enable = s1_redirect_valid_reg)
-  val s2_cfiUpdata_pc = RegEnable(cfiUpdate_pc, enable = s1_redirect_valid_reg)
+  val s2_pc = RegEnable(real_pc, enable = s1_redirect_valid_reg)
   val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, enable = s1_redirect_valid_reg)
   val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !io.flush, init = false.B)
-  val s2_ftqRead = io.stage2FtqRead.entry
 
   io.stage3Redirect.valid := s2_redirect_valid_reg
   io.stage3Redirect.bits := s2_redirect_bits_reg
   val stage3CfiUpdate = io.stage3Redirect.bits.cfiUpdate
-  stage3CfiUpdate.pc := s2_cfiUpdata_pc
+  stage3CfiUpdate.pc := s2_pc
   stage3CfiUpdate.pd := s2_pd
-  stage3CfiUpdate.rasSp := s2_ftqRead.rasSp
-  stage3CfiUpdate.rasEntry := s2_ftqRead.rasTop
-  stage3CfiUpdate.predHist := s2_ftqRead.predHist
-  stage3CfiUpdate.specCnt := s2_ftqRead.specCnt
-  stage3CfiUpdate.hist := s2_hist
   stage3CfiUpdate.predTaken := s2_redirect_bits_reg.cfiUpdate.predTaken
-  stage3CfiUpdate.sawNotTakenBranch := s2_sawNotTakenBranch
   stage3CfiUpdate.target := s2_target
   stage3CfiUpdate.taken := s2_redirect_bits_reg.cfiUpdate.taken
   stage3CfiUpdate.isMisPred := s2_redirect_bits_reg.cfiUpdate.isMisPred
 }
 
 class CtrlBlock(implicit p: Parameters) extends XSModule
-  with HasCircularQueuePtrHelper with HasFtqHelper {
+  with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
-    val frontend = Flipped(new FrontendToBackendIO)
+    val frontend = Flipped(new FrontendToCtrlIO)
     val enqIQ = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
@@ -208,10 +190,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
         val fpdqFull  = Input(Bool())
         val lsdqFull  = Input(Bool())
       }
-      val bpuInfo = new Bundle {
-        val bpRight = Output(UInt(XLEN.W))
-        val bpWrong = Output(UInt(XLEN.W))
-      }
     })
     val writeback = Vec(NRIntWritePorts + NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
     // redirect out
@@ -223,8 +201,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
 
-  val ftq = Module(new Ftq)
-
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
@@ -235,14 +211,14 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
   val roq = Module(new Roq(roqWbSize))
 
-  val backendRedirect = redirectGen.io.stage2Redirect
-  val frontendRedirect = redirectGen.io.stage3Redirect
+  val stage2Redirect = redirectGen.io.stage2Redirect
+  val stage3Redirect = redirectGen.io.stage3Redirect
   val flush = roq.io.flushOut.valid
   val flushReg = RegNext(flush)
 
   val exuRedirect = io.exuRedirect.map(x => {
     val valid = x.valid && x.bits.redirectValid
-    val killedByOlder = x.bits.uop.roqIdx.needFlush(backendRedirect, flushReg)
+    val killedByOlder = x.bits.uop.roqIdx.needFlush(stage2Redirect, flushReg)
     val delayed = Wire(Valid(new ExuOutput))
     delayed.valid := RegNext(valid && !killedByOlder, init = false.B)
     delayed.bits := RegEnable(x.bits, x.valid)
@@ -250,36 +226,25 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   })
   val loadReplay = Wire(Valid(new Redirect))
   loadReplay.valid := RegNext(io.memoryViolation.valid &&
-    !io.memoryViolation.bits.roqIdx.needFlush(backendRedirect, flushReg),
+    !io.memoryViolation.bits.roqIdx.needFlush(stage2Redirect, flushReg),
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
-  VecInit(ftq.io.ftqRead.tail.dropRight(2)) <> redirectGen.io.stage1FtqRead
-  ftq.io.ftqRead.dropRight(1).last <> redirectGen.io.memPredFtqRead
-  ftq.io.cfiRead <> redirectGen.io.stage2FtqRead
+  io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
+  io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushReg
 
-  ftq.io.enq <> io.frontend.fetchInfo
   for(i <- 0 until CommitWidth){
-    ftq.io.roq_commits(i).valid := roq.io.commits.valid(i) && !roq.io.commits.isWalk
-    ftq.io.roq_commits(i).bits := roq.io.commits.info(i)
+    io.frontend.toFtq.roq_commits(i).valid := roq.io.commits.valid(i) && !roq.io.commits.isWalk
+    io.frontend.toFtq.roq_commits(i).bits := roq.io.commits.info(i)
   }
-  ftq.io.redirect <> backendRedirect
-  ftq.io.flush := flushReg
-  ftq.io.flushIdx := RegNext(roq.io.flushOut.bits.ftqIdx)
-  ftq.io.flushOffset := RegNext(roq.io.flushOut.bits.ftqOffset)
-  ftq.io.frontendRedirect <> frontendRedirect
-  ftq.io.exuWriteback <> exuRedirect
+  io.frontend.toFtq.stage2Redirect <> stage2Redirect
+  io.frontend.toFtq.roqFlush <> RegNext(roq.io.flushOut)
 
-  ftq.io.ftqRead.last.ptr := roq.io.flushOut.bits.ftqIdx
-  val flushPC = GetPcByFtq(
-    ftq.io.ftqRead.last.entry.ftqPC,
-    RegEnable(roq.io.flushOut.bits.ftqOffset, roq.io.flushOut.valid),
-    ftq.io.ftqRead.last.entry.lastPacketPC.valid,
-    ftq.io.ftqRead.last.entry.lastPacketPC.bits
-  )
+  val roqPcRead = io.frontend.fromFtq.getRoqFlushPcRead
+  val flushPC = roqPcRead(roq.io.flushOut.bits.ftqIdx, roq.io.flushOut.bits.ftqOffset)
 
   val flushRedirect = Wire(Valid(new Redirect))
   flushRedirect.valid := flushReg
@@ -288,16 +253,19 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   flushRedirect.bits.interrupt := true.B
   flushRedirect.bits.cfiUpdate.target := Mux(io.roqio.toCSR.isXRet || roq.io.exception.valid,
     io.roqio.toCSR.trapTarget,
-    flushPC + 4.U // flush pipe
+    Mux(RegEnable(roq.io.flushOut.bits.replayInst, flush),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    )
   )
+  when (flushRedirect.valid && RegEnable(roq.io.flushOut.bits.replayInst, flush)) {
+    XSDebug("replay inst (%x) from rob\n", flushPC);
+  }
   val flushRedirectReg = Wire(Valid(new Redirect))
   flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
   flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
 
-  io.frontend.redirect_cfiUpdate := Mux(flushRedirectReg.valid, flushRedirectReg, frontendRedirect)
-  io.frontend.commit_cfiUpdate := ftq.io.commit_ftqEntry
-  io.frontend.ftqEnqPtr := ftq.io.enqPtr
-  io.frontend.ftqLeftOne := ftq.io.leftOne
+  io.frontend.toFtq.stage3Redirect := Mux(flushRedirectReg.valid, flushRedirectReg, stage3Redirect)
 
   decode.io.in <> io.frontend.cfVec
   // currently, we only update wait table when isReplay
@@ -309,30 +277,25 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
 
   val jumpInst = dispatch.io.enqIQCtrl(0).bits
-  val ftqOffsetReg = Reg(UInt(log2Up(PredictWidth).W))
-  ftqOffsetReg := jumpInst.cf.ftqOffset
-  ftq.io.ftqRead(0).ptr := jumpInst.cf.ftqPtr // jump
-  io.jumpPc := GetPcByFtq(
-    ftq.io.ftqRead(0).entry.ftqPC, ftqOffsetReg,
-    ftq.io.ftqRead(0).entry.lastPacketPC.valid,
-    ftq.io.ftqRead(0).entry.lastPacketPC.bits
-  )
-  io.jalr_target := ftq.io.ftqRead(0).entry.target
+  val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
+  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+  val jumpTargetRead = io.frontend.fromFtq.target_read
+  io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 
   // pipeline between decode and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      flushReg || io.frontend.redirect_cfiUpdate.valid)
+      flushReg || io.frontend.toFtq.stage3Redirect.valid)
   }
 
-  rename.io.redirect <> backendRedirect
+  rename.io.redirect <> stage2Redirect
   rename.io.flush := flushReg
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
   rename.io.dispatchInfo <> dispatch.io.preDpInfo
 
-  dispatch.io.redirect <> backendRedirect
+  dispatch.io.redirect <> stage2Redirect
   dispatch.io.flush := flushReg
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.enqLsq
@@ -363,15 +326,15 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   intBusyTable.io.read <> dispatch.io.readIntState
   fpBusyTable.io.read <> dispatch.io.readFpState
 
-  roq.io.redirect <> backendRedirect
+  roq.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
   for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
-    roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(backendRedirect, flushReg))
+    roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(stage2Redirect, flushReg))
     roq_wb.bits := RegNext(wb.bits)
   }
 
   // TODO: is 'backendRedirect' necesscary?
-  io.redirect <> backendRedirect
+  io.redirect <> stage2Redirect
   io.flush <> flushReg
   io.debug_int_rat <> rename.io.debug_int_rat
   io.debug_fp_rat <> rename.io.debug_fp_rat
@@ -391,5 +354,4 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.perfInfo.ctrlInfo.intdqFull := RegNext(dispatch.io.ctrlInfo.intdqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(dispatch.io.ctrlInfo.fpdqFull)
   io.perfInfo.ctrlInfo.lsdqFull := RegNext(dispatch.io.ctrlInfo.lsdqFull)
-  io.perfInfo.bpuInfo <> RegNext(ftq.io.bpuInfo)
 }

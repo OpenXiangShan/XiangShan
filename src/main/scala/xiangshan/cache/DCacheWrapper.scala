@@ -18,8 +18,8 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.ExtModule
 import chisel3.util._
-import Chisel.BlackBox
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -86,9 +86,11 @@ class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
 class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
-  val data   = UInt((cfg.blockBytes * 8).W)
+  val data   = UInt(l1BusDataWidth.W)
+  // for debug usage
   val data_raw = UInt((cfg.blockBytes * 8).W)
-  val hasdata  = Bool()
+  val hasdata = Bool()
+  val refill_done = Bool()
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
   }
@@ -372,16 +374,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.mshrFull := missQueue.io.full
 }
 
-class AMOHelper() extends BlackBox {
-  val io = IO(new Bundle {
-    val clock  = Input(Clock())
-    val enable = Input(Bool())
-    val cmd    = Input(UInt(5.W))
-    val addr   = Input(UInt(64.W))
-    val wdata  = Input(UInt(64.W))
-    val mask   = Input(UInt(8.W))
-    val rdata  = Output(UInt(64.W))
-  })
+class AMOHelper() extends ExtModule {
+//  val io = IO(new Bundle {
+    val clock  = IO(Input(Clock()))
+    val enable = IO(Input(Bool()))
+    val cmd    = IO(Input(UInt(5.W)))
+    val addr   = IO(Input(UInt(64.W)))
+    val wdata  = IO(Input(UInt(64.W)))
+    val mask   = IO(Input(UInt(8.W)))
+    val rdata  = IO(Output(UInt(64.W)))
+//  })
 }
 
 class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
@@ -391,17 +393,17 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   // to LoadUnit
   for (i <- 0 until LoadPipelineWidth) {
     val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-    fakeRAM.io.clk   := clock
-    fakeRAM.io.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.io.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
-    fakeRAM.io.wIdx  := 0.U
-    fakeRAM.io.wdata := 0.U
-    fakeRAM.io.wmask := 0.U
-    fakeRAM.io.wen   := false.B
+    fakeRAM.clk   := clock
+    fakeRAM.en    := io.lsu.load(i).resp.valid && !reset.asBool
+    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
+    fakeRAM.wIdx  := 0.U
+    fakeRAM.wdata := 0.U
+    fakeRAM.wmask := 0.U
+    fakeRAM.wen   := false.B
 
     io.lsu.load(i).req.ready := true.B
     io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
-    io.lsu.load(i).resp.bits.data := fakeRAM.io.rdata
+    io.lsu.load(i).resp.bits.data := fakeRAM.rdata
     io.lsu.load(i).resp.bits.miss := false.B
     io.lsu.load(i).resp.bits.replay := false.B
     io.lsu.load(i).resp.bits.id := DontCare
@@ -418,16 +420,16 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
   // to atomics
   val amoHelper = Module(new AMOHelper)
-  amoHelper.io.clock := clock
-  amoHelper.io.enable := io.lsu.atomics.req.valid && !reset.asBool
-  amoHelper.io.cmd := io.lsu.atomics.req.bits.cmd
-  amoHelper.io.addr := io.lsu.atomics.req.bits.addr
-  amoHelper.io.wdata := io.lsu.atomics.req.bits.data
-  amoHelper.io.mask := io.lsu.atomics.req.bits.mask
+  amoHelper.clock := clock
+  amoHelper.enable := io.lsu.atomics.req.valid && !reset.asBool
+  amoHelper.cmd := io.lsu.atomics.req.bits.cmd
+  amoHelper.addr := io.lsu.atomics.req.bits.addr
+  amoHelper.wdata := io.lsu.atomics.req.bits.data
+  amoHelper.mask := io.lsu.atomics.req.bits.mask
   io.lsu.atomics.req.ready := true.B
   io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
   assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
-  io.lsu.atomics.resp.bits.data := amoHelper.io.rdata
+  io.lsu.atomics.resp.bits.data := amoHelper.rdata
   io.lsu.atomics.resp.bits.replay := false.B
   io.lsu.atomics.resp.bits.id := 1.U
 }

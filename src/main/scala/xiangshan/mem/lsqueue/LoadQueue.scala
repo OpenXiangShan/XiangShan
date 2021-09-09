@@ -19,7 +19,6 @@ package xiangshan.mem
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 import xiangshan._
 import xiangshan.cache._
@@ -28,7 +27,8 @@ import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqLsqIO
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.ftq.FtqPtr
+import xiangshan.frontend.FtqPtr
+import xiangshan.backend.fu.fpu.FPU
 
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -46,22 +46,19 @@ object LqPtr {
   }
 }
 
-trait HasFpLoadHelper { this: HasFPUParameters =>
-  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
-    LookupTree(uop.ctrl.fuOpType, List(
-      LSUOpType.lw   -> recode(rdata(31, 0), S),
-      LSUOpType.ld   -> recode(rdata(63, 0), D)
-    ))
-  }
-}
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
     val fpWen = uop.ctrl.fpWen
     LookupTree(uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, Cat(Fill(32, 1.U(1.W)), rdata(31, 0)), SignExt(rdata(31, 0), XLEN)),
-      LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
+      /*
+          riscv-spec-20191213: 12.2 NaN Boxing of Narrower Values
+          Any operation that writes a narrower result to an f register must write
+          all 1s to the uppermost FLEN−n bits to yield a legal NaN-boxed value.
+      */
+      LSUOpType.lw   -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.ld   -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), XLEN)),
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
@@ -116,6 +113,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
+  val refilling = WireInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
 
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
@@ -240,6 +238,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     when(dataModule.io.refill.valid && dataModule.io.refill.refillMask(i) && dataModule.io.refill.matchMask(i)) {
       datavalid(i) := true.B
       miss(i) := false.B
+      refilling(i) := true.B
     }
   })
 
@@ -262,7 +261,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val loadWbSelV = Wire(Vec(LoadPipelineWidth, Bool())) // index selected in last cycle is valid
 
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && !writebacked(i) && datavalid(i)
+    allocated(i) && !writebacked(i) && (datavalid(i) || refilling(i))
   })).asUInt() // use uint instead vec to reduce verilog lines
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
@@ -706,7 +705,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   for (i <- 0 until LoadQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, dataModule.io.debug(i).paddr)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, debug_paddr(i))
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && datavalid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

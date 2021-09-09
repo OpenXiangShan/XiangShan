@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tile.FType
+import fudian.FPUpConverter
 import hardfloat.{DivSqrtRecFNToRaw_small, DivSqrtRecFNToRaw_srt4, RoundAnyRawFNToRecFN}
 
 class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
@@ -59,8 +60,32 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   }
   when(kill_r){ state := s_idle }
 
-  val src1 = unbox(io.in.src(0), tag, None)
-  val src2 = unbox(io.in.src(1), tag, None)
+  val in1_unboxed = FPU.unbox(io.in.src(0), tag)
+  val in2_unboxed = FPU.unbox(io.in.src(1), tag)
+
+  def up_convert_s_d(in: UInt): UInt = {
+    val converter = Module(new FPUpConverter(
+      FPU.f32.expWidth, FPU.f32.precision,
+      FPU.f64.expWidth, FPU.f64.precision
+    ))
+    converter.io.in := in
+    converter.io.rm := DontCare
+    converter.io.result
+  }
+
+  val src1 = hardfloat.recFNFromFN(FType.D.exp, FType.D.sig,
+    Mux(tag === FPU.S,
+      up_convert_s_d(in1_unboxed),
+      in1_unboxed
+    )
+  )
+  val src2 = hardfloat.recFNFromFN(FType.D.exp, FType.D.sig,
+    Mux(tag === FPU.S,
+      up_convert_s_d(in2_unboxed),
+      in2_unboxed
+    )
+  )
+
   divSqrt.io.inValid := in_fire && !kill_w
   divSqrt.io.sqrtOp := fpCtrl.sqrt
   divSqrt.io.kill := kill_r
@@ -84,7 +109,13 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
     rounder.io.detectTininess := hardfloat.consts.tininess_afterRounding
   }
 
-  val data = Mux(single, round32.io.out, round64.io.out)
+  val data = Mux(single,
+    FPU.box(
+      Cat(0.U(32.W), hardfloat.fNFromRecFN(FType.S.exp, FType.S.sig, round32.io.out)),
+      FPU.S
+    ),
+    FPU.box(hardfloat.fNFromRecFN(FType.D.exp, FType.D.sig, round64.io.out), FPU.D)
+  )
   val flags = Mux(single, round32.io.exceptionFlags, round64.io.exceptionFlags)
 
   assert(!(state === s_idle && !divSqrt.io.inReady))
@@ -92,6 +123,7 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   out_valid := state===s_finish
   io.out.data := RegNext(data, divSqrtRawValid)
   fflags := RegNext(flags, divSqrtRawValid)
+
 }
 
 

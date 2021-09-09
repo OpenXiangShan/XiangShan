@@ -116,7 +116,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
 
   // should we refill the data to load queue to wake up any missed load?
-  val should_refill_data  = Reg(Bool())
+  val should_refill_data_reg = Reg(Bool())
+  val should_refill_data = WireInit(should_refill_data_reg)
 
 
   // --------------------------------------------
@@ -197,7 +198,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     req := io.req
     grantack.valid := false.B
     // only miss req from load needs a refill to LoadQueue
-    should_refill_data := io.req.source === LOAD_SOURCE.U
+    should_refill_data_reg := io.req.source === LOAD_SOURCE.U
 
     state := s_refill_req
   }
@@ -226,7 +227,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       req := io.req
     }
 
-    should_refill_data := should_refill_data || io.req.source === LOAD_SOURCE.U
+    should_refill_data := should_refill_data_reg || io.req.source === LOAD_SOURCE.U
+    should_refill_data_reg := should_refill_data
   }
 
 
@@ -320,11 +322,27 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // put should_refill_data out of RegNext
   // so that when load miss are merged at refill_done
   // we can still refill data back
-  io.refill.valid := RegNext(state === s_refill_resp && refill_done) && should_refill_data
-  io.refill.bits.addr := req.addr
-  io.refill.bits.data := refill_data.asUInt
-  io.refill.bits.data_raw := refill_data_raw.asUInt
+  //
+  // Now refill to load queue width l1BusDataWidth, to load queue refill req
+  // will be issued as soon as data is ready (stored in regs in miss queue)
+  val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
+    val data = refill_data.asUInt
+    data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
+  })))
+  // val refill_addr_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i =>
+  //   req.addr + (i << refillOffBits)
+  // )))
+  io.refill.valid := RegNext(state === s_refill_resp && io.mem_grant.fire()) && should_refill_data
+  io.refill.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
+  io.refill.bits.data := refill_data_splited(RegNext(refill_count))
+  io.refill.bits.data_raw := refill_data_raw.asUInt()
   io.refill.bits.hasdata := hasData
+  io.refill.bits.refill_done := RegNext(refill_done)
+  when(io.refill.fire()){
+    io.refill.bits.dump()
+    XSDebug("refill_count %d\n", RegNext(refill_count));
+  }
+  val refill_finished = RegNext(state === s_refill_resp && refill_done) && should_refill_data
 
   when (state === s_main_pipe_req) {
     io.pipe_req.valid := true.B
@@ -386,7 +404,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
 
   val load_miss_begin = io.req_valid && (io.primary_ready || io.secondary_ready) && io.req.source === LOAD_SOURCE.U
-  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, io.refill.valid)
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
 
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
@@ -506,7 +524,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.valid := io.refill.valid && io.refill.bits.hasdata
+    difftest.io.valid := io.refill.valid && io.refill.bits.hasdata && io.refill.bits.refill_done
     difftest.io.addr := io.refill.bits.addr
     difftest.io.data := io.refill.bits.data_raw.asTypeOf(difftest.io.data)
   }

@@ -37,11 +37,11 @@ import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
+import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-  private val l2xbar = TLXbar()
   private val busPMU = BusPerfMonitor(enable = true)
   private val l2cache = if(useFakeL2Cache) null else
     LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -54,9 +54,9 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   if (!useFakeDCache) {
     busPMU := TLLogger(s"L2_L1D_$hardId") := TLBuffer() := core.memBlock.dcache.clientNode
   }
-  if (!useFakeL1plusCache) {
-    busPMU := TLBuffer() := core.l1pluscache.clientNode
-  }
+  //if (!useFakeL1plusCache) {
+    busPMU := TLBuffer() := core.frontend.icache.clientNode
+  //}
   if (!useFakePTW) {
     busPMU := TLBuffer() := core.ptw.node
   }
@@ -79,6 +79,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
+
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
@@ -294,7 +295,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   }
   plic.intnode := beu.intNode
   plic.intnode := plicSource.sourceNode
-  
+
   plic.node := peripheralXbar
 
   val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
