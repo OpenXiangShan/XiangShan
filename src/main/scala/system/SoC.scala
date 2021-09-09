@@ -30,7 +30,7 @@ case class SoCParameters
   cores: List[XSCoreParameters],
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
-  L3NBanks: Int = 1,
+  L3NBanks: Int = 4,
   L3CacheParams: HCCacheParameters = HCCacheParameters(
     name = "l3",
     level = 3,
