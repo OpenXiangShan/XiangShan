@@ -41,7 +41,7 @@ class PayloadArrayWriteIO[T <: Data](gen: T, params: RSParams) extends Bundle {
 
 class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val read = Vec(params.numDeq, new PayloadArrayReadIO(gen, params))
+    val read = Vec(params.numDeq + 1, new PayloadArrayReadIO(gen, params))
     val write = Vec(params.numEnq, new PayloadArrayWriteIO(gen, params))
   })
 

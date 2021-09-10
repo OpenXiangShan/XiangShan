@@ -52,7 +52,7 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
 }
 
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
-  val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
+  val read = Vec(params.numDeq + 1, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
   val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
@@ -75,12 +75,12 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
 
     val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
-    io.read.map(_.data(i)).zip(dataModule.io.rdata).map{ case (d, r) => d := r }
+    io.read.map(_.data(i)).zip(dataModule.io.rdata).foreach{ case (d, r) => d := r }
     dataModule.io.wen := wen
     dataModule.io.wvec := waddr
     dataModule.io.wdata := wdata
     for (i <- 0 until params.numEntries) {
-      val w = VecInit((0 until wen.length).map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
+      val w = VecInit(wen.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
       assert(RegNext(PopCount(w) <= 1.U))
       when(PopCount(w) > 1.U) {
         XSDebug("ERROR: RS DataArray write overlap!\n")
