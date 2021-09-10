@@ -514,4 +514,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
+
+  // If miss queue refill the second time after main pipe, how many conflicts will it bring?
+  XSPerfAccumulate("refill_2nd_time_conflict", RegNext(io.pipe_resp.valid) && io.refill.valid)
 }
