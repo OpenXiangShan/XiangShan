@@ -642,3 +642,9 @@ object TimeOutAssert {
     assert(counter <= threshold.U, message)
   }
 }
+
+object DataHoldBypass {
+  def apply(data: UInt, valid: Bool): UInt = {
+    Mux(valid, data, RegEnable(data, valid))
+  }
+}
