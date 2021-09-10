@@ -49,8 +49,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val state = RegInit(UIntToOH(s_idle, 7))
 
   // reused wires
-  val aNormAbs = Wire(UInt((len + 1).W)) // Inputs of xNormAbs regs below
-  val dNormAbs = Wire(UInt((len + 1).W))  
+//  val aNormAbs = Wire(UInt((len + 1).W)) // Inputs of xNormAbs regs below
+//  val dNormAbs = Wire(UInt((len + 1).W))
   val quotIter = Wire(UInt(len.W))
   val quotM1Iter = Wire(UInt(len.W))
   val aLZC = Wire(UInt((lzc_width + 1).W))
@@ -66,8 +66,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val special = Wire(Bool())
 
   // reused regs
-  val aNormAbsReg = RegEnable(aNormAbs, newReq | state(s_pre_0) | state(s_post_0)) // reg for normalized a & d and rem & rem+d
-  val dNormAbsReg = RegEnable(dNormAbs, newReq | state(s_pre_0) | state(s_post_0))
+//  val aNormAbsReg = RegEnable(aNormAbs, newReq | state(s_pre_0) | state(s_post_0)) // reg for normalized a & d and rem & rem+d
+//  val dNormAbsReg = RegEnable(dNormAbs, newReq | state(s_pre_0) | state(s_post_0))
   val quotIterReg = RegEnable(quotIter, state(s_pre_1) | state(s_iter) | state(s_post_0))
   val quotM1IterReg = RegEnable(quotM1Iter, state(s_pre_1) | state(s_iter) | state(s_post_0))
   val specialReg = RegEnable(special, state(s_pre_1))
@@ -95,53 +95,59 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   io.in_ready := state(s_idle)
   aInverter := -Mux(state(s_idle), a, quotIterReg) // 64, 0
-  dInverter := -Mux(state(s_pre_1), dNormAbsReg, Mux(state(s_idle), d, quotM1IterReg)) // 64, 0
+  dInverter := -Mux(state(s_idle), d, quotM1IterReg) // 64, 0
 
   val aSign = io.sign && a(len - 1) // 1
   val dSign = io.sign && d(len - 1)
 
   val aAbs = Mux(aSign, aInverter, a) // 64, 0
   val dAbs = Mux(dSign, dInverter, d)
-  val aNorm = (aNormAbsReg(len - 1, 0) << aLZC(lzc_width - 1, 0))(len - 1, 0) // 64, 65
-  val dNorm = (dNormAbsReg(len - 1, 0) << dLZC(lzc_width - 1, 0))(len - 1, 0)
+  val aAbsReg = RegEnable(aAbs, newReq)
+  val dAbsReg = RegEnable(dAbs, newReq)
 
-  aNormAbs := Mux1H(Seq(
-    state(s_idle) -> Cat(0.U(1.W), aAbs), // 65, 0
-    state(s_pre_0) -> Cat(0.U(1.W), aNorm), // 65, 0
-    state(s_post_0) -> rNext(len + 3, 3) // remainder 65, 64. highest is sign bit 
-  ))
-  dNormAbs := Mux1H(Seq(
-    state(s_idle) -> Cat(0.U(1.W), dAbs),
-    state(s_pre_0) -> Cat(0.U(1.W), dNorm),
-    state(s_post_0) -> rNextPd(len + 3, 3)
-    ))
+  val aNorm = (aAbsReg(len - 1, 0) << aLZC(lzc_width - 1, 0))(len - 1, 0) // 64, 65
+  val dNorm = (dAbsReg(len - 1, 0) << dLZC(lzc_width - 1, 0))(len - 1, 0)
+
+  val aNormReg = RegEnable(aNorm, state(s_pre_0))
+  val dNormReg = RegEnable(dNorm, state(s_pre_0))
+
+//  aNormAbs := Mux1H(Seq(
+//    state(s_idle) -> Cat(0.U(1.W), aAbs), // 65, 0
+//    state(s_pre_0) -> Cat(0.U(1.W), aNorm), // 65, 0
+//    state(s_post_0) -> rNext(len + 3, 3) // remainder 65, 64. highest is sign bit
+//  ))
+//  dNormAbs := Mux1H(Seq(
+//    state(s_idle) -> Cat(0.U(1.W), dAbs),
+//    state(s_pre_0) -> Cat(0.U(1.W), dNorm),
+//    state(s_post_0) -> rNextPd(len + 3, 3)
+//    ))
 
   // Second cycle, state is pre_0
   // calculate lzc and move div* and lzc diff check if no_iter_needed
 
-  aLZC := PriorityEncoder(aNormAbsReg(len - 1, 0).asBools().reverse)
-  dLZC := PriorityEncoder(dNormAbsReg(len - 1, 0).asBools().reverse)
+  aLZC := PriorityEncoder(aAbsReg(len - 1, 0).asBools().reverse)
+  dLZC := PriorityEncoder(dAbsReg(len - 1, 0).asBools().reverse)
   val aLZCReg = RegEnable(aLZC, state(s_pre_0)) // 7, 0
   val dLZCReg = RegEnable(dLZC, state(s_pre_0))
 
   val lzcWireDiff = Cat(0.U(1.W), dLZC(lzc_width - 1, 0)) - Cat(0.U(1.W), aLZC(lzc_width - 1, 0)) // 7, 0
   val lzcRegDiff = Cat(0.U(1.W), dLZCReg(lzc_width - 1, 0)) - Cat(0.U(1.W), aLZCReg(lzc_width - 1, 0))
-  val lzcDiff = Mux(state(s_pre_0), lzcWireDiff, lzcRegDiff)
+//  val lzcDiff = Mux(state(s_pre_0), lzcWireDiff, lzcRegDiff)
 
   // special case:
-  // divisor is 1 or -1; dividend has less bits than divisor; divisor is zero 
+  // divisor is 1 or -1; dividend has less bits than divisor; divisor is zero
   // s_pre_0:
   val dIsOne = dLZC(lzc_width - 1, 0).andR()
   val dIsZero = dLZCReg(lzc_width)
   val aIsZero = RegEnable(aLZC(lzc_width), state(s_pre_0))
-  val aTooSmall = RegEnable(aIsZero | lzcDiff(lzc_width), state(s_pre_0))
+  val aTooSmall = RegEnable(aIsZero | lzcWireDiff(lzc_width), state(s_pre_0))
   special := dIsOne | dIsZero | aTooSmall
 
-  val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt, 
-                            Mux(aTooSmall, 0.U, 
+  val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt,
+                            Mux(aTooSmall, 0.U,
                               Mux(dSign, -aReg, aReg)
                             ))
-  val remSpecial = Mux(dIsZero, 0.U, 
+  val remSpecial = Mux(dIsZero, 0.U,
                             Mux(aTooSmall, aReg, 0.U))
   val quotSpecialReg = RegEnable(quotSpecial, state(s_pre_1))
   val remSpecialReg = RegEnable(remSpecial, state(s_pre_1))
@@ -152,18 +158,18 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val quotSignReg = RegEnable(quotSign, in_fire | (state(s_pre_1) & dIsZero))
   val rSignReg = RegEnable(rSign, in_fire)
 
-  val rShift = lzcDiff(0)
-  val oddIter = lzcDiff(1) ^ lzcDiff(0)
+  val rShift = lzcRegDiff(0)
+  val oddIter = lzcRegDiff(1) ^ lzcRegDiff(0)
   val iterNum = Wire(UInt((lzc_width - 2).W))
   val iterNumReg = RegEnable(iterNum, state(s_pre_1) | state(s_iter))
-  iterNum := Mux(state(s_pre_1), (lzcDiff + 1.U) >> 2, iterNumReg -% 1.U)
+  iterNum := Mux(state(s_pre_1), (lzcRegDiff + 1.U) >> 2, iterNumReg -% 1.U)
   finalIter := iterNumReg === 0.U
 
-  val rSumInit = Cat(0.U(3.W), Mux(rShift, Cat(0.U(1.W), aNormAbsReg(len - 1, 0)), Cat(aNormAbsReg(len - 1, 0), 0.U(1.W)))) //(1, 67), 0.001xxx
+  val rSumInit = Cat(0.U(3.W), Mux(rShift, Cat(0.U(1.W), aNormReg), Cat(aNormReg, 0.U(1.W)))) //(1, 67), 0.001xxx
   val rCarryInit = 0.U(itn_len.W)
 
   val rSumInitTrunc = Cat(0.U(1.W), rSumInit(itn_len - 4, itn_len - 4 - 4 + 1)) // 0.00___
-  val mInitPos1 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b00100".U(5.W), 
+  val mInitPos1 = MuxLookup(dNormReg(len-2, len-4), "b00100".U(5.W),
     Array(
       0.U -> "b00100".U(5.W),
       1.U -> "b00100".U(5.W),
@@ -175,7 +181,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
       7.U -> "b01000".U(5.W),
     )
   )
-  val mInitPos2 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b01100".U(5.W), 
+  val mInitPos2 = MuxLookup(dNormReg(len-2, len-4), "b01100".U(5.W),
     Array(
       0.U -> "b01100".U(5.W),
       1.U -> "b01110".U(5.W),
@@ -193,8 +199,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   // in pre_1 we also obtain m_i + 16u * d for all u
   // udNeg -> (rud, r2ud) -> (rudPmNeg, r2udPmNeg) 
-  val dPos = dNormAbsReg                          // +d, 0.1xxx, (1, 64)
-  val dNeg = -dNormAbsReg // -d, 1.xxxx, (1, 64)
+  val dPos = Cat(0.U(1.W), dNormReg)                          // +d, 0.1xxx, (1, 64)
+  val dNeg = -Cat(0.U(1.W), dNormReg) // -d, 1.xxxx, (1, 64)
   // val m = Wire(Vec(4, UInt(7.W)))     // we have to sigext them to calculate rqd-m_k
 
   // index 0 is for q=-2 and 4 is for q=2!!!
@@ -229,10 +235,10 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   // Give values to the regs and wires above...
   val dForLookup = dPos(len-2, len-4)
-  mNeg := VecInit(Cat(SignExt(MuxLookup(dNormAbsReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(0)), 11), 0.U(1.W)), // (2, 5) -> (6, 6)
-                  Cat(SignExt(MuxLookup(dNormAbsReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(1)), 10) ,0.U(2.W)), // (3, 4) -> (6, 6)
-                  Cat(SignExt(MuxLookup(dNormAbsReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(2)), 10) ,0.U(2.W)),
-                  Cat(SignExt(MuxLookup(dNormAbsReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(3)), 11) ,0.U(1.W))
+  mNeg := VecInit(Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(0)), 11), 0.U(1.W)), // (2, 5) -> (6, 6)
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(1)), 10) ,0.U(2.W)), // (3, 4) -> (6, 6)
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(2)), 10) ,0.U(2.W)),
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(3)), 11) ,0.U(1.W))
   )
   udNeg := VecInit( Cat(SignExt(dPos, 66), 0.U(2.W)),
                     Cat(SignExt(dPos, 67), 0.U(1.W)),
@@ -252,6 +258,11 @@ class SRT16DividerDataModule(len: Int) extends Module {
   r2ws := rSumReg(itn_len-1, itn_len-10)
   r2wc := rCarryReg(itn_len-1, itn_len-10)
 
+  val udNegReg = RegEnable(udNeg, state(s_pre_1))
+//  val rudNegReg = RegEnable(rudNeg, state(s_pre_1))
+  val rudPmNegReg = RegEnable(rudPmNeg, state(s_pre_1))
+  val r2udPmNegReg = RegEnable(r2udPmNeg, state(s_pre_1))
+
   def DetectSign(signs: UInt, name: String): UInt = {
     val qVec = Wire(Vec(5, Bool())).suggestName(name)
     qVec(quot_neg_2) := signs(0) && signs(1) && signs(2)
@@ -263,10 +274,11 @@ class SRT16DividerDataModule(len: Int) extends Module {
   }
   // Selection block
   val signs = VecInit(Seq.tabulate(4){ i => {
-      val csa = Module(new CSA3_2(10)).suggestName(s"csa_sel_${i}")
-      csa.io.in(0) := r2ws
-      csa.io.in(1) := r2wc        
-      csa.io.in(2) := rudPmNeg(OHToUInt(qPrevReg))(i)
+    val csa = Module(new CSA3_2(10)).suggestName(s"csa_sel_${i}")
+    csa.io.in(0) := r2ws
+    csa.io.in(1) := r2wc
+    csa.io.in(2) := Mux1H(qPrevReg, rudPmNegReg.toSeq)(i) // rudPmNeg(OHToUInt(qPrevReg))(i)
+
       (csa.io.out(0) + (csa.io.out(1)(8, 0) << 1))(9)
     }})
   qNext := DetectSign(signs.asUInt, s"sel_q")
@@ -274,10 +286,10 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val csaWide2 = Module(new CSA3_2(itn_len)).suggestName("csa_sel_wide_2")
   csaWide1.io.in(0) := rSumReg << 2
   csaWide1.io.in(1) := rCarryReg << 2
-  csaWide1.io.in(2) := udNeg(OHToUInt(qPrevReg)) << 2
+  csaWide1.io.in(2) := Mux1H(qPrevReg, udNegReg.toSeq) << 2//udNeg(OHToUInt(qPrevReg)) << 2
   csaWide2.io.in(0) := csaWide1.io.out(0) << 2
   csaWide2.io.in(1) := (csaWide1.io.out(1) << 1)(itn_len-1, 0) << 2
-  csaWide2.io.in(2) := udNeg(OHToUInt(qNext)) << 2
+  csaWide2.io.in(2) := Mux1H(qNext, udNegReg.toSeq) << 2 // udNeg(OHToUInt(qNext)) << 2
   rSumIter := Mux(~oddIter & finalIter, csaWide1.io.out(0), csaWide2.io.out(0))
   rCarryIter := Mux(~oddIter & finalIter, (csaWide1.io.out(1) << 1)(itn_len-1, 0), (csaWide2.io.out(1) << 1)(itn_len-1, 0))
   // r3wsIter := r3udNeg(OHToUInt(qNext))
@@ -287,18 +299,20 @@ class SRT16DividerDataModule(len: Int) extends Module {
       val csa1 = Module(new CSA3_2(13)).suggestName(s"csa_spec_${q_spec}")
       csa1.io.in(0) := r3ws
       csa1.io.in(1) := r3wc
-      csa1.io.in(2) := SignExt(rudNeg(q_spec), 13) // (4, 6) -> (7, 6)
+      csa1.io.in(2) := SignExt(udNegReg(q_spec)(itn_len-2, itn_len-11), 13) // (4, 6) -> (7, 6)
       val signs2 = VecInit(Seq.tabulate(4){ i => {
         val csa2 = Module(new CSA3_2(13)).suggestName(s"csa_spec_${q_spec}_${i}")
         csa2.io.in(0) := csa1.io.out(0)
         csa2.io.in(1) := (csa1.io.out(1) << 1)(12, 0)
-        csa2.io.in(2) := r2udPmNeg(OHToUInt(qPrevReg))(i)
+        csa2.io.in(2) := Mux1H(qPrevReg, r2udPmNegReg.toSeq)(i) // r2udPmNeg(OHToUInt(qPrevReg))(i)
         (csa2.io.out(0) + (csa2.io.out(1)(11, 0) << 1))(12)
       }})
       val qVec2 = DetectSign(signs2.asUInt, s"spec_q_${q_spec}")
       qVec2
   }})
-  qNext2 := qSpec(OHToUInt(qNext))
+  // qNext2 := qSpec(OHToUInt(qNext)) // TODO: Use Mux1H!!
+
+  qNext2 := Mux1H(qNext, qSpec.toSeq)
 
   // on the fly quotient conversion
   val quotHalfIter = Wire(UInt(64.W))
@@ -326,31 +340,41 @@ class SRT16DividerDataModule(len: Int) extends Module {
   quotM1HalfIter := OTFC(qPrevReg, quotIterReg, quotM1IterReg)._2
   quotIterNext := Mux(~oddIter && finalIter, quotHalfIter, OTFC(qNext, quotHalfIter, quotM1HalfIter)._1)
   quotM1IterNext := Mux(~oddIter && finalIter, quotM1HalfIter, OTFC(qNext, quotHalfIter, quotM1HalfIter)._2)
-  quotIter := Mux(state(s_pre_1),  0.U(len.W),
-                      Mux(state(s_iter), quotIterNext,
-                        Mux(quotSignReg, aInverter, quotIterReg)))
-  quotM1Iter := Mux(state(s_pre_1), 
-                        0.U(len.W), Mux(state(s_iter), quotM1IterNext,
-                          Mux(quotSignReg, dInverter, quotM1IterReg)))
+  // quotIter := Mux(state(s_pre_1),  0.U(len.W),
+  //                     Mux(state(s_iter), quotIterNext,
+  //                       Mux(quotSignReg, aInverter, quotIterReg)))
+  // quotM1Iter := Mux(state(s_pre_1), 
+  //                       0.U(len.W), Mux(state(s_iter), quotM1IterNext,
+  //                         Mux(quotSignReg, dInverter, quotM1IterReg)))
+
+  quotIter := Mux(state(s_iter), quotIterNext,
+                    Mux(state(s_pre_1), 0.U(len.W),
+                      Mux(quotSignReg, aInverter, quotIterReg)))
+  quotM1Iter := Mux(state(s_iter), quotM1IterNext,
+                      Mux(state(s_pre_1), 0.U(len.W),
+                        Mux(quotSignReg, dInverter, quotM1IterReg)))
   // finally, to the recovery stages!
 
   when(rSignReg) {
     rNext := ~rSumReg + ~rCarryReg + 2.U
-    rNextPd := ~rSumReg + ~rCarryReg + ~Cat(0.U(1.W), dNormAbsReg(len - 1, 0), 0.U(3.W)) + 3.U
+    rNextPd := ~rSumReg + ~rCarryReg + ~Cat(0.U(1.W), dNormReg, 0.U(3.W)) + 3.U
   } .otherwise {
     rNext := rSumReg + rCarryReg
-    rNextPd := rSumReg + rCarryReg + Cat(0.U(1.W), dNormAbsReg(len - 1, 0), 0.U(3.W))
+    rNextPd := rSumReg + rCarryReg + Cat(0.U(1.W), dNormReg, 0.U(3.W))
   }
+  val rNextReg = RegEnable(rNext(len + 3, 3), state(s_post_0))
+  val rNextPdReg = RegEnable(rNextPd(len + 3, 3), state(s_post_0))
+  dontTouch(rNextReg)
   // post_1
-  val r = aNormAbsReg
-  val rPd = dNormAbsReg
+  val r = rNextReg
+  val rPd = rNextPdReg
   val rIsZero = ~(r.orR())
   val needCorr = Mux(rSignReg, ~r(len) & r.orR(), r(len)) // when we get pos rem for a<0 or neg rem for a>0
   val rPreShifted = Mux(needCorr, rPd, r)
   val rightShifter = Module(new RightShifter(len, lzc_width))
-  rightShifter.io.in := rPreShifted(len - 1, 0)
+  rightShifter.io.in := rPreShifted
   rightShifter.io.shiftNum := dLZCReg
-  rightShifter.io.msb := state(s_post_1) & rSignReg & rPreShifted(len)
+  rightShifter.io.msb := rSignReg
   val rShifted = rightShifter.io.out
   val rFinal = RegEnable(Mux(specialReg, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = RegEnable(Mux(specialReg, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))
