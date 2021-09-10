@@ -1,4 +1,3 @@
-
 /***************************************************************************************
 * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
@@ -14,6 +13,10 @@
 *
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
+
+// This file contains components originally written by Yifei He, see
+// https://github.com/OpenXiangShan/XS-Verilog-Library/tree/main/int_div_radix_4_v1
+// Email of original author: hyf_sysu@qq.com
 
 package xiangshan.backend.fu
 

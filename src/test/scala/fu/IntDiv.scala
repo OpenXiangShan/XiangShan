@@ -1,14 +1,27 @@
+/***************************************************************************************
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
+
 package futest
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
-import chisel3.util._
 import chiseltest._
 import chiseltest.ChiselScalatestTester
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
 import chiseltest.legacy.backends.verilator.VerilatorFlags
-import org.scalatest._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -51,7 +64,7 @@ class SRT4DividerWrapper extends Module {
 }
 
 class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
-  behavior of "srt4 divider"
+  behavior of "srt16 divider"
   it should "run" in {
     val rand = new Random(0x14226)
     val testNum = 1000
