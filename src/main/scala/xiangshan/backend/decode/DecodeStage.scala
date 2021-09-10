@@ -57,12 +57,45 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
     io.in(i).ready       := io.out(i).ready
   }
+
   for (i <- 0 until StorePipelineWidth) {
     waittable.io.update(i) <> RegNext(io.memPredUpdate(i))
   }
   waittable.io.csrCtrl <> io.csrCtrl
   ssit.io.update <> RegNext(io.memPredUpdate(0))
   ssit.io.csrCtrl <> io.csrCtrl
+
+  // instruction fusion
+  val fusionDecoder = Module(new FusionDecoder())
+  fusionDecoder.io.in.zip(io.in).foreach{ case (d, in) =>
+    // TODO: instructions with exceptions should not be considered fusion
+    d.valid := in.valid
+    d.bits := in.bits.instr
+  }
+  fusionDecoder.io.dec := decoders.map(_.io.deq.cf_ctrl.ctrl)
+  fusionDecoder.io.out.zip(io.out.dropRight(1)).zipWithIndex.foreach{ case ((d, out), i) =>
+    d.ready := out.ready
+    when (d.valid) {
+      out.bits.ctrl := d.bits
+      // TODO: remove this
+      // Dirty code for ftq update
+      val sameFtqPtr = out.bits.cf.ftqPtr.value === io.out(i + 1).bits.cf.ftqPtr.value
+      val ftqOffset0 = out.bits.cf.ftqOffset
+      val ftqOffset1 = io.out(i + 1).bits.cf.ftqOffset
+      val ftqOffsetDiff = ftqOffset1 - ftqOffset0
+      val cond1 = sameFtqPtr && ftqOffsetDiff === 1.U
+      val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
+      val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
+      val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
+      out.bits.ctrl.isFused := Mux(cond1, 1.U, Mux(cond2, 2.U, Mux(cond3, 3.U, 4.U)))
+      XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
+    }
+  }
+  fusionDecoder.io.clear.zip(io.out.map(_.valid)).foreach{ case (c, v) =>
+    when (c) {
+      v := false.B
+    }
+  }
 
   val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
   XSPerfAccumulate("loadWaitBitSet", loadWaitBitSet)

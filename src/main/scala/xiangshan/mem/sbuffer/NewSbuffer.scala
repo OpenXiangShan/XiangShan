@@ -482,7 +482,6 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     }
   }
 
-
   for (i <- 0 until StoreBufferSize) {
     XSDebug("ptag %x vtag %x valid %x inflight %x\n", 
       ptag(i) << OffsetWidth,
@@ -505,5 +504,4 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
-
 }

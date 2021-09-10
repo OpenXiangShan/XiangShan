@@ -53,7 +53,7 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
   fsgnjMux.data := fsgnj
   fsgnjMux.exc := 0.U
 
-  val scmp = Module(new FCMP(FPU.f32.expWidth, FPU.f64.precision))
+  val scmp = Module(new FCMP(FPU.f32.expWidth, FPU.f32.precision))
   val dcmp = Module(new FCMP(FPU.f64.expWidth, FPU.f64.precision))
   val lt = VecInit(Seq(scmp, dcmp).map { fcmp =>
     fcmp.io.a := src1
@@ -63,13 +63,8 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
   })(inTag)
 
   val fminmax = FPU.ftypes map { t =>
-    val fcmp = Module(new FCMP(t.expWidth, t.precision))
-    fcmp.io.a := src1
-    fcmp.io.b := src2
-    fcmp.io.signaling := !rmReg(1)
-    val lt = fcmp.io.lt || (fcmp.io.a.asSInt() < 0.S && fcmp.io.b.asSInt() >= 0.S)
-    val fp_a = FloatPoint.fromUInt(fcmp.io.a, t.expWidth, t.precision).decode
-    val fp_b = FloatPoint.fromUInt(fcmp.io.b, t.expWidth, t.precision).decode
+    val fp_a = FloatPoint.fromUInt(src1, t.expWidth, t.precision).decode
+    val fp_b = FloatPoint.fromUInt(src2, t.expWidth, t.precision).decode
     val isnan1 = fp_a.isNaN
     val isnan2 = fp_b.isNaN
     val isInv = fp_a.isSNaN || fp_b.isSNaN

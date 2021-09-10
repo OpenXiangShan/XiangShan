@@ -54,6 +54,9 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
     op,
     mulInputFuncTable.map(p => (p._1(1, 0), p._2._1(src1)))
   )
+  when (func(3)) {
+    mul.io.in.bits.src(0) := src1(6, 0)
+  }
   mul.io.in.bits.src(1) := LookupTree(
     op,
     mulInputFuncTable.map(p => (p._1(1, 0), p._2._2(src2)))

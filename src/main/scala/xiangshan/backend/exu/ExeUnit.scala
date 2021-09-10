@@ -19,10 +19,11 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
 import utils.{XSDebug, XSPerfAccumulate}
 import xiangshan._
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.IntToFP
+import xiangshan.backend.fu.fpu.FPUSubModule
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
@@ -33,7 +34,7 @@ class FenceIO(implicit p: Parameters) extends XSBundle {
 
 class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: ExuConfig) {
   val disableSfence = WireInit(false.B)
-  val csr_frm = WireInit(0.U(3.W))
+  val csr_frm = WireInit(frm.getOrElse(0.U(3.W)))
 
   val hasRedirect = config.fuConfigs.zip(functionUnits).filter(_._1.hasRedirect).map(_._2)
   println(s"${functionUnits} ${hasRedirect} hasRedirect: ${hasRedirect.length}")
@@ -63,12 +64,23 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
     fence.disableSfence := disableSfence
   }
 
-  if (config.fuConfigs.contains(i2fCfg)) {
-    val i2f = functionUnits.collectFirst {
-      case i: IntToFP => i
-    }.get
-    val instr_rm = io.fromInt.bits.uop.ctrl.fpu.rm
-    i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr_frm)
+  val fpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[FPUSubModule])
+  if (fpModules.nonEmpty) {
+    // frm is from csr/frm (from CSR) or instr_rm (from instruction decoding)
+    val fpSubModules = fpModules.map(_._1.asInstanceOf[FPUSubModule])
+    fpSubModules.foreach(mod => {
+      val instr_rm = mod.io.in.bits.uop.ctrl.fpu.rm
+      mod.rm := Mux(instr_rm =/= 7.U, instr_rm, csr_frm)
+    })
+    // fflags is selected by arbSelReg
+    require(config.hasFastUopOut, "non-fast not implemented")
+    val fflagsSel = fpModules.map{ case (fu, (cfg, i)) =>
+      val fflagsValid = arbSelReg(i)
+      val fflags = fu.asInstanceOf[FPUSubModule].fflags
+      val fflagsBits = if (cfg.fastImplemented) fflags else RegNext(fflags)
+      (fflagsValid, fflagsBits)
+    }
+    io.out.bits.fflags := Mux1H(fflagsSel.map(_._1), fflagsSel.map(_._2))
   }
 
   if (config.fuConfigs.contains(stdCfg)) {
@@ -97,6 +109,8 @@ class AluExeUnit(implicit p: Parameters) extends ExeUnit(AluExeUnitCfg)
 class JumpCSRExeUnit(implicit p: Parameters) extends ExeUnit(JumpCSRExeUnitCfg)
 class JumpExeUnit(implicit p: Parameters) extends ExeUnit(JumpExeUnitCfg)
 class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
+class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
+class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
 
 object ExeUnit {
   def apply(cfg: ExuConfig)(implicit p: Parameters): ExeUnit = {
@@ -115,3 +129,4 @@ object ExeUnit {
     }
   }
 }
+

@@ -176,3 +176,4 @@ class MinimalSimConfig(n: Int = 1) extends Config(
     )
   })
 )
+
