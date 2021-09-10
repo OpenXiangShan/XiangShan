@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import freechips.rocketchip.tilelink._
+import difftest._
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -262,6 +263,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   // raw data
   val refill_data = Reg(Vec(blockRows, UInt(rowBits.W)))
+  val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
   val new_data    = Wire(Vec(blockRows, UInt(rowBits.W)))
   val new_mask    = Wire(Vec(blockRows, UInt(rowBytes.W)))
 
@@ -277,6 +279,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
 
+  val hasData = RegInit(true.B)
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
     when (io.mem_grant.fire()) {
@@ -286,6 +289,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
           val idx = (refill_count << log2Floor(beatRows)) + i.U
           refill_data(idx) := mergePutData(io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i), new_data(idx), new_mask(idx))
         }
+        hasData := true.B
       } .otherwise {
         // Grant
 
@@ -301,7 +305,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         for (i <- 0 until blockRows) {
           refill_data(i) := new_data(i)
         }
+        hasData := false.B
       }
+      refill_data_raw(refill_count) := io.mem_grant.bits.data
     }
 
     when (refill_done) {
@@ -329,6 +335,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill.valid := RegNext(state === s_refill_resp && io.mem_grant.fire()) && should_refill_data
   io.refill.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill.bits.data := refill_data_splited(RegNext(refill_count))
+  io.refill.bits.data_raw := refill_data_raw.asUInt()
+  io.refill.bits.hasdata := hasData
+  io.refill.bits.refill_done := RegNext(refill_done)
   when(io.refill.fire()){
     io.refill.bits.dump()
     XSDebug("refill_count %d\n", RegNext(refill_count));
@@ -510,6 +519,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.refill.valid := refill_arb.io.out.valid
   io.refill.bits  := refill_arb.io.out.bits
   refill_arb.io.out.ready := true.B
+
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := hardId.U
+    difftest.io.valid := io.refill.valid && io.refill.bits.hasdata && io.refill.bits.refill_done
+    difftest.io.addr := io.refill.bits.addr
+    difftest.io.data := io.refill.bits.data_raw.asTypeOf(difftest.io.data)
+  }
 
   // one refill at a time
   OneHot.checkOneHot(refill_arb.io.in.map(r => r.valid))

@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
+import huancun.{CacheParameters, HCCacheParameters}
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -29,19 +30,21 @@ case class SoCParameters
   cores: List[XSCoreParameters],
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
+  L3NBanks: Int = 4,
+  L3CacheParams: HCCacheParameters = HCCacheParameters(
+    name = "l3",
+    level = 3,
+    ways = 8,
+    sets = 2048 // 1MB per bank
+  ),
   useFakeL3Cache: Boolean = false,
-  L3Size: Int = 4 * 1024 * 1024 // 4MB
 ){
   val PAddrBits = cores.map(_.PAddrBits).reduce((x, y) => if(x > y) x else y)
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
-  val L3NBanks = 4
-  val L3NWays = 8
-
   // on chip network configurations
   val L3OuterBusWidth = 256
-
 }
 
 trait HasSoCParameter {
@@ -55,11 +58,8 @@ trait HasSoCParameter {
   // L3 configurations
   val useFakeL3Cache = soc.useFakeL3Cache
   val L3InnerBusWidth = soc.L3InnerBusWidth
-  val L3Size = soc.L3Size
   val L3BlockSize = soc.L3BlockSize
   val L3NBanks = soc.L3NBanks
-  val L3NWays = soc.L3NWays
-  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
 
   // on chip network configurations
   val L3OuterBusWidth = soc.L3OuterBusWidth
