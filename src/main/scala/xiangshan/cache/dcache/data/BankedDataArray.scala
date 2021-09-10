@@ -84,6 +84,11 @@ class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
   val addr = Bits(PAddrBits.W)
 }
 
+class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
+{
+  val rmask = Bits(DCacheBanks.W)
+}
+
 // Now, we can write a cache-block in a single cycle
 class L1BankedDataWriteReq(implicit p: Parameters) extends L1BankedDataReadReq
 {
@@ -116,7 +121,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReq)))
     // main pipeline read / write line req
-    val readline = Flipped(DecoupledIO(new L1BankedDataReadReq))
+    val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
     val write = Flipped(DecoupledIO(new L1BankedDataWriteReq))
     // data bank read resp (all banks)
     val resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
@@ -138,8 +143,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
       }
     }
     when(io.readline.valid) {
-      XSDebug(s"DataArray Read Line, valid way_en: %x addr: %x\n",
-        io.readline.bits.way_en, io.readline.bits.addr)
+      XSDebug(s"DataArray Read Line, valid way_en: %x addr: %x rmask %x\n",
+        io.readline.bits.way_en, io.readline.bits.addr, io.readline.bits.rmask)
     }
   }
 
@@ -277,7 +282,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
   val rwhazard = io.write.valid
-  val rrhazard = io.readline.valid
+  val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
     set_addrs(rport_index) := addrToDCacheSet(io.read(rport_index).bits.addr)
     bank_addrs(rport_index) := addrToDCacheBank(io.read(rport_index).bits.addr)
@@ -294,20 +299,26 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
   val row_error = Wire(Vec(DCacheBanks, Bool()))
   val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
-  val rw_bank_conflict = io.readline.valid && (io.read(0).valid || io.read(1).valid)
-  val bank_conflict = rw_bank_conflict || rr_bank_conflict
+  val rrl_bank_conflict_0 = io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
+  val rrl_bank_conflict_1 = io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+  val rw_bank_conflict_0 = io.read(0).valid && rwhazard
+  val rw_bank_conflict_1 = io.read(1).valid && rwhazard
   val perf_multi_read = io.read(0).valid && io.read(1).valid
-  io.bank_conflict_fast(0) := rw_bank_conflict
+  io.bank_conflict_fast(0) := rw_bank_conflict_0 || rrl_bank_conflict_0
   io.bank_conflict_slow(0) := RegNext(io.bank_conflict_fast(0))
-  io.bank_conflict_fast(1) := bank_conflict
+  io.bank_conflict_fast(1) := rw_bank_conflict_1 || rrl_bank_conflict_1 || rr_bank_conflict
   io.bank_conflict_slow(1) := RegNext(io.bank_conflict_fast(1))
   XSPerfAccumulate("data_array_multi_read", perf_multi_read) 
   XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict) 
-  XSPerfAccumulate("data_array_rw_bank_conflict", rw_bank_conflict) 
-  XSPerfAccumulate("data_array_bank_conflict", bank_conflict) 
+  XSPerfAccumulate("data_array_rrl_bank_conflict_0", rrl_bank_conflict_0) 
+  XSPerfAccumulate("data_array_rrl_bank_conflict_1", rrl_bank_conflict_1) 
+  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict_0) 
+  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict_1) 
   XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid) 
-  XSPerfAccumulate("data_array_access_0", io.read(0).valid) 
-  XSPerfAccumulate("data_array_access_1", io.read(1).valid) 
+  XSPerfAccumulate("data_array_read_0", io.read(0).valid) 
+  XSPerfAccumulate("data_array_read_1", io.read(1).valid) 
+  XSPerfAccumulate("data_array_read_line", io.readline.valid) 
+  XSPerfAccumulate("data_array_write", io.write.valid) 
 
   for (bank_index <- 0 until DCacheBanks) {
     //     Set Addr & Read Way Mask
@@ -326,18 +337,19 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
       bank_addrs(i) === bank_index.U && io.read(i).valid
     })))
-    val bank_way_en = Mux(io.readline.valid, 
+    val readline_match = io.readline.valid && io.readline.bits.rmask(bank_index)
+    val bank_way_en = Mux(readline_match, 
       io.readline.bits.way_en,
       Mux(bank_addr_matchs(0), way_en(0), way_en(1))
     )
-    val bank_set_addr = Mux(io.readline.valid, 
+    val bank_set_addr = Mux(readline_match, 
       addrToDCacheSet(io.readline.bits.addr),
       Mux(bank_addr_matchs(0), set_addrs(0), set_addrs(1))
     )
 
     // read raw data
     val data_bank = data_banks(bank_index)
-    data_bank.io.r.en := bank_addr_matchs.asUInt.orR || io.readline.valid
+    data_bank.io.r.en := bank_addr_matchs.asUInt.orR || readline_match
     data_bank.io.r.way_en := bank_way_en
     data_bank.io.r.addr := bank_set_addr
     bank_result(bank_index).raw_data := data_bank.io.r.data
