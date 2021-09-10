@@ -22,6 +22,7 @@ import chisel3.util._
 import utils._
 import freechips.rocketchip.tilelink._
 import bus.tilelink.TLMessages._
+import difftest._
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -434,6 +435,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.refill.bits  := refill_arb.io.out.bits
   refill_arb.io.out.ready := true.B
 
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := hardId.U
+    difftest.io.valid := io.refill.valid && io.refill.bits.hasdata && io.refill.bits.refill_done
+    difftest.io.addr := io.refill.bits.addr
+    difftest.io.data := io.refill.bits.data_raw.asTypeOf(difftest.io.data)
+  }
+
   // one refill at a time
   OneHot.checkOneHot(refill_arb.io.in.map(r => r.valid))
 
@@ -514,7 +524,4 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
   io.full := num_valids === cfg.nMissEntries.U
   XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
-
-  // If miss queue refill the second time after main pipe, how many conflicts will it bring?
-  XSPerfAccumulate("refill_2nd_time_conflict", RegNext(io.pipe_resp.valid) && io.refill.valid)
 }
