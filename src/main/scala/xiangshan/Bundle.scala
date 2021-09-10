@@ -215,7 +215,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     }
   }
   def srcIsReady: Vec[Bool] = {
-    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcImm(t) || s === SrcState.rdy })
+    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcOrImm(t) || s === SrcState.rdy })
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
