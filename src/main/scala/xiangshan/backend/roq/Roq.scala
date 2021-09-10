@@ -754,6 +754,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     wdata.ftqOffset := req.cf.ftqOffset
     wdata.pc := req.cf.pc
     wdata.crossPageIPFFix := req.cf.crossPageIPFFix
+    wdata.isFused := req.ctrl.isFused
     // wdata.exceptionVec := req.cf.exceptionVec
   }
   dispatchData.io.raddr := commitReadAddr_next
@@ -813,6 +814,14 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   fflagsDataRead := fflagsDataModule.io.rdata
 
 
+  val instrCnt = RegInit(0.U(64.W))
+  val fuseCommitCnt = PopCount(io.commits.valid.zip(io.commits.info).map{ case (v, i) => v && i.isFused =/= 0.U })
+  val trueCommitCnt = commitCnt +& fuseCommitCnt
+  val retireCounter = Mux(state === s_idle, trueCommitCnt, 0.U)
+  instrCnt := instrCnt + retireCounter
+  io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
+  io.roqFull := !allowEnqueue
+
   /**
     * debug info
     */
@@ -836,14 +845,15 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RoqSize, PopCount((0 until RoqSize).map(valid(_))), !allowEnqueue)
-  io.roqFull := !allowEnqueue
-  XSPerfAccumulate("commitInstr", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid)))
+  XSPerfAccumulate("commitUop", Mux(io.commits.isWalk, 0.U, commitCnt))
+  XSPerfAccumulate("commitInstr", Mux(io.commits.isWalk, 0.U, trueCommitCnt))
   val commitIsMove = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).ctrl.isMove)
   XSPerfAccumulate("commitInstrMove", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))
   if (EnableIntMoveElim) {
     val commitMoveElim = deqPtrVec.map(_.value).map(ptr => debug_microOp(ptr).debugInfo.eliminatedMove)
     XSPerfAccumulate("commitInstrMoveElim", Mux(io.commits.isWalk, 0.U, PopCount(io.commits.valid zip commitMoveElim map { case (v, e) => v && e })))
   }
+  XSPerfAccumulate("commitInstrFused", Mux(io.commits.isWalk, 0.U, fuseCommitCnt))
   val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
   val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
   XSPerfAccumulate("commitInstrLoad", Mux(io.commits.isWalk, 0.U, PopCount(commitLoadValid)))
@@ -869,10 +879,6 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
   XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
 
-  val instrCnt = RegInit(0.U(64.W))
-  val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
-  instrCnt := instrCnt + retireCounter
-  io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
@@ -910,8 +916,10 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
       difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
       difftest.io.instr    := RegNext(uop.cf.instr)
+      difftest.io.special  := RegNext(uop.ctrl.isFused =/= 0.U)
       if (EnableIntMoveElim) {
-        // when committing an eliminated move instruction, we must make sure that skip is properly set to false (output from EXU is random value)
+        // when committing an eliminated move instruction,
+        // we must make sure that skip is properly set to false (output from EXU is random value)
         difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
       } else {
         difftest.io.skip     := RegNext(exuOut.isMMIO || exuOut.isPerfCnt)

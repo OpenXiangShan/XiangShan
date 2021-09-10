@@ -147,7 +147,9 @@ case class XSCoreParameters
     fetchi = true,
     useDmode = false,
     sameCycle = true,
+    normalNWays = 32,
     normalReplacer = Some("plru"),
+    superNWays = 4,
     superReplacer = Some("plru"),
     shouldBlock = true
   ),
