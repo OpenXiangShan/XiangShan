@@ -271,22 +271,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   // time out assert
   for (i <- 0 until MSHRSize + 1) {
-    val wait_counter = RegInit(0.U(32.W))
-    when (waiting_resp(i)) {
-      wait_counter := wait_counter  + 1.U
-    }.otherwise {
-      wait_counter := 0.U
-    }
-    assert(wait_counter <= 2000.U, "ptw mem resp time out wait_resp")
-  }
-  for (i <- 0 until MSHRSize + 1) {
-    val wait_counter = RegInit(0.U(32.W))
-    when (sfence_latch(i)) {
-      wait_counter := wait_counter  + 1.U
-    }.otherwise {
-      wait_counter := 0.U
-    }
-    assert(wait_counter <= 2000.U, "ptw mem resp time out sfence_latch")
+    TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
+    TimeOutAssert(sfence_latch(i), timeOutThreshold, s"ptw mem resp time out sfence_latch${i}")
   }
 }
 

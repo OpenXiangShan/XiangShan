@@ -630,3 +630,15 @@ object OneCycleValid {
     valid
   }
 }
+
+object TimeOutAssert {
+  def apply(signal: Bool, threshold: Int, message: String): Unit = {
+    val counter = RegInit(0.U(32.W))
+    when (signal) {
+      counter := counter + 1.U
+    }.otherwise {
+      counter := 0.U
+    }
+    assert(counter <= threshold.U, message)
+  }
+}
