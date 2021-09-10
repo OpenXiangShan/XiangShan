@@ -35,6 +35,7 @@ import utils._
 import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -152,14 +153,20 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
+  val isFused = UInt(3.W)
 
-  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
+  private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
+    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+
+  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
-    val signals =
-      Seq(srcType(0), srcType(1), srcType(2), fuType, fuOpType, rfWen, fpWen,
-        isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
-    signals zip decoder map { case (s, d) => s := d }
+    allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
+    this
+  }
+
+  def decode(bit: List[BitPat]): CtrlSignals = {
+    allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
     this
   }
 }
@@ -300,6 +307,7 @@ class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
