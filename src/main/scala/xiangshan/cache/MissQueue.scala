@@ -157,6 +157,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   val refill_data = Reg(Vec(blockRows, UInt(rowBits.W)))
+  val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
   val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
   val new_mask = Wire(Vec(blockRows, UInt(rowBytes.W)))
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
@@ -168,6 +169,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     // we only need to merge data for Store
     new_mask(i) := Mux(req.isStore, req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
   }
+  val hasData = RegInit(true.B)
   when (io.mem_grant.fire()) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
@@ -180,6 +182,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       }
 
       w_grantlast := w_grantlast || refill_done
+
+      hasData := true.B
     }.otherwise {
       // Grant
 
@@ -197,7 +201,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       }
 
       w_grantlast := true.B
+
+      hasData := false.B
     }
+
+    refill_data_raw(refill_count) := io.mem_grant.bits.data
   }
 
   when (io.mem_finish.fire()) {
@@ -258,6 +266,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.refill.valid := RegNext(!w_grantlast && s_acquire && io.mem_grant.fire()) && should_refill_data
   io.refill.bits.addr := RegNext(req.addr + (refill_count << refillOffBits))
   io.refill.bits.data := refill_data_splited(RegNext(refill_count))
+  io.refill.bits.refill_done := RegNext(refill_done && io.mem_grant.fire())
+  io.refill.bits.hasdata := hasData
+  io.refill.bits.data_raw := refill_data_raw.asUInt
 
   io.mem_acquire.valid := !s_acquire
   val grow_param = req.coh.onAccess(req.cmd)._2
