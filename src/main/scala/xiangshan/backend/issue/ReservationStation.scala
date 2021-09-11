@@ -97,50 +97,28 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     params.numEnq += 1
     params.exuCfg.get.fuConfigs
   }
-
   def addEarlyWakeup(num: Int) = {
     params.numFastWakeup += num
   }
-
   def addWakeup(num: Int) = {
     params.numWakeup += num
   }
-
-  def canAccept(fuType: UInt): Bool = {
-    params.exuCfg.get.canAccept(fuType)
-  }
-
-  def intSrcCnt = {
-    params.exuCfg.get.intSrcCnt
-  }
-
-  def fpSrcCnt = {
-    params.exuCfg.get.fpSrcCnt
-  }
-
-  def numOutFastWakeupPort = {
-    if (params.fixedLatency >= 0) params.numDeq else 0
-  }
-
-  def numExtFastWakeupPort = {
-    if (params.exuCfg.get == LdExeUnitCfg) params.numDeq else 0
-  }
-
-  def numAllFastWakeupPort = numOutFastWakeupPort + numExtFastWakeupPort
-
-  def numIntWbPort = {
+  def canAccept(fuType: UInt): Bool = params.exuCfg.get.canAccept(fuType)
+  def intSrcCnt = params.exuCfg.get.intSrcCnt
+  def fpSrcCnt = params.exuCfg.get.fpSrcCnt
+  def numOutFastWakeupPort: Int = if (params.fixedLatency >= 0) params.numDeq else 0
+  def numExtFastWakeupPort: Int = if (params.exuCfg.get == LdExeUnitCfg) params.numDeq else 0
+  def numAllFastWakeupPort: Int = numOutFastWakeupPort + numExtFastWakeupPort
+  def numIntWbPort: Int = {
     val privatePort = params.exuCfg.get.writeIntRf && params.exuCfg.get.wbIntPriority <= 1
     if (privatePort) params.numDeq else 0
   }
-
-  def numFpWbPort = {
+  def numFpWbPort: Int = {
     val privatePort = params.exuCfg.get.writeFpRf && params.exuCfg.get.wbFpPriority <= 1
     if (privatePort) params.numDeq else 0
   }
-
-  def wbIntPriority = params.exuCfg.get.wbIntPriority
-
-  def wbFpPriority = params.exuCfg.get.wbFpPriority
+  def wbIntPriority: Int = params.exuCfg.get.wbIntPriority
+  def wbFpPriority: Int = params.exuCfg.get.wbFpPriority
 
   override def toString: String = params.toString
 
@@ -271,7 +249,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   statusArray.io.flush := io.flush
 
   /**
-    * S0: Update status (from dispatch and wakeup)
+    * S0: Update status (from dispatch and wakeup) and schedule possible instructions to issue.
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
@@ -286,9 +264,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).enable := io.fromDispatch(i).fire()
     statusArray.io.update(i).addr := select.io.allocate(i).bits
     statusArray.io.update(i).data.valid := true.B
-    statusArray.io.update(i).data.scheduled := (if (params.delayedRf) needFpSource(i) else false.B)
-    statusArray.io.update(i).data.blocked := (if (params.checkWaitBit) io.fromDispatch(i).bits.cf.loadWaitBit else false.B)
-    statusArray.io.update(i).data.credit := (if (params.delayedRf) Mux(needFpSource(i), 2.U, 0.U) else 0.U)
+    statusArray.io.update(i).data.scheduled := params.delayedRf.B && needFpSource(i)
+    statusArray.io.update(i).data.blocked := params.checkWaitBit.B && io.fromDispatch(i).bits.cf.loadWaitBit
+    statusArray.io.update(i).data.credit := Mux(params.delayedRf.B && needFpSource(i), 2.U, 0.U)
     statusArray.io.update(i).data.srcState := VecInit(io.fromDispatch(i).bits.srcIsReady.take(params.numSrc))
     statusArray.io.update(i).data.psrc := VecInit(io.fromDispatch(i).bits.psrc.take(params.numSrc))
     statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(params.numSrc))
@@ -313,12 +291,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.wakeup(i).bits := wakeupDest(i)
   }
 
-  /**
-    * S1: scheduler (and regfile read)
-    */
-  // pipeline registers for stage one
-  val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
-
   // select the issue instructions
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
@@ -326,14 +298,25 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
   val oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
 
+  // send address to read uop and data
+  // For better timing, we read the payload array before we determine which instruction to issue.
+  // In this way, selection and payload read happen simultaneously.
+  for (i <- 0 until params.numDeq) {
+    payloadArray.io.read(i).addr := select.io.grant(i).bits
+  }
+  payloadArray.io.read(params.numDeq).addr := oldestSel.bits
+
+  /**
+    * S1: read uop and data
+    */
   val issueVec = Wire(Vec(params.numDeq, Valid(UInt(params.numEntries.W))))
   // When the reservation station has oldestFirst, we need to issue the oldest instruction if possible.
   // However, in this case, the select policy always selects at maximum numDeq instructions to issue.
   // Thus, we need an arbitration between the numDeq + 1 possibilities.
   // For better performance, we always let the last issue port be the victim.
-  def doIssueArbitration(oldest: Valid[UInt], in: Seq[ValidIO[UInt]], out: Seq[ValidIO[UInt]]): Bool = {
+  def doIssueArbitration(oldest: Valid[UInt], in: Vec[ValidIO[UInt]], out: Vec[ValidIO[UInt]]): Bool = {
     require(in.length == out.length)
-    in.zip(out).foreach{ case (i, o) => i <> o }
+    out := in
     // When the oldest is not matched in in.dropRight(1), we always select the oldest.
     // We don't need to compare the last selection here, because we will select the oldest when
     // either the last matches the oldest or the last does not match the oldest.
@@ -348,14 +331,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // returns whether the oldest is selected
     oldestNotSelected
   }
-  val oldestOverride = doIssueArbitration(oldestSel, select.io.grant, issueVec)
+  val oldestOverride = doIssueArbitration(RegNext(oldestSel), RegNext(select.io.grant), issueVec)
 
-  // For better timing, we read the payload array before we determine which instruction to issue.
-  // In this way, selection and payload read happen simultaneously.
-  for (i <- 0 until params.numDeq) {
-    payloadArray.io.read(i).addr := select.io.grant(i).bits
-  }
-  payloadArray.io.read(params.numDeq).addr := oldestSel.bits
+  // pipeline registers for stage one
+  val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
   // Do the read data arbitration
   s1_out.zip(payloadArray.io.read.dropRight(1)).foreach{ case (o, r) => o.bits.uop := r.data }
   when (oldestOverride) {
