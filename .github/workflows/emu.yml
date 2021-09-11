@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ false_hit_fix, master ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
