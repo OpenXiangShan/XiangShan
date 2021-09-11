@@ -37,8 +37,9 @@ package object xiangshan {
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
     def isFp(srcType: UInt) = srcType===fp
-    def isPcImm(srcType: UInt) = srcType(0)
-    def isRegFp(srcType: UInt) = !srcType(0)
+    def isPcOrImm(srcType: UInt) = srcType(0)
+    def isRegOrFp(srcType: UInt) = !srcType(1)
+    def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
   }

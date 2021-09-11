@@ -54,6 +54,7 @@ case class RSParams
   def allWakeup: Int = numFastWakeup + numWakeup
   def indexWidth: Int = log2Up(numEntries)
   def oldestFirst: Boolean = exuCfg.get != AluExeUnitCfg
+  def needScheduledBit: Boolean = hasFeedback || delayedRf
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -274,16 +275,17 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
-  val doEnqueue = Wire(Vec(params.numEnq, Bool()))
-  val needFpSource = Wire(Vec(params.numEnq, Bool()))
+  // agreement with dispatch: don't enqueue when io.redirect.valid
+  val doEnqueue = io.fromDispatch.map(_.fire && !io.redirect.valid && !io.flush)
+  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.roqIdx.needFlush(io.redirect, io.flush))
+  XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
+  val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(1, 1, false))
   for (i <- 0 until params.numEnq) {
     io.fromDispatch(i).ready := select.io.allocate(i).valid
-    // agreement with dispatch: don't enqueue when io.redirect.valid
-    doEnqueue(i) := io.fromDispatch(i).fire() && !io.redirect.valid && !io.flush
-    statusArray.io.update(i).enable := doEnqueue(i)
+    // for better timing, we update statusArray no matter there's a flush or not
+    statusArray.io.update(i).enable := io.fromDispatch(i).fire()
     statusArray.io.update(i).addr := select.io.allocate(i).bits
     statusArray.io.update(i).data.valid := true.B
-    needFpSource(i) := io.fromDispatch(i).bits.needRfRPort(1, 1, false)
     statusArray.io.update(i).data.scheduled := (if (params.delayedRf) needFpSource(i) else false.B)
     statusArray.io.update(i).data.blocked := (if (params.checkWaitBit) io.fromDispatch(i).bits.cf.loadWaitBit else false.B)
     statusArray.io.update(i).data.credit := (if (params.delayedRf) Mux(needFpSource(i), 2.U, 0.U) else 0.U)
@@ -293,11 +295,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.roqIdx := io.fromDispatch(i).bits.roqIdx
     statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
     statusArray.io.update(i).data.isFirstIssue := true.B
+    // for better power, we don't write payload array when there's a redirect
     payloadArray.io.write(i).enable := doEnqueue(i)
     payloadArray.io.write(i).addr := select.io.allocate(i).bits
     payloadArray.io.write(i).data := io.fromDispatch(i).bits
   }
-  val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
+
   // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
   if (params.checkWaitBit) {
     statusArray.io.stIssuePtr := io.checkwait.get.stIssuePtr
@@ -320,6 +323,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // Option 1: normal selection (do not care about the age)
   select.io.request := statusArray.io.canIssue
   // Option 2: select the oldest
+  val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
   val oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
 
   val issueVec = Wire(Vec(params.numDeq, Valid(UInt(params.numEntries.W))))
@@ -428,7 +432,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   dataArray.io.multiWrite.zipWithIndex.foreach { case (w, i) =>
     w.enable := broadcastValid(i)
     for (j <- 0 until params.numSrc) {
-      w.addr(j) := VecInit(slowWakeupMatchVec.map(_ (j)(i))).asUInt
+      w.addr(j) := VecInit(slowWakeupMatchVec.map(_(j)(i))).asUInt
     }
     w.data := broadcastValue(i)
   }
