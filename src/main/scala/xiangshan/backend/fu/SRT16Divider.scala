@@ -148,9 +148,9 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt,
                             Mux(aTooSmall, 0.U,
-                              Mux(dSign, -aReg, aReg)
+                              Mux(dSign && ~(aReg.andR()), -aReg, aReg) //  signed 2^(len-1)
                             ))
-  val remSpecial = Mux(dIsZero, 0.U,
+  val remSpecial = Mux(dIsZero, aReg,
                             Mux(aTooSmall, aReg, 0.U))
   val quotSpecialReg = RegEnable(quotSpecial, state(s_pre_1))
   val remSpecialReg = RegEnable(remSpecial, state(s_pre_1))
