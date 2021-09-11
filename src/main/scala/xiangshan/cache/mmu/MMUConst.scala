@@ -39,7 +39,8 @@ case class TLBParameters
   superReplacer: Option[String] = Some("plru"),
   normalAssociative: String = "fa", // "fa", "sa", "da", "sa" is not supported
   superAssociative: String = "fa", // must be fa
-  normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
+  normalAsVictim: Boolean = false, // when get replace from fa, store it into sa
+  superAsVictim: Boolean = false, // when get replace from sa, store it into fa
   outReplace: Boolean = false,
   shouldBlock: Boolean = false // only for perf, not support for io
 )

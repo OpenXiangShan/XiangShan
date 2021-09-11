@@ -160,7 +160,8 @@ case class XSCoreParameters
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
     superNWays = 8,
-    normalAsVictim = true,
+//    normalAsVictim = true,
+    superAsVictim = true,
     outReplace = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -170,7 +171,8 @@ case class XSCoreParameters
     normalAssociative = "sa",
     normalReplacer = Some("setplru"),
     superNWays = 8,
-    normalAsVictim = true,
+    // normalAsVictim = true,
+    superAsVictim = true,
     outReplace = true
   ),
   btlbParameters: TLBParameters = TLBParameters(

@@ -268,7 +268,7 @@ object TlbCmd {
   def isAtom(a: UInt) = a(2)
 }
 
-class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends  TlbBundle {
+class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends TlbBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))

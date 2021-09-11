@@ -35,6 +35,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   if (q.sameCycle) {
     require(q.normalAssociative == "fa")
   }
+  require(!(q.normalAsVictim && q.superAsVictim))
 
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
@@ -56,7 +57,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val valid = req.map(_.valid)
 
   def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
-
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   // Normal page && Super page
@@ -69,7 +69,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nWays = q.normalNWays,
     sramSinglePort = sramSinglePort,
     normalPage = true,
-    superPage = false
+    superPage = false,
+    q.normalAsVictim
   )
   val superPage = TlbStorage(
     name = "super",
@@ -79,8 +80,9 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = q.superNSets,
     nWays = q.superNWays,
     sramSinglePort = sramSinglePort,
-    normalPage = q.normalAsVictim,
+    normalPage = q.normalAsVictim || q.superAsVictim,
     superPage = true,
+    q.superAsVictim
   )
 
 
@@ -97,9 +99,14 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     )
   }
 
+  normalPage.victim.in <> DontCare
+  superPage.victim.in <> DontCare
+  if (q.normalAsVictim) {
+    normalPage.victim.in <> superPage.victim.out
+  } else if (q.superAsVictim) (
+    normalPage.victim.out <> superPage.victim.in
+  )
 
-  normalPage.victim.in <> superPage.victim.out
-  normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
 
@@ -205,15 +212,18 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   }
 
   val refill = ptw.resp.fire() && !sfence.valid
+  val resp_level = ptw.resp.bits.entry.level.get
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
-    else refill && ptw.resp.bits.entry.level.get === 2.U },
+      else refill && resp_level === 2.U
+    },
     wayIdx = normal_refill_idx,
     data = ptw.resp.bits
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
-    else refill && ptw.resp.bits.entry.level.get =/= 2.U },
+      else refill && resp_level =/= 2.U
+    },
     wayIdx = super_refill_idx,
     data = ptw.resp.bits
   )

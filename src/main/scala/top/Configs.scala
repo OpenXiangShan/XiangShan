@@ -127,7 +127,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
           superNWays = 4,
-          normalAsVictim = true,
+//          normalAsVictim = true,
+          superAsVictim = true,
           outReplace = true
         ),
         sttlbParameters = TLBParameters(
@@ -136,7 +137,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalNWays = 1, // when fa or sa
           normalAssociative = "sa",
           normalReplacer = Some("setplru"),
-          normalAsVictim = true,
+//          normalAsVictim = true,
+          superAsVictim = true,
           superNWays = 4,
           outReplace = true
         ),

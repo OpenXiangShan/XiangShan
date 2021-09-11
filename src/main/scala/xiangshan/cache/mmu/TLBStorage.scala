@@ -32,7 +32,8 @@ class TLBFA(
   nWays: Int,
   sramSinglePort: Boolean,
   normalPage: Boolean,
-  superPage: Boolean
+  superPage: Boolean,
+  asvictim: Boolean
 )(implicit p: Parameters) extends TlbModule{
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
@@ -49,7 +50,9 @@ class TLBFA(
     val vpn = req.bits.vpn
     val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
 
-    val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
+    val refill_mask = if (sameCycle) 0.U(nWays.W)
+                      else if (asvictim) Mux(io.w.valid || io.victim.in.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
+                      else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit(entries.zip(v zip refill_mask.asBools).map{case (e, m) => e.hit(vpn) && m._1 && !m._2})
 
     hitVec.suggestName("hitVec")
@@ -68,9 +71,18 @@ class TLBFA(
     resp.bits.hitVec.suggestName("hitVec")
   }
 
+  // victim input has lower priority than ptw resp
+  // fa may write two entries at same time, but we only have one wayIdx
+  if (asvictim) {
+    when (io.victim.in.valid) {
+      v(io.w.bits.wayIdx) := true.B
+      entries(io.w.bits.wayIdx) := { if(superPage) n_to_ns(io.victim.in.bits) else io.victim.in.bits }
+    }
+  }
+
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data)
+    entries(io.w.bits.wayIdx) := Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)
   }
 
   val sfence = io.sfence
@@ -96,9 +108,14 @@ class TLBFA(
     }
   }
 
-  val victim_idx = io.w.bits.wayIdx
-  io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).level.getOrElse(3.U) === 2.U
-  io.victim.out.bits := ns_to_n(entries(victim_idx))
+  if (!asvictim) {
+    val victim_idx = io.w.bits.wayIdx
+    io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).level.getOrElse(3.U) === 2.U
+    io.victim.out.bits := ns_to_n(entries(victim_idx))
+  } else {
+    io.victim.out := DontCare
+  }
+
 
   def ns_to_n(ns: TlbEntry): TlbEntry = {
     val n = Wire(new TlbEntry(pageNormal = true, pageSuper = false))
@@ -107,7 +124,14 @@ class TLBFA(
     n.tag := ns.tag
     n
   }
-
+  def n_to_ns(n: TlbEntry): TlbEntry = {
+    val ns = Wire(new TlbEntry(pageNormal = true, pageSuper = true))
+    ns.level.map(_ := 2.U)
+    ns.perm := n.perm
+    ns.ppn := n.ppn
+    ns.tag := n.tag
+    ns
+  }
   XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
 
@@ -130,7 +154,8 @@ class TLBSA(
   nWays: Int,
   sramSinglePort: Boolean,
   normalPage: Boolean,
-  superPage: Boolean
+  superPage: Boolean,
+  asvictim: Boolean
 )(implicit p: Parameters) extends TlbModule {
   require(!superPage, "super page should use reg/fa")
   require(!sameCycle, "sram needs next cycle")
@@ -141,7 +166,8 @@ class TLBSA(
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
 
   for (i <- 0 until ports) { // duplicate sram
-    val entries = Module(new SRAMTemplate(
+//    val entries = Module(new SRAMTemplate(
+    val entries = Module(new SRAMTemplateTemp(
       new TlbEntry(normalPage, superPage),
       set = nSets,
       way = nWays,
@@ -157,7 +183,7 @@ class TLBSA(
     val ridx = get_idx(vpn, nSets)
     val vidx = RegNext(Mux(req.fire(), v(ridx), VecInit(Seq.fill(nWays)(false.B))))
     entries.io.r.req.valid := req.valid
-    entries.io.r.req.bits.apply(setIdx = ridx)
+    entries.r_apply(setIdx = ridx)
 
     val data = entries.io.r.resp.data
     val hitVec = VecInit(data.zip(vidx).map{ case (e, vi) => e.hit(vpn_reg) && vi})
@@ -172,20 +198,42 @@ class TLBSA(
     resp.bits.perm.suggestName("perm")
     resp.bits.hitVec.suggestName("hitVec")
 
-    entries.io.w.apply(
-      valid = io.w.valid || io.victim.in.valid,
-      setIdx = Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)),
-      data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
-      waymask = UIntToOH(io.w.bits.wayIdx)
-    )
+    if (asvictim) {
+      entries.w_apply(
+        valid = io.w.valid || io.victim.in.valid,
+        setIdx = Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)),
+        data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
+        waymask = UIntToOH(io.w.bits.wayIdx)
+      )
+    } else {
+      entries.w_apply(
+        valid = io.w.valid,
+        setIdx = get_idx(io.w.bits.data.entry.tag, nSets),
+        data = (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)),
+        waymask = UIntToOH(io.w.bits.wayIdx)
+      )
+    }
+
+    entries.io.r_asy.req.setIdx := get_idx(io.w.bits.data.entry.tag, nSets)
+    if (i == 0) {
+      if (!asvictim) {
+        io.victim.out.valid := v(get_idx(io.w.bits.data.entry.tag, nSets))(io.w.bits.wayIdx) && io.w.valid
+        io.victim.out.bits := entries.io.r_asy.resp.data(io.w.bits.wayIdx)
+      } else {
+        io.victim.out := DontCare
+      }
+    }
   }
 
   when (io.w.valid) {
     v(get_idx(io.w.bits.data.entry.tag, nSets))(io.w.bits.wayIdx) := true.B
   }
-  when (io.victim.in.valid) {
-    v(get_idx(io.victim.in.bits.tag, nSets))(io.w.bits.wayIdx) := true.B
+  if (asvictim) {
+    when (io.victim.in.valid) {
+      v(get_idx(io.victim.in.bits.tag, nSets))(io.w.bits.wayIdx) := true.B
+    }
   }
+
 
   val sfence = io.sfence
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
@@ -209,8 +257,6 @@ class TLBSA(
       }
     }
   }
-
-  io.victim.out := DontCare
 
   XSPerfAccumulate(s"access", io.r.req.map(_.valid.asUInt()).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
@@ -258,16 +304,67 @@ object TlbStorage {
     nWays: Int,
     sramSinglePort: Boolean,
     normalPage: Boolean,
-    superPage: Boolean
+    superPage: Boolean,
+    asVictim: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage, asVictim))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {
-       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBSA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage, asVictim))
        storage.suggestName(s"tlb_${name}_sa")
        storage.io
     }
   }
+}
+
+class SRAMTemplateTemp[T <: Data](gen: T, set: Int, way: Int, singlePort: Boolean = false)(implicit p: Parameters)
+  extends 
+  XSModule {
+  val io = IO(new Bundle {
+    val r = new Bundle {
+      val req = Flipped(Decoupled(new Bundle {
+        val setIdx = Output(UInt(log2Up(set).W))
+      }))
+      val resp = new Bundle {
+        val data = Output(Vec(way, gen))
+      }
+    }
+    val r_asy = new Bundle {
+      val req = Flipped(new Bundle {
+        val setIdx = Output(UInt(log2Up(set).W))
+      })
+      val resp = new Bundle {
+        val data = Output(Vec(way, gen))
+      }
+    }
+    val w = Flipped(Decoupled(new Bundle {
+      val setIdx = Output(UInt(log2Up(set).W))
+      val data = Output(gen)
+      val wayMask = Output(UInt(way.W))
+    })
+
+    )
+  })
+  def r_apply(setIdx: UInt) = {
+    this.io.r.req.bits.setIdx := setIdx
+  }
+  def w_apply(valid: Bool, setIdx: UInt, data: T, waymask: UInt) = {
+    this.io.w.valid := valid
+    this.io.w.bits.setIdx := setIdx
+    this.io.w.bits.data := data
+    this.io.w.bits.wayMask := waymask
+  }
+  val entries = Reg(Vec(set, Vec(way, gen)))
+  when (io.w.valid) {
+    val wayIdx = OHToUInt(io.w.bits.wayMask)
+    entries(io.w.bits.setIdx)(wayIdx) := io.w.bits.data
+  }
+  io.w.ready := true.B
+  
+  io.r.req.ready := !io.w.valid
+  io.r.resp.data := RegNext(entries(io.r.req.bits.setIdx))
+  
+  io.r_asy.resp.data := entries(io.r_asy.req.setIdx)
 }
