@@ -109,7 +109,8 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
     ALUOpType.or    -> io.or,
     ALUOpType.xnor  -> io.xnor,
     ALUOpType.xor   -> io.xor,
-    ALUOpType.orh48 -> io.orh48
+    ALUOpType.orh48 -> io.orh48,
+    ALUOpType.orc_b -> io.orcb
   ).map(x => (x._1(2, 0) === io.func(2, 0), x._2)))
   val maskedLogicRes = Cat(Fill(63, ~io.func(3)), 1.U(1.W)) & logicResSel
 
@@ -117,10 +118,10 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
     ALUOpType.sext_b -> io.sextb,
     ALUOpType.sext_h -> io.sexth,
     ALUOpType.zext_h -> io.zexth,
-    ALUOpType.orc_b  -> io.orcb,
     ALUOpType.rev8   -> io.rev8,
     ALUOpType.szewl1 -> Cat(0.U(31.W), io.src(31, 0), 0.U(1.W)),
     ALUOpType.szewl2 -> Cat(0.U(30.W), io.src(31, 0), 0.U(2.W)),
+    ALUOpType.szewl3 -> Cat(0.U(29.W), io.src(31, 0), 0.U(3.W)),
     ALUOpType.byte2  -> Cat(0.U(56.W), io.src(15, 8))
   ).map(x => (x._1(2, 0) === io.func(2, 0), x._2)))
 
@@ -187,30 +188,29 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   // For 64-bit adder:
   // BITS(2, 1): shamt (0, 1, 2, 3)
   // BITS(3   ): different fused cases
-  val shaddShamt = func(2,1)
-  addModule.io.src(0) := (Cat(Fill(32, func(0)), Fill(32,1.U)) & src1) << shaddShamt
-  addModule.io.src(1) := src2
+  val wordMaskAddSource = Cat(Fill(32, func(0)), Fill(32, 1.U)) & src1
+  val shaddSource = VecInit(Seq(
+    Cat(wordMaskAddSource(62, 0), 0.U(1.W)),
+    Cat(wordMaskAddSource(61, 0), 0.U(2.W)),
+    Cat(wordMaskAddSource(60, 0), 0.U(3.W)),
+    Cat(wordMaskAddSource(59, 0), 0.U(4.W))
+  ))
+  val sraddSource = VecInit(Seq(
+    ZeroExt(src1(63, 29), XLEN),
+    ZeroExt(src1(63, 30), XLEN),
+    ZeroExt(src1(63, 31), XLEN),
+    ZeroExt(src1(63, 32), XLEN)
+  ))
   // TODO: use decoder or other libraries to optimize timing
-  when (func(4)) {
-    addModule.io.src(0) := ZeroExt(src1(0), XLEN)
-  }
-  when (func(3)) {
-    val sourceVec = VecInit(Seq(
-      Cat(src1(59, 0), 0.U(4.W)),
-      ZeroExt(src1(63, 30), XLEN),
-      ZeroExt(src1(63, 31), XLEN),
-      ZeroExt(src1(63, 32), XLEN)
-    ))
-    addModule.io.src(0) := sourceVec(func(2, 1))
-  }
+  // Now we assume shadd has the worst timing.
+  addModule.io.src(0) := Mux(ALUOpType.isShAdd(func), shaddSource(func(2, 1)),
+    Mux(ALUOpType.isSrAdd(func), sraddSource(func(2, 1)),
+    Mux(ALUOpType.isAddOddBit(func), ZeroExt(src1(0), XLEN), wordMaskAddSource))
+  )
+  addModule.io.src(1) := src2
   val add = addModule.io.add
-  // For 32-bit adder:
-  // BITS(4   ): different fused cases
-  // BITS(2, 1): result mask (ffffffff, 0x1, 0xff)
-  addModule.io.srcw := src1(31,0)
-  when (func(4)) {
-    addModule.io.srcw := ZeroExt(src1(0), XLEN)
-  }
+  // For 32-bit adder: its source comes from lower 32bits or lowest bit.
+  addModule.io.srcw := Mux(ALUOpType.isAddOddBit(func), ZeroExt(src1(0), XLEN), src1(31,0))
   val byteMask = Cat(Fill(56, ~func(1)), 0xff.U(8.W))
   val bitMask = Cat(Fill(63, ~func(2)), 0x1.U(1.W))
   val addw = addModule.io.addw & byteMask & bitMask
