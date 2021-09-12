@@ -189,4 +189,12 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
       }
     }
   })
+
+  // By default, instructions do not have exceptions when they enter the function units.
+  fuBlock.io.issue.map(_.bits.uop.clearExceptions())
+  // For exe units that don't have exceptions, we assign zeroes to their exception vector.
+  for ((cfg, wb) <- flattenFuConfigs.zip(io.fuWriteback).filterNot(_._1.hasExceptionOut)) {
+    wb.bits.uop.clearExceptions()
+  }
+
 }
