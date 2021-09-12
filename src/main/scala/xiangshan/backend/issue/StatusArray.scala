@@ -220,7 +220,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   }
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
-  io.canIssue := VecInit(statusArray.map(_.valid).zip(readyVec).map{ case (v, r) => v && r}).asUInt
+  io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.flushed := flushedVec.asUInt
 

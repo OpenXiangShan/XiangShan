@@ -59,7 +59,7 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   }
 }
 
-class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
+class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val enq = Vec(numEnq, Input(UInt(numEntries.W)))
     val deq = Input(UInt(numEntries.W))
@@ -103,13 +103,13 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
     VecInit((0 until numEntries).map(j => get_next_age(i, j))).asUInt.andR
   })).asUInt
 
-  io.out := RegNext(nextBest)
-  XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= io.out, "age error\n")
+  io.out := (if (regOut) RegNext(nextBest) else nextBest)
+  XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= RegNext(nextBest), "age error\n")
 }
 
 object AgeDetector {
   def apply(numEntries: Int, enq: Vec[UInt], deq: UInt, canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
-    val age = Module(new AgeDetector(numEntries, enq.length))
+    val age = Module(new AgeDetector(numEntries, enq.length, regOut = false))
     age.io.enq := enq
     age.io.deq := deq
     val out = Wire(Valid(UInt(deq.getWidth.W)))
