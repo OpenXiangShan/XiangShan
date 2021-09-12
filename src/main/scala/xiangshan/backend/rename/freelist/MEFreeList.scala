@@ -108,11 +108,6 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val decreaseSpecRefCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // used when walking ME instructions
   val decreaseSpecRefCounterValueVec = Wire(Vec(CommitWidth, UInt(log2Ceil(CommitWidth-1).W)))
 
-  val oldPdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val oldPdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val pdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val pdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-
   // handle duplicate INC requirements on cmtCounter and archRefCounter
   val old_pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
   val pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
@@ -127,44 +122,33 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
     }).reverse)
   }
 
-  def getCompareResult(m: MixedVec[UInt]): (Vec[Bool], Vec[Bool], Vec[UInt]) = {
+  def getCompareResult(m: MixedVec[UInt]): (Vec[Bool], Vec[UInt]) = {
     val is_last = WireInit(VecInit(Seq.tabulate(CommitWidth){
       case last if (last == CommitWidth - 1) => true.B
       case i => !(Cat((i until (CommitWidth - 1)).map(j => m(j)(i))).orR)
-    }))
-    val has_same_before = WireInit(VecInit(Seq.tabulate(CommitWidth){
-      case 0 => false.B
-      case i => m(i - 1).orR()
     }))
     val times = WireInit(VecInit(Seq.tabulate(CommitWidth){
       case 0 => 0.U(log2Ceil(CommitWidth-1).W)
       case i => PopCount(m(i - 1))
     }))
-    (is_last, has_same_before, times)
+    (is_last, times)
   }
 
-  val (old_pdests_is_last, old_pdests_has_same_before, old_pdests_times) = getCompareResult(old_pdests_cmp)
-  val (pdests_is_last, pdests_has_same_before, pdests_times) = getCompareResult(pdests_cmp)
+  val (old_pdests_is_last, old_pdests_times) = getCompareResult(old_pdests_cmp)
+  val (pdests_is_last, pdests_times) = getCompareResult(pdests_cmp)
 
   for (i <- 0 until CommitWidth) {
 
     val preg = freeRegCandidates(i) // physical register waiting for freeing
 
-    oldPdestIsUnique(i) := old_pdests_is_last(i) && !old_pdests_has_same_before(i)
-    oldPdestNotUniqueButLast(i) := old_pdests_is_last(i) && old_pdests_has_same_before(i)
-
-    pdestIsUnique(i) := pdests_is_last(i) && !pdests_has_same_before(i)
-    pdestNotUniqueButLast(i) := pdests_is_last(i) && pdests_has_same_before(i)
-
-    freeVec(i) := ((oldPdestIsUnique(i) && (cmtCounter(preg) === Mux(updateSpecRefCounter(preg), specRefCounterNext(preg), specRefCounter(preg)))) 
-      || (oldPdestNotUniqueButLast(i) && (cmtCounter(preg) + old_pdests_times(i) === Mux(updateSpecRefCounter(preg), specRefCounterNext(preg), specRefCounter(preg))))) &&
+    freeVec(i) := (cmtCounter(preg) + old_pdests_times(i) === specRefCounter(preg)) &&
       freeReq(i) && freePhyReg(i) =/= 0.U && !walk
 
-    updateCmtCounterVec(i) := freeReq(i) && (oldPdestIsUnique(i) || oldPdestNotUniqueButLast(i)) && freePhyReg(i) =/= 0.U && !walk
+    updateCmtCounterVec(i) := freeReq(i) && old_pdests_is_last(i) && freePhyReg(i) =/= 0.U && !walk
 
-    updateArchRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && (pdestIsUnique(i) || pdestNotUniqueButLast(i)) && freePhyReg(i) =/= 0.U && !walk
+    updateArchRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && pdests_is_last(i) && freePhyReg(i) =/= 0.U && !walk
 
-    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && freePhyReg(i) =/= 0.U && walk && (pdestIsUnique(i) || pdestNotUniqueButLast(i))
+    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && freePhyReg(i) =/= 0.U && walk && pdests_is_last(i)
     decreaseSpecRefCounterValueVec(i) := pdests_times(i) + 1.U
 
 
@@ -179,14 +163,6 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       freeList(idx) := freeRegCandidates(i)
       XSDebug(p"[$i] Free List enqueue: [ preg ${freeRegCandidates(i)} ]\n")
     }
-
-    XSDebug(p"decReq:${freeReq(i)},dec_old_pdst:${freePhyReg(i)},dec_is_me:${eliminatedMove(i)},dec_pdest:${multiRefPhyReg(i)}(isWalk:${walk})\n")
-    XSDebug(freeReq(i), p"port[$i]:old_pdest:${freePhyReg(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
-    XSDebug(freeReq(i) && eliminatedMove(i), p"port[$i]:pdest:${multiRefPhyReg(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
-    XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
-    XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(freeReq(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${freeReq(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
-    XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
-    XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
   }
 
   // set counters-update flag
@@ -206,9 +182,8 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
         updateCmtCounter(preg) := true.B
         // cmt counter after incrementing/ stay not change
         // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
-        cmtCounterNext(preg) := Mux(freeReq(idx) && oldPdestIsUnique(idx), cmtCounter(preg) + 1.U,
-                        Mux(freeReq(idx) && oldPdestNotUniqueButLast(idx), cmtCounter(preg) + 1.U + old_pdests_times(idx), 
-                                                /* stay not change */ cmtCounter(preg)))
+        cmtCounterNext(preg) := Mux(freeReq(idx), cmtCounter(preg) + 1.U + old_pdests_times(idx),
+                                                /* stay not change */ cmtCounter(preg))
       }
     }
 
@@ -216,8 +191,9 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       when (ready && preg.U === multiRefPhyReg(idx)) {
         updateArchRefCounter(preg) := true.B
         // arch ref counter of pdest
-        archRefCounterNext(multiRefPhyReg(idx)) := Mux(/* if this is me inst */freeReq(idx) && eliminatedMove(idx) && pdestIsUnique(idx), archRefCounter(multiRefPhyReg(idx)) + 1.U, 
-          Mux(freeReq(idx) && eliminatedMove(idx) && pdestNotUniqueButLast(idx), archRefCounter(multiRefPhyReg(idx)) + 1.U + pdests_times(idx), archRefCounter(multiRefPhyReg(idx))))
+        archRefCounterNext(multiRefPhyReg(idx)) := 
+          Mux(/* if this is me inst */freeReq(idx) && eliminatedMove(idx) && pdests_is_last(idx),
+          archRefCounter(multiRefPhyReg(idx)) + 1.U + pdests_times(idx), archRefCounter(multiRefPhyReg(idx)))
       }
     }
   }
