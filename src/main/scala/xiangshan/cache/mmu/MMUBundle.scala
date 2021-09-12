@@ -437,7 +437,16 @@ abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
-  val reserved  = UInt(pteResLen.W)
+  if(HasSvbpmtExtension)
+  {
+    val n = Bool()
+    //TODO : implement function of pbmt bits
+    val pbmt = UInt(2.W)
+    val reserved = UInt((pteResLen - 3).W)
+  }else
+  {
+    val reserved  = UInt(pteResLen.W)
+  }
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
   val perm = new Bundle {
