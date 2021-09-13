@@ -279,6 +279,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.redirect <> ctrlBlock.io.redirect
   memScheduler.io.flush <> ctrlBlock.io.flush
   memBlock.io.issue <> memScheduler.io.issue
+  // By default, instructions do not have exceptions when they enter the function units.
+  memBlock.io.issue.map(_.bits.uop.clearExceptions())
   memScheduler.io.writeback <> rfWriteback
   memScheduler.io.fastUopIn <> allFastUop1
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc

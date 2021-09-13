@@ -389,7 +389,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       val wbIdx = io.exeWbResults(i).bits.uop.roqIdx.value
       debug_microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       debug_microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
-      debug_microOp(wbIdx).cf.replayInst := io.exeWbResults(i).bits.uop.cf.replayInst
+      debug_microOp(wbIdx).ctrl.replayInst := io.exeWbResults(i).bits.uop.ctrl.replayInst
       debug_microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
       debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
@@ -430,6 +430,10 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
   io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
   io.flushOut.bits.replayInst := deqHasReplayInst
+  XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
+  XSPerfAccumulate("exception_num", io.flushOut.valid && exceptionEnable)
+  XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
+  XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
   val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable)
   io.exception.valid := RegNext(exceptionHappen)
@@ -708,7 +712,7 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       val block_wb = 
         selectAll(io.exeWbResults(i).bits.uop.cf.exceptionVec, false, true).asUInt.orR || 
         io.exeWbResults(i).bits.uop.ctrl.flushPipe ||
-        io.exeWbResults(i).bits.uop.cf.replayInst
+        io.exeWbResults(i).bits.uop.ctrl.replayInst
       writebacked(wbIdx) := !block_wb
     }
   }
@@ -766,21 +770,29 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.enq(i).bits.roqIdx := io.enq.req(i).bits.roqIdx
     exceptionGen.io.enq(i).bits.exceptionVec := selectFrontend(io.enq.req(i).bits.cf.exceptionVec, false, true)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.ctrl.flushPipe
-    exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.cf.replayInst
+    exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.ctrl.replayInst
     assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
   }
 
   // TODO: don't hard code these idxes
+  val numIntWbPorts = exuParameters.AluCnt + exuParameters.LduCnt + exuParameters.MduCnt
   // CSR is after Alu and Load
   def csr_wb_idx = exuParameters.AluCnt + exuParameters.LduCnt
   def atomic_wb_idx = exuParameters.AluCnt // first port for load
   def load_wb_idxes = Seq(exuParameters.AluCnt + 1) // second port for load
-  def store_wb_idxes = (0 until 2).map(_ + NRIntWritePorts + NRFpWritePorts)
+  def store_wb_idxes = io.exeWbResults.indices.takeRight(2)
   val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
   all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
     exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
+    // A temporary fix for float load writeback
+    // TODO: let int/fp load use the same two wb ports
+    if (wb_index == atomic_wb_idx || load_wb_idxes.contains(wb_index)) {
+      when (io.exeWbResults(wb_index - exuParameters.AluCnt + numIntWbPorts + exuParameters.FmacCnt).valid) {
+        exceptionGen.io.wb(index).valid := true.B
+      }
+    }
     exceptionGen.io.wb(index).bits.roqIdx       := io.exeWbResults(wb_index).bits.uop.roqIdx
     val selectFunc = if (wb_index == csr_wb_idx) selectCSR _
     else if (wb_index == atomic_wb_idx) selectAtomics _
@@ -791,14 +803,14 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
     exceptionGen.io.wb(index).bits.exceptionVec := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
     exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
-    exceptionGen.io.wb(index).bits.replayInst    := io.exeWbResults(wb_index).bits.uop.cf.replayInst
+    exceptionGen.io.wb(index).bits.replayInst   := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
     exceptionGen.io.wb(index).bits.singleStep   := false.B
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
-  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + NRIntWritePorts)
-  val fmiscWb = (0 until exuParameters.FmacCnt).map(_ + NRIntWritePorts + exuParameters.FmacCnt + 2)
-  val i2fWb = Seq(NRIntWritePorts - 1) // last port in int
+  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + numIntWbPorts)
+  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt + 2)
+  val i2fWb = Seq(numIntWbPorts - 1) // last port in int
   val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
     (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
   }).map(_._1)

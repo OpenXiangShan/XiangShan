@@ -111,9 +111,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  // This inst will flush all the pipe when it is the oldest inst in ROB,
-  // then replay from this inst itself
-  val replayInst = Bool() 
 }
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
@@ -154,6 +151,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
+  // This inst will flush all the pipe when it is the oldest inst in ROB,
+  // then replay from this inst itself
+  val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
     isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
@@ -219,6 +219,12 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
+  def clearExceptions(): MicroOp = {
+    cf.exceptionVec.map(_ := false.B)
+    ctrl.replayInst := false.B
+    ctrl.flushPipe := false.B
+    this
+  }
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
