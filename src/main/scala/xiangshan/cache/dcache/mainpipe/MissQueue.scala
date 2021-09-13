@@ -304,6 +304,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   pipe_req.source := req.source
   pipe_req.cmd    := req.cmd
   pipe_req.addr   := req.addr
+  pipe_req.vaddr   := req.vaddr
   pipe_req.store_data := refill_data.asUInt
   // full overwrite
   pipe_req.store_mask := Fill(cfg.blockBytes, "b1".U)
