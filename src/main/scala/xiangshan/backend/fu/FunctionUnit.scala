@@ -50,7 +50,8 @@ case class FuConfig
   latency: HasFuLatency = CertainLatency(0),
   fastUopOut: Boolean = false,
   fastImplemented: Boolean = false,
-  hasInputBuffer: Boolean = false
+  hasInputBuffer: Boolean = false,
+  hasExceptionOut: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }

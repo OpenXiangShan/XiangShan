@@ -239,7 +239,7 @@ object XDecode extends DecodeConstants {
     SH2ADDU_W   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.alu, ALUOpType.sh2add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
     SH3ADDU_W   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.alu, ALUOpType.sh3add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
     ADDU_W      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.alu, ALUOpType.add_uw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    SLLIU_W     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.alu, ALUOpType.slli_uw, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    SLLIU_W     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.alu, ALUOpType.slli_uw, Y, N, N, N, N, N, N, SelImm.IMM_I)
   )
 }
 
@@ -492,12 +492,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
-  var decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
+  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
   cs.singleStep := false.B
+  cs.replayInst := false.B
+
+  cs.isFused := 0.U
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr

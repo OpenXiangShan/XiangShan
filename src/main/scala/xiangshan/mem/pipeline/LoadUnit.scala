@@ -279,7 +279,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
-  io.out.bits.uop.cf.replayInst := s2_forward_fail && !s2_mmio // if forward fail, repaly this inst
+  // if forward fail, replay this inst
+  io.out.bits.uop.ctrl.replayInst := s2_forward_fail && !s2_mmio
   io.out.bits.mmio := s2_mmio
   
   // For timing reasons, sometimes we can not let

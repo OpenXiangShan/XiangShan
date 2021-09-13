@@ -822,6 +822,19 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   for (c <- io.fromBackend.roq_commits) {
     when(c.valid) {
       commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := c_commited
+      // TODO: remove this
+      // For instruction fusions, we also update the next instruction
+      when (c.bits.isFused === 1.U) {
+        commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset + 1.U) := c_commited
+      }.elsewhen(c.bits.isFused === 2.U) {
+        commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset + 2.U) := c_commited
+      }.elsewhen(c.bits.isFused === 3.U) {
+        val index = (c.bits.ftqIdx + 1.U).value
+        commitStateQueue(index)(0) := c_commited
+      }.elsewhen(c.bits.isFused === 4.U) {
+        val index = (c.bits.ftqIdx + 1.U).value
+        commitStateQueue(index)(1) := c_commited
+      }
     }
   }
   

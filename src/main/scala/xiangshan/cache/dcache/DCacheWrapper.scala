@@ -164,6 +164,10 @@ class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
   val data   = UInt(l1BusDataWidth.W)
+  // for debug usage
+  val data_raw = UInt((cfg.blockBytes * 8).W)
+  val hasdata = Bool()
+  val refill_done = Bool()
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
   }
@@ -469,6 +473,7 @@ class AMOHelper() extends ExtModule {
     val rdata  = IO(Output(UInt(64.W)))
 //  })
 }
+
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 

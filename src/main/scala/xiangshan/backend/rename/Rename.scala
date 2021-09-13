@@ -149,7 +149,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     // }
 
 
-    uops(i).roqIdx := roqIdxHead + i.U
+    uops(i).roqIdx := roqIdxHead + PopCount(io.in.take(i).map(_.valid))
 
     io.out(i).valid := io.in(i).valid && intFreeList.canAllocate && fpFreeList.canAllocate && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)

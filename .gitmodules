@@ -1,15 +1,12 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/OpenXiangShan/rocket-chip.git
-[submodule "block-inclusivecache-sifive"]
-	path = block-inclusivecache-sifive
-	url = https://github.com/OpenXiangShan/block-inclusivecache-sifive.git
 [submodule "chiseltest"]
 	path = chiseltest
 	url = https://github.com/ucb-bar/chisel-testers2.git
 [submodule "api-config-chipsalliance"]
 	path = api-config-chipsalliance
-	url = https://github.com/chipsalliance/api-config-chipsalliance
+	url = https://github.com/chipsalliance/api-config-chipsalliance.git
 [submodule "berkeley-hardfloat"]
 	path = berkeley-hardfloat
 	url = https://github.com/OpenXiangShan/berkeley-hardfloat.git
@@ -19,6 +16,9 @@
 [submodule "ready-to-run"]
 	path = ready-to-run
 	url = https://github.com/OpenXiangShan/ready-to-run
+[submodule "huancun"]
+	path = huancun
+	url = https://github.com/OpenXiangshan/huancun.git
 [submodule "fudian"]
 	path = fudian
 	url = https://github.com/OpenXiangShan/fudian.git
