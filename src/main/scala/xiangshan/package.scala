@@ -485,7 +485,8 @@ package object xiangshan {
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency() // TODO: need rewrite latency structure, not just this value
+    latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
+    hasExceptionOut = true
   )
 
   val csrCfg = FuConfig(
@@ -497,7 +498,8 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false
+    hasRedirect = false,
+    hasExceptionOut = true
   )
 
   val i2fCfg = FuConfig(
@@ -596,7 +598,7 @@ package object xiangshan {
     null, // DontCare
     null,
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val staCfg = FuConfig(
@@ -604,7 +606,7 @@ package object xiangshan {
     null,
     null,
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val stdCfg = FuConfig(
@@ -618,7 +620,7 @@ package object xiangshan {
     null,
     null,
     FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)

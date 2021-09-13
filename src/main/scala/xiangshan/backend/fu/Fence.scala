@@ -72,7 +72,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   io.out.valid := state =/= s_idle && state =/= s_wait
   io.out.bits.data := DontCare
   io.out.bits.uop := uop
-  io.out.bits.uop.cf.exceptionVec(illegalInstr) := uop.cf.exceptionVec(illegalInstr) || (func === FenceOpType.sfence && disableSfence)
+  io.out.bits.uop.cf.exceptionVec(illegalInstr) := func === FenceOpType.sfence && disableSfence
 
   XSDebug(valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InroqIdx:${io.in.bits.uop.roqIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")

@@ -67,6 +67,7 @@ case class ExuConfig
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
+  val hasExceptionOut = fuConfigs.map(_.hasExceptionOut).reduce(_ || _)
 
   val latency: HasFuLatency = {
     val lats = fuConfigs.map(_.latency)
