@@ -268,7 +268,7 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     //req register
     val req = Reg(new ICacheMissReq)
     val req_idx = req.vSetIdx         //virtual index
-    val req_tag = get_tag(req.addr)           //physical tag
+    val req_tag = get_phy_tag(req.addr)           //physical tag
     val req_waymask = req.waymask
 
     val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
