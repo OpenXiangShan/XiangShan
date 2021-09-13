@@ -141,6 +141,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     assert(!sfence_latch(i) || waiting_resp(i)) // when sfence_latch wait for mem resp, waiting_resp should be true
   }
 
+  val mq_out = missQueue.io.out
   val mq_mem = missQueue.io.mem
   mq_mem.req_mask := waiting_resp.take(MSHRSize)
   fsm.io.mem.mask := waiting_resp.last
@@ -151,6 +152,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   mem_arb.io.out.ready := mem.a.ready
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
+
   when (mem_arb.io.out.fire()) {
     req_addr_low(mem_arb.io.out.bits.id) := mem_arb.io.out.bits.addr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
     waiting_resp(mem_arb.io.out.bits.id) := true.B
@@ -166,14 +168,19 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   mem.a.valid := mem_arb.io.out.valid
   mem.d.ready := true.B
   // mem -> data buffer
-  val refill_data = Reg(Vec(MemReqWidth, Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W))))
+  val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
   val mem_resp_done = refill_helper._3
   val mem_resp_from_mq = from_missqueue(mem.d.bits.source)
   when (mem.d.valid) {
     assert(mem.d.bits.source <= MSHRSize.U)
-    refill_data(mem.d.bits.source)(refill_helper._4) := mem.d.bits.data
+    refill_data(refill_helper._4) := mem.d.bits.data
   }
+  // save only one pte for each id
+  // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
+  val resp_pte = VecInit((0 until MemReqWidth).map(i =>
+    DataHoldBypass(get_part(refill_data, RegNext(req_addr_low(mem.d.bits.source))), RegNext(i.U === mem.d.bits.source && mem.d.valid))
+  ))
   // mem -> control signal
   when (mem_resp_done) {
     waiting_resp(mem.d.bits.source) := false.B
@@ -185,16 +192,16 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   // mem -> fsm
   fsm.io.mem.req.ready := mem.a.ready
   fsm.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
-  fsm.io.mem.resp.bits := get_part(refill_data(MSHRSize), req_addr_low(MSHRSize))
+  fsm.io.mem.resp.bits := resp_pte.last
   // mem -> cache
   val refill_from_mq = RegNext(mem_resp_from_mq)
   cache.io.refill.valid := RegNext(mem_resp_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
-  cache.io.refill.bits.ptes := refill_data(RegNext(mem.d.bits.source)).asUInt
+  cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
-  val mq_out = missQueue.io.out
+
   mq_out.ready := MuxLookup(missQueue.io.out.bits.source, false.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
   for (i <- 0 until PtwWidth) {
@@ -204,9 +211,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := mq_out.valid && mq_out.bits.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(get_part(refill_data(mq_out.bits.id),
-      req_addr_low(mq_out.bits.id)),
-      mq_out.bits.vpn)
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(mq_out.bits.id), mq_out.bits.vpn)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -271,22 +276,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   // time out assert
   for (i <- 0 until MSHRSize + 1) {
-    val wait_counter = RegInit(0.U(32.W))
-    when (waiting_resp(i)) {
-      wait_counter := wait_counter  + 1.U
-    }.otherwise {
-      wait_counter := 0.U
-    }
-    assert(wait_counter <= 2000.U, "ptw mem resp time out wait_resp")
-  }
-  for (i <- 0 until MSHRSize + 1) {
-    val wait_counter = RegInit(0.U(32.W))
-    when (sfence_latch(i)) {
-      wait_counter := wait_counter  + 1.U
-    }.otherwise {
-      wait_counter := 0.U
-    }
-    assert(wait_counter <= 2000.U, "ptw mem resp time out sfence_latch")
+    TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
+    TimeOutAssert(sfence_latch(i), timeOutThreshold, s"ptw mem resp time out sfence_latch${i}")
   }
 }
 

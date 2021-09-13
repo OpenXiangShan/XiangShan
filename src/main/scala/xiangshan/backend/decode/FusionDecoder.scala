@@ -212,6 +212,25 @@ class FusedSzewl2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   def fusionName: String = "slli32_srli30"
 }
 
+// Case: shift zero-extended word left by three
+// Source: `slli r1, r0, 32` + `srli r1, r0, 29`
+// Target: `szewl3 r1, r0` (customized internal opcode)
+class FusedSzewl3(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SLLI && instr(0)(25, 20) === 32.U
+  def inst2Cond = instr(1) === Instructions.SRLI && instr(1)(25, 20) === 29.U
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.ZEXT_H)
+    // replace the fuOpType with szewl3
+    cs.fuOpType := ALUOpType.szewl3
+    cs.lsrc(0) := instr1Rs1
+    cs
+  }
+
+  def fusionName: String = "slli32_srli29"
+}
+
 // Case: get the second byte
 // Source: `srli r1, r0, 8` + `andi r1, r1, 255`
 // Target: `byte2 r1, r0` (customized internal opcode)
@@ -249,6 +268,26 @@ class FusedSh4add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
   }
 
   def fusionName: String = "slli4_add"
+}
+
+// Case: shift right by 29 and add
+// Source: `srli r1, r0, 29` + `add r1, r1, r2`
+// Target: `sr29add r1, r0, r2` (customized internal opcode)
+class FusedSr29add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.SRLI && instr(0)(25, 20) === 29.U
+  def inst2Cond = instr(1) === Instructions.ADD
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
+  def target: CtrlSignals = {
+    val cs = getBaseCS(Instructions.SH3ADD)
+    // replace the fuOpType with sr29add
+    cs.fuOpType := ALUOpType.sr29add
+    cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := Mux(destToRs1, instr2Rs2, instr2Rs1)
+    cs
+  }
+
+  def fusionName: String = "srli29_add"
 }
 
 // Case: shift right by 30 and add
@@ -473,8 +512,10 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedSh3add(pair),
       new FusedSzewl1(pair),
       new FusedSzewl2(pair),
+      new FusedSzewl3(pair),
       new FusedByte2(pair),
       new FusedSh4add(pair),
+      new FusedSr29add(pair),
       new FusedSr30add(pair),
       new FusedSr31add(pair),
       new FusedSr32add(pair),

@@ -37,8 +37,9 @@ package object xiangshan {
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
     def isFp(srcType: UInt) = srcType===fp
-    def isPcImm(srcType: UInt) = srcType(0)
-    def isRegFp(srcType: UInt) = !srcType(0)
+    def isPcOrImm(srcType: UInt) = srcType(0)
+    def isRegOrFp(srcType: UInt) = !srcType(1)
+    def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
   }
@@ -213,6 +214,7 @@ package object xiangshan {
     def xor         = "b0_00_00_100".U
     def xnor        = "b0_00_00_101".U
     def orh48       = "b0_00_00_110".U
+    def orc_b       = "b0_00_00_111".U
 
     def andlsb      = "b0_00_11_000".U
     def andnlsb     = "b0_00_11_001".U
@@ -224,13 +226,11 @@ package object xiangshan {
     def sext_b      = "b0_00_01_000".U
     def sext_h      = "b0_00_01_001".U
     def zext_h      = "b0_00_01_010".U
+    def rev8        = "b0_00_01_011".U
     // TOOD: optimize it
-    def szewl1      = "b0_00_01_011".U
-    def orc_b       = "b0_00_01_100".U
-    def rev8        = "b0_00_01_101".U
-    // TOOD: optimize it
-    def szewl2      = "b0_00_01_110".U
-    // TOOD: optimize it
+    def szewl1      = "b0_00_01_100".U
+    def szewl2      = "b0_00_01_101".U
+    def szewl3      = "b0_00_01_110".U
     def byte2       = "b0_00_01_111".U
 
     def beq         = "b0_00_10_000".U
@@ -243,14 +243,18 @@ package object xiangshan {
     // add & sub optype
     def add_uw       = "b0_01_00_000".U
     def add          = "b0_01_00_001".U
-    def oddadd       = "b0_01_10_001".U
-    def sh1add_uw    = "b0_01_00_010".U
-    def sh1add       = "b0_01_00_011".U
-    def sh2add_uw    = "b0_01_00_100".U
-    def sh2add       = "b0_01_00_101".U
-    def sh3add_uw    = "b0_01_00_110".U
-    def sh3add       = "b0_01_00_111".U
-    def sh4add       = "b0_01_01_001".U
+
+    def oddadd       = "b0_01_11_001".U
+
+    def sh1add_uw    = "b0_01_10_000".U
+    def sh1add       = "b0_01_10_001".U
+    def sh2add_uw    = "b0_01_10_010".U
+    def sh2add       = "b0_01_10_011".U
+    def sh3add_uw    = "b0_01_10_100".U
+    def sh3add       = "b0_01_10_101".U
+    def sh4add       = "b0_01_10_111".U
+
+    def sr29add      = "b0_01_01_001".U
     def sr30add      = "b0_01_01_011".U
     def sr31add      = "b0_01_01_101".U
     def sr32add      = "b0_01_01_111".U
@@ -282,7 +286,7 @@ package object xiangshan {
     def addw        = "b1_01_00_001".U
     def addwbyte    = "b1_01_00_011".U
     def addwbit     = "b1_01_00_101".U
-    def oddaddw     = "b1_01_10_001".U
+    def oddaddw     = "b1_01_11_001".U
     def subw        = "b1_11_00_000".U
     def sllw        = "b1_10_00_000".U
     def srlw        = "b1_10_01_001".U
@@ -297,6 +301,9 @@ package object xiangshan {
     def isBranch(func: UInt) = func(6, 3) === "b0010".U
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
+    def isAddOddBit(func: UInt) = func(4, 3) === "b11".U(2.W)
+    def isShAdd(func: UInt) = func(4, 3) === "b10".U(2.W)
+    def isSrAdd(func: UInt) = func(4, 3) === "b01".U(2.W)
 
     def apply() = UInt(8.W)
   }
