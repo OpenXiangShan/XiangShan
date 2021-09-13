@@ -27,7 +27,7 @@ import scala.math.max
 
 // TODO: refactor dcache parameter system
 trait HasBankedDataArrayParameters extends {
-  val DCacheSets = 64
+  val DCacheSets = 256
   val DCacheWays = 8
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64
@@ -42,6 +42,8 @@ trait HasBankedDataArrayParameters extends {
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheTagOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheIndexOffset = DCacheBankOffset
+  val DCacheSameVPAddrLength = 12
+  val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
 
   def addrToDCacheBank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)

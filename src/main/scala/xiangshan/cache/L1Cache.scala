@@ -50,8 +50,8 @@ trait HasL1CacheParameters extends HasXSParameter
   def untagBits = blockOffBits + idxBits
   // 4K page
   def pgIdxBits = 12
-  // def pgUntagBits = untagBits // min pgIdxBits
-  def pgUntagBits = untagBits min pgIdxBits
+  def pgUntagBits = untagBits // min pgIdxBits
+  // def pgUntagBits = untagBits min pgIdxBits
   def tagBits = PAddrBits - pgUntagBits
 
   // the basic unit at which we store contents

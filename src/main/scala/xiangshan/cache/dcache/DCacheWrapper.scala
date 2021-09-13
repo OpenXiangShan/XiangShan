@@ -32,7 +32,7 @@ import device.RAMHelper
 // It's a virtually indexed, physically tagged cache.
 case class DCacheParameters
 (
-  nSets: Int = 64,
+  nSets: Int = 256,
   nWays: Int = 8,
   rowBits: Int = 128,
   tagECC: Option[String] = None,
@@ -86,7 +86,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
   // this is a VIPT L1 cache
-  require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
+  // require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
   // require(rowWords == 1, "Our DCache Implementation assumes rowWords == 1")
 }
 
@@ -121,6 +121,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
+  val vaddr  = UInt(VAddrBits.W)
   val addr   = UInt(PAddrBits.W)
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
@@ -188,7 +189,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheLineReq )
+  val req  = DecoupledIO(new DCacheLineReq)
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 

@@ -29,6 +29,8 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val source = UInt()
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
+  // TODO: l2 should use vaddr index to probe l1
+  val vaddr  = UInt(VAddrBits.W) 
   val param  = UInt(TLPermissions.bdWidth.W)
 
   def dump() = {
@@ -87,6 +89,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.probe := true.B
     pipe_req.probe_param := req.param
     pipe_req.addr   := req.addr
+    pipe_req.vaddr  := req.vaddr
 
     when (io.pipe_req.fire()) {
       state := s_invalid
@@ -120,6 +123,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   req.source := io.mem_probe.bits.source
   req.opcode := io.mem_probe.bits.opcode
   req.addr := io.mem_probe.bits.address
+  req.vaddr := io.mem_probe.bits.address // 128KBL1: FIXME: use vaddr given by l2
   req.param := io.mem_probe.bits.param
 
   io.mem_probe.ready := allocate

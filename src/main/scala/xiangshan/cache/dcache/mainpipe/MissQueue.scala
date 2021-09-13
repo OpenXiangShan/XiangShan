@@ -28,6 +28,7 @@ class MissReq(implicit p: Parameters) extends DCacheBundle
   val cmd    = UInt(M_SZ.W)
   // must be aligned to block
   val addr   = UInt(PAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W)
 
   // store
   val store_data   = UInt((cfg.blockBytes * 8).W)
@@ -348,6 +349,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     pipe_req.source := req.source
     pipe_req.cmd    := req.cmd
     pipe_req.addr   := req.addr
+    // provide vaddr so that mainpipe can get the right index
+    pipe_req.vaddr   := req.vaddr 
     pipe_req.store_data := refill_data.asUInt
     // full overwrite
     pipe_req.store_mask := Fill(cfg.blockBytes, "b1".U)
@@ -422,6 +425,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     val full = Output(Bool())
   })
+
+  // 128KBL1: FIXME: provide vaddr for l2
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
   val refill_arb   = Module(new Arbiter(new Refill, cfg.nMissEntries))

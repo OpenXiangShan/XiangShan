@@ -97,7 +97,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2
         ),
         dcacheParameters = DCacheParameters(
-          nSets = 64, // 32KB DCache
+          nSets = 256, // 128KB DCache
           nWays = 8,
           tagECC = Some("secded"),
           dataECC = Some("secded"),

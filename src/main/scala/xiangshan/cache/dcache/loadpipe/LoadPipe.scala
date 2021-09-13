@@ -93,6 +93,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_req = RegEnable(s0_req, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_addr = io.lsu.s1_paddr
+  val s1_vaddr = s1_req.addr
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
@@ -113,6 +114,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_fake_meta = Wire(new L1Metadata)
   s1_fake_meta.tag := get_tag(s1_addr)
   s1_fake_meta.coh := ClientMetadata.onReset
+  s1_fake_meta.paddr := s1_addr
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
@@ -121,13 +123,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
   // data read
   io.debug_data_read.valid := s1_fire && !s1_nack
-  io.debug_data_read.bits.addr := s1_addr
+  io.debug_data_read.bits.addr := s1_vaddr
   io.debug_data_read.bits.way_en := s1_tag_match_way
   // only needs to read the specific row
-  io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_addr))
+  io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_vaddr))
 
   io.banked_data_read.valid := s1_fire && !s1_nack
-  io.banked_data_read.bits.addr := s1_addr
+  io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way
   // only needs to read the specific row
   // io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_addr))
@@ -145,6 +147,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_addr = RegEnable(s1_addr, s1_fire)
+  val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   s2_ready := true.B
 
   when (s1_fire) { s2_valid := !io.lsu.s1_kill }
@@ -194,19 +197,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // val s2_decoded = cacheParams.dataCode.decode(s2_word)
   // val s2_word_decoded = s2_decoded.corrected
   val s2_word_decoded = s2_word(wordBits - 1, 0)
-  assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
+  // assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
 
   val debug_mismatch = s2_valid && s2_hit && !s2_nack && s2_word_decoded =/= banked_data_resp_word.raw_data && !io.bank_conflict_slow
-  assert(!(RegNext(debug_mismatch)))
+  // assert(!(RegNext(debug_mismatch)))
   when(debug_mismatch) {
     XSDebug("loadpipe " + id + " data mismatch, right %x wrong %x\n",
       s2_word_decoded,
       banked_data_resp_word.raw_data
     )
-    printf("loadpipe " + id + " data mismatch, right %x wrong %x\n",
-      s2_word_decoded,
-      banked_data_resp_word.raw_data
-    )
+    // printf("loadpipe " + id + " data mismatch, right %x wrong %x\n",
+    //   s2_word_decoded,
+    //   banked_data_resp_word.raw_data
+    // )
   }
 
   when(s2_valid && s2_hit && !s2_nack && s2_word_decoded === banked_data_resp_word.raw_data && !io.bank_conflict_slow) {
@@ -241,6 +244,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits.source := LOAD_SOURCE.U
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_addr)
+  io.miss_req.bits.vaddr := s2_vaddr
   io.miss_req.bits.coh := s2_hit_coh
 
   // send back response

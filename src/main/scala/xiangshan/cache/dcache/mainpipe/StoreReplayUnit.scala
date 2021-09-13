@@ -61,6 +61,7 @@ class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
     when (io.lsu.req.fire()) {
       req   := io.lsu.req.bits
       state := s_pipe_req
+      // to use 32KB+ cache, vaddr is needed for dcache store
     }
   }
 
@@ -76,6 +77,7 @@ class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req.source := STORE_SOURCE.U
     pipe_req.cmd    := req.cmd
     pipe_req.addr   := req.addr
+    pipe_req.vaddr   := req.vaddr
     pipe_req.store_data  := req.data
     pipe_req.store_mask  := req.mask
     pipe_req.id := io.id

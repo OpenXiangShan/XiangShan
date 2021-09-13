@@ -42,6 +42,9 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle
   // probe does not use this
   val source = UInt(sourceTypeWidth.W)
   val cmd    = UInt(M_SZ.W)
+  // if dcache size > 32KB, vaddr is also needed for store
+  // vaddr is used to get extra index bits
+  val vaddr  = UInt(VAddrBits.W)
   // must be aligned to block
   val addr   = UInt(PAddrBits.W)
 
@@ -189,7 +192,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   io.meta_read.valid := io.req.valid && !set_conflict && s1_ready
   val meta_read = io.meta_read.bits
-  meta_read.idx := get_idx(s0_req.addr)
+  meta_read.idx := get_idx(s0_req.vaddr)
   meta_read.way_en := ~0.U(nWays.W)
   meta_read.tag := DontCare
 
@@ -252,7 +255,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_banked_need_data = RegEnable(banked_need_data, s0_fire)
   val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.banked_data_read.ready)
   val s1_req = RegEnable(s0_req, s0_fire)
-  val s1_set = get_idx(s1_req.addr)
+  val s1_set = get_idx(s1_req.vaddr)
 
   val s1_rmask = RegEnable(s0_rmask, s0_fire)
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
@@ -265,7 +268,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_amo_word = RegEnable(amo_word, s0_fire)
   val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
 
-  s1_s0_set_conflict := s1_valid && get_idx(s1_req.addr) === get_idx(s0_req.addr)
+  s1_s0_set_conflict := s1_valid && get_idx(s1_req.vaddr) === get_idx(s0_req.vaddr)
+  assert(!(s1_valid && s1_req.vaddr === 0.U))
 
   when (s0_fire) {
     s1_valid := true.B
@@ -288,6 +292,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_fake_meta = Wire(new L1Metadata)
   s1_fake_meta.tag := get_tag(s1_req.addr)
   s1_fake_meta.coh := ClientMetadata.onReset
+  s1_fake_meta.paddr := s1_req.addr
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
@@ -313,12 +318,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.debug_data_read.valid := s1_fire && s1_need_data
   io.debug_data_read.bits.rmask := s1_rmask
   io.debug_data_read.bits.way_en := s1_way_en
-  io.debug_data_read.bits.addr := s1_req.addr
+  io.debug_data_read.bits.addr := s1_req.vaddr
 
   io.banked_data_read.valid := s1_fire && s1_banked_need_data
   io.banked_data_read.bits.rmask := s1_banked_rmask
   io.banked_data_read.bits.way_en := s1_way_en
-  io.banked_data_read.bits.addr := s1_req.addr
+  io.banked_data_read.bits.addr := s1_req.vaddr
 
   // tag ecc check
   (0 until nWays).foreach(w => assert(!(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(ecc_meta_resp(w)).uncorrectable)))
@@ -346,7 +351,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s2_amo_word = RegEnable(s1_amo_word, s1_fire)
   val s2_amo_word_addr = RegEnable(s1_amo_word_addr, s1_fire)
 
-  s2_s0_set_conflict := s2_valid && get_idx(s2_req.addr) === get_idx(s0_req.addr)  
+  s2_s0_set_conflict := s2_valid && get_idx(s2_req.vaddr) === get_idx(s0_req.vaddr)  
 
   when (s1_fire) { s2_valid := true.B }
   .elsewhen(s2_fire) { s2_valid := false.B }
@@ -461,7 +466,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val debug_s3_data_decoded = RegEnable(VecInit(debug_s2_data_decoded.flatten).asUInt, s2_fire)
   val s3_data = RegEnable(s2_data, s2_fire)
 
-  s3_s0_set_conflict := s3_valid && get_idx(s3_req.addr) === get_idx(s0_req.addr)
+  s3_s0_set_conflict := s3_valid && get_idx(s3_req.vaddr) === get_idx(s0_req.vaddr)
 
   when (s2_fire) { s3_valid := true.B }
   .elsewhen (s3_fire) { s3_valid := false.B }
@@ -521,9 +526,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     Mux(store_update_meta || amo_update_meta, s3_new_hit_coh, ClientMetadata.onReset)))
 
   io.meta_write.valid := s3_fire && update_meta
-  io.meta_write.bits.idx := get_idx(s3_req.addr)
+  io.meta_write.bits.idx := get_idx(s3_req.vaddr)
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.data.tag := get_tag(s3_req.addr)
+  io.meta_write.bits.data.paddr := s3_req.addr //TODO
   io.meta_write.bits.data.coh := new_coh
 
   // --------------------------------------------------------------------------------
@@ -639,13 +645,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.debug_data_write.valid := s3_fire && need_write_data
   io.debug_data_write.bits.rmask := DontCare
   io.debug_data_write.bits.way_en := s3_way_en
-  io.debug_data_write.bits.addr := s3_req.addr
+  io.debug_data_write.bits.addr := s3_req.vaddr
   io.debug_data_write.bits.wmask := VecInit(wmask.map(_.orR)).asUInt
   io.debug_data_write.bits.data := debug_s3_amo_data_merged
 
   io.banked_data_write.valid := s3_fire && banked_need_write_data
   io.banked_data_write.bits.way_en := s3_way_en
-  io.banked_data_write.bits.addr := s3_req.addr
+  io.banked_data_write.bits.addr := s3_req.vaddr
   io.banked_data_write.bits.wmask := banked_wmask
   io.banked_data_write.bits.data := s3_amo_data_merged.asUInt.asTypeOf(io.banked_data_write.bits.data.cloneType)
 
@@ -658,16 +664,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val probe_writeback = s3_req.probe
   val need_writeback  = miss_writeback || probe_writeback
 
-  val writeback_addr  = Cat(s3_meta.tag, get_idx(s3_req.addr)) << blockOffBits
+  val writeback_vaddr  = Cat(s3_meta.tag, get_idx(s3_req.vaddr)) << blockOffBits
 
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
   val writeback_data = s3_coh === ClientStates.Dirty
 
+  val writeback_paddr = Cat(
+    writeback_vaddr(VAddrBits-1,14),
+    s3_meta.paddr(13,12),
+    writeback_vaddr(11,0)
+  )
+
   val wb_req = io.wb_req.bits
   io.wb_req.valid := s3_fire && need_writeback
-  wb_req.addr := writeback_addr
+  wb_req.addr := writeback_paddr
+  // wb_req.vaddr := writeback_vaddr
   wb_req.param := writeback_param
   wb_req.voluntary := miss_writeback
   wb_req.hasData := writeback_data
@@ -690,7 +703,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   // update replacement policy
   val access_bundle = Wire(ValidIO(new ReplacementAccessBundle))
   access_bundle.valid := RegNext(s3_fire && (update_meta || need_write_data))
-  access_bundle.bits.set := RegNext(get_idx(s3_req.addr))
+  access_bundle.bits.set := RegNext(get_idx(s3_req.vaddr))
   access_bundle.bits.way := RegNext(OHToUInt(s3_way_en))
   val access_bundles = io.replace_access.toSeq ++ Seq(access_bundle)
   val sets = access_bundles.map(_.bits.set)
@@ -708,6 +721,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits.source := s3_req.source
   io.miss_req.bits.cmd := s3_req.cmd
   io.miss_req.bits.addr := s3_req.addr
+  io.miss_req.bits.vaddr := s3_req.vaddr
   io.miss_req.bits.store_data := s3_req.store_data
   io.miss_req.bits.store_mask := s3_req.store_mask
   io.miss_req.bits.word_idx := s3_req.word_idx

@@ -27,13 +27,15 @@ import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
+  val paddr = UInt(PAddrBits.W)
 }
 
 object L1Metadata {
-  def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
+  def apply(tag: Bits, coh: ClientMetadata, paddr: UInt)(implicit p: Parameters) = {
     val meta = Wire(new L1Metadata)
     meta.tag := tag
     meta.coh := coh
+    meta.paddr := paddr
     meta
   }
 }
@@ -126,7 +128,7 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
 }
 
 class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCacheModule {
-  def onReset = L1Metadata(0.U, ClientMetadata.onReset)
+  def onReset = L1Metadata(0.U, ClientMetadata.onReset, 0.U)
 
   val metaBits = onReset.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)

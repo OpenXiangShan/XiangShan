@@ -388,10 +388,12 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
-  val evictionTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionVTag = RegEnable(vtag(evictionIdx), enable = willSendDcacheReq)
 
   io.dcache.req.valid := prepareValidReg
-  io.dcache.req.bits.addr := getAddr(evictionTag)
+  io.dcache.req.bits.vaddr := getAddr(evictionVTag)
+  io.dcache.req.bits.addr := getAddr(evictionPTag)
   io.dcache.req.bits.data := data(evictionIdxReg).asUInt
   io.dcache.req.bits.mask := mask(evictionIdxReg).asUInt
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
