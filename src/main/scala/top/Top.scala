@@ -360,10 +360,17 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
+      val sram_config = Input(UInt(5.W))
+      val osc_clock = Input(Bool())
+      val pll_output = Output(UInt(14.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
+    io.pll_output := DontCare
+    dontTouch(io.sram_config)
+    dontTouch(io.osc_clock)
+    dontTouch(io.pll_output)
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {
