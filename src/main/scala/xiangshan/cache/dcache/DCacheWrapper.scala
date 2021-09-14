@@ -281,32 +281,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // data array
-  val DataWritePortCount = 1
-  val MainPipeDataWritePort = 0
 
   debugDataArray.io.write <> mainPipe.io.debug_data_write
   bankedDataArray.io.write <> mainPipe.io.banked_data_write
 
-  // give priority to MainPipe
-  val DataReadPortCount = 2
-  val MainPipeDataReadPort = 0
-  val LoadPipeDataReadPort = 1
+  // debug data array
+  debugDataArray.io.read(0) <> ldu(0).io.debug_data_read
+  debugDataArray.io.read(1) <> ldu(1).io.debug_data_read
+  debugDataArray.io.read(2) <> mainPipe.io.debug_data_read
 
-  val debug_dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
+  ldu(0).io.debug_data_resp := debugDataArray.io.resp(0)
+  ldu(1).io.debug_data_resp := debugDataArray.io.resp(1)
+  mainPipe.io.debug_data_resp := debugDataArray.io.resp(2)
 
-  debug_dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.debug_data_read
-  debug_dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.debug_data_read
-
-  debugDataArray.io.read(LoadPipelineWidth - 1) <> debug_dataReadArb.io.out
-
-  debugDataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.debug_data_resp
-  debugDataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.debug_data_resp
-
-  for (w <- 0 until (LoadPipelineWidth - 1)) {
-    debugDataArray.io.read(w) <> ldu(w).io.debug_data_read
-    debugDataArray.io.resp(w) <> ldu(w).io.debug_data_resp
-  }
-
+  // real data array
   bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
   bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
   bankedDataArray.io.readline <> mainPipe.io.banked_data_read

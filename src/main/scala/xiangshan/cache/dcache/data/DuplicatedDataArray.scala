@@ -99,7 +99,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     io.rdata := row_data
   }
 
-  for (j <- 0 until LoadPipelineWidth) {
+  for (j <- 0 until 3) {
     val raddr = raddrs(j)
     val rmask = io.read(j).bits.rmask
 

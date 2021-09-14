@@ -41,17 +41,17 @@ class L1DataWriteReq(implicit p: Parameters) extends L1DataReadReq {
 
 abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
   val io = IO(new DCacheBundle {
-    val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
+    val read = Vec(3, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
-    val resp = Output(Vec(LoadPipelineWidth, Vec(blockRows, Bits(encRowBits.W))))
-    val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-    val errors = Output(Vec(LoadPipelineWidth, new L1CacheErrorInfo))
+    val resp = Output(Vec(3, Vec(blockRows, Bits(encRowBits.W))))
+    val nacks = Output(Vec(3, Bool()))
+    val errors = Output(Vec(3, new L1CacheErrorInfo))
   })
 
-  def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
+  def pipeMap[T <: Data](f: Int => T) = VecInit((0 until 3).map(f))
 
   def dumpRead() = {
-    (0 until LoadPipelineWidth) map { w =>
+    (0 until 3) map { w =>
       when(io.read(w).valid) {
         XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
           io.read(w).bits.way_en, io.read(w).bits.addr)
@@ -72,7 +72,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
   }
 
   def dumpResp() = {
-    (0 until LoadPipelineWidth) map { w =>
+    (0 until 3) map { w =>
       XSDebug(s"DataArray ReadResp channel: $w\n")
       (0 until blockRows) map { r =>
         XSDebug(s"cycle: $r data: %x\n", io.resp(w)(r))
@@ -81,7 +81,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
   }
 
   def dumpNack() = {
-    (0 until LoadPipelineWidth) map { w =>
+    (0 until 3) map { w =>
       when(io.nacks(w)) {
         XSDebug(s"DataArray NACK channel: $w\n")
       }
