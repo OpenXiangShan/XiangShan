@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import freechips.rocketchip.util.BundleFieldBase
 import system.L1CacheErrorInfo
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 
@@ -44,7 +45,8 @@ case class DCacheParameters
   nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  reqFields:Seq[BundleFieldBase] = Nil
 ) extends L1CacheParameters {
 
   def tagCode: Code = Code.fromString(tagECC)
