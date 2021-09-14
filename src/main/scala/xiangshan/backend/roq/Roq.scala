@@ -351,11 +351,15 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
+  val isSvinvalBegin = RegInit(false.B)
+  val isSvinvalEnd = WireInit(false.B)
   // When blockBackward instruction leaves Roq (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
+  //when end instruction of svinval comes , clear isSvinvalBegin
+  when(isSvinvalEnd) { isSvinvalBegin := false.B }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.resp      := enqPtrVec
@@ -371,6 +375,15 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       when (io.enq.req(i).bits.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      when(FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        isSvinvalBegin := true.B
+      }
+      when(FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        isSvinvalEnd := true.B
+      }
+      assert( !isSvinvalBegin || FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
