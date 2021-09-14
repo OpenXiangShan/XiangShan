@@ -93,6 +93,7 @@ trait HasL1CacheParameters extends HasXSParameter
 
   def beatRows = beatBits/rowBits
   def rowWords = rowBits/wordBits
+  def blockBeats = blockBytes / beatBytes
 
   def full_divide(a: Int, b: Int) = a >= b && isPow2(a / b)
 }

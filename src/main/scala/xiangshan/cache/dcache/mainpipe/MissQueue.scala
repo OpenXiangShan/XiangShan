@@ -112,6 +112,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
 
+  val grant_beats = RegInit(0.U((beatBits).W))
+
   when (io.req.valid && io.primary_ready) {
     req_valid := true.B
     req := io.req.bits
@@ -124,6 +126,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     w_pipe_resp := false.B
 
     should_refill_data_reg := io.req.bits.isLoad
+
+    grant_beats := 0.U
   }.elsewhen (release_entry) {
     req_valid := false.B
   }
@@ -185,6 +189,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       w_grantlast := w_grantlast || refill_done
 
       hasData := true.B
+
+      grant_beats := grant_beats + 1.U
     }.otherwise {
       // Grant
 
@@ -221,29 +227,38 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     w_pipe_resp := true.B
   }
 
-  def can_merge(new_req: MissReq): Bool = {
-    // caution: do not merge with AMO
-    // we can not do amoalu calculation in MissQueue
-    // so, we do not know the result after AMO calculation
-    // so do not merge with AMO
+//  def can_merge(new_req: MissReq): Bool = {
+//    // caution: do not merge with AMO
+//    // we can not do amoalu calculation in MissQueue
+//    // so, we do not know the result after AMO calculation
+//    // so do not merge with AMO
+//
+//    // before read acquire is fired, we can merge read or write
+//    val before_read_sent = acquire_not_sent && req.source === LOAD_SOURCE.U && (new_req.source === LOAD_SOURCE.U || new_req.source === STORE_SOURCE.U)
+//    // before read/write refills data to LoadQueue, we can merge any read
+//    val before_data_refill = data_not_refilled && (req.source === LOAD_SOURCE.U || req.source === STORE_SOURCE.U) && new_req.source === LOAD_SOURCE.U
+//
+//    before_read_sent || before_data_refill
+//  }
 
-    // before read acquire is fired, we can merge read or write
-    val before_read_sent = acquire_not_sent && req.source === LOAD_SOURCE.U && (new_req.source === LOAD_SOURCE.U || new_req.source === STORE_SOURCE.U)
-    // before read/write refills data to LoadQueue, we can merge any read
-    val before_data_refill = data_not_refilled && (req.source === LOAD_SOURCE.U || req.source === STORE_SOURCE.U) && new_req.source === LOAD_SOURCE.U
+  def before_read_sent_can_merge(new_req: MissReq): Bool = {
+    acquire_not_sent && req.source === LOAD_SOURCE.U && (new_req.source === LOAD_SOURCE.U || new_req.source === STORE_SOURCE.U)
+  }
 
-    before_read_sent || before_data_refill
+  def before_data_refill_can_merge(new_req: MissReq): Bool = {
+    data_not_refilled && (req.source === LOAD_SOURCE.U || req.source === STORE_SOURCE.U) && new_req.source === LOAD_SOURCE.U
   }
 
   def should_merge(new_req: MissReq): Bool = {
     val block_match = req.addr === new_req.addr
-    block_match && can_merge(new_req)
+    val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
+    block_match && (before_read_sent_can_merge(new_req) || beat_match && before_data_refill_can_merge(new_req))
   }
 
   def should_reject(new_req: MissReq): Bool = {
     val block_match = req.addr === new_req.addr
     // do not reject any req when we are in s_invalid
-    block_match && !can_merge(new_req) && req_valid
+    block_match && !should_merge(new_req) && req_valid // TODO: optimize this
   }
 
   io.primary_ready := !req_valid

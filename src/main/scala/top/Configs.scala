@@ -179,6 +179,19 @@ class MinimalSimConfig(n: Int = 1) extends Config(
   })
 )
 
+class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val upParams = up(SoCParamsKey)
+    val sets = n * 1024 / ways / 64
+    upParams.copy(cores = upParams.cores.map(p => p.copy(
+      dcacheParameters = p.dcacheParameters.copy(
+        nSets = sets,
+        nWays = ways
+      )
+    )))
+}
+)
+
 class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
@@ -191,7 +204,12 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
           ways = ways,
           sets = l2sets,
           inclusive = inclusive,
-          prefetch = Some(huancun.prefetch.BOPParameters())
+          clientCaches = Seq(CacheParameters(
+            "dcache",
+            sets = p.dcacheParameters.nSets,
+            ways = p.dcacheParameters.nWays + 2,
+            physicalIndex = false
+          ))
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,
@@ -235,4 +253,11 @@ class DefaultL3DebugConfig(n: Int = 1) extends Config(
 
 class NonInclusiveL3Config(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4) ++ new WithNKBL2(512) ++ new DefaultConfig(n)
+)
+
+class MinimalAliasDebugConfig(n: Int = 1) extends Config(
+  new WithNKBL3(512, inclusive = false) ++
+    new WithNKBL2(256, inclusive = false) ++
+    new WithNKBL1D(128) ++
+    new MinimalConfig(n)
 )

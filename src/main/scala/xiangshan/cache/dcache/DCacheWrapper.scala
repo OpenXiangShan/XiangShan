@@ -24,8 +24,10 @@ import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.BundleFieldBase
 import system.L1CacheErrorInfo
 import device.RAMHelper
+import huancun.AliasKey
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
@@ -44,7 +46,8 @@ case class DCacheParameters
   nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  reqFields:Seq[BundleFieldBase] = Nil
 ) extends L1CacheParameters {
 
   def tagCode: Code = Code.fromString(tagECC)
@@ -218,7 +221,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
       name = "dcache",
       sourceId = IdRange(0, cfg.nMissEntries+1),
       supportsProbe = TransferSizes(cfg.blockBytes)
-    ))
+    )),
+    requestFields = cacheParams.reqFields
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -354,6 +358,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
+  bus.a.bits.user.lift(AliasKey).foreach(_ := 0.U)
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_req := bus.b.bits.address
 
