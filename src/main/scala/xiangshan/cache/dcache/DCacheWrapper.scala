@@ -135,6 +135,10 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
   }
 }
 
+class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
@@ -182,6 +186,12 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
+class DCacheWordIOWithVaddr(implicit p: Parameters) extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheWordReqWithVaddr)
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
+}
+
 // used by load unit
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
@@ -204,7 +214,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = Flipped(new DCacheLineIO) // for sbuffer
-  val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
+  val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {

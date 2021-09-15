@@ -58,7 +58,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val flush = Input(Bool())
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new SBufferWordReq)) // write commited store to sbuffer
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write commited store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val roq = Flipped(new RoqLsqIO)

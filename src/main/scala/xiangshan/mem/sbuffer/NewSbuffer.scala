@@ -24,10 +24,6 @@ import utils._
 import xiangshan.cache._
 import difftest._
 
-class SBufferWordReq(implicit p: Parameters) extends DCacheWordReq {
-  val vaddr = UInt(VAddrBits.W)
-}
-
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
   val empty = Input(Bool())
@@ -93,7 +89,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
 class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new SBufferWordReq)))  //Todo: store logic only support Width == 2 now
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
