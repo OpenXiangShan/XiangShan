@@ -173,7 +173,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = true
   ),
-  refillBothTlb: Boolean = true,
+  refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
     normalNSets = 1,
