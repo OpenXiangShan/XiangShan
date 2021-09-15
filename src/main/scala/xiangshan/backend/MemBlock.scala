@@ -230,7 +230,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // rs.io.storeData <> lsq.io.storeDataIn(i)
     lsq.io.storeDataIn(i) := io.stData(i)
 
-    // sync issue info to store set LFST
+    // 1. sync issue info to store set LFST
+    // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
     io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
 

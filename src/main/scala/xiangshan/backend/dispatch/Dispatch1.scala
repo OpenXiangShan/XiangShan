@@ -176,9 +176,10 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     if(StoreSetEnable) {
       // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) // classic store set
       updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && !isStore(i) // store set lite
-      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // 2-bit store set
+      updatedUop(i).cf.waitForSqIdx := lfst.io.lookup.sqIdx(i)
     } else {
       updatedUop(i).cf.loadWaitBit := io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // wait table does not require store to be delayed
+      updatedUop(i).cf.waitForSqIdx := DontCare
     }
 
     // update store set LFST

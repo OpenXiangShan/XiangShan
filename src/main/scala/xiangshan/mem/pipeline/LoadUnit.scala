@@ -202,6 +202,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val lsq = new LoadForwardQueryIO
+    val dataInvalidSqIdx = Input(UInt())
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
@@ -307,6 +308,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
       RSFeedbackType.mshrFull
     )
   )
+  io.rsFeedback.bits.dataInvalidSqIdx.value := io.dataInvalidSqIdx
+  io.rsFeedback.bits.dataInvalidSqIdx.flag := DontCare
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   io.needReplayFromRS := s2_cache_replay && !fullForward
@@ -386,6 +389,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   load_s2.io.fastpath <> io.fastpathOut
+  load_s2.io.dataInvalidSqIdx := io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to generate 
   io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
   io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS

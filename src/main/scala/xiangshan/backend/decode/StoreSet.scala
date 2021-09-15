@@ -163,6 +163,7 @@ class LookupLFST(implicit p: Parameters) extends XSBundle  {
   val raddr = Vec(DecodeWidth, Input(UInt(SSIDWidth.W))) // use ssid to llokup LFST
   val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
   val rdata = Vec(DecodeWidth, Output(Bool()))
+  val sqIdx = Vec(DecodeWidth, Output(new SqPtr))
 }
 
 // Last Fetched Store Table
@@ -183,6 +184,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // TODO: use MemTemplate
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
   val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
+  val lastSqIdx = Reg(Vec(LFSTSize, new SqPtr))
   val roqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RoqPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
@@ -205,13 +207,14 @@ class LFST(implicit p: Parameters) extends XSModule  {
         (valid(io.lookup.raddr(i)) || hitInDispatchBundle) && io.lookup.ren(i) || 
         io.csrCtrl.no_spec_load // set loadWaitBit for all loads
       ) && !io.csrCtrl.lvpred_disable
+    io.lookup.sqIdx(i) := lastSqIdx(io.lookup.raddr(i))
   }
 
   // when store is issued, mark it as invalid
   (0 until exuParameters.StuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.asUInt === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).asUInt){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.value === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
         validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
       }
     })
@@ -226,6 +229,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
       validVec(waddr)(wptr) := true.B
       sqIdxVec(waddr)(wptr) := io.dispatch(i).bits.sqIdx
       roqIdxVec(waddr)(wptr) := io.dispatch(i).bits.roqIdx
+      lastSqIdx(waddr) := io.dispatch(i).bits.sqIdx
     }
   })
 

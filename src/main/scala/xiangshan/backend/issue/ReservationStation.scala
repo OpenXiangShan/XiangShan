@@ -222,6 +222,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
   })) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr())
+    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
   }) else None
   val store = if (params.isStore) Some(new Bundle {
     val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
@@ -272,6 +273,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(params.numSrc))
     statusArray.io.update(i).data.roqIdx := io.fromDispatch(i).bits.roqIdx
     statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
+    statusArray.io.update(i).data.waitForSqIdx := io.fromDispatch(i).bits.cf.waitForSqIdx
     statusArray.io.update(i).data.isFirstIssue := true.B
     // for better power, we don't write payload array when there's a redirect
     payloadArray.io.write(i).enable := doEnqueue(i)
@@ -282,6 +284,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
   if (params.checkWaitBit) {
     statusArray.io.stIssuePtr := io.checkwait.get.stIssuePtr
+    statusArray.io.stIssue := io.checkwait.get.stIssue
   }
   // wakeup from other RS or function units
   val wakeupValid = io.fastUopsIn.map(_.valid) ++ io.slowPorts.map(_.valid)
@@ -349,11 +352,13 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
     statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
     statusArray.io.deqResp(i).bits.resptype := DontCare
+    statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
     if (io.feedback.isDefined) {
       statusArray.io.deqResp(i).valid := io.feedback.get(i).memfeedback.valid
       statusArray.io.deqResp(i).bits.rsMask := UIntToOH(io.feedback.get(i).memfeedback.bits.rsIdx)
       statusArray.io.deqResp(i).bits.success := io.feedback.get(i).memfeedback.bits.hit
       statusArray.io.deqResp(i).bits.resptype := io.feedback.get(i).memfeedback.bits.sourceType
+      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := io.feedback.get(i).memfeedback.bits.dataInvalidSqIdx
     }
 
     if (io.fastWakeup.isDefined) {

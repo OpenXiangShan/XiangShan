@@ -107,6 +107,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
+  val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
@@ -328,6 +329,7 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
+  val dataInvalidSqIdx = new SqPtr
 }
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {

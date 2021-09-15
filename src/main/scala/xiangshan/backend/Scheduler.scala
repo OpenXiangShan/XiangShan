@@ -174,6 +174,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val rsIdx = Output(UInt(log2Up(memRsEntries).W))
       val isFirstIssue = Output(Bool())
     })) else None
+    // special ports for load / store
+    val stIssue = if (outer.numReplayPorts > 0) Some(Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))) else None
     // special ports for store
     val stData = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, ValidIO(new StoreDataBundle))) else None
     val fpRfReadIn = if (outer.numSTDPorts > 0) Some(Vec(outer.numSTDPorts, Flipped(new RfReadPort(XLEN)))) else None
@@ -202,7 +204,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // wakeup-related ports
     val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
-    // feedback ports
+    // misc ports
     val extra = new SchedulerExtraIO
   })
 
@@ -289,6 +291,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
+      rs.io.checkwait.get.stIssue <> io.extra.stIssue.get
     }
     if (rs.io.feedback.isDefined) {
       val width = rs.io.feedback.get.length
