@@ -73,6 +73,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req.source := AMO_SOURCE.U
     pipe_req.cmd    := req.cmd
     pipe_req.addr   := get_block_addr(req.addr)
+    pipe_req.addr   := get_block_addr(req.vaddr)
     pipe_req.word_idx  := get_word(req.addr)
     pipe_req.amo_data  := req.data
     pipe_req.amo_mask  := req.mask
