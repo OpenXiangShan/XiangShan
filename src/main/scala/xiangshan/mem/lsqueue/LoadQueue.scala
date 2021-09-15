@@ -704,7 +704,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until LoadQueueSize) {
-    XSDebug(i + " pc %x pa %x ", uop(i).cf.pc, dataModule.io.debug(i).paddr)
+    XSDebug(i + " pc %x pa %x ", uop(i).cf.pc, debug_paddr(i))
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && datavalid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

@@ -358,7 +358,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
-  bus.a.bits.user.lift(AliasKey).foreach(_ := 0.U)
+  bus.a.bits.user.lift(AliasKey).foreach(_ := missQueue.io.mem_acquire_user)
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_req := bus.b.bits.address
 

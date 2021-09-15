@@ -200,16 +200,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
 
   val debug_mismatch = s2_valid && s2_hit && !s2_nack && s2_word_decoded =/= banked_data_resp_word.raw_data && !io.bank_conflict_slow
-  // assert(!(RegNext(debug_mismatch)))
+  assert(!(RegNext(debug_mismatch)))
   when(debug_mismatch) {
     XSDebug("loadpipe " + id + " data mismatch, right %x wrong %x\n",
       s2_word_decoded,
       banked_data_resp_word.raw_data
     )
-    // printf("loadpipe " + id + " data mismatch, right %x wrong %x\n",
-    //   s2_word_decoded,
-    //   banked_data_resp_word.raw_data
-    // )
+    printf("loadpipe " + id + " data mismatch, right %x wrong %x\n",
+      s2_word_decoded,
+      banked_data_resp_word.raw_data
+    )
   }
 
   when(s2_valid && s2_hit && !s2_nack && s2_word_decoded === banked_data_resp_word.raw_data && !io.bank_conflict_slow) {

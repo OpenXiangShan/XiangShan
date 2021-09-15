@@ -123,7 +123,10 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   req.source := io.mem_probe.bits.source
   req.opcode := io.mem_probe.bits.opcode
   req.addr := io.mem_probe.bits.address
-  req.vaddr := io.mem_probe.bits.address // 128KBL1: FIXME: use vaddr given by l2
+  req.vaddr := Cat(
+    io.mem_probe.bits.data(1,0), // add extra 2 bits from vaddr to get vindex
+    io.mem_probe.bits.address(DCacheSameVPAddrOffset, 0)
+  )
   req.param := io.mem_probe.bits.param
 
   io.mem_probe.ready := allocate
