@@ -62,8 +62,10 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
+  // dtlb filter
+  filterSize: Int = 8,
   // miss queue
-  missQueueSize: Int = 9,
+  missQueueBaseSize: Int = 1 + 8,
   // way size
   blockBytes: Int = 64
 )
