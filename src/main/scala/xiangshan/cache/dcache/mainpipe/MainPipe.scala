@@ -172,8 +172,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val row_write = VecInit(word_write.map(_.orR)).asUInt
   val full_overwrite = row_full_overwrite.andR
 
-  val bank_write = VecInit((0 until DCacheBanks).map(i => getMaskOfBank(i, s0_req.store_mask).orR)).asUInt
-  val bank_full_write = VecInit((0 until DCacheBanks).map(i => getMaskOfBank(i, s0_req.store_mask).andR)).asUInt
+  val bank_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).orR)).asUInt
+  val bank_full_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).andR)).asUInt
   val banks_full_overwrite = bank_full_write.andR
 
   val banked_store_rmask = bank_write & ~bank_full_write
@@ -428,10 +428,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   for (i <- 0 until DCacheBanks) {
     val old_data = s2_data(i)
-    val new_data = getDataOfBank(i, s2_req.store_data)
+    val new_data = get_data_of_bank(i, s2_req.store_data)
     // for amo hit, we should use read out SRAM data
     // do not merge with store data
-    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), getMaskOfBank(i, s2_req.store_mask))
+    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, s2_req.store_mask))
     s2_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
   }
 
