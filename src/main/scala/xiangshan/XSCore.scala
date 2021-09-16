@@ -275,6 +275,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     XSPerfAccumulate(s"std_rs_not_ready_$i", std.valid && !std.ready)
   }
   exuBlocks(1).io.scheExtra.fpRfReadIn.get <> exuBlocks(2).io.scheExtra.fpRfReadOut.get
+  val stData = exuBlocks.map(_.io.fuExtra.stData.getOrElse(Seq())).reduce(_ ++ _)
 
   memScheduler.io.redirect <> ctrlBlock.io.redirect
   memScheduler.io.flush <> ctrlBlock.io.flush
@@ -284,7 +285,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc
   memScheduler.io.extra.jalr_target <> ctrlBlock.io.jalr_target
   memScheduler.io.extra.stIssuePtr <> memBlock.io.stIssuePtr
-  memScheduler.io.extra.stIssue.get <> memBlock.io.stIn
+  memScheduler.io.extra.memWaitUpdateReq.get.staIssue <> memBlock.io.stIn
+  memScheduler.io.extra.memWaitUpdateReq.get.stdIssue <> stData
   memScheduler.io.extra.loadFastMatch.get <> memBlock.io.loadFastMatch
   memScheduler.io.extra.debug_int_rat <> ctrlBlock.io.debug_int_rat
   memScheduler.io.extra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
@@ -330,7 +332,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.replay <> memScheduler.io.extra.feedback.get.map(_.replay)
   memBlock.io.rsIdx <> memScheduler.io.extra.feedback.get.map(_.rsIdx)
   memBlock.io.isFirstIssue <> memScheduler.io.extra.feedback.get.map(_.isFirstIssue)
-  val stData = exuBlocks.map(_.io.fuExtra.stData.getOrElse(Seq())).reduce(_ ++ _)
   memBlock.io.stData := stData
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
