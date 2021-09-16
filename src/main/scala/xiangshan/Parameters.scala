@@ -173,6 +173,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = true
   ),
+  refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
     normalNSets = 1,
@@ -327,6 +328,7 @@ trait HasXSParameter {
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val refillBothTlb = coreParams.refillBothTlb
   val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
