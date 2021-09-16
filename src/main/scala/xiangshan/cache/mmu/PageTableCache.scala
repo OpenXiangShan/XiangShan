@@ -225,6 +225,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(second_req.vpn))
   val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(second_req.vpn))
+  val l3HitPbmt = l3HitData.pbmts.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, UInt(2.W))))(genPtwL3SectorIdx(second_req.vpn))
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
@@ -249,6 +250,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
+  val spHitPbmt = spHitData.pbmt.getOrElse(0.U)
 
   val resp = Wire(io.resp.bits.cloneType)
   val resp_latch = RegEnable(resp, io.resp.valid && !io.resp.ready)
@@ -265,6 +267,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   resp.toTlb.ppn   := Mux(l3Hit, l3HitPPN, spHitData.ppn)
   resp.toTlb.perm.map(_ := Mux(l3Hit, l3HitPerm, spHitPerm))
   resp.toTlb.level.map(_ := Mux(l3Hit, 2.U, spHitLevel))
+  resp.toTlb.pbmt.map(_ := Mux(l3Hit, l3HitPbmt, spHitPbmt))
 
   io.resp.valid := second_valid
   io.resp.bits := Mux(resp_latch_valid, resp_latch, resp)
@@ -305,7 +308,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
-      l1(refillIdx).refill(refill.vpn, memSelData)
+      l1(refillIdx).refill(refill.vpn, memSelData, 0.U, memPte.pbmt.getOrElse(0.U))
       ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
@@ -393,7 +396,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     when ((refill.level === 0.U || refill.level === 1.U) && memPte.isLeaf()) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
-      sp(refillIdx).refill(refill.vpn, memSelData, refill.level)
+      sp(refillIdx).refill(refill.vpn, memSelData, refill.level, memPte.pbmt.getOrElse(0.U))
       spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)

@@ -104,13 +104,14 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   superPage.sfence <> io.sfence
 
   def TLBNormalRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
-    val (super_hit, super_ppn, super_perm, super_hitVec) = superPage.r_resp_apply(i)
+    val (normal_hit, normal_ppn, normal_perm, normal_hitVec, normal_pbmt) = normalPage.r_resp_apply(i)
+    val (super_hit, super_ppn, super_perm, super_hitVec, super_pbmt) = superPage.r_resp_apply(i)
     assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
     val ppn = Mux(normal_hit, normal_ppn, super_ppn)
     val perm = Mux(normal_hit, normal_perm, super_perm)
+    val pbmt = Mux(normal_hit, normal_pbmt, super_pbmt)
 
     val pf = perm.pf && hit
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
@@ -143,7 +144,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
     // if vmenable, use pre-calcuated pma check result
-    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
+    resp(i).bits.mmio := (Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) || (pbmt === 2.U)) && vmEnable && hit
     resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
     resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
     resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit

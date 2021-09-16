@@ -131,6 +131,8 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
   val level = if(superpage) Some(UInt(1.W)) else None // /*2 for 4KB,*/ 1 for 2MB, 0 for 1GB
   val ppn = UInt(ppnLen.W)
   val perm = new TlbPermBundle
+  // no need to use this class 
+  val pbmt = if(!superpage) Some(UInt(2.W)) else None // super page's pbmt must be 0 by software TODO:prevent mistake by software
 
   def genPPN(vpn: UInt): UInt = {
     if (superpage) {
@@ -142,7 +144,7 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     }
   }
 
-  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool) = {
+  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool, pbmt: UInt) = {
     this.level.map(_ := level(0))
     this.ppn := ppn
     // refill pagetable perm
@@ -164,6 +166,9 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     this.perm.pa := PMAMode.atomic(pmaMode)
     this.perm.pi := PMAMode.icache(pmaMode)
     this.perm.pd := PMAMode.dcache(pmaMode)
+
+    // for Svpbmt extension
+    this.pbmt.map( _ := pbmt)
 
     this
   }
@@ -187,6 +192,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   val ppn = if (!pageNormal) UInt((ppnLen - vpnnLen).W)
             else UInt(ppnLen.W)
   val perm = new TlbPermBundle
+  val pbmt = if(HasSvbpmtExtension) Some(UInt(2.W)) else None
 
   def hit(vpn: UInt): Bool = {
     if (!pageSuper) vpn === tag
@@ -227,6 +233,9 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.pa := PMAMode.atomic(pmaMode)
     this.perm.pi := PMAMode.icache(pmaMode)
     this.perm.pd := PMAMode.dcache(pmaMode)
+
+    // for Svpbmt extension
+    this.pbmt.map(_ := item.entry.pbmt.getOrElse(0.U))
 
     this
   }
@@ -278,6 +287,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val ppn = Output(UInt(ppnLen.W))
       val perm = Output(new TlbPermBundle())
       val hitVec = Output(UInt(nWays.W))
+      val pbmt = Output(UInt(2.W))
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -296,7 +306,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec,  this.r.resp(i).bits.pbmt)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
@@ -437,16 +447,9 @@ abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
   with HasXSParameter with HasPtwConst
 
 class PteBundle(implicit p: Parameters) extends PtwBundle{
-  if(HasSvbpmtExtension)
-  {
-    val n = Bool()
-    //TODO : implement function of pbmt bits
-    val pbmt = UInt(2.W)
-    val reserved = UInt((pteResLen - 3).W)
-  }else
-  {
-    val reserved  = UInt(pteResLen.W)
-  }
+  val n = if(HasSvbpmtExtension) Some(Bool()) else None
+  val pbmt = if(HasSvbpmtExtension) Some(UInt(2.W)) else None
+  val reserved = if(HasSvbpmtExtension) Some(UInt((pteResLen - 3).W)) else UInt(pteResLen.W)
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
   val perm = new Bundle {
@@ -496,6 +499,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
+  val pbmt = if(HasSvbpmtExtension) Some(UInt(2.W)) else None
 
   def hit(vpn: UInt, allType: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
@@ -514,16 +518,17 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U, pbmt: UInt) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.level.map(_ := level)
+    this.pbmt.map(_ := pbmt)
   }
 
-  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
+  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U, pbmt: UInt = 0.U) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, pte, level)
+    e.refill(vpn, pte, level, pbmt)
     e
   }
 
@@ -544,6 +549,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
+  val pbmts = if (HasSvbpmtExtension) Some(Vec(num, UInt(2.W))) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
   def tagClip(vpn: UInt) = {
@@ -570,6 +576,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
       ps.ppns(i) := pte.ppn
       ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.perms.map(_(i) := pte.perm)
+      ps.pbmts.map(_(i) := pte.pbmt.getOrElse(0.U))
     }
     ps
   }
@@ -601,6 +608,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
+    this.entry.pbmt.map(_ := pte.pbmt.getOrElse(0.U))
     this.pf := pf
   }
 

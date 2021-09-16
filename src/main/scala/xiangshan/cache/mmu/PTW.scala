@@ -248,6 +248,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := pte_in.isPf(2.U)
+    ptw_resp.entry.pbmt.map(_ := pte_in.pbmt.getOrElse(0.U))
     ptw_resp
   }
 

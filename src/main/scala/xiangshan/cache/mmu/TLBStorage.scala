@@ -60,6 +60,7 @@ class TLBFA(
     resp.bits.hit := Cat(hitVecReg).orR
     resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(vpn_reg)))
     resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+    resp.bits.pbmt := ParallelMux(hitVecReg zip entries.map(_.pbmt.getOrElse(0.U)))
     resp.bits.hitVec := hitVecReg.asUInt
 
     resp.bits.hit.suggestName("hit")
@@ -105,6 +106,8 @@ class TLBFA(
     n.perm := ns.perm
     n.ppn := ns.ppn
     n.tag := ns.tag
+    n.pbmt.map(_ := ns.pbmt.getOrElse(0.U))
+
     n
   }
 
@@ -164,6 +167,7 @@ class TLBSA(
     resp.bits.hit := Cat(hitVec).orR
     resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
     resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
+    resp.bits.pbmt := ParallelMux(hitVec zip data.map(_.pbmt.getOrElse(0.U)))
     resp.bits.hitVec := hitVec.asUInt
 
     resp.valid := { if (sramSinglePort) RegNext(req.fire()) else RegNext(req.valid) }
