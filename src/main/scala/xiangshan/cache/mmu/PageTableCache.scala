@@ -34,13 +34,11 @@ import freechips.rocketchip.tilelink._
 class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val vpn = UInt(vpnLen.W)
-    val source = UInt(bPtwWidth.W)
-    val isReplay = Bool()
+    val source = UInt(bSourceWidth.W)
   }))
   val resp = DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val vpn = UInt(vpnLen.W)
-    val isReplay = Bool()
     val hit = Bool()
     val toFsm = new Bundle {
       val l1Hit = Bool()
@@ -72,14 +70,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val first_fire = first_valid && io.req.ready
   val first_req = io.req.bits
   val second_ready = Wire(Bool())
-  val second_valid = ValidHold(first_fire, io.resp.fire(), sfence.valid)
+  val second_valid = ValidHold(first_fire && !sfence.valid, io.resp.fire(), sfence.valid)
   val second_req = RegEnable(first_req, first_fire)
   // NOTE: if ptw cache resp may be blocked, hard to handle refill
   // when miss queue is full, please to block itlb and dtlb input
 
   // when refill, refuce to accept new req
   val rwHarzad = if (sramSinglePort) io.refill.valid else false.B
-  io.req.ready := !rwHarzad && (second_ready || io.req.bits.isReplay)
+  io.req.ready := !rwHarzad && second_ready
   // NOTE: when write, don't ready, whe
   //       when replay, just come in, out make sure resp.fire()
 
@@ -252,11 +250,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val resp = Wire(io.resp.bits.cloneType)
   val resp_latch = RegEnable(resp, io.resp.valid && !io.resp.ready)
-  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.ready, sfence.valid)
-  second_ready := !(second_valid || resp_latch_valid) || io.resp.fire()
+  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.fire(), sfence.valid)
+  second_ready := !second_valid || io.resp.fire()
   resp.source   := second_req.source
   resp.vpn      := second_req.vpn
-  resp.isReplay := second_req.isReplay
   resp.hit      := l3Hit || spHit
   resp.toFsm.l1Hit := l1Hit
   resp.toFsm.l2Hit := l2Hit

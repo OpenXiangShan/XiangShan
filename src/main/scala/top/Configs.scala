@@ -153,7 +153,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           l3nSets = 4,
           l3nWays = 8,
           spSize = 2,
-          missQueueSize = 8
         ),
         useFakeL2Cache = true, // disable L2 Cache
       )),

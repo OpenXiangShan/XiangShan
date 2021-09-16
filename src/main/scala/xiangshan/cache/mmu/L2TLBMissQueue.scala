@@ -32,20 +32,20 @@ import freechips.rocketchip.tilelink._
 
 class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = UInt(vpnLen.W)
-  val source = UInt(bPtwWidth.W)
+  val source = UInt(bSourceWidth.W)
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(MSHRSize).W)
 }
 
 class L2TlbMQInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = Output(UInt(vpnLen.W))
-  val source = Output(UInt(bPtwWidth.W))
+  val source = Output(UInt(bSourceWidth.W))
   val l3 = Valid(Output(UInt(PAddrBits.W)))
 }
 
 class L2TlbMQCacheBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = Output(UInt(vpnLen.W))
-  val source = Output(UInt(bPtwWidth.W))
+  val source = Output(UInt(bSourceWidth.W))
 }
 
 class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
@@ -54,7 +54,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val cache = Decoupled(new L2TlbMQCacheBundle())
   val fsm_done = Input(Bool())
   val out = DecoupledIO(new Bundle {
-    val source = Output(UInt(bPtwWidth.W))
+    val source = Output(UInt(bSourceWidth.W))
     val id = Output(UInt(bMemID.W))
     val vpn = Output(UInt(vpnLen.W))
   })
@@ -128,8 +128,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
       state(i) := state_cache_low
     }
   }
-  val enq_state = Mux(to_cache, state_cache_next, // relay one cycle to wait for refill
-    Mux(to_wait, state_mem_waiting,
+  val enq_state = Mux(to_cache, Mux(from_pre(io.in.bits.source), state_idle, state_cache_next), // relay one cycle to wait for refill
+    Mux(to_wait, Mux(from_pre(io.in.bits.source), state_idle, state_mem_waiting),
     Mux(io.in.bits.l3.valid, state_mem_req, state_cache_high)))
   when (io.in.fire()) {
     state(enq_ptr) := enq_state
@@ -192,9 +192,9 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   XSPerfAccumulate("mem_count", io.mem.req.fire())
   XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
+  XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
 
   for (i <- 0 until MSHRSize) {
     TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
   }
-  assert(!io.in.valid || io.in.ready, "when io.in.valid, should always ready")
 }

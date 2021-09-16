@@ -27,12 +27,12 @@ import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
-class PTW()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "ptw",
-      sourceId = IdRange(0, l2tlbParams.missQueueSize + 1)
+      sourceId = IdRange(0, MemReqWidth)
     ))
   )))
 
@@ -77,14 +77,15 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   val satp   = csr.satp
   val priv   = csr.priv
 
+
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
   val fsm = Module(new PtwFsm)
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
-    val source = UInt(bPtwWidth.W)
-  }, 2))
+    val source = UInt(bSourceWidth.W)
+  }, if (l2tlbParams.enablePrefetch) 3 else 2))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
   val outArbFsmPort = 1
   val outArbMqPort = 2
@@ -93,16 +94,25 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   arb1.io.in <> VecInit(io.tlb.map(_.req(0)))
   arb1.io.out.ready := arb2.io.in(1).ready
 
-  arb2.io.in(0) <> missQueue.io.cache
-  arb2.io.in(1).valid := arb1.io.out.valid
-  arb2.io.in(1).bits.vpn := arb1.io.out.bits.vpn
-  arb2.io.in(1).bits.source := arb1.io.chosen
+  val InArbMissQueuePort = 0
+  val InArbTlbPort = 1
+  val InArbPrefetchPort = 2
+  arb2.io.in(InArbMissQueuePort) <> missQueue.io.cache
+  arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
+  arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
+  arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
+  if (l2tlbParams.enablePrefetch) {
+    val prefetch = Module(new L2TlbPrefetch())
+    prefetch.io.in.valid := arb1.io.out.fire() && arb1.io.chosen===1.U
+    prefetch.io.in.bits.vpn := arb1.io.out.bits.vpn
+    prefetch.io.sfence := sfence
+    arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
+  }
   arb2.io.out.ready := cache.io.req.ready
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.source := arb2.io.out.bits.source
-  cache.io.req.bits.isReplay := arb2.io.chosen === 0.U
   cache.io.sfence := sfence
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
@@ -125,7 +135,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   fsm.io.req.bits.vpn := cache.io.resp.bits.vpn
   fsm.io.csr := csr
   fsm.io.sfence := sfence
-  fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, false.B,
+  fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, true.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbFsmPort).ready))
 
   // mem req
@@ -133,7 +143,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     Cat(addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W))
   }
   def from_missqueue(id: UInt) = {
-    (id =/= MSHRSize.U)
+    (id =/= FsmReqID.U)
   }
   val waiting_resp = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
   val sfence_latch = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
@@ -202,7 +212,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
 
-  mq_out.ready := MuxLookup(missQueue.io.out.bits.source, false.B,
+  mq_out.ready := MuxLookup(missQueue.io.out.bits.source, true.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
@@ -263,8 +273,6 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.cache.valid)
-  XSPerfAccumulate(s"replay_again", cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isReplay && !fsm.io.req.ready)
-  XSPerfAccumulate(s"into_fsm_no_replay", cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.isReplay && fsm.io.req.ready)
   for (i <- 0 until (MemReqWidth + 1)) {
     XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
   }
@@ -272,10 +280,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   XSPerfAccumulate("mem_count", mem.a.fire())
 
   // print configs
-  println(s"${l2tlbParams.name}: one ptw, miss queue size ${l2tlbParams.missQueueSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
+  println(s"${l2tlbParams.name}: one ptw, miss queue size ${MSHRSize} l1:${l2tlbParams.l1Size} fa l2: nSets ${l2tlbParams.l2nSets} nWays ${l2tlbParams.l2nWays} l3: ${l2tlbParams.l3nSets} nWays ${l2tlbParams.l3nWays} blockBytes:${l2tlbParams.blockBytes}")
 
   // time out assert
-  for (i <- 0 until MSHRSize + 1) {
+  for (i <- 0 until MemReqWidth) {
     TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
     TimeOutAssert(sfence_latch(i), timeOutThreshold, s"ptw mem resp time out sfence_latch${i}")
   }

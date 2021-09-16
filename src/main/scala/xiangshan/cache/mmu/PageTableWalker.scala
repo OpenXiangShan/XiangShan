@@ -30,13 +30,13 @@ import freechips.rocketchip.tilelink._
  */
 class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val l1Hit = Bool()
     val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
   val resp = DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val resp = new PtwResp
   })
 
@@ -142,7 +142,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
   mem.req.valid := state === s_mem_req && !io.mem.mask
   mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
-  mem.req.bits.id := MSHRSize.U(bMemID.W)
+  mem.req.bits.id := FsmReqID.U(bMemID.W)
 
   io.refill.vpn := vpn
   io.refill.level := level
