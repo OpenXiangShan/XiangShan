@@ -664,18 +664,24 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val probe_writeback = s3_req.probe
   val need_writeback  = miss_writeback || probe_writeback
 
-  val writeback_vaddr  = Cat(s3_meta.tag, get_idx(s3_req.vaddr)) << blockOffBits
+  val writeback_vaddr  = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
   val writeback_data = s3_coh === ClientStates.Dirty
 
-  val writeback_paddr = Cat(
-    writeback_vaddr(VAddrBits-1,14),
-    s3_meta.paddr(13,12),
-    writeback_vaddr(11,0)
-  )
+  val writeback_paddr = Wire(UInt()) 
+  if (DCacheAboveIndexOffset > DCacheTagOffset) {
+    writeback_paddr := Cat(
+      writeback_vaddr(VAddrBits-1, DCacheAboveIndexOffset),
+      s3_meta.paddr(DCacheAboveIndexOffset-1, DCacheTagOffset+1),
+      writeback_vaddr(DCacheTagOffset, 0)
+    )
+    require((DCacheAboveIndexOffset-1) >= (DCacheTagOffset+1))
+  } else {
+    writeback_paddr := writeback_vaddr
+  }
 
   val wb_req = io.wb_req.bits
   io.wb_req.valid := s3_fire && need_writeback

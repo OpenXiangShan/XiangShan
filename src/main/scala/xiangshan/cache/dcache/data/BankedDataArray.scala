@@ -36,14 +36,17 @@ trait HasBankedDataArrayParameters extends {
   val DCacheLineBytes = DCacheLineBits / 8
   val DCacheLineWords = DCacheLineBits / 64 // TODO
 
+  val DCacheSameVPAddrLength = 12
+  val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
+
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = 0
   val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
-  val DCacheTagOffset = DCacheSetOffset + log2Up(DCacheSets)
+  val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
+  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrOffset
   val DCacheIndexOffset = DCacheBankOffset
-  val DCacheSameVPAddrLength = 12
-  val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
+
 
   def addrToDCacheBank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)
@@ -51,8 +54,8 @@ trait HasBankedDataArrayParameters extends {
   }
 
   def addrToDCacheSet(addr: UInt) = {
-    require(addr.getWidth >= DCacheTagOffset)
-    addr(DCacheTagOffset-1, DCacheSetOffset)
+    require(addr.getWidth >= DCacheAboveIndexOffset)
+    addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
   }
 
   def getDataOfBank(bank: Int, data: UInt) = {
@@ -68,15 +71,20 @@ trait HasBankedDataArrayParameters extends {
 
 //           Physical Address
 // --------------------------------------
-// | Physical Tag |   Index    | Offset |
+// |   Physical Tag |  PIndex  | Offset |
 // --------------------------------------
-// | Physical Tag | Set | Bank | Offset |
+//                  |
+//                  DCacheTagOffset
+// 
+//           Virtual Address
+// --------------------------------------
+// | Above index  | Set | Bank | Offset |
 // --------------------------------------
 //                |     |      |        |
 //                |     |      |        DCacheWordOffset
 //                |     |      DCacheBankOffset
 //                |     DCacheSetOffset
-//                DCacheTagOffset
+//                DCacheAboveIndexOffset
 
 // DCache size = 64 sets * 8 ways * 8 banks * 8 Byte = 32K Byte
 
