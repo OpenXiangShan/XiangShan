@@ -115,7 +115,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_fake_meta = Wire(new L1Metadata)
   s1_fake_meta.tag := get_tag(s1_addr)
   s1_fake_meta.coh := ClientMetadata.onReset
-  s1_fake_meta.paddr := s1_addr
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage

@@ -292,7 +292,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_fake_meta = Wire(new L1Metadata)
   s1_fake_meta.tag := get_tag(s1_req.addr)
   s1_fake_meta.coh := ClientMetadata.onReset
-  s1_fake_meta.paddr := s1_req.addr
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
@@ -529,7 +528,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.meta_write.bits.idx := get_idx(s3_req.vaddr)
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.data.tag := get_tag(s3_req.addr)
-  io.meta_write.bits.data.paddr := s3_req.addr //TODO
   io.meta_write.bits.data.coh := new_coh
 
   // --------------------------------------------------------------------------------
@@ -664,24 +662,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val probe_writeback = s3_req.probe
   val need_writeback  = miss_writeback || probe_writeback
 
-  val writeback_vaddr  = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
-
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
   val writeback_data = s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
 
-  val writeback_paddr = Wire(UInt()) 
-  if (DCacheAboveIndexOffset > DCacheTagOffset) {
-    writeback_paddr := Cat(
-      writeback_vaddr(VAddrBits-1, DCacheAboveIndexOffset),
-      s3_meta.paddr(DCacheAboveIndexOffset-1, DCacheTagOffset+1),
-      writeback_vaddr(DCacheTagOffset, 0)
-    )
-    require((DCacheAboveIndexOffset-1) >= (DCacheTagOffset+1))
-  } else {
-    writeback_paddr := writeback_vaddr
-  }
+  val writeback_paddr = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 
   val wb_req = io.wb_req.bits
   io.wb_req.valid := s3_fire && need_writeback

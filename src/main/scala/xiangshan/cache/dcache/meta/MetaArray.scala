@@ -27,7 +27,6 @@ import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
   val tag = UInt(tagBits.W)
-  val paddr = UInt(PAddrBits.W)
 }
 
 object L1Metadata {
@@ -35,7 +34,6 @@ object L1Metadata {
     val meta = Wire(new L1Metadata)
     meta.tag := tag
     meta.coh := coh
-    meta.paddr := paddr
     meta
   }
 }
