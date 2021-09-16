@@ -685,8 +685,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   val wb_req = io.wb_req.bits
   io.wb_req.valid := s3_fire && need_writeback
-  wb_req.addr := writeback_paddr
-  // wb_req.vaddr := writeback_vaddr
+  wb_req.addr := get_block_addr(writeback_paddr)
   wb_req.param := writeback_param
   wb_req.voluntary := miss_writeback
   wb_req.hasData := writeback_data
