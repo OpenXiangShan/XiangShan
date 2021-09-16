@@ -94,6 +94,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // in stage 1, load unit gets the physical address
   val s1_addr = io.lsu.s1_paddr
   val s1_vaddr = s1_req.addr
+  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_req.addr))
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
@@ -148,6 +149,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_addr = RegEnable(s1_addr, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
+  val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   s2_ready := true.B
 
   when (s1_fire) { s2_valid := !io.lsu.s1_kill }
@@ -180,9 +182,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s2_data = debug_data_resp(get_row(s2_addr))
 
   val banked_data_resp = io.banked_data_resp
-  val bank_addr = addrToDCacheBank(s2_addr)
-  val banked_data_resp_word = io.banked_data_resp(bank_addr)
-  dontTouch(bank_addr)
+  val s2_bank_addr = addr_to_dcache_bank(s2_addr)
+  val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
+  dontTouch(s2_bank_addr)
 
   // select the word
   // the index of word in a row, in case rowBits != wordBits
