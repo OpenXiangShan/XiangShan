@@ -198,42 +198,58 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.req_pc.ready := ftb.io.r.req.ready
 
     val req_tag = RegEnable(ftbAddr.getTag(io.req_pc.bits)(tagSize-1, 0), io.req_pc.valid)
+    val req_idx = RegEnable(ftbAddr.getIdx(io.req_pc.bits), io.req_pc.valid)
 
     val read_entries = ftb.io.r.resp.data.map(_.entry)
     val read_tags    = ftb.io.r.resp.data.map(_.tag)
 
-    val total_hits = VecInit((0 until numWays).map(b => read_tags(b) === req_tag && read_entries(b).valid))
+    val total_hits = VecInit((0 until numWays).map(b => read_tags(b) === req_tag && read_entries(b).valid && RegNext(io.req_pc.valid)))
     val hit = total_hits.reduce(_||_)
     val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
+    
+    val replacer = ReplacementPolicy.fromString(Some("setplru"), numWays, numSets)
+    val allocWriteWay = replacer.way(req_idx)
 
-    def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
-      val randomAlloc = false
-      if (numWays > 1) {
-        val w = Wire(UInt(log2Up(numWays).W))
-        val valid = WireInit(valids.andR)
-        val tags = Cat(meta_tags, req_tag)
-        val l = log2Up(numWays)
-        val nChunks = (tags.getWidth + l - 1) / l
-        val chunks = (0 until nChunks).map( i =>
-          tags(min((i+1)*l, tags.getWidth)-1, i*l)
-        )
-        w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(numWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
-        w
-      } else {
-        val w = WireInit(0.U)
-        w
-      }
-    }
+    val touch_set = Seq.fill(1)(Wire(UInt(log2Ceil(numSets).W)))
+    val touch_way = Seq.fill(1)(Wire(Valid(UInt(log2Ceil(numWays).W))))
+    
+    replacer.access(touch_set, touch_way)
+    
+    touch_set(0) := req_idx
+    
+    touch_way(0).valid := hit
+    touch_way(0).bits := OHToUInt(hit_way_1h)
 
-    val allocWriteWay = allocWay(
-      VecInit(read_entries.map(_.valid)).asUInt,
-      VecInit(read_tags).asUInt,
-      req_tag
-    )
+    // def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
+    //   val randomAlloc = false
+    //   if (numWays > 1) {
+    //     val w = Wire(UInt(log2Up(numWays).W))
+    //     val valid = WireInit(valids.andR)
+    //     val tags = Cat(meta_tags, req_tag)
+    //     val l = log2Up(numWays)
+    //     val nChunks = (tags.getWidth + l - 1) / l
+    //     val chunks = (0 until nChunks).map( i =>
+    //       tags(min((i+1)*l, tags.getWidth)-1, i*l)
+    //     )
+    //     w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(numWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
+    //     w
+    //   } else {
+    //     val w = WireInit(0.U)
+    //     w
+    //   }
+    // }
+
+    // val allocWriteWay = allocWay(
+    //   VecInit(read_entries.map(_.valid)).asUInt,
+    //   VecInit(read_tags).asUInt,
+    //   req_tag
+    // )
 
     io.read_resp := PriorityMux(total_hits, read_entries) // Mux1H
     io.read_hits.valid := hit
     io.read_hits.bits := Mux(hit, hit_way_1h, VecInit(UIntToOH(allocWriteWay).asBools()))
+    
+    XSDebug(!hit, "FTB not hit, alloc a way: %d\n", allocWriteWay)
 
     // Update logic
     val u_valid = io.update_write_data.valid
