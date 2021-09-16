@@ -269,7 +269,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
 
   s1_s0_set_conflict := s1_valid && get_idx(s1_req.vaddr) === get_idx(s0_req.vaddr)
-  assert(!(s1_valid && s1_req.vaddr === 0.U))
+  // assert(!(s1_valid && s1_req.vaddr === 0.U)) // probe vaddr may be 0
 
   when (s0_fire) {
     s1_valid := true.B
