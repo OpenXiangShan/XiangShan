@@ -250,13 +250,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val debugDataArray = Module(new DuplicatedDataArray)
   val bankedDataArray = Module(new BankedDataArray)
   val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
-  debugDataArray.dump()
   bankedDataArray.dump()
 
-  // val errors = debugDataArray.io.errors ++ metaArray.io.errors
   val errors = bankedDataArray.io.errors ++ metaArray.io.errors
   io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
   // assert(!io.error.ecc_error.valid)
@@ -296,19 +293,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // data array
 
-  debugDataArray.io.write <> mainPipe.io.debug_data_write
   bankedDataArray.io.write <> mainPipe.io.banked_data_write
-
-  // debug data array
-  debugDataArray.io.read(0) <> ldu(0).io.debug_data_read
-  debugDataArray.io.read(1) <> ldu(1).io.debug_data_read
-  debugDataArray.io.read(2) <> mainPipe.io.debug_data_read
-
-  ldu(0).io.debug_data_resp := debugDataArray.io.resp(0)
-  ldu(1).io.debug_data_resp := debugDataArray.io.resp(1)
-  mainPipe.io.debug_data_resp := debugDataArray.io.resp(2)
-
-  // real data array
   bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
   bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
   bankedDataArray.io.readline <> mainPipe.io.banked_data_read
