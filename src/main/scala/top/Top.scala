@@ -136,7 +136,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 trait HaveSlaveAXI4Port {
   this: BaseXSSoc =>
 
-  val idBits = 16
+  val idBits = 14
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -154,6 +154,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
