@@ -23,7 +23,7 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import xiangshan.frontend.{ICacheParameters}
+import xiangshan.frontend.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import xiangshan.backend.dispatch.DispatchParameters
@@ -32,7 +32,7 @@ import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.cache.prefetch._
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{CacheParameters, HCCacheParameters}
+import huancun.{AliasField, CacheParameters, HCCacheParameters}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64

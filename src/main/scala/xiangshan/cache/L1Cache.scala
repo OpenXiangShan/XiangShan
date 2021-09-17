@@ -30,6 +30,7 @@ trait L1CacheParameters {
   def nWays:         Int
   def rowBits:       Int
   def blockBytes:    Int
+  val pageSize = 4 * 1024
 }
 
 trait HasL1CacheParameters extends HasXSParameter
