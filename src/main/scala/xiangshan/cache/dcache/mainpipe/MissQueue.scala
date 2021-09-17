@@ -23,6 +23,7 @@ import utils._
 import freechips.rocketchip.tilelink._
 import bus.tilelink.TLMessages._
 import difftest._
+import huancun.AliasKey
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -74,7 +75,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
-    val mem_acquire_user = Output(UInt())
 
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
@@ -303,7 +303,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     growPermissions = grow_param
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
-  io.mem_acquire_user := req.vaddr(13,12) // hard coded for now, support up to 128KB dcache
+  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
   require(nSets <= 256) // dcache size should not be more than 128KB
   io.mem_grant.ready := !w_grantlast && s_acquire
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
@@ -368,7 +368,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val mem_acquire = Decoupled(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish  = Decoupled(new TLBundleE(edge.bundle))
-    val mem_acquire_user = Output(UInt())
 
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
@@ -484,7 +483,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish,  entries.map(_.io.mem_finish):_*)
-  io.mem_acquire_user := Mux1H(entries.map(_.io.mem_acquire.fire()), entries.map(_.io.mem_acquire_user))
 
   io.pipe_req <> pipe_req_arb.io.out
 
