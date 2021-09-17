@@ -70,6 +70,8 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // LFST state sync
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
+    // singleStep
+    val singleStep = Input(Bool())
   })
 
 
@@ -104,8 +106,15 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
   /**
     * Part 2:
-    *   Update commitType, psrc(0), psrc(1), psrc(2), old_pdest, roqIdx, lqIdx, sqIdx for the uops
+    *   Update commitType, psrc(0), psrc(1), psrc(2), old_pdest, roqIdx, lqIdx, sqIdx and singlestep for the uops
     */
+
+  val singleStepStatus = RegInit(false.B)
+  when (io.flush) {
+    singleStepStatus := false.B
+  }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
+    singleStepStatus := true.B
+  }
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val updatedPsrc1 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
@@ -135,15 +144,8 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       .foldLeft(io.fromRename(i).bits.old_pdest) {
         (z, next) => Mux(next._2, next._1, z)
       }
-    if (i == 0) {
-      updatedPsrc1(i) := pdestBypassedPsrc1
-      updatedPsrc2(i) := pdestBypassedPsrc2
-    }
-    else {
-      // for move elimination, the psrc(0)/psrc(1) of consumer instruction always come from psrc(0) of move
-      updatedPsrc1(i) := Mux(io.renameBypass.move_eliminated_src1(i-1), updatedPsrc1(i-1), pdestBypassedPsrc1)
-      updatedPsrc2(i) := Mux(io.renameBypass.move_eliminated_src2(i-1), updatedPsrc1(i-1), pdestBypassedPsrc2)
-    }
+    updatedPsrc1(i) := pdestBypassedPsrc1
+    updatedPsrc2(i) := pdestBypassedPsrc2
     updatedPsrc3(i) := pdestBypassedPsrc3
     updatedOldPdest(i) := pdestBypassedOldPdest
 
@@ -153,8 +155,11 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedUop(i).psrc(1) := updatedPsrc2(i)
     updatedUop(i).psrc(2) := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
-    updatedUop(i).debugInfo.src1MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src1(i-1))
-    updatedUop(i).debugInfo.src2MoveElim := (if (i == 0) false.B else io.renameBypass.move_eliminated_src2(i-1))
+    if (EnableIntMoveElim) {
+      updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
+    } else {
+      updatedUop(i).debugInfo.eliminatedMove := DontCare
+    }
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update roqIdx, lqIdx, sqIdx
@@ -182,6 +187,9 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     io.lfst(i).bits.roqIdx := updatedUop(i).roqIdx
     io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
     io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
+
+    // update singleStep
+    updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
   }
 
   // store set perf count
@@ -260,10 +268,16 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     // We use notBlockedByPrevious here.
-    io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
+    if (EnableIntMoveElim) {
+      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove
+      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
+                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && !io.fromRename(i).bits.eliminatedMove
+    } else {
+      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
+      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
+                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    }
     io.toIntDq.req(i).bits  := updatedUop(i)
-    io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
-                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
     io.toFpDq.needAlloc(i)  := io.fromRename(i).valid && isFp(i)
     io.toFpDq.req(i).bits   := updatedUop(i)
@@ -294,7 +308,11 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       p"roq ${updatedUop(i).roqIdx}, lq ${updatedUop(i).lqIdx}, sq ${updatedUop(i).sqIdx})\n"
     )
 
-    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U)
+    if (EnableIntMoveElim) {
+      io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
+    } else {
+      io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U)
+    }
     io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpWen
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }

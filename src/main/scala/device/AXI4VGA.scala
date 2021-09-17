@@ -19,6 +19,7 @@ package device
 import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.experimental.ExtModule
 import freechips.rocketchip.amba.axi4.{AXI4AdapterNode, AXI4IdentityNode, AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
 import utils._
@@ -90,13 +91,11 @@ class VGACtrl
   }
 }
 
-class FBHelper extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val valid = Input(Bool())
-    val pixel = Input(UInt(32.W))
-    val sync = Input(Bool())
-  })
+class FBHelper extends ExtModule with HasExtModuleInline {
+  val clk = IO(Input(Clock()))
+  val valid = IO(Input(Bool()))
+  val pixel = IO(Input(UInt(32.W)))
+  val sync = IO(Input(Bool()))
 
   setInline("FBHelper.v",
     s"""
@@ -189,10 +188,10 @@ class AXI4VGA
 
     if (sim) {
       val fbHelper = Module(new FBHelper)
-      fbHelper.io.clk := clock
-      fbHelper.io.valid := io.vga.valid
-      fbHelper.io.pixel := color
-      fbHelper.io.sync := ctrl.module.io.extra.get.sync
+      fbHelper.clk := clock
+      fbHelper.valid := io.vga.valid
+      fbHelper.pixel := color
+      fbHelper.sync := ctrl.module.io.extra.get.sync
     }
 
   }

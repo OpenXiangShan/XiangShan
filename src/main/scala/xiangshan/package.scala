@@ -22,6 +22,7 @@ import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
+import xiangshan.backend.Std
 
 package object xiangshan {
   object SrcType {
@@ -36,8 +37,9 @@ package object xiangshan {
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
     def isFp(srcType: UInt) = srcType===fp
-    def isPcImm(srcType: UInt) = srcType(0)
-    def isRegFp(srcType: UInt) = !srcType(0)
+    def isPcOrImm(srcType: UInt) = srcType(0)
+    def isRegOrFp(srcType: UInt) = !srcType(1)
+    def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
   }
@@ -57,6 +59,7 @@ package object xiangshan {
     def mul          = "b0100".U
     def div          = "b0101".U
     def fence        = "b0011".U
+    def bmu          = "b0111".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1011".U
@@ -66,7 +69,7 @@ package object xiangshan {
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
 
-    def num = 13
+    def num = 14
 
     def apply() = UInt(log2Up(num).W)
 
@@ -79,8 +82,8 @@ package object xiangshan {
     def isAMO(fuType: UInt) = fuType(1)
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
-    def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1)
-    def aluCanAccept(fuType: UInt) = fuType(2) && fuType(1)
+    def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1) || fuType(2) && fuType(1) && fuType(0)
+    def aluCanAccept(fuType: UInt) = fuType(2) && fuType(1) && !fuType(0)
 
     def fmacCanAccept(fuType: UInt) = !fuType(1)
     def fmiscCanAccept(fuType: UInt) = fuType(1)
@@ -108,7 +111,7 @@ package object xiangshan {
   }
 
   object FuOpType {
-    def apply() = UInt(6.W)
+    def apply() = UInt(8.W)
   }
 
   object CommitType {
@@ -203,39 +206,106 @@ package object xiangshan {
   }
 
   object ALUOpType {
-    def add  = "b000000".U
-    def sll  = "b000001".U
-    def slt  = "b000010".U
-    def sltu = "b000011".U
-    def xor  = "b000100".U
-    def srl  = "b000101".U
-    def or   = "b000110".U
-    def and  = "b000111".U
-    def sub  = "b001000".U
-    def sra  = "b001101".U
+    // misc & branch optype
+    def and         = "b0_00_00_000".U
+    def andn        = "b0_00_00_001".U
+    def or          = "b0_00_00_010".U
+    def orn         = "b0_00_00_011".U
+    def xor         = "b0_00_00_100".U
+    def xnor        = "b0_00_00_101".U
+    def orh48       = "b0_00_00_110".U
+    def orc_b       = "b0_00_00_111".U
 
-    def addw = "b100000".U
-    def subw = "b101000".U
-    def sllw = "b100001".U
-    def srlw = "b100101".U
-    def sraw = "b101101".U
+    def andlsb      = "b0_00_11_000".U
+    def andnlsb     = "b0_00_11_001".U
+    def orlsb       = "b0_00_11_010".U
+    def ornlsb      = "b0_00_11_011".U
+    def xorlsb      = "b0_00_11_100".U
+    def xnorlsb     = "b0_00_11_101".U
 
-    def isAddSub(func: UInt) = {
-      func === add || func === sub || func === addw || func === subw
-    }
+    def sext_b      = "b0_00_01_000".U
+    def sext_h      = "b0_00_01_001".U
+    def zext_h      = "b0_00_01_010".U
+    def rev8        = "b0_00_01_011".U
+    // TOOD: optimize it
+    def szewl1      = "b0_00_01_100".U
+    def szewl2      = "b0_00_01_101".U
+    def szewl3      = "b0_00_01_110".U
+    def byte2       = "b0_00_01_111".U
 
-    def isWordOp(func: UInt) = func(5)
+    def beq         = "b0_00_10_000".U
+    def bne         = "b0_00_10_001".U
+    def blt         = "b0_00_10_100".U
+    def bge         = "b0_00_10_101".U
+    def bltu        = "b0_00_10_110".U
+    def bgeu        = "b0_00_10_111".U
 
-    def beq  = "b010000".U
-    def bne  = "b010001".U
-    def blt  = "b010100".U
-    def bge  = "b010101".U
-    def bltu = "b010110".U
-    def bgeu = "b010111".U
+    // add & sub optype
+    def add_uw       = "b0_01_00_000".U
+    def add          = "b0_01_00_001".U
 
-    def isBranch(func: UInt) = func(4)
+    def oddadd       = "b0_01_11_001".U
+
+    def sh1add_uw    = "b0_01_10_000".U
+    def sh1add       = "b0_01_10_001".U
+    def sh2add_uw    = "b0_01_10_010".U
+    def sh2add       = "b0_01_10_011".U
+    def sh3add_uw    = "b0_01_10_100".U
+    def sh3add       = "b0_01_10_101".U
+    def sh4add       = "b0_01_10_111".U
+
+    def sr29add      = "b0_01_01_001".U
+    def sr30add      = "b0_01_01_011".U
+    def sr31add      = "b0_01_01_101".U
+    def sr32add      = "b0_01_01_111".U
+
+    // shift optype
+    def slli_uw     = "b0_10_00_000".U
+    def sll         = "b0_10_00_001".U
+    def bclr        = "b0_10_00_100".U
+    def bset        = "b0_10_00_101".U
+    def binv        = "b0_10_00_110".U
+
+    def srl         = "b0_10_01_001".U
+    def bext        = "b0_10_01_010".U
+    def sra         = "b0_10_01_100".U
+
+    def rol         = "b0_10_10_000".U
+
+    def ror         = "b0_10_11_000".U
+
+    def sub         = "b0_11_00_000".U
+    def sltu        = "b0_11_00_001".U
+    def slt         = "b0_11_00_010".U
+    def maxu        = "b0_11_00_100".U
+    def minu        = "b0_11_00_101".U
+    def max         = "b0_11_00_110".U
+    def min         = "b0_11_00_111".U
+
+    // RV64 32bit optype
+    def addw        = "b1_01_00_001".U
+    def addwbyte    = "b1_01_00_011".U
+    def addwbit     = "b1_01_00_101".U
+    def oddaddw     = "b1_01_11_001".U
+    def subw        = "b1_11_00_000".U
+    def sllw        = "b1_10_00_000".U
+    def srlw        = "b1_10_01_001".U
+    def sraw        = "b1_10_01_100".U
+    def rolw        = "b1_10_10_000".U
+    def rorw        = "b1_10_11_000".U
+
+    def isWordOp(func: UInt) = func(7)
+    def isAddw(func: UInt) = func(7, 5) === "b101".U
+    def isLogic(func: UInt) = func(7, 3) === "b00000".U
+    def logicToLSB(func: UInt) = Cat(func(7, 5), "b11".U(2.W), func(2, 0))
+    def isBranch(func: UInt) = func(6, 3) === "b0010".U
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
+    def isAddOddBit(func: UInt) = func(4, 3) === "b11".U(2.W)
+    def isShAdd(func: UInt) = func(4, 3) === "b10".U(2.W)
+    def isSrAdd(func: UInt) = func(4, 3) === "b01".U(2.W)
+
+    def apply() = UInt(8.W)
   }
 
   object MDUOpType {
@@ -247,40 +317,27 @@ package object xiangshan {
     def mulhu  = "b00011".U
     def mulw   = "b00100".U
 
+    def mulw7  = "b01100".U
+
     // div
     // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | opcode(1bit) |
-    def div    = "b01000".U
-    def divu   = "b01010".U
-    def rem    = "b01001".U
-    def remu   = "b01011".U
+    def div    = "b10000".U
+    def divu   = "b10010".U
+    def rem    = "b10001".U
+    def remu   = "b10011".U
 
-    def divw   = "b01100".U
-    def divuw  = "b01110".U
-    def remw   = "b01101".U
-    def remuw  = "b01111".U
+    def divw   = "b10100".U
+    def divuw  = "b10110".U
+    def remw   = "b10101".U
+    def remuw  = "b10111".U
 
-    // fence
-    // bit encoding: | type (2bit) | padding(1bit)(zero) | opcode(2bit) |
-    def fence    = "b10000".U
-    def sfence   = "b10001".U
-    def fencei   = "b10010".U
-
-    // the highest bits are for instruction types
-    def typeMSB = 4
-    def typeLSB = 3
-
-    def MulType     = "b00".U
-    def DivType     = "b01".U
-    def FenceType   = "b10".U
-
-    def isMul(op: UInt)     = op(typeMSB, typeLSB) === MulType
-    def isDiv(op: UInt)     = op(typeMSB, typeLSB) === DivType
-    def isFence(op: UInt)   = op(typeMSB, typeLSB) === FenceType
+    def isMul(op: UInt) = !op(4)
+    def isDiv(op: UInt) = op(4)
 
     def isDivSign(op: UInt) = isDiv(op) && !op(1)
     def isW(op: UInt) = op(2)
-    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1,0)=/=0.U)
-    def getMulOp(op: UInt) = op(1,0)
+    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1, 0) =/= 0.U)
+    def getMulOp(op: UInt) = op(1, 0)
   }
 
   object LSUOpType {
@@ -330,6 +387,20 @@ package object xiangshan {
     def amomaxu_d = "b101011".U
   }
 
+  object BMUOpType {
+
+    def clmul       = "b0000".U
+    def clmulh      = "b0010".U
+    def clmulr      = "b0100".U
+
+    def clz         = "b1000".U
+    def clzw        = "b1001".U
+    def ctz         = "b1010".U
+    def ctzw        = "b1011".U
+    def cpop        = "b1100".U
+    def cpopw       = "b1101".U
+  }
+
   object BTBtype {
     def B = "b00".U  // branch
     def J = "b01".U  // jump
@@ -340,21 +411,23 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_X  = "b111".U
-    def IMM_S  = "b000".U
-    def IMM_SB = "b001".U
-    def IMM_U  = "b010".U
-    def IMM_UJ = "b011".U
-    def IMM_I  = "b100".U
-    def IMM_Z  = "b101".U
-    def INVALID_INSTR = "b110".U
+    def IMM_X  = "b0111".U
+    def IMM_S  = "b0000".U
+    def IMM_SB = "b0001".U
+    def IMM_U  = "b0010".U
+    def IMM_UJ = "b0011".U
+    def IMM_I  = "b0100".U
+    def IMM_Z  = "b0101".U
+    def INVALID_INSTR = "b0110".U
+    def IMM_B6 = "b1000".U
 
-    def apply() = UInt(3.W)
+    def apply() = UInt(4.W)
   }
 
   def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
-  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1, Seq(0, 2))(p)
+  def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
+  def bmuGen(p: Parameters) = new Bmu()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
   def fenceGen(p: Parameters) = new Fence()(p)
   def csrGen(p: Parameters) = new CSR()(p)
@@ -363,28 +436,30 @@ package object xiangshan {
   def f2iGen(p: Parameters) = new FPToInt()(p)
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
+  def stdGen(p: Parameters) = new Std()(p)
 
-  def f2iSel(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.rfWen
+  def f2iSel(uop: MicroOp): Bool = {
+    uop.ctrl.rfWen
   }
 
-  def i2fSel(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.fpu.fromInt
+  def i2fSel(uop: MicroOp): Bool = {
+    uop.ctrl.fpu.fromInt
   }
 
-  def f2fSel(x: FunctionUnit): Bool = {
-    val ctrl = x.io.in.bits.uop.ctrl.fpu
+  def f2fSel(uop: MicroOp): Bool = {
+    val ctrl = uop.ctrl.fpu
     ctrl.fpWen && !ctrl.div && !ctrl.sqrt
   }
 
-  def fdivSqrtSel(x: FunctionUnit): Bool = {
-    val ctrl = x.io.in.bits.uop.ctrl.fpu
+  def fdivSqrtSel(uop: MicroOp): Bool = {
+    val ctrl = uop.ctrl.fpu
     ctrl.div || ctrl.sqrt
   }
 
   val aluCfg = FuConfig(
+    name = "alu",
     fuGen = aluGen,
-    fuSel = _ => true.B,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.alu,
     fuType = FuType.alu,
     numIntSrc = 2,
     numFpSrc = 0,
@@ -394,8 +469,9 @@ package object xiangshan {
   )
 
   val jmpCfg = FuConfig(
+    name = "jmp",
     fuGen = jmpGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.jmp,
     fuType = FuType.jmp,
     numIntSrc = 1,
     numFpSrc = 0,
@@ -405,24 +481,29 @@ package object xiangshan {
   )
 
   val fenceCfg = FuConfig(
+    name = "fence",
     fuGen = fenceGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency() // TODO: need rewrite latency structure, not just this value
+    latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
+    hasExceptionOut = true
   )
 
   val csrCfg = FuConfig(
+    name = "csr",
     fuGen = csrGen,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.csr,
     fuType = FuType.csr,
     numIntSrc = 1,
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false
+    hasRedirect = false,
+    hasExceptionOut = true
   )
 
   val i2fCfg = FuConfig(
+    name = "i2f",
     fuGen = i2fGen,
     fuSel = i2fSel,
     FuType.i2f,
@@ -431,82 +512,121 @@ package object xiangshan {
     writeIntRf = false,
     writeFpRf = true,
     hasRedirect = false,
-    UncertainLatency()
+    latency = CertainLatency(2),
+    fastUopOut = true, fastImplemented = true
   )
 
   val divCfg = FuConfig(
+    name = "div",
     fuGen = dividerGen,
-    fuSel = (x: FunctionUnit) => MDUOpType.isDiv(x.io.in.bits.uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => MDUOpType.isDiv(uop.ctrl.fuOpType),
     FuType.div,
     2,
     0,
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(),
+    fastUopOut = true,
+    fastImplemented = false
   )
 
   val mulCfg = FuConfig(
+    name = "mul",
     fuGen = multiplierGen,
-    fuSel = (x: FunctionUnit) => MDUOpType.isMul(x.io.in.bits.uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => MDUOpType.isMul(uop.ctrl.fuOpType),
     FuType.mul,
     2,
     0,
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = false,
-    CertainLatency(2)
+    latency = CertainLatency(2),
+    fastUopOut = true,
+    fastImplemented = true
   )
 
+  val bmuCfg = FuConfig(
+    name = "bmu",
+    fuGen = bmuGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bmu,
+    fuType = FuType.bmu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    hasRedirect = false,
+    latency = CertainLatency(1),
+    fastUopOut = true,
+    fastImplemented = false
+ )
+
   val fmacCfg = FuConfig(
+    name = "fmac",
     fuGen = fmacGen,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    latency = UncertainLatency(), fastUopOut = true, fastImplemented = true
   )
 
   val f2iCfg = FuConfig(
+    name = "f2i",
     fuGen = f2iGen,
     fuSel = f2iSel,
-    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = true
   )
 
   val f2fCfg = FuConfig(
+    name = "f2f",
     fuGen = f2fGen,
     fuSel = f2fSel,
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
+    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2),
+    fastUopOut = true, fastImplemented = true
   )
 
   val fdivSqrtCfg = FuConfig(
+    name = "fdivSqrt",
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
-    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
+    FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
+    fastUopOut = true, fastImplemented = false, hasInputBuffer = true
   )
 
   val lduCfg = FuConfig(
+    "ldu",
     null, // DontCare
     null,
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
-  val stuCfg = FuConfig(
+  val staCfg = FuConfig(
+    "sta",
     null,
     null,
-    FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    latency = UncertainLatency(), hasExceptionOut = true
+  )
+
+  val stdCfg = FuConfig(
+    "std",
+    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
+    "mou",
     null,
     null,
-    FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg), 1, Int.MaxValue)
+  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bmuCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
@@ -515,5 +635,6 @@ package object xiangshan {
     Int.MaxValue, 1
   )
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StExeUnitCfg = ExuConfig("StoreExu", "Mem", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 }

@@ -192,7 +192,7 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := LOAD_SOURCE.U
   io.miss_req.bits.cmd := s2_req.cmd
-  io.miss_req.bits.addr := get_block_addr(s2_addr)
+  io.miss_req.bits.addr := get_refill_addr(s2_addr)
   io.miss_req.bits.coh := s2_hit_coh
 
   // send back response

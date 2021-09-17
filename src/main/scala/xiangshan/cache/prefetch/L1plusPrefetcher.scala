@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.frontend.{ICacheMissReq}
 import utils._
 
 case class L1plusPrefetcherParameters(
@@ -34,7 +35,7 @@ case class L1plusPrefetcherParameters(
 // prefetch ICache lines in L1plusCache using StreamPrefetch
 class L1plusPrefetcher(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val in = Flipped(DecoupledIO(new IcacheMissReq))
+    val in = Flipped(DecoupledIO(new ICacheMissReq))
     // prefetch
     val mem_acquire = DecoupledIO(new L1plusCacheReq)
     val mem_grant = Flipped(DecoupledIO(new L1plusCacheResp))

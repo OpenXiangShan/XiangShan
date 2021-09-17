@@ -48,7 +48,14 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
 
     io.enqIQCtrl(i).bits.srcState(0) := io.readState(i * 2).resp
     io.enqIQCtrl(i).bits.srcState(1) := io.readState(i * 2 + 1).resp
+
+    val numReady = io.enqIQCtrl(i).fire + PopCount(io.enqIQCtrl(i).bits.srcState.take(2).map(_ === SrcState.rdy))
+    XSPerfHistogram(s"deq_num_src_ready_$i", numReady, true.B, 0, 3, 1)
   }
+  val enqFire = io.enqIQCtrl.map(_.fire)
+  val numRegSources = io.enqIQCtrl.map(enq => PopCount(enq.bits.ctrl.srcType.take(2).map(_ === SrcType.reg)))
+  val numRegfilePorts = enqFire.zip(numRegSources).map(enq => Mux(enq._1, enq._2, 0.U)).reduce(_ + _)
+  XSPerfHistogram("regfile_ports", numRegfilePorts, true.B, 0, 8, 1)
 
   for (i <- exuParameters.AluCnt until dpParams.IntDqDeqWidth) {
     io.fromDq(i).ready := false.B

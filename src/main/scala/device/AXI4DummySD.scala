@@ -18,6 +18,7 @@ package device
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.ExtModule
 import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
@@ -36,14 +37,12 @@ trait HasSDConst {
   def C_SIZE = NrBlock / MULT - 1
 }
 
-class SDHelper extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val ren = Input(Bool())
-    val data = Output(UInt(32.W))
-    val setAddr = Input(Bool())
-    val addr = Input(UInt(32.W))
-  })
+class SDHelper extends ExtModule with HasExtModuleInline {
+  val clk = IO(Input(Clock()))
+  val ren = IO(Input(Bool()))
+  val data = IO(Output(UInt(32.W)))
+  val setAddr = IO(Input(Bool()))
+  val addr = IO(Input(UInt(32.W)))
 
   setInline("SDHelper.v",
     s"""
@@ -122,12 +121,12 @@ class AXI4DummySD
     }
 
     val sdHelper = Module(new SDHelper)
-    sdHelper.io.clk := clock
-    sdHelper.io.ren := (getOffset(raddr) === 0x40.U && in.ar.fire())
-    sdHelper.io.setAddr := setAddr
-    sdHelper.io.addr := regs(sdarg)
+    sdHelper.clk := clock
+    sdHelper.ren := (getOffset(raddr) === 0x40.U && in.ar.fire())
+    sdHelper.setAddr := setAddr
+    sdHelper.addr := regs(sdarg)
 
-    def sdRead = sdHelper.io.data
+    def sdRead = sdHelper.data
 
     val mapping = Map(
       RegMap(0x00, regs(sdcmd), cmdWfn),

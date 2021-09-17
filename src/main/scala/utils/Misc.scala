@@ -56,12 +56,14 @@ object MaskGen {
 object Random
 {
   def apply(mod: Int, random: UInt): UInt = {
-    if (isPow2(mod)) random(log2Ceil(mod)-1,0)
+    if (mod == 1) 0.U
+    else if (isPow2(mod)) random(log2Ceil(mod)-1,0)
     else PriorityEncoder(partition(apply(1 << log2Up(mod*8), random), mod))
   }
   def apply(mod: Int): UInt = apply(mod, randomizer)
   def oneHot(mod: Int, random: UInt): UInt = {
-    if (isPow2(mod)) UIntToOH(random(log2Up(mod)-1,0))
+    if (mod == 1) 1.U(1.W)
+    else if (isPow2(mod)) UIntToOH(random(log2Up(mod)-1,0))
     else VecInit(PriorityEncoderOH(partition(apply(1 << log2Up(mod*8), random), mod))).asUInt
   }
   def oneHot(mod: Int): UInt = oneHot(mod, randomizer)
@@ -80,5 +82,20 @@ object Transpose
   def apply[T <: chisel3.Data](in: Vec[Vec[T]]) = {
     val n = in(0).size
     VecInit((0 until n).map(i => VecInit(in.map(row => row(i)))))
+  }
+}
+
+/**
+ * assert when 'signal' is true for more than 'threshold' cycles
+ */
+object TimeOutAssert {
+  def apply(signal: Bool, threshold: Int, message: String): Unit = {
+    val counter = RegInit(0.U(32.W))
+    when (signal) {
+      counter := counter + 1.U
+    }.otherwise {
+      counter := 0.U
+    }
+    assert(counter <= threshold.U, message)
   }
 }

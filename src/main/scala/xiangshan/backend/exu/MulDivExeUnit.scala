@@ -31,11 +31,11 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
     io.fromInt.bits.src(1)(XLEN - 1, 0)
   )
 
-  val mul = supportedFunctionUnits.collectFirst {
+  val mul = functionUnits.collectFirst {
     case m: ArrayMultiplier => m
   }.get
 
-  val div = supportedFunctionUnits.collectFirst {
+  val div = functionUnits.collectFirst {
     case d: AbstractDivider => d
   }.orNull
 
@@ -54,6 +54,9 @@ class MulDivExeUnit(implicit p: Parameters) extends ExeUnit(MulDivExeUnitCfg) {
     op,
     mulInputFuncTable.map(p => (p._1(1, 0), p._2._1(src1)))
   )
+  when (func(3)) {
+    mul.io.in.bits.src(0) := src1(6, 0)
+  }
   mul.io.in.bits.src(1) := LookupTree(
     op,
     mulInputFuncTable.map(p => (p._1(1, 0), p._2._2(src2)))

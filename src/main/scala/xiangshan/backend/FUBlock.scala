@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
-
+import xiangshan.mem.StoreDataBundle
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -87,11 +87,13 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
   val hasFence = configs.map(_._1).contains(JumpCSRExeUnitCfg)
   val hasFrm = configs.map(_._1).contains(FmacExeUnitCfg) || configs.map(_._1).contains(FmiscExeUnitCfg)
   val numRedirectOut = configs.filter(_._1.hasRedirect).map(_._2).sum
+  val numStd = configs.filter(_._1 == StdExeUnitCfg).map(_._2).sum
 
   val exuRedirect = Vec(numRedirectOut, ValidIO(new ExuOutput))
   val csrio = if (hasCSR) Some(new CSRFileIO) else None
   val fenceio = if (hasFence) Some(new FenceIO) else None
   val frm = if (hasFrm) Some(Input(UInt(3.W))) else None
+  val stData = if (numStd > 0) Some(Vec(numStd, ValidIO(new StoreDataBundle))) else None
 
   override def cloneType: FUBlockExtraIO.this.type =
     new FUBlockExtraIO(configs).asInstanceOf[this.type]
@@ -113,9 +115,12 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
   })
 
   val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
-
+  println(exeUnits)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
-  val fpExeUnits = exeUnits.filter(_.config.readFpRf)
+  // TODO: deal with Std units
+  val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
+  val stdExeUnits = exeUnits.filter(_.config.readIntRf).filter(_.config.readFpRf)
+  stdExeUnits.foreach(_.io.fromFp := DontCare)
   io.issue <> intExeUnits.map(_.io.fromInt) ++ fpExeUnits.map(_.io.fromFp)
   io.writeback <> exeUnits.map(_.io.out)
 
@@ -142,22 +147,17 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     }
 
     if (exu.frm.isDefined) {
-      // fp instructions have three operands
-      for (j <- 0 until 3) {
-        // when one of the higher bits is zero, then it's not a legal single-precision number
-        val isLegalSingle = io.issue(i).bits.uop.ctrl.fpu.typeTagIn === S && io.issue(i).bits.src(j)(63, 32).andR
-        val single = recode(io.issue(i).bits.src(j)(31, 0), S)
-        val double = recode(io.issue(i).bits.src(j)(63, 0), D)
-        exu.io.fromFp.bits.src(j) := Mux(isLegalSingle, single, double)
-      }
-
-      // out
-      io.writeback(i).bits.data := Mux(exu.io.out.bits.uop.ctrl.fpWen,
-        ieee(exu.io.out.bits.data),
-        exu.io.out.bits.data
-      )
-
       exu.frm.get := io.extra.frm.get
     }
   }
+
+  if (io.extra.stData.isDefined) {
+    io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
+  }
+
+  for ((iss, i) <- io.issue.zipWithIndex) {
+    XSPerfAccumulate(s"issue_count_$i", iss.fire())
+  }
+  XSPerfHistogram("writeback_count", PopCount(io.writeback.map(_.fire())), true.B, 0, numIn, 1)
+
 }

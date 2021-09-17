@@ -19,6 +19,7 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -31,7 +32,6 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
     val source = UInt(bPtwWidth.W)
     val l1Hit = Bool()
-    val l2Hit = Bool()
     val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
@@ -40,25 +40,23 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val resp = new PtwResp
   })
 
+  val mq = DecoupledIO(new L2TlbMQInBundle())
+
   val mem = new Bundle {
-    val req = DecoupledIO(new Bundle {
-      val addr = UInt(PAddrBits.W)
-    })
-    val resp = Flipped(ValidIO(new Bundle {
-      val data = UInt(MemBandWidth.W)
-    }))
+    val req = DecoupledIO(new L2TlbMemReqBundle())
+    val resp = Flipped(ValidIO(UInt(XLEN.W)))
+    val mask = Input(Bool())
   }
 
   val csr = Input(new TlbCsrBundle)
   val sfence = Input(new SfenceBundle)
-  val sfenceLatch = Output(Bool())
   val refill = Output(new Bundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
-    val memAddr = UInt(PAddrBits.W)
   })
 }
 
+@chiselName
 class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new PtwFsmIO)
 
@@ -66,35 +64,26 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem = io.mem
   val satp = io.csr.satp
 
-  val s_idle :: s_mem_req :: s_mem_resp :: s_resp :: Nil = Enum(4)
+  val s_idle :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val ppn = Reg(UInt(ppnLen.W))
   val vpn = Reg(UInt(vpnLen.W))
   val levelNext = level + 1.U
-
-  val sfenceLatch = RegEnable(false.B, init = false.B, mem.resp.valid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
-  val memAddrReg = RegEnable(mem.req.bits.addr, mem.req.fire())
   val l1Hit = Reg(Bool())
-  val l2Hit = Reg(Bool())
+  val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
+  io.req.ready := state === s_idle
 
-  val memRdata = mem.resp.bits.data
-  val memSelData = memRdata.asTypeOf(Vec(MemBandWidth/XLEN, UInt(XLEN.W)))(memAddrReg(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)))
-  val memPtes = (0 until PtwL3SectorSize).map(i => memRdata((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle))
-  val memPte = memSelData.asTypeOf(new PteBundle)
-  val memPteReg = RegEnable(memPte, mem.resp.fire())
-
-  val notFound = WireInit(false.B)
+  val pageFault = WireInit(false.B)
   switch (state) {
     is (s_idle) {
       when (io.req.fire()) {
         val req = io.req.bits
         state := s_mem_req
-        level := Mux(req.l2Hit, 2.U, Mux(req.l1Hit, 1.U, 0.U))
-        ppn := Mux(req.l2Hit || req.l1Hit, io.req.bits.ppn, satp.ppn)
+        level := Mux(req.l1Hit, 1.U, 0.U)
+        ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
         vpn := io.req.bits.vpn
         l1Hit := req.l1Hit
-        l2Hit := req.l2Hit
       }
     }
 
@@ -105,62 +94,60 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
 
     is (s_mem_resp) {
-      when (mem.resp.fire()) {
-        when (memPte.isLeaf() || memPte.isPf(level)) {
-          state := s_resp
-          notFound := memPte.isPf(level)
-        }.otherwise {
-          when (level =/= 2.U) {
-            level := levelNext
-            state := s_mem_req
-          }.otherwise {
-            state := s_resp
-            notFound := true.B
-          }
-        }
+      when(mem.resp.fire()) {
+        state := s_check_pte
       }
     }
 
-    is (s_resp) {
-      when (io.resp.fire()) {
-        state := s_idle
+    is (s_check_pte) {
+      when (memPte.isLeaf() || memPte.isPf(level)) {
+        when (io.resp.fire()) {
+          state := s_idle
+        }
+        pageFault := memPte.isPf(level)
+      }.otherwise {
+        when (level =/= (Level-2).U) { // when level is 1.U, finish
+          level := levelNext
+          state := s_mem_req
+        }.otherwise {
+          when (io.mq.fire()) {
+            state := s_idle
+          }
+        }
       }
     }
   }
 
   when (sfence.valid) {
     state := s_idle
-    when (state === s_mem_resp && !mem.resp.fire() || state === s_mem_req && mem.req.fire()) {
-      sfenceLatch := true.B
-    }
   }
 
-  val finish = mem.resp.fire()  && (memPte.isLeaf() || memPte.isPf(level) || level === 2.U)
-  val resp = Reg(io.resp.bits.cloneType)
-  when (finish && !sfenceLatch) {
-    resp.source := RegEnable(io.req.bits.source, io.req.fire())
-    resp.resp.pf := level === 3.U || notFound
-    resp.resp.entry.tag := vpn
-    resp.resp.entry.ppn := memPte.ppn
-    resp.resp.entry.perm.map(_ := memPte.getPerm())
-    resp.resp.entry.level.map(_ := level)
-  }
-  io.resp.valid := state === s_resp
-  io.resp.bits := resp
-  io.req.ready := state === s_idle
+  val is_pte = memPte.isLeaf() || memPte.isPf(level)
+  val find_pte = is_pte
+  val to_find_pte = level === 1.U && !is_pte
+  val source = RegEnable(io.req.bits.source, io.req.fire())
+  io.resp.valid := state === s_check_pte && find_pte
+  io.resp.bits.source := source
+  io.resp.bits.resp.apply(pageFault, level, memPte, vpn)
+
+  io.mq.valid := state === s_check_pte && to_find_pte
+  io.mq.bits.source := source
+  io.mq.bits.vpn := vpn
+  io.mq.bits.l3.valid := true.B
+  io.mq.bits.l3.bits := memPte.ppn
+
+  assert(level =/= 2.U || level =/= 3.U)
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPteReg.ppn), getVpnn(vpn, 1))
-  val l3addr = MakeAddr(Mux(l2Hit, ppn, memPteReg.ppn), getVpnn(vpn, 0))
-  mem.req.valid := state === s_mem_req && !sfenceLatch
-  mem.req.bits.addr := Mux(level === 0.U, l1addr, Mux(level === 1.U, l2addr, l3addr))
+  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
+  mem.req.valid := state === s_mem_req && !io.mem.mask
+  mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
+  mem.req.bits.id := MSHRSize.U(bMemID.W)
 
   io.refill.vpn := vpn
   io.refill.level := level
-  io.refill.memAddr := memAddrReg
-  io.sfenceLatch := sfenceLatch
 
-  XSDebug(p"[fsm] state:${state} level:${level} sfenceLatch:${sfenceLatch} notFound:${notFound}\n")
+  XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())
@@ -173,4 +160,6 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_count", mem.req.fire())
   XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+
+  TimeOutAssert(state =/= s_idle, timeOutThreshold, "page table walker time out")
 }

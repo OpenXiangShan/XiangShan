@@ -41,7 +41,7 @@ class PayloadArrayWriteIO[T <: Data](gen: T, params: RSParams) extends Bundle {
 
 class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val read = Vec(params.numDeq, new PayloadArrayReadIO(gen, params))
+    val read = Vec(params.numDeq + 1, new PayloadArrayReadIO(gen, params))
     val write = Vec(params.numEnq, new PayloadArrayWriteIO(gen, params))
   })
 
@@ -49,7 +49,7 @@ class PayloadArray[T <: Data](gen: T, params: RSParams)(implicit p: Parameters) 
 
   // read ports
   io.read.map(_.data).zip(io.read.map(_.addr)).map {
-    case (data, addr) => data := Mux1H(addr, payload)
+    case (data, addr) => data := Mux1H(RegNext(addr), payload)
     XSError(PopCount(addr) > 1.U, p"raddr ${Binary(addr)} is not one-hot\n")
   }
 

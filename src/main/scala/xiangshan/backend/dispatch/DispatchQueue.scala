@@ -229,4 +229,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   XSPerfAccumulate("in", numEnq)
   XSPerfAccumulate("out", PopCount(io.deq.map(_.fire())))
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
+  val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
+  XSPerfAccumulate("fake_block", fake_block)
 }

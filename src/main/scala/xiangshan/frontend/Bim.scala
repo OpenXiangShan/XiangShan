@@ -24,129 +24,123 @@ import utils._
 import chisel3.experimental.chiselName
 
 trait BimParams extends HasXSParameter {
-  val BimBanks = PredictWidth
-  val BimSize = 4096
-  val nRows = BimSize / BimBanks
+  val bimSize = 2048
   val bypassEntries = 4
 }
 
 @chiselName
-class BIM(implicit p: Parameters) extends BasePredictor with BimParams {
-  class BIMResp extends Resp {
-    val ctrs = Vec(PredictWidth, UInt(2.W))
-  }
-  class BIMMeta extends Meta {
-    val ctrs = Vec(PredictWidth, UInt(2.W))
-  }
-  class BIMFromOthers extends FromOthers {}
+class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils {
+  val bimAddr = new TableAddr(log2Up(bimSize), 1)
 
-  class BIMIO(implicit p: Parameters) extends DefaultBasePredictorIO {
-    val resp = Output(new BIMResp)
-    val meta = Output(new BIMMeta)
-  }
-
-  override val io = IO(new BIMIO)
-  override val debug = true
-
-  val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
-
-  val bim = Module(new SRAMTemplate(UInt(2.W), set = nRows, way=BimBanks, shouldReset = false, holdRead = true))
+  val bim = Module(new SRAMTemplate(UInt(2.W), set = bimSize, way=numBr, shouldReset = false, holdRead = true))
 
   val doing_reset = RegInit(true.B)
-  val resetRow = RegInit(0.U(log2Ceil(nRows).W))
+  val resetRow = RegInit(0.U(log2Ceil(bimSize).W))
   resetRow := resetRow + doing_reset
-  when (resetRow === (nRows-1).U) { doing_reset := false.B }
+  when (resetRow === (bimSize-1).U) { doing_reset := false.B }
 
-  val if1_packetAlignedPC = packetAligned(io.pc.bits)
-  val if2_pc = RegEnable(if1_packetAlignedPC, io.pc.valid)
+  val s0_idx = bimAddr.getIdx(s0_pc)
 
-  val if1_mask = io.inMask
-  val if1_row  = bimAddr.getBankIdx(if1_packetAlignedPC)
+  bim.io.r.req.valid := io.s0_fire
+  bim.io.r.req.bits.setIdx := s0_idx
 
-  bim.io.r.req.valid := io.pc.valid
-  bim.io.r.req.bits.setIdx := if1_row
+  io.in.ready := bim.io.r.req.ready
+  io.s1_ready := bim.io.r.req.ready
 
-  val if2_bimRead = bim.io.r.resp.data
-  val ctrlMask = Fill(if2_bimRead.getWidth, ctrl.bim_enable.asUInt).asTypeOf(if2_bimRead)
-  io.resp.ctrs  := VecInit(if2_bimRead zip ctrlMask map {case (a, b) => a & b})
-  io.meta.ctrs  := if2_bimRead
+  val s1_read = bim.io.r.resp.data
 
-  val updateValid = RegNext(io.update.valid)
-  val u = RegNext(io.update.bits)
+  io.out.resp := io.in.bits.resp_in(0)
 
-  val updateRow = bimAddr.getBankIdx(u.ftqPC)
+  val s1_latch_taken_mask = VecInit(Cat((0 until numBr reverse).map(i => s1_read(i)(1))).asBools())
+  val s1_latch_meta       = s1_read.asUInt()
+  override val meta_size = s1_latch_meta.getWidth
 
+  io.out.resp.s1.preds.taken_mask := s1_latch_taken_mask
+  io.out.resp.s2.preds.taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
-  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, UInt(2.W)))))
-  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(BimBanks, Bool()))))
-  val wrbypass_rows     = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(nRows).W))))
-  val wrbypass_enq_idx  = RegInit(0.U(log2Up(bypassEntries).W))
+  io.out.resp.s3.preds.taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
+  io.out.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
 
-  val wrbypass_hits = VecInit((0 until bypassEntries).map( i => 
-    !doing_reset && wrbypass_rows(i) === updateRow))
+  // Update logic
+  val u_valid = RegNext(io.update.valid)
+  val update = RegNext(io.update.bits)
+
+  val u_idx = bimAddr.getIdx(update.pc)
+
+  // Bypass logic
+  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, UInt(2.W)))))
+  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, Bool()))))
+  val wrbypass_idx       = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(bimSize).W))))
+  val wrbypass_enq_ptr    = RegInit(0.U(log2Up(bypassEntries).W))
+
+  val wrbypass_hits = VecInit((0 until bypassEntries).map(i =>
+    !doing_reset && wrbypass_idx(i) === u_idx))
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtrs = VecInit((0 until BimBanks).map(b => 
-                  Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(b),
-                    wrbypass_ctrs(wrbypass_hit_idx)(b), u.metas(b).bimCtr)))
-  
-  val newTakens = VecInit((0 until BimBanks).map(b => u.cfiIndex.valid && u.cfiIndex.bits === b.U))
-  val newCtrs = VecInit((0 until BimBanks).map(b => satUpdate(oldCtrs(b), 2, newTakens(b))))
-  // val oldSaturated = newCtr === oldCtr
-  
-  val needToUpdate = VecInit((0 until PredictWidth).map(i => updateValid && u.br_mask(i) && u.valids(i)))
+  val oldCtrs = VecInit((0 until numBr).map(i =>
+    Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i),
+    wrbypass_ctrs(wrbypass_hit_idx)(i), update.meta(2*i+1, 2*i))))
 
-  when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
-  
-  for (b <- 0 until BimBanks) {
-    when (needToUpdate.reduce(_||_)) {
-      when (wrbypass_hit) {
-        when (needToUpdate(b)) {
-          wrbypass_ctrs(wrbypass_hit_idx)(b) := newCtrs(b)
-          wrbypass_ctr_valids(wrbypass_hit_idx)(b) := true.B
+  val newTakens = update.preds.taken_mask
+  val newCtrs = VecInit((0 until numBr).map(i =>
+    satUpdate(oldCtrs(i), 2, newTakens(i))
+  ))
+
+  val update_mask = LowerMask(PriorityEncoderOH(update.preds.taken_mask.asUInt))
+  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
+
+  when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}
+
+  for (i <- 0 until numBr) {
+    when(need_to_update.reduce(_||_)) {
+      when(wrbypass_hit) {
+        when(need_to_update(i)) {
+          wrbypass_ctrs(wrbypass_hit_idx)(i) := newCtrs(i)
+          wrbypass_ctr_valids(wrbypass_hit_idx)(i) := true.B
         }
       }.otherwise {
-        wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B
-        when (needToUpdate(b)) {
-          wrbypass_ctr_valids(wrbypass_enq_idx)(b) := true.B
-          wrbypass_ctrs(wrbypass_enq_idx)(b) := newCtrs(b)
+        wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := false.B
+        when(need_to_update(i)) {
+          wrbypass_ctrs(wrbypass_enq_ptr)(i) := newCtrs(i)
+          wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := true.B
         }
       }
     }
   }
-  
-  when (needToUpdate.reduce(_||_) && !wrbypass_hit) {
-    wrbypass_rows(wrbypass_enq_idx) := updateRow
-    wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
+
+  when (need_to_update.reduce(_||_) && !wrbypass_hit) {
+    wrbypass_idx(wrbypass_enq_ptr) := u_idx
+    wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypassEntries)-1, 0)
   }
 
   bim.io.w.apply(
-    valid = needToUpdate.asUInt.orR || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(BimBanks)(2.U(2.W))), newCtrs),
-    setIdx = Mux(doing_reset, resetRow, updateRow),
-    waymask = Mux(doing_reset, Fill(BimBanks, "b1".U).asUInt, needToUpdate.asUInt)
+    valid = need_to_update.asUInt.orR || doing_reset,
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
+    setIdx = Mux(doing_reset, resetRow, u_idx),
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
   )
 
-  XSPerfAccumulate("bim_wrbypass_hit", needToUpdate.reduce(_||_) && wrbypass_hit)
-  XSPerfAccumulate("bim_wrbypass_enq", needToUpdate.reduce(_||_) && !wrbypass_hit)
+  val latch_s0_fire = RegNext(io.s0_fire)
 
-  if (BPUDebug && debug) {
-    val u = io.update.bits
-    XSDebug(doing_reset, "Reseting...\n")
-    XSDebug("[update] v=%d pc=%x valids=%b, tgt=%x\n", updateValid, u.ftqPC, u.valids.asUInt, u.target)
-    
-    XSDebug("[update] brMask=%b, taken=%b isMisPred=%b\n", u.br_mask.asUInt, newTakens.asUInt, u.mispred.asUInt)
-    for (i <- 0 until BimBanks) {
-      XSDebug(RegNext(io.pc.valid && io.inMask(i)), p"BimResp[$i]: ctr = ${io.resp.ctrs(i)}\n")
-      XSDebug(needToUpdate(i),
-        p"update bim bank $i: pc:${Hexadecimal(u.ftqPC)}, taken:${u.takens(i)}, " +
-        p"oldCtr:${oldCtrs(i)}, newCtr:${newCtrs(i)}\n")
-      XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i) && needToUpdate(i),
-        p"bank $i wrbypass hit wridx $wrbypass_hit_idx: row:$updateRow, " +
-        p"ctr:${oldCtrs(i)}, newCtr:${newCtrs(i)}\n")
-      XSDebug(true.B, p"bimCtr(${i.U})=${Binary(u.metas(i).bimCtr)} oldCtr=${Binary(oldCtrs(i))} newCtr=${Binary(newCtrs(i))}\n")
-    }
+  XSDebug(doing_reset, "Doing reset...\n")
+
+  XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", s0_pc, s0_idx)
+
+  for(i <- 0 until numBr) {
+    XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
   }
-  
+
+  XSDebug(u_valid, "update_pc=%x, update_idx=%d, is_br=%b\n", update.pc, u_idx, update.ftb_entry.brValids.asUInt)
+
+  XSDebug(u_valid, "newTakens=%b\n", newTakens.asUInt)
+
+  for(i <- 0 until numBr) {
+    XSDebug(u_valid, "oldCtrs%d=%b\n", i.U, oldCtrs(i))
+  }
+
+  for(i <- 0 until numBr) {
+    XSDebug(u_valid, "newCtrs%d=%b\n", i.U, newCtrs(i))
+  }
+
 }
