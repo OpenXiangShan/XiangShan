@@ -84,6 +84,7 @@ class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
 
     when (io.pipe_req.fire()) {
       state := s_pipe_resp
+      assert(!io.pipe_req.bits.vaddr === 0.U)
     }
   }
 

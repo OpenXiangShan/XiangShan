@@ -48,25 +48,29 @@ trait HasBankedDataArrayParameters extends {
   val DCacheIndexOffset = DCacheBankOffset
 
 
-  def addrToDCacheBank(addr: UInt) = {
+  def addr_to_dcache_bank(addr: UInt) = {
     require(addr.getWidth >= DCacheSetOffset)
     addr(DCacheSetOffset-1, DCacheBankOffset)
   }
 
-  def addrToDCacheSet(addr: UInt) = {
+  def addr_to_dcache_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
     addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
   }
 
-  def getDataOfBank(bank: Int, data: UInt) = {
+  def get_data_of_bank(bank: Int, data: UInt) = {
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBits)
     data(DCacheSRAMRowBits * (bank + 1) - 1, DCacheSRAMRowBits * bank)
   }
 
-  def getMaskOfBank(bank: Int, data: UInt) = {
+  def get_mask_of_bank(bank: Int, data: UInt) = {
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
+
+  // def gen_OH_rmask_and_sel_result(index: UInt, data: Vec) = {
+  //   Mux1H(RegNext(UIntToOH(index)), data)
+  // }
 }
 
 //           Physical Address
@@ -294,8 +298,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rwhazard = io.write.valid
   val rrhazard = false.B // io.readline.valid
   (0 until LoadPipelineWidth).map(rport_index => {
-    set_addrs(rport_index) := addrToDCacheSet(io.read(rport_index).bits.addr)
-    bank_addrs(rport_index) := addrToDCacheBank(io.read(rport_index).bits.addr)
+    set_addrs(rport_index) := addr_to_dcache_set(io.read(rport_index).bits.addr)
+    bank_addrs(rport_index) := addr_to_dcache_bank(io.read(rport_index).bits.addr)
 
     io.read(rport_index).ready := !(rwhazard || rrhazard)
 
@@ -353,7 +357,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       Mux(bank_addr_matchs(0), way_en(0), way_en(1))
     )
     val bank_set_addr = Mux(readline_match, 
-      addrToDCacheSet(io.readline.bits.addr),
+      addr_to_dcache_set(io.readline.bits.addr),
       Mux(bank_addr_matchs(0), set_addrs(0), set_addrs(1))
     )
 
@@ -385,7 +389,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.resp := bank_result
 
   // write data_banks & ecc_banks
-  val sram_waddr = addrToDCacheSet(io.write.bits.addr)
+  val sram_waddr = addr_to_dcache_set(io.write.bits.addr)
   for (bank_index <- 0 until DCacheBanks) {
     // data write
     val data_bank = data_banks(bank_index)

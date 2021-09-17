@@ -172,8 +172,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val row_write = VecInit(word_write.map(_.orR)).asUInt
   val full_overwrite = row_full_overwrite.andR
 
-  val bank_write = VecInit((0 until DCacheBanks).map(i => getMaskOfBank(i, s0_req.store_mask).orR)).asUInt
-  val bank_full_write = VecInit((0 until DCacheBanks).map(i => getMaskOfBank(i, s0_req.store_mask).andR)).asUInt
+  val bank_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).orR)).asUInt
+  val bank_full_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).andR)).asUInt
   val banks_full_overwrite = bank_full_write.andR
 
   val banked_store_rmask = bank_write & ~bank_full_write
@@ -269,7 +269,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
 
   s1_s0_set_conflict := s1_valid && get_idx(s1_req.vaddr) === get_idx(s0_req.vaddr)
-  assert(!(s1_valid && s1_req.vaddr === 0.U))
+  // assert(!(s1_valid && s1_req.vaddr === 0.U)) // probe vaddr may be 0
 
   when (s0_fire) {
     s1_valid := true.B
@@ -292,7 +292,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_fake_meta = Wire(new L1Metadata)
   s1_fake_meta.tag := get_tag(s1_req.addr)
   s1_fake_meta.coh := ClientMetadata.onReset
-  s1_fake_meta.paddr := s1_req.addr
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
@@ -428,10 +427,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   for (i <- 0 until DCacheBanks) {
     val old_data = s2_data(i)
-    val new_data = getDataOfBank(i, s2_req.store_data)
+    val new_data = get_data_of_bank(i, s2_req.store_data)
     // for amo hit, we should use read out SRAM data
     // do not merge with store data
-    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), getMaskOfBank(i, s2_req.store_mask))
+    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, s2_req.store_mask))
     s2_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
   }
 
@@ -529,7 +528,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.meta_write.bits.idx := get_idx(s3_req.vaddr)
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.data.tag := get_tag(s3_req.addr)
-  io.meta_write.bits.data.paddr := s3_req.addr //TODO
   io.meta_write.bits.data.coh := new_coh
 
   // --------------------------------------------------------------------------------

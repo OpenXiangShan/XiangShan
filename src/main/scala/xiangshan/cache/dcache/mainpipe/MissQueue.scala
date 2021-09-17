@@ -222,6 +222,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   when (io.pipe_req.fire()) {
     s_pipe_req := true.B
+    assert(!io.pipe_req.bits.vaddr === 0.U)
   }
 
   when (io.pipe_resp.valid) {
