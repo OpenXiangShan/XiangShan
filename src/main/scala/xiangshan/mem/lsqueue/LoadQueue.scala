@@ -215,7 +215,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.needReplayFromRS(i)
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
-      uop(loadWbIndex).debugInfo.issueTime := io.loadIn(i).bits.uop.debugInfo.issueTime
+      uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
     }
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
