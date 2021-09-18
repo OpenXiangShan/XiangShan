@@ -208,22 +208,22 @@ class XiangShan(object):
         return riscv_tests
 
     def __am_apps_path(self, bench):
-        filename = f"{bench}-riscv64-noop.bin"
+        filename = f"new-{bench}-riscv64-noop.bin"
         return [os.path.join(self.args.am_home, "apps", bench, "build", filename)]
 
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
-            "povray": "_3400001000_.gz",
-            "mcf": "_2550001000_.gz",
-            "xalancbmk": "_6600001000_.gz",
-            "gcc": "_1250001000_.gz",
-            "namd": "_4850001000_.gz",
-            "milc": "_4150001000_.gz",
-            "lbm": "_7550001000_.gz",
-            "gromacs": "_3150001000_.gz"
+            "povray": "_700480000000_.gz",
+            "mcf": "_17520000000_.gz",
+            "xalancbmk": "_266100000000_.gz",
+            "gcc": "_39720000000_.gz",
+            "namd": "_434640000000_.gz",
+            "milc": "_103620000000_.gz",
+            "lbm": "_140840000000_.gz",
+            "gromacs": "_275480000000_.gz"
         }
-        return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
+        return [os.path.join("/home/ci-runner/xsenv/new_workloads", name, workloads[name])]
 
     def run_ci(self, test):
         all_tests = {
