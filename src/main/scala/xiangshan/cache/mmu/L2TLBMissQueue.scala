@@ -64,7 +64,10 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
       val id = Output(UInt(log2Up(MSHRSize).W))
     }))
 
-    val refill_vpn = Output(UInt(vpnLen.W))
+    val refill = Output(new Bundle {
+      val vpn = UInt(vpnLen.W)
+      val source = UInt(bSourceWidth.W)
+    })
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
 }
@@ -176,7 +179,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
-  io.mem.refill_vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
+  io.mem.refill.vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
+  io.mem.refill.source := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).source
 
   XSPerfAccumulate("mq_in_count", io.in.fire())
   XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)

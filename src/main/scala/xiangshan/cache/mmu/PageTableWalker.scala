@@ -53,6 +53,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val refill = Output(new Bundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
+    val source = UInt(bSourceWidth.W)
   })
 }
 
@@ -146,6 +147,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   io.refill.vpn := vpn
   io.refill.level := level
+  io.refill.source := source
 
   XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
 

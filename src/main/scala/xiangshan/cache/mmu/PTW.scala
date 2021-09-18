@@ -113,6 +113,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.vpn := arb2.io.out.bits.vpn
   cache.io.req.bits.source := arb2.io.out.bits.source
+  cache.io.req_isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
@@ -207,10 +208,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   val refill_from_mq = RegNext(mem_resp_from_mq)
   cache.io.refill.valid := RegNext(mem_resp_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
   cache.io.refill.bits.ptes := refill_data.asUInt
-  cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
+  cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill.vpn, fsm.io.refill.vpn)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
+  cache.io.refill.bits.prefetch := Mux(refill_from_mq, from_pre(mq_mem.refill.source), from_pre(fsm.io.refill.source))
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
-
 
   mq_out.ready := MuxLookup(missQueue.io.out.bits.source, true.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
@@ -258,6 +259,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := pte_in.isPf(2.U)
+    ptw_resp.entry.prefetch := DontCare
     ptw_resp
   }
 
