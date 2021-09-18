@@ -229,6 +229,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
+      uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
       XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
         io.storeIn(i).bits.uop.cf.pc,
