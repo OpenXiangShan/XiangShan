@@ -20,13 +20,12 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.prefetch._
+import huancun.{CacheParameters, HCCacheParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, Tage_SC}
 import freechips.rocketchip.diplomacy.AddressSet
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
@@ -60,7 +59,7 @@ case class XSCoreParameters
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
-  RasSize: Int = 16,
+  RasSize: Int = 32,
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
@@ -75,11 +74,12 @@ case class XSCoreParameters
       val bim = Module(new BIM()(p))
       val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
       val ras = Module(new RAS()(p))
+      val ittage = Module(new ITTage()(p))
       // val tage = Module(new Tage()(p))
       // val fake = Module(new FakePredictor()(p))
 
       // val preds = Seq(loop, tage, btb, ubtb, bim)
-      val preds = Seq(bim, ubtb, tage, ftb, ras)
+      val preds = Seq(bim, ubtb, tage, ftb, ittage, ras)
       preds.map(_.io := DontCare)
 
       // ubtb.io.resp_in(0)  := resp_in
@@ -91,7 +91,8 @@ case class XSCoreParameters
       ubtb.io.in.bits.resp_in(0) := bim.io.out.resp
       tage.io.in.bits.resp_in(0) := ubtb.io.out.resp
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
-      ras.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
+      ras.io.in.bits.resp_in(0) := ittage.io.out.resp
       
       (preds, ras.io.out.resp)
     }),
@@ -146,7 +147,9 @@ case class XSCoreParameters
     fetchi = true,
     useDmode = false,
     sameCycle = true,
+    normalNWays = 32,
     normalReplacer = Some("plru"),
+    superNWays = 4,
     superReplacer = Some("plru"),
     shouldBlock = true
   ),
@@ -170,6 +173,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = true
   ),
+  refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
     normalNSets = 1,
@@ -200,8 +204,14 @@ case class XSCoreParameters
     nReleaseEntries = 16,
     nStoreReplayEntries = 16
   ),
-  L2Size: Int = 512 * 1024, // 512KB
-  L2NWays: Int = 8,
+  L2CacheParams: HCCacheParameters = HCCacheParameters(
+    name = "l2",
+    level = 2,
+    ways = 8,
+    sets = 1024, // default 512KB L2
+    prefetch = Some(huancun.prefetch.BOPParameters())
+  ),
+  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -318,6 +328,7 @@ trait HasXSParameter {
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val refillBothTlb = coreParams.refillBothTlb
   val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
@@ -345,10 +356,7 @@ trait HasXSParameter {
   // L2 configurations
   val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
   val L1BusWidth = 256
-  val L2Size = coreParams.L2Size
   val L2BlockSize = 64
-  val L2NWays = coreParams.L2NWays
-  val L2NSets = L2Size / L2BlockSize / L2NWays
 
   // L3 configurations
   val L2BusWidth = 256
@@ -365,29 +373,6 @@ trait HasXSParameter {
       reallocStreamOnMissInstantly = true,
       cacheName = "icache"
     )
-  )
-
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "bop", // "stream" or "bop"
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "dcache"
-    ),
-    bopParams = BOPParameters(
-      rrTableEntries = 256,
-      rrTagBits = 12,
-      scoreBits = 5,
-      roundMax = 50,
-      badScore = 1,
-      blockBytes = L2BlockSize,
-      nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
-    ),
   )
 
   // load violation predict

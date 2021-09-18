@@ -28,7 +28,7 @@ import scala.math.min
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
-  val numEntries = 2048
+  val numEntries = 4096
   val numWays    = 4
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20
@@ -89,7 +89,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
 
   def getLowerStatByTarget(offsetLen: Int)(pc: UInt, target: UInt) = {
     val pc_higher = pc(VAddrBits-1, offsetLen)
-    val target_higher = pc(VAddrBits-1, offsetLen)
+    val target_higher = target(VAddrBits-1, offsetLen)
     val stat = WireInit(Mux(target_higher > pc_higher, TAR_OVF,
       Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT)))
     val lower = WireInit(target(offsetLen-1, 0))

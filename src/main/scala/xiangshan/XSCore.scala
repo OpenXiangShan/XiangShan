@@ -279,6 +279,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.redirect <> ctrlBlock.io.redirect
   memScheduler.io.flush <> ctrlBlock.io.flush
   memBlock.io.issue <> memScheduler.io.issue
+  // By default, instructions do not have exceptions when they enter the function units.
+  memBlock.io.issue.map(_.bits.uop.clearExceptions())
   memScheduler.io.writeback <> rfWriteback
   memScheduler.io.fastUopIn <> allFastUop1
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc
@@ -338,7 +340,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater(2))
-  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize))
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize-1))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> fenceio.sfence
@@ -349,7 +351,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.csr <> csrioIn.tlb
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  assert(l2PrefetcherParameters._type == "bop")
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
   val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
@@ -359,6 +360,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val memBlock_reset_gen = Module(new ResetGen(3, !debugOpts.FPGAPlatform))
   memBlock.reset := memBlock_reset_gen.io.out
+  memScheduler.reset := memBlock_reset_gen.io.out
 
   val exuBlock_reset_gen = Module(new ResetGen(4, !debugOpts.FPGAPlatform))
   exuBlocks.foreach(_.reset := exuBlock_reset_gen.io.out)

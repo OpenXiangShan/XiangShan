@@ -39,11 +39,13 @@ trait HasL1CacheParameters extends HasXSParameter
   def nSets = cacheParams.nSets
   def nWays = cacheParams.nWays
   def blockBytes = cacheParams.blockBytes
+  def refillBytes = l1BusDataWidth / 8
   def blockBits = blockBytes * 8
 
   def idxBits = log2Up(cacheParams.nSets)
   def wayBits = log2Up(nWays)
   def blockOffBits = log2Up(cacheParams.blockBytes)
+  def refillOffBits = log2Up(l1BusDataWidth / 8)
 
   def untagBits = blockOffBits + idxBits
   // 4K page
@@ -71,6 +73,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def wordOffBits = log2Up(wordBytes)
   // the number of words in a block
   def blockWords = blockBytes / wordBytes
+  def refillWords = refillBytes / wordBytes
 
   def idxMSB = untagBits-1
   def idxLSB = blockOffBits
@@ -78,9 +81,11 @@ trait HasL1CacheParameters extends HasXSParameter
   def offsetlsb = wordOffBits
 
   def get_tag(addr: UInt) = (addr >> untagBits).asUInt()
+  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
   def get_block(addr: UInt) = addr >> blockOffBits
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
+  def get_refill_addr(addr: UInt) = (addr >> refillOffBits) << refillOffBits
 
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_row(addr: UInt) = addr(blockOffBits - 1, rowOffBits)
@@ -88,6 +93,7 @@ trait HasL1CacheParameters extends HasXSParameter
 
   def beatRows = beatBits/rowBits
   def rowWords = rowBits/wordBits
+  def blockBeats = blockBytes / beatBytes
 
   def full_divide(a: Int, b: Int) = a >= b && isPow2(a / b)
 }

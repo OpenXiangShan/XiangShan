@@ -52,18 +52,18 @@ case class L2TLBParameters
   l1Associative: String = "fa",
   l1Replacer: Option[String] = Some("plru"),
   // l2
-  l2nSets: Int = 8,
-  l2nWays: Int = 4,
+  l2nSets: Int = 32,
+  l2nWays: Int = 2,
   l2Replacer: Option[String] = Some("setplru"),
   // l3
-  l3nSets: Int = 64,
-  l3nWays: Int = 8,
+  l3nSets: Int = 128,
+  l3nWays: Int = 4,
   l3Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
   // miss queue
-  missQueueSize: Int = 8,
+  missQueueSize: Int = 9,
   // way size
   blockBytes: Int = 64
 )
@@ -80,6 +80,8 @@ trait HasTlbConst extends HasXSParameter {
   val asidLen = 16
 
   val sramSinglePort = true
+
+  val timeOutThreshold = 2000
 
   def get_idx(vpn: UInt, nSets: Int): UInt = {
     vpn(log2Up(nSets)-1, 0)
@@ -154,6 +156,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def genPtwL3SectorIdx(vpn: UInt) = {
     genPtwL3Idx(vpn)(PtwL3SectorIdxLen - 1, 0)
+  }
+
+  def dropL3SectorBits(vpn: UInt) = {
+    vpn(vpn.getWidth-1, PtwL3SectorIdxLen)
   }
 
   def genPtwL3SetIdx(vpn: UInt) = {
