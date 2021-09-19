@@ -277,6 +277,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     payloadArray.io.write(i).enable := doEnqueue(i)
     payloadArray.io.write(i).addr := select.io.allocate(i).bits
     payloadArray.io.write(i).data := io.fromDispatch(i).bits
+    payloadArray.io.write(i).data.debugInfo.enqRsTime := GTimer()
   }
 
   // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
@@ -340,6 +341,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   when (oldestOverride) {
     s1_out.last.bits.uop := payloadArray.io.read.last.data
   }
+  s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
   for (i <- 0 until params.numDeq) {
     s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush)
@@ -362,6 +364,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // TODO: optimize timing here since ready may be slow
       wakeupQueue.io.in.valid := issueVec(i).valid && s1_out(i).ready && fuCheck
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
+      wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() + 1.U
       wakeupQueue.io.redirect := io.redirect
       wakeupQueue.io.flush := io.flush
       io.fastWakeup.get(i) := wakeupQueue.io.out
@@ -538,6 +541,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
         XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
       }
+
+      io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
 
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire() && wakeupBypassMask(j).asUInt().orR())

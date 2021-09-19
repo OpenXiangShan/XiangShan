@@ -95,19 +95,20 @@ package object xiangshan {
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int to float",
+      i2f.litValue() -> "int_to_float",
       csr.litValue() -> "csr",
       alu.litValue() -> "alu",
       mul.litValue() -> "mul",
       div.litValue() -> "div",
       fence.litValue() -> "fence",
+      bmu.litValue() -> "bmu",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
       fDivSqrt.litValue() -> "fdiv/fsqrt",
       ldu.litValue() -> "load",
-      stu.litValue() -> "store"
+      stu.litValue() -> "store",
+      mou.litValue() -> "mou"
     )
-
   }
 
   object FuOpType {
