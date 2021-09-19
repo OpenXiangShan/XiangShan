@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
+import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
@@ -192,6 +193,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       new SchedulerExtraIO().asInstanceOf[this.type]
   }
 
+  val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
+
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
@@ -205,7 +208,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
     // feedback ports
     val extra = new SchedulerExtraIO
+    val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
+
+  if (io.fmaMid.isDefined) {
+    io.fmaMid.get <> outer.reservationStations.flatMap(_.module.io.fmaMid.getOrElse(Seq()))
+  }
 
   def extraReadRf(numRead: Seq[Int]): Seq[UInt] = {
     require(numRead.length == io.allocate.length)
