@@ -147,13 +147,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   // print rs info
   println("Scheduler: ")
-  for ((rs, i) <- rs_all.zipWithIndex) {
-    println(s"RS $i: $rs")
-    println(s"  innerIntUop: ${outer.innerIntFastSources(i).map(_._2)}")
-    println(s"  innerFpUop: ${outer.innerFpFastSources(i).map(_._2)}")
-    println(s"  innerFastPorts: ${outer.innerFastPorts(i)}")
-    println(s"  outFastPorts: ${outer.outFastPorts(i)}")
-  }
   println(s"  number of issue ports: ${outer.numIssuePorts}")
   println(s"  number of replay ports: ${outer.numReplayPorts}")
   println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
@@ -165,6 +158,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
   if (fpRfConfig._1) {
     println(s"FP  Regfile: ${fpRfConfig._2}R${fpRfConfig._3}W")
+  }
+  for ((rs, i) <- rs_all.zipWithIndex) {
+    println(s"RS $i: $rs")
+    println(s"  innerIntUop: ${outer.innerIntFastSources(i).map(_._2)}")
+    println(s"  innerFpUop: ${outer.innerFpFastSources(i).map(_._2)}")
+    println(s"  innerFastPorts: ${outer.innerFastPorts(i)}")
+    println(s"  outFastPorts: ${outer.outFastPorts(i)}")
+    println(s"  loadBalance: ${rs_all(i).params.needBalance}")
   }
 
   class SchedulerExtraIO extends XSBundle {

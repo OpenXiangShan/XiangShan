@@ -29,7 +29,8 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     val allocate = Vec(params.numEnq, ValidIO(UInt(params.numEntries.W)))
     // select for issue
     val request = Input(UInt(params.numEntries.W))
-    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W))) //TODO: optimize it
+    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
+    val grantBalance = Output(Bool())
   })
 
   val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
@@ -49,13 +50,46 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
   val request = io.request.asBools
   val select = SelectOne(policy, request, params.numDeq)
   for (i <- 0 until params.numDeq) {
-    val sel = select.getNthOH(i + 1)
+    val sel = select.getNthOH(i + 1, params.needBalance)
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
 
     XSError(io.grant(i).valid && PopCount(io.grant(i).bits.asBools) =/= 1.U,
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
     XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
+  }
+  io.grantBalance := select.getBalance2
+
+}
+
+class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
+    val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
+    val canOverride = Vec(params.numDeq, Input(Bool()))
+    val out = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
+    val isOverrided = Vec(params.numDeq, Output(Bool()))
+  })
+
+  io.out := io.in
+
+  val oldestMatchVec = VecInit(io.in.map(i => i.valid && OHToUInt(i.bits) === OHToUInt(io.oldest.bits)))
+  io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
+    // When the oldest is not matched with io.in(i), we always select the oldest.
+    // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.
+    val oldestMatchIn = if (params.numDeq > 1) {
+      VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
+    } else false.B
+    canDo && io.oldest.valid && !oldestMatchIn
+  }
+
+  for ((out, i) <- io.out.zipWithIndex) {
+    out.valid := io.in(i).valid || io.isOverrided(i)
+    when (io.isOverrided(i)) {
+      out.bits := io.oldest.bits
+    }
+
+    XSPerfAccumulate(s"oldest_override_$i", io.isOverrided(i))
   }
 }
 
