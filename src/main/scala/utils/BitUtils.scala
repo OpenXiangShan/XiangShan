@@ -175,7 +175,12 @@ object OnesMoreThan {
 }
 
 abstract class SelectOne {
-  def getNthOH(n: Int): (Bool, Vec[Bool])
+  protected val balance2 = RegInit(false.B)
+  balance2 := !balance2
+
+  // need_balance: for balanced selections only (DO NOT use this if you don't know what it is)
+  def getNthOH(n: Int, need_balance: Boolean = false): (Bool, Vec[Bool])
+  def getBalance2: Bool = balance2
 }
 
 class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
@@ -199,9 +204,9 @@ class NaiveSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
     }
   }
 
-  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
-    require(n > 0, s"n should be positive to select the n-th one")
-    require(n <= n_sel, s"n should not be larger than n_sel")
+  def getNthOH(n: Int, need_balance: Boolean = false): (Bool, Vec[Bool]) = {
+    require(n > 0, s"$n should be positive to select the n-th one")
+    require(n <= n_sel, s"$n should not be larger than $n_sel")
     // bits(i) is true.B and bits(i - 1, 0) has n - 1
     val selValid = OnesMoreThan(bits, n)
     val sel = VecInit(bits.zip(matrix).map{ case (b, m) => b && m(n - 1) })
@@ -216,15 +221,28 @@ class CircSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
 
   val sel_forward = new NaiveSelectOne(bits, (n_sel + 1) / 2)
   val sel_backward = new NaiveSelectOne(bits.reverse, n_sel / 2)
+  val moreThan = Seq(1, 2).map(i => OnesMoreThan(bits, i))
 
-  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
-    val selValid = OnesMoreThan(bits, n)
+  def getNthOH(n: Int, need_balance: Boolean = false): (Bool, Vec[Bool]) = {
+    require(!need_balance || max_sel == 2, s"does not support load balance between $max_sel selections")
+    val selValid = if (!need_balance) {
+      OnesMoreThan(bits, n)
+    } else {
+      if (n == 1) {
+        // When balance2 bit is set, we prefer the second selection port.
+        Mux(balance2, moreThan.last, moreThan.head)
+      }
+      else {
+        require(n == 2)
+        Mux(balance2, moreThan.head, moreThan.last)
+      }
+    }
     val sel_index = (n + 1) / 2
     if (n % 2 == 1) {
-      (selValid, sel_forward.getNthOH(sel_index)._2)
+      (selValid, sel_forward.getNthOH(sel_index, need_balance)._2)
     }
     else {
-      (selValid, VecInit(sel_backward.getNthOH(sel_index)._2.reverse))
+      (selValid, VecInit(sel_backward.getNthOH(sel_index, need_balance)._2.reverse))
     }
   }
 }
@@ -240,15 +258,15 @@ class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
   val n_odd = n_bits / 2
   val sel_odd = new CircSelectOne((0 until n_odd).map(i => bits(2 * i + 1)), (n_sel + 1) / 2)
 
-  def getNthOH(n: Int): (Bool, Vec[Bool]) = {
+  def getNthOH(n: Int, need_balance: Boolean = false): (Bool, Vec[Bool]) = {
     val sel_index = (n + 1) / 2
     if (n % 2 == 1) {
-      val selected = sel_even.getNthOH(sel_index)
+      val selected = sel_even.getNthOH(sel_index, need_balance)
       val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 0) selected._2(i / 2) else false.B))
       (selected._1, sel)
     }
     else {
-      val selected = sel_odd.getNthOH(sel_index)
+      val selected = sel_odd.getNthOH(sel_index, need_balance)
       val sel = VecInit((0 until n_bits).map(i => if (i % 2 == 1) selected._2(i / 2) else false.B))
       (selected._1, sel)
     }
@@ -256,10 +274,12 @@ class OddEvenSelectOne(bits: Seq[Bool], max_sel: Int = -1) extends SelectOne {
 }
 
 object SelectOne {
-  def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = policy.toLowerCase match {
-    case "naive" => new NaiveSelectOne(bits, max_sel)
-    case "circ" => new CircSelectOne(bits, max_sel)
-    case "oddeven" => new OddEvenSelectOne(bits, max_sel)
-    case _ => throw new IllegalArgumentException(s"unknown select policy")
+  def apply(policy: String, bits: Seq[Bool], max_sel: Int = -1): SelectOne = {
+    policy.toLowerCase match {
+      case "naive" => new NaiveSelectOne(bits, max_sel)
+      case "circ" => new CircSelectOne(bits, max_sel)
+      case "oddeven" => new OddEvenSelectOne(bits, max_sel)
+      case _ => throw new IllegalArgumentException(s"unknown select policy")
+    }
   }
 }
