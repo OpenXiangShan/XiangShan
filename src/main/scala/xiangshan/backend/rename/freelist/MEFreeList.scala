@@ -205,25 +205,22 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   Increments: from rename stage
    */
   val needAllocatingVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  XSDebug(needAllocatingVec.asUInt().orR(), p"needAllocatingVec:${Binary(needAllocatingVec.asUInt)}\n")
-
   val increaseSpecRefCounterVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
 
-  for (i <- 0 until RenameWidth) {
-    // enqueue instr, isn't move elimination
-    needAllocatingVec(i) := allocateReq(i) && canAllocate && doAllocate && !flush && !psrcOfMove(i).valid && !redirect && !walk
-    // enqueue instr, is move elimination
-    increaseSpecRefCounterVec(i) := allocateReq(i) && canAllocate && doAllocate && !flush && psrcOfMove(i).valid && psrcOfMove(i).bits =/= 0.U && !redirect && !walk
+  val allocatePtr = (0 until RenameWidth).map(i => headPtr + i.U)
+  val phyRegCandidates = VecInit(allocatePtr.map(ptr => freeList(ptr.value)))
 
-    val offset = i match {
-      case 0 => 0.U
-      case n => PopCount(needAllocatingVec.take(n))
-    }
-    val ptr = headPtr + offset
-    allocatePhyReg(i) := freeList(ptr.value)
+  for (i <- 0 until RenameWidth) {
+    val renameEnable = allocateReq(i) && canAllocate && doAllocate && !flush && !redirect && !walk
+    // enqueue instr, isn't move elimination
+    needAllocatingVec(i) := renameEnable && !psrcOfMove(i).valid
+    // enqueue instr, is move elimination
+    increaseSpecRefCounterVec(i) := renameEnable && psrcOfMove(i).valid
+
+    allocatePhyReg(i) := phyRegCandidates(PopCount(needAllocatingVec.take(i)))
   }
 
-  for (preg <- 0 until NRPhyRegs) {
+  for (preg <- 1 until NRPhyRegs) {
     val increaseCmpVec = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => increaseSpecRefCounterVec(i) && psrcOfMove(i).bits === preg.U)))
     val decreaseCmpVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => decreaseSpecRefCounterVec(i) && freePhyReg(i) === preg.U)))
 
