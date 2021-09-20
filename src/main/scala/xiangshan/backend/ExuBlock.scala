@@ -73,6 +73,9 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   // the scheduler issues instructions to function units
   scheduler.io.issue <> fuBlock.io.issue
+  if (scheduler.io.fmaMid.isDefined) {
+    scheduler.io.fmaMid.get <> fuBlock.io.fmaMid.get
+  }
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect

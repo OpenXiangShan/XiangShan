@@ -20,10 +20,10 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, XSPerfAccumulate}
+import utils._
 import xiangshan._
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.FPUSubModule
+import xiangshan.backend.fu.fpu.{FPUSubModule, FMA}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
@@ -81,6 +81,12 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
       (fflagsValid, fflagsBits)
     }
     io.out.bits.fflags := Mux1H(fflagsSel.map(_._1), fflagsSel.map(_._2))
+  }
+
+  val fmaModules = functionUnits.filter(_.isInstanceOf[FMA]).map(_.asInstanceOf[FMA])
+  if (fmaModules.nonEmpty) {
+    require(fmaModules.length == 1)
+    fmaModules.head.midResult <> fmaMid.get
   }
 
   if (config.fuConfigs.contains(stdCfg)) {
