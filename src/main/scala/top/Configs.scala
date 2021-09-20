@@ -32,7 +32,7 @@ import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.cache.prefetch._
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{AliasField, CacheParameters, HCCacheParameters}
+import huancun.{AliasField, CacheParameters, HCCacheParameters, PreferCacheField}
 
 class DefaultConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -209,7 +209,8 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
             sets = p.dcacheParameters.nSets,
             ways = p.dcacheParameters.nWays + 2,
             physicalIndex = false
-          ))
+          )),
+          reqField = Seq(PreferCacheField())
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,

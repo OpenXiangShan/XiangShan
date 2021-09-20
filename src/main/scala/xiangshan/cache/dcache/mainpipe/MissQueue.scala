@@ -23,7 +23,7 @@ import utils._
 import freechips.rocketchip.tilelink._
 import bus.tilelink.TLMessages._
 import difftest._
-import huancun.AliasKey
+import huancun.{AliasKey, PreferCacheKey, PrefetchKey}
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -303,7 +303,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     growPermissions = grow_param
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
+  // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+  // trigger prefetch
+  io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := true.B)
+  // prefer not to cache data in L2 by default
+  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
   require(nSets <= 256) // dcache size should not be more than 128KB
   io.mem_grant.ready := !w_grantlast && s_acquire
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
