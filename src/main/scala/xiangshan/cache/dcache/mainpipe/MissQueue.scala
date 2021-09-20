@@ -118,6 +118,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   when (io.req.valid && io.primary_ready) {
     req_valid := true.B
     req := io.req.bits
+    req.addr := get_block_addr(io.req.bits.addr)
 
     s_acquire := false.B
     s_grantack := false.B
@@ -252,13 +253,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   def should_merge(new_req: MissReq): Bool = {
-    val block_match = req.addr === new_req.addr
+    val block_match = req.addr === get_block_addr(new_req.addr)
     val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
     block_match && (before_read_sent_can_merge(new_req) || beat_match && before_data_refill_can_merge(new_req))
   }
 
   def should_reject(new_req: MissReq): Bool = {
-    val block_match = req.addr === new_req.addr
+    val block_match = req.addr === get_block_addr(new_req.addr)
     // do not reject any req when we are in s_invalid
     block_match && !should_merge(new_req) && req_valid // TODO: optimize this
   }
@@ -522,7 +523,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         cmd === M_XA_MAXU)
     }
     // req addr must be aligned to block boundary
-    assert (io.req.bits.addr(blockOffBits - 1, 0) === 0.U)
+//    assert (io.req.bits.addr(blockOffBits - 1, 0) === 0.U)
   }
 
   when (io.refill.fire()) {

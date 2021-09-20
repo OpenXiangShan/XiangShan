@@ -53,8 +53,10 @@ case class RSParams
 ){
   def allWakeup: Int = numFastWakeup + numWakeup
   def indexWidth: Int = log2Up(numEntries)
-  def oldestFirst: Boolean = exuCfg.get != AluExeUnitCfg
+  // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
+  def oldestFirst: (Boolean, Boolean, Int) = (true, !isLoad, if (isLoad) 0 else numDeq - 1)
   def needScheduledBit: Boolean = hasFeedback || delayedRf
+  def needBalance: Boolean = exuCfg.get.needLoadBalance
 
   override def toString: String = {
     s"type ${exuCfg.get.name}, size $numEntries, enq $numEnq, deq $numDeq, numSrc $numSrc, fast $numFastWakeup, wakeup $numWakeup"
@@ -277,6 +279,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     payloadArray.io.write(i).enable := doEnqueue(i)
     payloadArray.io.write(i).addr := select.io.allocate(i).bits
     payloadArray.io.write(i).data := io.fromDispatch(i).bits
+    payloadArray.io.write(i).data.debugInfo.enqRsTime := GTimer()
   }
 
   // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
@@ -310,36 +313,39 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     * S1: read uop and data
     */
   val issueVec = Wire(Vec(params.numDeq, Valid(UInt(params.numEntries.W))))
-  // When the reservation station has oldestFirst, we need to issue the oldest instruction if possible.
-  // However, in this case, the select policy always selects at maximum numDeq instructions to issue.
-  // Thus, we need an arbitration between the numDeq + 1 possibilities.
-  // For better performance, we always let the last issue port be the victim.
-  def doIssueArbitration(oldest: Valid[UInt], in: Vec[ValidIO[UInt]], out: Vec[ValidIO[UInt]]): Bool = {
-    require(in.length == out.length)
-    out := in
-    // When the oldest is not matched in in.dropRight(1), we always select the oldest.
-    // We don't need to compare the last selection here, because we will select the oldest when
-    // either the last matches the oldest or the last does not match the oldest.
-    val oldestMatchVec = in.dropRight(1).map(i => i.valid && i.bits === oldest.bits)
-    val oldestMatchIn = if (params.numDeq > 1) VecInit(oldestMatchVec).asUInt().orR() else false.B
-    val oldestNotSelected = params.oldestFirst.B && oldest.valid && !oldestMatchIn
-    out.last.valid := in.last.valid || oldestNotSelected
-    when (oldestNotSelected) {
-      out.last.bits := oldest.bits
+  val oldestOverride = Wire(Vec(params.numDeq, Bool()))
+  if (params.oldestFirst._1) {
+    // When the reservation station has oldestFirst, we need to issue the oldest instruction if possible.
+    // However, in this case, the select policy always selects at maximum numDeq instructions to issue.
+    // Thus, we need an arbitration between the numDeq + 1 possibilities.
+    val oldestSelection = Module(new OldestSelection(params))
+    oldestSelection.io.in := RegNext(select.io.grant)
+    oldestSelection.io.oldest := RegNext(oldestSel)
+    // By default, we use the default victim index set in parameters.
+    oldestSelection.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
+    // When deq width is two, we have a balance bit to indicate selection priorities.
+    // For better performance, we decide the victim according to selection priorities.
+    if (params.needBalance && params.oldestFirst._2 && params.numDeq == 2) {
+      // When balance2 bit is set, selection prefers the second selection port.
+      // Thus, the first is the victim if balance2 bit is set.
+      oldestSelection.io.canOverride(0) := select.io.grantBalance
+      oldestSelection.io.canOverride(1) := !select.io.grantBalance
     }
-    XSPerfAccumulate("oldest_override_last", oldestNotSelected)
-    // returns whether the oldest is selected
-    oldestNotSelected
+    issueVec := oldestSelection.io.out
+    oldestOverride := oldestSelection.io.isOverrided
   }
-  val oldestOverride = doIssueArbitration(RegNext(oldestSel), RegNext(select.io.grant), issueVec)
+  else {
+    issueVec := RegNext(select.io.grant)
+    oldestOverride.foreach(_ := false.B)
+  }
 
   // pipeline registers for stage one
   val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
   // Do the read data arbitration
-  s1_out.zip(payloadArray.io.read.dropRight(1)).foreach{ case (o, r) => o.bits.uop := r.data }
-  when (oldestOverride) {
-    s1_out.last.bits.uop := payloadArray.io.read.last.data
+  for ((doOverride, i) <- oldestOverride.zipWithIndex) {
+    s1_out(i).bits.uop := Mux(doOverride, payloadArray.io.read.last.data, payloadArray.io.read(i).data)
   }
+  s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
   for (i <- 0 until params.numDeq) {
     s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush)
@@ -362,6 +368,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // TODO: optimize timing here since ready may be slow
       wakeupQueue.io.in.valid := issueVec(i).valid && s1_out(i).ready && fuCheck
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
+      wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() + 1.U
       wakeupQueue.io.redirect := io.redirect
       wakeupQueue.io.flush := io.flush
       io.fastWakeup.get(i) := wakeupQueue.io.out
@@ -428,10 +435,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   dataArray.io.read.last.addr := oldestSel.bits
   // Do the read data arbitration
   s1_out.foreach(_.bits.src := DontCare)
-  for (i <- 0 until params.numSrc) {
-    s1_out.zip(dataArray.io.read.dropRight(1)).foreach{ case (o, r) => o.bits.src(i) := r.data(i) }
-    when (oldestOverride) {
-      s1_out.last.bits.src(i) := dataArray.io.read.last.data(i)
+  for ((doOverride, i) <- oldestOverride.zipWithIndex) {
+    for (j <- 0 until params.numSrc) {
+      s1_out(i).bits.src(j) := Mux(doOverride, dataArray.io.read.last.data(j), dataArray.io.read(i).data(j))
     }
   }
 
@@ -538,6 +544,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
         XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
       }
+
+      io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
 
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire() && wakeupBypassMask(j).asUInt().orR())

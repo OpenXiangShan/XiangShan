@@ -81,7 +81,8 @@ trait HasL1CacheParameters extends HasXSParameter
   def offsetmsb = idxLSB-1
   def offsetlsb = wordOffBits
 
-  def get_tag(addr: UInt) = (addr >> pgUntagBits).asUInt()
+  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
+  def get_tag(addr: UInt) = get_phy_tag(addr)
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
   def get_untag(addr: UInt) = addr(pgUntagBits-1, 0)
   def get_block(addr: UInt) = addr >> blockOffBits
