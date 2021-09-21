@@ -145,7 +145,8 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
     updateArchRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && pdests_is_last(i) && multiRefPhyReg(i) =/= 0.U && !walk
 
-    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && freePhyReg(i) =/= 0.U && walk && pdests_is_last(i)
+    // pdests_is_last equals old_pdests_is_last when walk.valid
+    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && pdests_is_last(i) && freePhyReg(i) =/= 0.U && walk
     decreaseSpecRefCounterValueVec(i) := pdests_times(i) + 1.U
 
 
@@ -228,7 +229,9 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
     val doDecrease = decreaseCmpVec.asUInt.orR
 
     updateSpecRefCounter(preg) := doIncrease || doDecrease
-    specRefCounterNext(preg) := specRefCounter(preg) + doIncrease.asUInt - Mux(doDecrease, decreaseSpecRefCounterValueVec(OHToUInt(decreaseCmpVec)), 0.U)
+    val addOne = specRefCounter(preg) + 1.U
+    val subN = specRefCounter(preg) - decreaseSpecRefCounterValueVec(OHToUInt(decreaseCmpVec))
+    specRefCounterNext(preg) := Mux(doDecrease, subN, addOne)
   }
 
 
@@ -254,8 +257,9 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   // update tail pointer
   val tailPtrNext = Mux(walk, tailPtr, tailPtr + PopCount(freeVec))
   // update head pointer
+  val walkValidVec = WireInit(VecInit(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }))
   val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegCnt - archRefCntZero,
-                      Mux(walk, headPtr - PopCount(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }), 
+                      Mux(walk, headPtr - PopCount(walkValidVec), 
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
   freeRegCnt := distanceBetween(tailPtr, headPtrNext)
