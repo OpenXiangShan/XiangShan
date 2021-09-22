@@ -260,11 +260,17 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
+  val sec_miss_reg   = RegInit(0.U.asTypeOf(Vec(4, Bool())))
+  val has_fixed_0_miss = sec_miss_reg(0) || sec_miss_reg(2)
+  val has_fixed_1_miss = sec_miss_reg(1) || sec_miss_reg(3)
+  val has_fixed_vec = VecInit(Seq(has_fixed_0_miss,has_fixed_1_miss ))
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
   val f2_hit      = RegEnable(next = f1_hit   , enable = f1_fire)
-  val f2_bank_hit = RegEnable(next = f1_bank_hit, enable = f1_fire)
-  val f2_miss     = f2_valid && !f2_hit
+  val f2_bank_hit = RegEnable(next = f1_bank_hit, enable = f1_fire)  
+  val f2_fixed_hit_vec = VecInit((0 until 2).map(i => f2_bank_hit(i) || has_fixed_vec(i)))
+  val f2_fixed_hit = (f2_valid && f2_fixed_hit_vec(0) && f2_fixed_hit_vec(1) && f2_doubleLine) || (f2_valid && f2_fixed_hit_vec(0) && !f2_doubleLine)
+  val f2_miss     = f2_valid && !f2_fixed_hit 
   val (f2_vSetIdx, f2_pTags) = (RegEnable(next = f1_vSetIdx, enable = f1_fire), RegEnable(next = f1_pTags, enable = f1_fire))
   val f2_waymask  = RegEnable(next = f1_victim_masks, enable = f1_fire)
   //exception information
@@ -282,12 +288,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (miss0_resp, miss1_resp) = (fromMissQueue(0).fire(), fromMissQueue(1).fire())
   val (bank0_fix, bank1_fix)   = (miss0_resp  && !f2_bank_hit(0), miss1_resp && f2_doubleLine && !f2_bank_hit(1))
 
-  val  only_0_miss = f2_valid && !f2_hit && !f2_doubleLine && !f2_has_except
+  val  only_0_miss = f2_valid && !f2_hit && !f2_doubleLine && !f2_has_except && !has_fixed_0_miss
   val  only_0_hit  = f2_valid && f2_hit && !f2_doubleLine
   val  hit_0_hit_1  = f2_valid && f2_hit && f2_doubleLine
-  val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine  && !f2_has_except),
-                                                          (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine  && !f2_has_except),
-                                                          (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine && !f2_has_except),
+  val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && !has_fixed_1_miss && (f2_bank_hit(0) || has_fixed_0_miss) && f2_doubleLine  && !f2_has_except),
+                                                          (f2_valid && !f2_bank_hit(0) && !has_fixed_0_miss && (f2_bank_hit(1) || has_fixed_1_miss) && f2_doubleLine  && !f2_has_except),
+                                                          (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && !has_fixed_0_miss && !has_fixed_1_miss && f2_doubleLine && !f2_has_except),
                                                        )
 
   val  hit_0_except_1  = f2_valid && f2_doubleLine &&  !f2_except(0) && f2_except(1)  &&  f2_bank_hit(0)
@@ -373,8 +379,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   }
 
   val miss_all_fix       = (wait_state === wait_finish)
-
-  f2_fetchFinish         := ((f2_valid && f2_hit) || miss_all_fix || hit_0_except_1 || except_0)
+  f2_fetchFinish         := ((f2_valid && f2_fixed_hit) || miss_all_fix || hit_0_except_1 || except_0)
 
   XSPerfAccumulate("ifu_bubble_f2_miss",    f2_valid && !f2_fetchFinish )
 
@@ -387,8 +392,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     t_w(1).valid   := f2_valid && !f2_bank_hit(i)
     t_w(1).bits    := OHToUInt(f2_waymask(i))
   }
-
-  val sec_miss_reg   = RegInit(0.U.asTypeOf(Vec(4, Bool())))
+  
+  //val sec_miss_reg   = RegInit(0.U.asTypeOf(Vec(4, Bool())))
   val reservedRefillData = Reg(Vec(2, UInt(blockBits.W)))
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire)
   val f2_datas        = Wire(Vec(2, UInt(blockBits.W)))
