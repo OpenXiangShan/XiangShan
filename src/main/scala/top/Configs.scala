@@ -210,7 +210,8 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
             ways = p.dcacheParameters.nWays + 2,
             physicalIndex = false
           )),
-          reqField = Seq(PreferCacheField())
+          reqField = Seq(PreferCacheField()),
+          prefetch = Some(huancun.prefetch.BOPParameters())
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,
