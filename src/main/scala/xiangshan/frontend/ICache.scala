@@ -385,7 +385,7 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     io.meta_write.bits := DontCare
     io.data_write.bits := DontCare
 
-    io.req.ready := state === s_idle
+    io.req.ready := (state === s_idle)
     io.mem_acquire.valid := state === s_memReadReq
 
     //flush register
@@ -417,7 +417,8 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
             respDataReg(readBeatCnt) := io.mem_grant.bits.data
             when (readBeatCnt === (refillCycles - 1).U) {
               assert(refill_done, "refill not done!")
-              state := Mux(needFlush || io.flush, s_wait_resp, s_write_back)
+              //state := Mux(needFlush || io.flush, s_wait_resp, s_write_back)
+              state := s_write_back
             }
           }
         }
@@ -437,10 +438,10 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
 
     //refill write and meta write
     //WARNING: Maybe could not finish refill in 1 cycle
-    io.meta_write.valid := (state === s_write_back) && !needFlush
+    io.meta_write.valid := (state === s_write_back) //&& !needFlush
     io.meta_write.bits.apply(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
-
-    io.data_write.valid := (state === s_write_back) && !needFlush
+   
+    io.data_write.valid := (state === s_write_back) //&& !needFlush
     io.data_write.bits.apply(data=respDataReg.asUInt, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     //mem request
