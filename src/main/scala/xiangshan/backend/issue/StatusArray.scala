@@ -167,7 +167,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // Reset when (1) deq is not granted (it needs to be scheduled again); (2) only one credit left.
     val hasIssued = VecInit(io.issueGranted.map(iss => iss.valid && iss.bits(i))).asUInt.orR
     val deqNotGranted = deqRespValid && !deqRespSucc
-    statusNext.scheduled := true.B
+    statusNext.scheduled := false.B
     if (params.needScheduledBit) {
       // An entry keeps in the scheduled state until its credit comes to zero or deqFailed.
       val noCredit = status.valid && status.credit === 1.U
@@ -230,6 +230,17 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val waitSrc = statusArray.map(_.srcState).map(s => Cat(s.zipWithIndex.filter(_._2 != i).map(_._1)).andR && !s(i))
     val srcBlockIssue = statusArray.zip(waitSrc).map{ case (s, w) => s.valid && !s.scheduled && !s.blocked && w }
     XSPerfAccumulate(s"wait_for_src_$i", PopCount(srcBlockIssue))
+    for (j <- 0 until params.allWakeup) {
+      val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
+      XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
+      val criticalWakeup = srcBlockIssue.zip(wakeup_j_i).map(x => x._1 && x._2)
+      XSPerfAccumulate(s"critical_wakeup_${j}_$i", PopCount(criticalWakeup))
+      // For FMAs only: critical_wakeup from fma instructions (to fma instructions)
+      if (i == 2 && j < 2 * exuParameters.FmacCnt) {
+        val isFMA = io.wakeup(j).bits.ctrl.fpu.ren3
+        XSPerfAccumulate(s"critical_wakeup_from_fma_${j}", Mux(isFMA, PopCount(criticalWakeup), 0.U))
+      }
+    }
   }
   val canIssueEntries = PopCount(io.canIssue)
   XSPerfHistogram("can_issue_entries", canIssueEntries, true.B, 0, params.numEntries, 1)
@@ -241,10 +252,4 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("not_selected_entries", notSelected)
   val isReplayed = PopCount(io.deqResp.map(resp => resp.valid && !resp.bits.success))
   XSPerfAccumulate("replayed_entries", isReplayed)
-  for (j <- 0 until params.allWakeup) {
-    for (i <- 0 until params.numSrc) {
-      val wakeup_j_i = io.wakeupMatch.map(_(i)(j)).zip(statusArray.map(_.valid)).map(p => p._1 && p._2)
-      XSPerfAccumulate(s"wakeup_${j}_$i", PopCount(wakeup_j_i).asUInt)
-    }
-  }
 }

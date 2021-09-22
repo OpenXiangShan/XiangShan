@@ -30,11 +30,10 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import xiangshan.cache.prefetch._
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{AliasField, CacheParameters, HCCacheParameters}
+import huancun.{AliasField, CacheParameters, HCCacheParameters, PreferCacheField}
 
-class DefaultConfig(n: Int) extends Config((site, here, up) => {
+class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters(
@@ -53,7 +52,7 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
 // * L2 cache NOT included
 // * L3 cache included
 class MinimalConfig(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+  new BaseConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
         DecodeWidth = 2,
@@ -206,10 +205,13 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
           inclusive = inclusive,
           clientCaches = Seq(CacheParameters(
             "dcache",
-            sets = p.dcacheParameters.nSets,
+            sets = 2 * p.dcacheParameters.nSets,
             ways = p.dcacheParameters.nWays + 2,
-            physicalIndex = false
-          ))
+            aliasBitsOpt = p.dcacheParameters.aliasBitsOpt
+          )),
+          reqField = Seq(PreferCacheField()),
+          prefetch = Some(huancun.prefetch.BOPParameters()),
+          enablePerf = true
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,
@@ -234,7 +236,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         clientCaches = upParams.cores.map{ core =>
           val l2params = core.L2CacheParams.toCacheParams
           l2params.copy(ways = 2 * l2params.ways)
-        }
+        },
+        enablePerf = true
       )
     )
 })
@@ -248,11 +251,7 @@ class MinimalL3DebugConfig(n: Int = 1) extends Config(
 )
 
 class DefaultL3DebugConfig(n: Int = 1) extends Config(
-  new WithL3DebugConfig ++ new DefaultConfig(n)
-)
-
-class NonInclusiveL3Config(n: Int = 1) extends Config(
-  new WithNKBL3(4096, inclusive = false, banks = 4) ++ new WithNKBL2(512) ++ new DefaultConfig(n)
+  new WithL3DebugConfig ++ new BaseConfig(n)
 )
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
@@ -260,4 +259,11 @@ class MinimalAliasDebugConfig(n: Int = 1) extends Config(
     new WithNKBL2(256, inclusive = false) ++
     new WithNKBL1D(128) ++
     new MinimalConfig(n)
+)
+
+class DefaultConfig(n: Int = 1) extends Config(
+  new WithNKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNKBL2(512, inclusive = false)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
 )

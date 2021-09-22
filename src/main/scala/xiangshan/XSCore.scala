@@ -360,6 +360,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val memBlock_reset_gen = Module(new ResetGen(3, !debugOpts.FPGAPlatform))
   memBlock.reset := memBlock_reset_gen.io.out
+  memScheduler.reset := memBlock_reset_gen.io.out
 
   val exuBlock_reset_gen = Module(new ResetGen(4, !debugOpts.FPGAPlatform))
   exuBlocks.foreach(_.reset := exuBlock_reset_gen.io.out)

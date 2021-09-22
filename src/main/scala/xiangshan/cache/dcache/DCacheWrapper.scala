@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import system.L1CacheErrorInfo
 import device.RAMHelper
-import huancun.{AliasField, AliasKey}
+import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField}
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
@@ -53,7 +53,10 @@ case class DCacheParameters
   // we need to avoid this by recoding additional bits in L2 cache
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
-  val reqFields: Seq[BundleFieldBase] = Seq(AliasField())
+  val reqFields: Seq[BundleFieldBase] = Seq(
+    PrefetchField(),
+    PreferCacheField()
+  ) ++ aliasBitsOpt.map(AliasField)
 
   def tagCode: Code = Code.fromString(tagECC)
 
@@ -358,8 +361,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
-  println("----------------------------------")
-  println(bus.a.bits.user(AliasKey).getWidth)
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_req := bus.b.bits.address
 
