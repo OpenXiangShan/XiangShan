@@ -325,6 +325,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   pipe_req.probe := false.B
   pipe_req.probe_param := DontCare
+  pipe_req.probe_need_data := false.B
 
   pipe_req.source := req.source
   pipe_req.cmd    := req.cmd

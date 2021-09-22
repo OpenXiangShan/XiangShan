@@ -74,6 +74,7 @@ class StoreReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req := DontCare
     pipe_req.miss := false.B
     pipe_req.probe := false.B
+    pipe_req.probe_need_data := false.B
     pipe_req.source := STORE_SOURCE.U
     pipe_req.cmd    := req.cmd
     pipe_req.addr   := req.addr

@@ -36,6 +36,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle
   // does this req come from Probe
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
+  val probe_need_data = Bool()
 
   // request info
   // reqs from MissQueue, Store, AMO use this
@@ -665,7 +666,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
-  val writeback_data = s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  val writeback_data = s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
+    s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
 
   val writeback_paddr = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 
