@@ -54,10 +54,9 @@ case class DCacheParameters
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
-    AliasField(),
     PrefetchField(),
     PreferCacheField()
-  )
+  ) ++ aliasBitsOpt.map(AliasField)
 
   def tagCode: Code = Code.fromString(tagECC)
 
