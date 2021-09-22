@@ -188,7 +188,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       when (ready && preg.U === multiRefPhyReg(idx)) {
         updateArchRefCounter(preg) := true.B
         // arch ref counter of pdest
-        archRefCounterNext(multiRefPhyReg(idx)) := archRefCounter(multiRefPhyReg(idx)) + 1.U + pdests_times(idx)
+        archRefCounterNext(preg) := archRefCounter(preg) + 1.U + pdests_times(idx)
       }
     }
   }
