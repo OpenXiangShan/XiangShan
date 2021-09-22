@@ -263,4 +263,6 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   )
   io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA && !waitAddOperand)
 
+  XSPerfAccumulate("fma_partial_issue_fire", io.in.fire && midResult.waitForAdd)
+  XSPerfAccumulate("fma_mid_result_in_fire", io.in.fire && midResult.in.valid)
 }
