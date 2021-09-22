@@ -300,7 +300,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.setByJmpTarget(io.start_addr, Mux(cfi_is_jalr, io.target, pd.jalTarget))
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
   init_entry.pftAddr := Mux(entry_has_jmp, jmpPft, getLower(io.start_addr) + ((FetchWidth*4)>>instOffsetBits).U + Mux(last_br_rvi, 1.U, 0.U))
-  init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1))
+  init_entry.carry   := Mux(entry_has_jmp, jmpPft(carryPos-instOffsetBits), io.start_addr(carryPos-1) || (io.start_addr(carryPos-2, instOffsetBits).andR && last_br_rvi))
   init_entry.isJalr := new_jmp_is_jalr
   init_entry.isCall := new_jmp_is_call
   init_entry.isRet  := new_jmp_is_ret
@@ -580,6 +580,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
     ) {
       entry_hit_status(ifuPtr.value) := h_false_hit
+      XSDebug(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
     }
     io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
     io.toIfu.req.bits.fallThruError  := true.B
@@ -646,6 +647,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       )
 
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
+    XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
+    
+    // assert(!has_false_hit)
   }
 
   when (has_false_hit) {
@@ -1015,6 +1019,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val update_valid = io.toBpu.update.valid
   def u(cond: Bool) = update_valid && cond
   val ftb_false_hit = u(update.false_hit)
+  // assert(!ftb_false_hit)
   val ftb_hit = u(commit_hit === h_hit)
 
   val ftb_new_entry = u(ftbEntryGen.is_init_entry)

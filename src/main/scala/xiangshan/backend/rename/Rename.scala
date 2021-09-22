@@ -149,12 +149,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     //   fl.cpReqs(i).bits := io.in(i).bits.brTag
     // }
 
-
     uops(i).roqIdx := roqIdxHead + PopCount(io.in.take(i).map(_.valid))
-
-    io.out(i).valid := io.in(i).valid && intFreeList.canAllocate && fpFreeList.canAllocate && !io.roqCommits.isWalk
-    io.out(i).bits := uops(i)
-
 
     // read rename table
     def readRat(lsrcList: List[UInt], ldest: UInt, fp: Boolean) = {
@@ -222,6 +217,12 @@ class Rename(implicit p: Parameters) extends XSModule {
                        Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
                        /* default */, fpFreeList.allocatePhyReg(i))) // normal fp inst
     }
+
+    // Assign performance counters
+    uops(i).debugInfo.renameTime := GTimer()
+
+    io.out(i).valid := io.in(i).valid && intFreeList.canAllocate && fpFreeList.canAllocate && !io.roqCommits.isWalk
+    io.out(i).bits := uops(i)
 
     // write speculative rename table
     // we update rat later inside commit code

@@ -179,10 +179,12 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
-  val renameTime = UInt(64.W)
-  val dispatchTime = UInt(64.W)
-  val issueTime = UInt(64.W)
-  val writebackTime = UInt(64.W)
+  val renameTime = UInt(XLEN.W)
+  val dispatchTime = UInt(XLEN.W)
+  val enqRsTime = UInt(XLEN.W)
+  val selectTime = UInt(XLEN.W)
+  val issueTime = UInt(XLEN.W)
+  val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
 }
 
