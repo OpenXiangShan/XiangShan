@@ -23,7 +23,7 @@ import utils._
 import freechips.rocketchip.tilelink._
 import bus.tilelink.TLMessages._
 import difftest._
-import huancun.{AliasKey, PreferCacheKey, PrefetchKey}
+import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -177,6 +177,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     new_mask(i) := Mux(req.isStore, req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
   }
   val hasData = RegInit(true.B)
+  val isDirty = RegInit(false.B)
   when (io.mem_grant.fire()) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
@@ -215,6 +216,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     refill_data_raw(refill_count) := io.mem_grant.bits.data
+    isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
   }
 
   when (io.mem_finish.fire()) {
@@ -322,6 +324,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   pipe_req.miss := true.B
   pipe_req.miss_id := io.id
   pipe_req.miss_param := grant_param
+  pipe_req.miss_dirty := isDirty
 
   pipe_req.probe := false.B
   pipe_req.probe_param := DontCare

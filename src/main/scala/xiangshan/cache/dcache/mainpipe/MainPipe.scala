@@ -19,6 +19,9 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tilelink.ClientStates._
+import freechips.rocketchip.tilelink.MemoryOpCategories._
+import freechips.rocketchip.tilelink.TLPermissions._
 import utils._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 
@@ -31,6 +34,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   // what permission are we granted with?
   val miss_param = UInt(TLPermissions.bdWidth.W)
+  // whether the grant data is dirty
+  val miss_dirty = Bool()
 
   // for request that comes from MissQueue
   // does this req come from Probe
@@ -404,7 +409,21 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // --------------------------------------------------------------------------------
   // Permission checking
-  val miss_new_coh = s3_coh.onGrant(s3_req.cmd, s3_req.miss_param)
+  def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
+    val c = categorize(cmd)
+    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+      //(effect param) -> (next)
+      Cat(rd, toB, false.B)  -> Branch,
+      Cat(rd, toB, true.B)   -> Branch,
+      Cat(rd, toT, false.B)  -> Trunk,
+      Cat(rd, toT, true.B)   -> Dirty,
+      Cat(wi, toT, false.B)  -> Trunk,
+      Cat(wi, toT, true.B)   -> Dirty,
+      Cat(wr, toT, false.B)  -> Dirty,
+      Cat(wr, toT, true.B)   -> Dirty))
+  }
+  val miss_new_coh = ClientMetadata(missCohGen(s3_req.cmd, s3_req.miss_param, s3_req.miss_dirty))
+  assert(!RegNext(s3_valid && s3_req.miss && s3_req.miss_param === toB && s3_req.miss_dirty))
   assert(!RegNext(s3_valid && s3_req.miss && !miss_new_coh.isValid()))
   assert(!RegNext(s3_valid && s3_req.miss && s3_tag_match && !(s3_hit_coh.state < miss_new_coh.state)))
 
@@ -568,6 +587,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   wb_req.voluntary := miss_writeback
   wb_req.hasData := writeback_data
   wb_req.data := s3_data.asUInt
+  wb_req.dirty := s3_coh === ClientStates.Dirty
 
   // for write has higher priority than read, meta/data array ready is not needed
   s3_fire := s3_valid && (!need_writeback || io.wb_req.ready)/* &&

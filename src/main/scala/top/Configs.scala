@@ -31,7 +31,7 @@ import xiangshan.backend.exu.ExuParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{AliasField, CacheParameters, HCCacheParameters, PreferCacheField}
+import huancun._
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -191,7 +191,7 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
 }
 )
 
-class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config((site, here, up) => {
+class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseData: Boolean = false) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
     val l2sets = n * 1024 / ways / 64
@@ -203,6 +203,7 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
           ways = ways,
           sets = l2sets,
           inclusive = inclusive,
+          alwaysReleaseData = alwaysReleaseData,
           clientCaches = Seq(CacheParameters(
             "dcache",
             sets = 2 * p.dcacheParameters.nSets,
@@ -210,6 +211,7 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
             aliasBitsOpt = p.dcacheParameters.aliasBitsOpt
           )),
           reqField = Seq(PreferCacheField()),
+          echoField = Seq(DirtyField()),
           prefetch = Some(huancun.prefetch.BOPParameters()),
           enablePerf = true
         ),
@@ -256,14 +258,14 @@ class DefaultL3DebugConfig(n: Int = 1) extends Config(
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = false) ++
+    new WithNKBL2(256, inclusive = false, alwaysReleaseData = true) ++
     new WithNKBL1D(128) ++
     new MinimalConfig(n)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = false)
+    ++ new WithNKBL2(512, inclusive = false, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
