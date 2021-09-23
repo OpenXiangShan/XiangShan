@@ -117,7 +117,7 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
   val miscRes = ParallelMux(List(
     ALUOpType.sext_b -> io.sextb,
     ALUOpType.sext_h -> io.sexth,
-    ALUOpType.zext_h -> io.zexth,
+    // ALUOpType.zext_h -> io.zexth,
     ALUOpType.rev8   -> io.rev8,
     ALUOpType.szewl1 -> Cat(0.U(31.W), io.src(31, 0), 0.U(1.W)),
     ALUOpType.szewl2 -> Cat(0.U(30.W), io.src(31, 0), 0.U(2.W)),
@@ -286,8 +286,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val zexth   = ZeroExt(src1(15, 0), XLEN)
   val rev8    = Cat(src1(7,0), src1(15,8), src1(23,16), src1(31,24), 
                     src1(39,32), src1(47,40), src1(55,48), src1(63,56))
-  val orcb    = Cat(Reverse(src1(63,56)), Reverse(src1(55,48)), Reverse(src1(47,40)), Reverse(src1(39,32)),
-                    Reverse(src1(31,24)), Reverse(src1(23,16)), Reverse(src1(15,8)), Reverse(src1(7,0)))
+  val orcb    = Cat( (7 to 0) map {i => Fill(8, src1(i*8+7, i*8).orR)} )
 
   val branchOpTable = List(
     ALUOpType.getBranchType(ALUOpType.beq)  -> !xor.orR,

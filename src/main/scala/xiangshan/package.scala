@@ -225,7 +225,7 @@ package object xiangshan {
 
     def sext_b      = "b0_00_01_000".U
     def sext_h      = "b0_00_01_001".U
-    def zext_h      = "b0_00_01_010".U
+    // def zext_h      = "b0_00_01_010".U // packw
     def rev8        = "b0_00_01_011".U
     // TOOD: optimize it
     def szewl1      = "b0_00_01_100".U
@@ -389,16 +389,24 @@ package object xiangshan {
 
   object BMUOpType {
 
-    def clmul       = "b0000".U
-    def clmulh      = "b0010".U
-    def clmulr      = "b0100".U
+    def clmul       = "b00000".U
+    def clmulh      = "b00010".U
+    def clmulr      = "b00100".U
 
-    def clz         = "b1000".U
-    def clzw        = "b1001".U
-    def ctz         = "b1010".U
-    def ctzw        = "b1011".U
-    def cpop        = "b1100".U
-    def cpopw       = "b1101".U
+    def clz         = "b01000".U
+    def clzw        = "b01001".U
+    def ctz         = "b01010".U
+    def ctzw        = "b01011".U
+    def cpop        = "b01100".U
+    def cpopw       = "b01101".U
+
+    // TODO: move to alu
+    def xpermn      = "b10000".U
+    def xpermb      = "b10001".U
+    def pack        = "b10100".U
+    def packh       = "b10101".U
+    def packw       = "b10110".U
+    def revb        = "b11000".U
   }
 
   object BTBtype {
@@ -519,7 +527,7 @@ package object xiangshan {
   val divCfg = FuConfig(
     name = "div",
     fuGen = dividerGen,
-    fuSel = (uop: MicroOp) => MDUOpType.isDiv(uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.div,
     FuType.div,
     2,
     0,
@@ -534,7 +542,7 @@ package object xiangshan {
   val mulCfg = FuConfig(
     name = "mul",
     fuGen = multiplierGen,
-    fuSel = (uop: MicroOp) => MDUOpType.isMul(uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.mul,
     FuType.mul,
     2,
     0,
@@ -558,7 +566,7 @@ package object xiangshan {
     hasRedirect = false,
     latency = CertainLatency(1),
     fastUopOut = true,
-    fastImplemented = false
+    fastImplemented = true
  )
 
   val fmacCfg = FuConfig(

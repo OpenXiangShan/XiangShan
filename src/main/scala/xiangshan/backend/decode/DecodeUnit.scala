@@ -214,7 +214,7 @@ object XDecode extends DecodeConstants {
 
     SEXT_B  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sext_b, Y, N, N, N, N, N, N, SelImm.IMM_X),
     SEXT_H  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sext_h, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    ZEXT_H  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.zext_h, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    // ZEXT_H  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.zext_h, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
     ORC_B   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.orc_b, Y, N, N, N, N, N, N, SelImm.IMM_X),
     REV8    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.rev8, Y, N, N, N, N, N, N, SelImm.IMM_X),
@@ -336,6 +336,13 @@ object BDecode extends DecodeConstants{
     CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
     CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
     CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    REVB    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.revb, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    PACK    -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.pack, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    PACKH   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.packh, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    PACKW   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.packw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    XPERM_B -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.xpermb, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    XPERM_N -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.xpermn, Y, N, N, N, N, N, N, SelImm.IMM_X),
     
     CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
     CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
