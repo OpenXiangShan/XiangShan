@@ -37,8 +37,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     val nack      = Input(Bool())
 
     // meta and data array read port
-    val debug_data_read = DecoupledIO(new L1DataReadReq)
-    val debug_data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
@@ -122,17 +120,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_hit_coh = s1_hit_meta.coh
 
   // data read
-  io.debug_data_read.valid := s1_fire && !s1_nack
-  io.debug_data_read.bits.addr := s1_vaddr
-  io.debug_data_read.bits.way_en := s1_tag_match_way
-  // only needs to read the specific row
-  io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_vaddr))
-
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way
-  // only needs to read the specific row
-  // io.debug_data_read.bits.rmask := UIntToOH(get_row(s1_addr))
 
   io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
@@ -176,62 +166,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
-  // select the row we are interested in
-  val debug_data_resp = io.debug_data_resp
-  val s2_data = debug_data_resp(get_row(s2_addr))
-
   val banked_data_resp = io.banked_data_resp
   val s2_bank_addr = addr_to_dcache_bank(s2_addr)
   val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
   dontTouch(s2_bank_addr)
-
-  // select the word
-  // the index of word in a row, in case rowBits != wordBits
-  val s2_word_idx = if (rowWords == 1) 0.U else s2_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
-
-  // load data gen
-  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
-  for (w <- 0 until rowWords) {
-    s2_data_words(w) := s2_data(encWordBits * (w + 1) - 1, encWordBits * w)
-  }
-  val s2_word = s2_data_words(s2_word_idx)
-  // val s2_decoded = cacheParams.dataCode.decode(s2_word)
-  // val s2_word_decoded = s2_decoded.corrected
-  val s2_word_decoded = s2_word(wordBits - 1, 0)
-  // assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
-
-  val debug_mismatch = s2_valid && s2_hit && !s2_nack && s2_word_decoded =/= banked_data_resp_word.raw_data && !io.bank_conflict_slow
-  assert(!(RegNext(debug_mismatch)))
-  when(debug_mismatch) {
-    XSDebug("loadpipe " + id + " data mismatch, right %x wrong %x\n",
-      s2_word_decoded,
-      banked_data_resp_word.raw_data
-    )
-    printf("loadpipe " + id + " data mismatch, right %x wrong %x\n",
-      s2_word_decoded,
-      banked_data_resp_word.raw_data
-    )
-  }
-
-  when(s2_valid && s2_hit && !s2_nack && s2_word_decoded === banked_data_resp_word.raw_data && !io.bank_conflict_slow) {
-    XSDebug("loadpipe " + id + " data match, right %x\n", s2_word_decoded)
-  }
-
-  when(s2_valid && s2_hit && !s2_nack && io.bank_conflict_slow) {
-    XSDebug("loadpipe " + id + " data conflict, right %x\n", s2_word_decoded)
-  }
-
-  //-----------------------
-  when(s2_valid && s2_hit && !s2_nack && s2_word =/= banked_data_resp_word.asECCData() && !io.bank_conflict_slow) {
-    XSDebug("loadpipe " + id + " eccdata mismatch, right %x wrong %x\n",
-      s2_word,
-      banked_data_resp_word.asECCData
-    )
-  }
-  
-  when(s2_valid && s2_hit && !s2_nack && s2_word === banked_data_resp_word.asECCData() && !io.bank_conflict_slow) {
-    XSDebug("loadpipe " + id + " eccdata match, right %x\n", s2_word)
-  }
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
