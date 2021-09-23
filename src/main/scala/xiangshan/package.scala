@@ -425,7 +425,7 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
-  def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
+  def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def bmuGen(p: Parameters) = new Bmu()(p)

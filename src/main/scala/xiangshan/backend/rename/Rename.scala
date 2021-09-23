@@ -122,6 +122,7 @@ class Rename(implicit p: Parameters) extends XSModule {
   val isMax = if (EnableIntMoveElim) Some(intFreeList.asInstanceOf[freelist.MEFreeList].maxVec) else None
   val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val psrc_cmp = Wire(MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W))))
+  val intPsrc = Wire(Vec(RenameWidth, UInt()))
 
   val intSpecWen = Wire(Vec(RenameWidth, Bool()))
   val fpSpecWen = Wire(Vec(RenameWidth, Bool()))
@@ -171,6 +172,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     val lsrcList = List(uops(i).ctrl.lsrc(0), uops(i).ctrl.lsrc(1), uops(i).ctrl.lsrc(2))
     val ldest = uops(i).ctrl.ldest
     val (intPhySrcVec, intOldPdest) = readRat(lsrcList.take(2), ldest, fp = false)
+    intPsrc(i) := intPhySrcVec(0)
     val (fpPhySrcVec, fpOldPdest) = readRat(lsrcList, ldest, fp = true)
     uops(i).psrc(0) := Mux(uops(i).ctrl.srcType(0) === SrcType.reg, intPhySrcVec(0), fpPhySrcVec(0))
     uops(i).psrc(1) := Mux(uops(i).ctrl.srcType(1) === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
@@ -181,31 +183,29 @@ class Rename(implicit p: Parameters) extends XSModule {
 
       if (i == 0) {
         // calculate meEnable
-        meEnable(i) := isMove(i) && (!isMax.get(uops(i).psrc(0)) || uops(i).ctrl.lsrc(0) === 0.U)
+        meEnable(i) := isMove(i) && (!isMax.get(intPsrc(i)) || uops(i).ctrl.lsrc(0) === 0.U)
       } else {
         // compare psrc0
         psrc_cmp(i-1) := Cat((0 until i).map(j => {
-          uops(i).psrc(0) === uops(j).psrc(0) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
+          intPsrc(i) === intPsrc(j) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
         }) /* reverse is not necessary here */)
   
         // calculate meEnable
-        meEnable(i) := isMove(i) && (!(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(uops(i).psrc(0))) || uops(i).ctrl.lsrc(0) === 0.U)
+        meEnable(i) := isMove(i) && (!(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax.get(intPsrc(i))) || uops(i).ctrl.lsrc(0) === 0.U)
       }
       uops(i).eliminatedMove := meEnable(i) || (uops(i).ctrl.isMove && uops(i).ctrl.ldest === 0.U)
   
       // send psrc of eliminated move instructions to free list and label them as eliminated
-      when (meEnable(i)) {
-        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).valid := true.B
-        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).bits := uops(i).psrc(0)
-        XSInfo(io.in(i).valid && io.out(i).valid, p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} eliminated successfully! psrc:${uops(i).psrc(0)}\n")
-      } .otherwise {
-        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).valid := false.B
-        intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).bits := DontCare
-        XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
-      }
+      intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).valid := meEnable(i)
+      intFreeList.asInstanceOf[freelist.MEFreeList].psrcOfMove(i).bits := intPsrc(i)
+      // when (meEnable(i)) {
+      //   XSInfo(io.in(i).valid && io.out(i).valid, p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} eliminated successfully! psrc:${uops(i).psrc(0)}\n")
+      // } .otherwise {
+      //   XSInfo(io.in(i).valid && io.out(i).valid && isMove(i), p"Move instruction ${Hexadecimal(io.in(i).bits.cf.pc)} failed to be eliminated! psrc:${uops(i).psrc(0)}\n")
+      // }
   
       // update pdest
-      uops(i).pdest := Mux(meEnable(i), uops(i).psrc(0), // move eliminated
+      uops(i).pdest := Mux(meEnable(i), intPsrc(i), // move eliminated
                        Mux(needIntDest(i), intFreeList.allocatePhyReg(i), // normal int inst
                        Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
                        /* default */, fpFreeList.allocatePhyReg(i)))) // normal fp inst
@@ -286,7 +286,7 @@ class Rename(implicit p: Parameters) extends XSModule {
         rat.io.specWritePorts(i).addr := Mux(intSpecWen(i), uops(i).ctrl.ldest, io.roqCommits.info(i).ldest)
         if (EnableIntMoveElim) {
           rat.io.specWritePorts(i).wdata := 
-            Mux(intSpecWen(i), Mux(meEnable(i), uops(i).psrc(0), intFreeList.allocatePhyReg(i)), io.roqCommits.info(i).old_pdest)
+            Mux(intSpecWen(i), Mux(meEnable(i), intPsrc(i), intFreeList.allocatePhyReg(i)), io.roqCommits.info(i).old_pdest)
         } else {
           rat.io.specWritePorts(i).wdata := 
             Mux(intSpecWen(i), intFreeList.allocatePhyReg(i), io.roqCommits.info(i).old_pdest)

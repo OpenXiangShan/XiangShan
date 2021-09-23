@@ -23,6 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.CSRFileIO
+import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.StoreDataBundle
 
 class WakeUpBundle(numFast: Int, numSlow: Int)(implicit p: Parameters) extends XSBundle {
@@ -101,7 +102,7 @@ class FUBlockExtraIO(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) ext
 
 class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XSModule {
   val numIn = configs.map(_._2).sum
-
+  val numFma = configs.filter(_._1 == FmacExeUnitCfg).map(_._2).sum
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
@@ -112,6 +113,7 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     val writeback = Vec(numIn, DecoupledIO(new ExuOutput))
     // misc
     val extra = new FUBlockExtraIO(configs)
+    val fmaMid = if (numFma > 0) Some(Vec(numFma, new FMAMidResultIO)) else None
   })
 
   val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
@@ -153,6 +155,10 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
 
   if (io.extra.stData.isDefined) {
     io.extra.stData.get := VecInit(exeUnits.map(_.stData).filter(_.isDefined).map(_.get))
+  }
+
+  if (io.fmaMid.isDefined) {
+    io.fmaMid.get <> exeUnits.map(_.fmaMid).filter(_.isDefined).map(_.get)
   }
 
   for ((iss, i) <- io.issue.zipWithIndex) {

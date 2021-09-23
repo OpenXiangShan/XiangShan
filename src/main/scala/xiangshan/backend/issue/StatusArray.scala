@@ -45,6 +45,7 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val blocked = Bool()
   val credit = UInt(4.W)
   val srcState = Vec(params.numSrc, Bool())
+  val midState = Bool()
   // data
   val psrc = Vec(params.numSrc, UInt(params.dataIdBits.W))
   val srcType = Vec(params.numSrc, SrcType())
@@ -56,7 +57,14 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   def canIssue: Bool = {
     val scheduledCond = if (params.needScheduledBit) !scheduled else true.B
     val blockedCond = if (params.checkWaitBit) !blocked else true.B
-    srcState.asUInt.andR && scheduledCond && blockedCond
+    val checkedSrcState = if (params.numSrc > 2) srcState.take(2) else srcState
+    val midStateReady = if (params.hasMidState) srcState.last && midState else false.B
+    (VecInit(checkedSrcState).asUInt.andR && scheduledCond || midStateReady) && blockedCond
+  }
+
+  def allSrcReady: Bool = {
+    val midStateReady = if (params.hasMidState) srcState.last && midState else false.B
+    srcState.asUInt.andR || midStateReady
   }
 
   override def cloneType: StatusEntry.this.type =
@@ -82,6 +90,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val issueGranted = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
     // TODO: if more info is needed, put them in a bundle
     val isFirstIssue = Vec(params.numDeq, Output(Bool()))
+    val allSrcReady = Vec(params.numDeq, Output(Bool()))
+    val updateMidState = Input(UInt(params.numEntries.W))
     val deqResp = Vec(params.numDeq, Flipped(ValidIO(new Bundle {
       val rsMask = UInt(params.numEntries.W)
       val success = Bool()
@@ -206,6 +216,9 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
       case ((current, update), wakeup) => wakeup || Mux(updateValid(i), update, current)
     })
 
+    // midState: reset when enqueue; set when receiving feedback
+    statusNext.midState := !updateValid(i) && (io.updateMidState(i) || status.midState)
+
     // static data fields (only updated when instructions enqueue)
     statusNext.psrc := Mux(updateValid(i), updateVal(i).psrc, status.psrc)
     statusNext.srcType := Mux(updateValid(i), updateVal(i).srcType, status.srcType)
@@ -213,8 +226,8 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     statusNext.sqIdx := Mux(updateValid(i), updateVal(i).sqIdx, status.sqIdx)
 
     // isFirstIssue: indicate whether the entry has been issued before
-    // When the entry is not granted to leave the RS, set isFirstIssue to false.B
-    statusNext.isFirstIssue := Mux(deqNotGranted, false.B, updateValid(i) || status.isFirstIssue)
+    // When the entry is not granted to issue, set isFirstIssue to false.B
+    statusNext.isFirstIssue := Mux(hasIssued, false.B, updateValid(i) || status.isFirstIssue)
 
     XSDebug(status.valid, p"entry[$i]: $status\n")
   }
@@ -222,6 +235,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
   io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
+  io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
   io.flushed := flushedVec.asUInt
 
   val validEntries = PopCount(statusArray.map(_.valid))

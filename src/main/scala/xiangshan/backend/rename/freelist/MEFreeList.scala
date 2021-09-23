@@ -101,17 +101,11 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   Decrements: from roq commits
    */
   val freeVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // if dec(i).bits is freed and ready for writing back to free list
-  val freeRegCandidates = (0 until CommitWidth).map(freePhyReg(_))
 
   val updateCmtCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val updateArchRefCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val decreaseSpecRefCounterVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // used when walking ME instructions
   val decreaseSpecRefCounterValueVec = Wire(Vec(CommitWidth, UInt(log2Ceil(CommitWidth-1).W)))
-
-  val oldPdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val oldPdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val pdestIsUnique = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val pdestNotUniqueButLast = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
 
   // handle duplicate INC requirements on cmtCounter and archRefCounter
   val old_pdests_cmp = Wire(MixedVec(List.tabulate(CommitWidth-1)(i => UInt((i+1).W))))
@@ -127,44 +121,32 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
     }).reverse)
   }
 
-  def getCompareResult(m: MixedVec[UInt]): (Vec[Bool], Vec[Bool], Vec[UInt]) = {
+  def getCompareResult(m: MixedVec[UInt]): (Vec[Bool], Vec[UInt]) = {
     val is_last = WireInit(VecInit(Seq.tabulate(CommitWidth){
       case last if (last == CommitWidth - 1) => true.B
       case i => !(Cat((i until (CommitWidth - 1)).map(j => m(j)(i))).orR)
-    }))
-    val has_same_before = WireInit(VecInit(Seq.tabulate(CommitWidth){
-      case 0 => false.B
-      case i => m(i - 1).orR()
     }))
     val times = WireInit(VecInit(Seq.tabulate(CommitWidth){
       case 0 => 0.U(log2Ceil(CommitWidth-1).W)
       case i => PopCount(m(i - 1))
     }))
-    (is_last, has_same_before, times)
+    (is_last, times)
   }
 
-  val (old_pdests_is_last, old_pdests_has_same_before, old_pdests_times) = getCompareResult(old_pdests_cmp)
-  val (pdests_is_last, pdests_has_same_before, pdests_times) = getCompareResult(pdests_cmp)
+  val (old_pdests_is_last, old_pdests_times) = getCompareResult(old_pdests_cmp)
+  val (pdests_is_last, pdests_times) = getCompareResult(pdests_cmp)
 
   for (i <- 0 until CommitWidth) {
 
-    val preg = freeRegCandidates(i) // physical register waiting for freeing
-
-    oldPdestIsUnique(i) := old_pdests_is_last(i) && !old_pdests_has_same_before(i)
-    oldPdestNotUniqueButLast(i) := old_pdests_is_last(i) && old_pdests_has_same_before(i)
-
-    pdestIsUnique(i) := pdests_is_last(i) && !pdests_has_same_before(i)
-    pdestNotUniqueButLast(i) := pdests_is_last(i) && pdests_has_same_before(i)
-
-    freeVec(i) := ((oldPdestIsUnique(i) && (cmtCounter(preg) === Mux(updateSpecRefCounter(preg), specRefCounterNext(preg), specRefCounter(preg)))) 
-      || (oldPdestNotUniqueButLast(i) && (cmtCounter(preg) + old_pdests_times(i) === Mux(updateSpecRefCounter(preg), specRefCounterNext(preg), specRefCounter(preg))))) &&
+    freeVec(i) := (cmtCounter(freePhyReg(i)) + old_pdests_times(i) === specRefCounter(freePhyReg(i))) &&
       freeReq(i) && freePhyReg(i) =/= 0.U && !walk
 
-    updateCmtCounterVec(i) := freeReq(i) && (oldPdestIsUnique(i) || oldPdestNotUniqueButLast(i)) && freePhyReg(i) =/= 0.U && !walk
+    updateCmtCounterVec(i) := freeReq(i) && old_pdests_is_last(i) && freePhyReg(i) =/= 0.U && !walk
 
-    updateArchRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && (pdestIsUnique(i) || pdestNotUniqueButLast(i)) && freePhyReg(i) =/= 0.U && !walk
+    updateArchRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && pdests_is_last(i) && multiRefPhyReg(i) =/= 0.U && !walk
 
-    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && freePhyReg(i) =/= 0.U && walk && (pdestIsUnique(i) || pdestNotUniqueButLast(i))
+    // pdests_is_last equals old_pdests_is_last when walk.valid
+    decreaseSpecRefCounterVec(i) := freeReq(i) && eliminatedMove(i) && pdests_is_last(i) && freePhyReg(i) =/= 0.U && walk
     decreaseSpecRefCounterValueVec(i) := pdests_times(i) + 1.U
 
 
@@ -176,24 +158,16 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
     val ptr = tailPtr + offset
     val idx = ptr.value
     when (freeVec(i)) {
-      freeList(idx) := freeRegCandidates(i)
-      XSDebug(p"[$i] Free List enqueue: [ preg ${freeRegCandidates(i)} ]\n")
+      freeList(idx) := freePhyReg(i)
+      XSDebug(p"[$i] Free List enqueue: [ preg ${freePhyReg(i)} ]\n")
     }
-
-    XSDebug(p"decReq:${freeReq(i)},dec_old_pdst:${freePhyReg(i)},dec_is_me:${eliminatedMove(i)},dec_pdest:${multiRefPhyReg(i)}(isWalk:${walk})\n")
-    XSDebug(freeReq(i), p"port[$i]:old_pdest:${freePhyReg(i)},isUnique:${oldPdestIsUnique(i)},notUniqueButLast:${oldPdestNotUniqueButLast(i)}\n")
-    XSDebug(freeReq(i) && eliminatedMove(i), p"port[$i]:pdest:${multiRefPhyReg(i)},isUnique:${pdestIsUnique(i)},notUniqueButLast:${pdestNotUniqueButLast(i)}\n")
-    XSDebug(p"port[$i]cmtCounterInfo:plus_1=${cmtCounter(preg) + 1.U},plus_1_plus_times=${cmtCounter(preg) + 1.U + old_pdests_times(i)}\n")
-    XSDebug(p"port[$i]cmtCounterCtl:plus_1=${(freeReq(i) && oldPdestIsUnique(i)).asBool()},plus_1_plus_times=${freeReq(i) && oldPdestNotUniqueButLast(i)},clear=${freeVec(i)}\n")
-    XSDebug((specRefCounter(preg) === 0.U) && freeVec(i), p"normal preg free, preg:${preg}\n")
-    XSDebug((cmtCounter(preg) === specRefCounter(preg) && (specRefCounter(preg) =/= 0.U)) && freeVec(i), p"multi referenced preg free, preg:${preg}\n")
   }
 
   // set counters-update flag
-  for (preg <- 0 until NRPhyRegs) {
+  for (preg <- 1 until NRPhyRegs) {
     // set clear bit
     freeVec.zipWithIndex.foreach { case (ready, idx) => 
-      when (ready && preg.U === freeRegCandidates(idx)) { 
+      when (ready && preg.U === freePhyReg(idx)) { 
         clearArchRefCounter(preg) := true.B
         clearSpecRefCounter(preg) := true.B
         clearCmtCounter(preg) := true.B
@@ -202,13 +176,11 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
     // set update bit
     updateCmtCounterVec.zipWithIndex.foreach { case (ready, idx) => 
-      when (ready && preg.U === freeRegCandidates(idx)) {
+      when (ready && preg.U === freePhyReg(idx)) {
         updateCmtCounter(preg) := true.B
         // cmt counter after incrementing/ stay not change
         // free vec has higher priority than cmtCounterNext, so normal free wouldn't cause cmtCounter increasing
-        cmtCounterNext(preg) := Mux(freeReq(idx) && oldPdestIsUnique(idx), cmtCounter(preg) + 1.U,
-                        Mux(freeReq(idx) && oldPdestNotUniqueButLast(idx), cmtCounter(preg) + 1.U + old_pdests_times(idx), 
-                                                /* stay not change */ cmtCounter(preg)))
+        cmtCounterNext(preg) := cmtCounter(preg) + 1.U + old_pdests_times(idx)
       }
     }
 
@@ -216,8 +188,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       when (ready && preg.U === multiRefPhyReg(idx)) {
         updateArchRefCounter(preg) := true.B
         // arch ref counter of pdest
-        archRefCounterNext(multiRefPhyReg(idx)) := Mux(/* if this is me inst */freeReq(idx) && eliminatedMove(idx) && pdestIsUnique(idx), archRefCounter(multiRefPhyReg(idx)) + 1.U, 
-          Mux(freeReq(idx) && eliminatedMove(idx) && pdestNotUniqueButLast(idx), archRefCounter(multiRefPhyReg(idx)) + 1.U + pdests_times(idx), archRefCounter(multiRefPhyReg(idx))))
+        archRefCounterNext(preg) := archRefCounter(preg) + 1.U + pdests_times(idx)
       }
     }
   }
@@ -235,131 +206,73 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   Increments: from rename stage
    */
   val needAllocatingVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  XSDebug(needAllocatingVec.asUInt().orR(), p"needAllocatingVec:${Binary(needAllocatingVec.asUInt)}\n")
-
   val increaseSpecRefCounterVec = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
 
+  val allocatePtr = (0 until RenameWidth).map(i => headPtr + i.U)
+  val phyRegCandidates = VecInit(allocatePtr.map(ptr => freeList(ptr.value)))
+
   for (i <- 0 until RenameWidth) {
+    val renameEnable = allocateReq(i) && canAllocate && doAllocate && !flush && !redirect && !walk
     // enqueue instr, isn't move elimination
-    needAllocatingVec(i) := allocateReq(i) && canAllocate && doAllocate && !flush && !psrcOfMove(i).valid && !redirect && !walk
-
+    needAllocatingVec(i) := renameEnable && !psrcOfMove(i).valid
     // enqueue instr, is move elimination
-    when (allocateReq(i) && canAllocate && doAllocate && !flush && psrcOfMove(i).valid && psrcOfMove(i).bits =/= 0.U && !redirect && !walk) {
-      increaseSpecRefCounterVec(i) := true.B
-    }
+    increaseSpecRefCounterVec(i) := renameEnable && psrcOfMove(i).valid
 
-    val offset = i match {
-      case 0 => 0.U
-      case n => PopCount(needAllocatingVec.take(n))
-    }
-    val ptr = headPtr + offset
-    allocatePhyReg(i) := freeList(ptr.value)
+    allocatePhyReg(i) := phyRegCandidates(PopCount(needAllocatingVec.take(i)))
   }
 
-  for (preg <- 0 until NRPhyRegs) {
+  for (preg <- 1 until NRPhyRegs) {
     val increaseCmpVec = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => increaseSpecRefCounterVec(i) && psrcOfMove(i).bits === preg.U)))
-    val decreaseCmpVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => decreaseSpecRefCounterVec(i) && freeRegCandidates(i) === preg.U)))
+    val decreaseCmpVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => decreaseSpecRefCounterVec(i) && freePhyReg(i) === preg.U)))
 
     val doIncrease = increaseCmpVec.asUInt.orR
     val doDecrease = decreaseCmpVec.asUInt.orR
 
     updateSpecRefCounter(preg) := doIncrease || doDecrease
-    specRefCounterNext(preg) := specRefCounter(preg) + doIncrease.asUInt - Mux(doDecrease, decreaseSpecRefCounterValueVec(OHToUInt(decreaseCmpVec)), 0.U)
+    val addOne = specRefCounter(preg) + 1.U
+    val subN = specRefCounter(preg) - decreaseSpecRefCounterValueVec(OHToUInt(decreaseCmpVec))
+    specRefCounterNext(preg) := Mux(doDecrease, subN, addOne)
   }
 
 
   /*
   Flush: directly flush reference counter according to arch-rat
-  - replace specRefCounter with archRefCounter; reset headPtr to [ tailPtr - (NRPhyRegs-32) - (archRefCounter(i) - cmtCounter(i)).reduce(_ + _) ]
+  - replace specRefCounter with archRefCounter; reset headPtr
    */
+
+  val dupRegCntPos = RegInit(0.U(5.W))
+  val dupCntIncVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => Mux(updateArchRefCounterVec(i), pdests_times(i) + 1.U, 0.U))))
+  dupRegCntPos := Mux(!flush && !walk, dupRegCntPos + dupCntIncVec.reduceTree(_ + _), dupRegCntPos)
+  
+  val dupRegCntNeg = RegInit(0.U(5.W))
+  val dupCntDecVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i =>
+    Mux(updateCmtCounterVec(i) && !freeVec(i), old_pdests_times(i) + 1.U,
+    Mux(freeVec(i) && specRefCounter(freePhyReg(i)) =/= 0.U, old_pdests_times(i), 0.U)))))
+  dupRegCntNeg := Mux(!flush && !walk, dupRegCntNeg + dupCntDecVec.reduceTree(_ + _), dupRegCntNeg)
+
+  val dupRegCnt = Wire(UInt(5.W))
+  dupRegCnt := dupRegCntPos - dupRegCntNeg
 
 
   // update tail pointer
   val tailPtrNext = Mux(walk, tailPtr, tailPtr + PopCount(freeVec))
   // update head pointer
-  val dupRegVec = WireInit(VecInit(archRefCounter.zip(cmtCounter).drop(1).map{ case (a, c) => a - c }))
-  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegVec.reduceTree(_ +& _) - archRefCntZero, // FIXME Maybe this is too complicated?
-                      Mux(walk, headPtr - PopCount(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }), 
+  val walkValidVec = WireInit(VecInit(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }))
+  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegCnt - archRefCntZero,
+                      Mux(walk, headPtr - PopCount(walkValidVec), 
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
-  freeRegCnt := distanceBetween(tailPtrNext, headPtrNext)
+  freeRegCnt := distanceBetween(tailPtr, headPtrNext)
   canAllocate := RegNext(freeRegCnt >= RenameWidth.U)
 
   headPtr := headPtrNext
   tailPtr := tailPtrNext
 
   // update reg counter
-  for (i <- 0 until NRPhyRegs) {
+  for (i <- 1 until NRPhyRegs) {
     specRefCounter(i) := Mux(flush, archRefCounter(i), 
                            Mux(clearSpecRefCounter(i), 0.U, Mux(updateSpecRefCounter(i), specRefCounterNext(i), specRefCounter(i))))
     archRefCounter(i) :=   Mux(clearArchRefCounter(i), 0.U, Mux(updateArchRefCounter(i), archRefCounterNext(i), archRefCounter(i) ))
     cmtCounter(i)     :=   Mux(clearCmtCounter(i),     0.U, Mux(updateCmtCounter(i),     cmtCounterNext(i),     cmtCounter(i)     ))
-  }
-
-
-  /*
-  Re-direct: restore by walking, handled by rename using `dec` port
-   */
-
-
-
-  /*
-  Debug Info
-   */
-  for (i <- 0 until NRPhyRegs) {
-    XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
-      p"preg[$i] specRefCounter:${specRefCounter(i)} archRefCounter:${archRefCounter(i)} cmtCounter:${cmtCounter(i)}\n")
-    XSDebug(specRefCounter(i) =/= 0.U || archRefCounter(i) =/= 0.U || cmtCounter(i) =/= 0.U, 
-      p"preg[$i] specRefCounterNext:${specRefCounterNext(i)} archRefCounterNext:${archRefCounterNext(i)} cmtCounterNext:${cmtCounterNext(i)}\n")
-
-    // specRefCounter(i) must >= cmtCounter(i)
-    XSError(specRefCounter(i) < cmtCounter(i), p"Commits Overflow of preg${i}")
-  }
-
-  XSDebug(Array.range(0, MEFreeListSize).map(x => x.toString()).mkString("Free List (idx): ", "\t", "\n"))
-  XSDebug(p"Free List (val): " + Array.range(0, MEFreeListSize).map(x => p"${freeList(x)}\t").reduceLeft(_ + _) + "\n")
-
-  XSDebug(p"head:$headPtr tail:$tailPtr headPtrNext:$headPtrNext tailPtrNext:$tailPtrNext freeRegCnt:$freeRegCnt\n")
-
-  XSDebug(p"flush ${flush} redirect ${redirect} walk ${walk}\n")
-
-  XSDebug(PopCount(freeReq) =/= PopCount(freeVec), p"WARNING: Please check DEC requirement\n")
-  XSDebug(PopCount(allocateReq) =/= PopCount(needAllocatingVec), p"WARNING: Please check INC requirement\n")
-
-
-  /*
-  Assertions
-   */
-  val enableFreeListCheck = false
-
-  if (enableFreeListCheck) {
-
-    for (i <- 0 until RenameWidth) {
-      for (j <- (i + 1) until RenameWidth) {
-        XSError(needAllocatingVec(i) && needAllocatingVec(j) && allocatePhyReg(i) === allocatePhyReg(j),
-          p"Duplicate INC requirements detected!" + allocatePhyReg.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-        XSError(allocateReq(i) && allocateReq(j) && canAllocate && doAllocate && psrcOfMove(i).valid && psrcOfMove(j).valid && psrcOfMove(i).bits === psrcOfMove(j).bits,
-          p"Duplicate ME requirements detected! Cannot inc same specRefCount in 1 cycle!\n")
-      }
-      // also, we cannot count ref numbers more than 3 (which is very rare)
-      XSError(needAllocatingVec(i) && !psrcOfMove(i).valid && specRefCounter(allocatePhyReg(i)).andR(), p"(norm) Exceeding specRefCounter Max Value: preg[${allocatePhyReg(i)}]\n")
-      XSError(allocateReq(i) && canAllocate && doAllocate && psrcOfMove(i).valid && specRefCounter(psrcOfMove(i).bits).andR(), p"(move) Exceeding specRefCounter Max Value: preg[${psrcOfMove(i).bits}]\n")
-    }
-
-    for (i <- 0 until CommitWidth) {
-      // we cannot handle duplicate inc/dec requirements on a preg in 1 cycle for now
-      for (j <- (i + 1) until CommitWidth) {
-        XSInfo(freeReq(i) && freeReq(j) && freePhyReg(i) === freePhyReg(j), 
-          p"Duplicate DEC requirements detected!" + freePhyReg.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-        XSInfo(freeReq(i) && freeReq(j) && eliminatedMove(i) && eliminatedMove(j) && multiRefPhyReg(i) === multiRefPhyReg(j), 
-          p"Duplicate INC requirements on archRefCount detected!" + multiRefPhyReg.zipWithIndex.map{case (p, idx) => p" ($idx):$p"}.reduceLeft(_ + _) + "\n")
-        XSError(freeVec(i) && freeVec(j) && freePhyReg(i) === freePhyReg(j), "Fatal Error: free 1 reg 2 times in 1 cycle!\n")
-      }
-      // not inc and dec same reg in 1 cycle
-      for (j <- 0 until RenameWidth) {
-        XSDebug(allocateReq(j) && canAllocate && doAllocate && psrcOfMove(j).valid && !redirect && !walk &&
-          freeReq(i) && freePhyReg(i) === allocatePhyReg(j), p"INC and DEC Conflict Detected! inc($j): preg ${allocatePhyReg(j)}, dec($i): preg ${freePhyReg(i)}\n")
-      }
-    }
   }
 }
