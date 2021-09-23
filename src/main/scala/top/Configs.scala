@@ -28,7 +28,7 @@ import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
+import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun.{AliasField, CacheParameters, HCCacheParameters, PreferCacheField}
