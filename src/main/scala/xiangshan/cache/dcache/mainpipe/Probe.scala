@@ -122,14 +122,20 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   // translate to inner req
   val req = Wire(new ProbeReq)
+  val alias_addr_frag = io.mem_probe.bits.data(2, 1) // add extra 2 bits from vaddr to get vindex
   req.source := io.mem_probe.bits.source
   req.opcode := io.mem_probe.bits.opcode
   req.addr := io.mem_probe.bits.address
-  req.vaddr := Cat(
-    io.mem_probe.bits.address(VAddrBits - 1, DCacheSameVPAddrLength + 2),
-    io.mem_probe.bits.data(2, 1), // add extra 2 bits from vaddr to get vindex
-    io.mem_probe.bits.address(DCacheSameVPAddrOffset, 0)
-  )
+  if(DCacheAboveIndexOffset > DCacheTagOffset) {
+    // have alias problem, extra alias bits needed for index
+    req.vaddr := Cat(
+      io.mem_probe.bits.address(VAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
+      io.mem_probe.bits.address(DCacheTagOffset - 1, 0)                 // index & others
+    )
+  } else { // no alias problem
+    req.vaddr := io.mem_probe.bits.address
+  }
   req.param := io.mem_probe.bits.param
   req.needData := io.mem_probe.bits.data(0)
 

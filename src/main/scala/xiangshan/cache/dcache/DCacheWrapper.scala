@@ -114,14 +114,13 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheLineWords = DCacheLineBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
-  val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = 0
   val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
-  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrOffset
+  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -303,6 +302,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
+
+  println("DCache:") 
+  println("  DCacheSets: " + DCacheSets) 
+  println("  DCacheWays: " + DCacheWays) 
+  println("  DCacheBanks: " + DCacheBanks) 
+  println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits) 
+  println("  DCacheWordOffset: " + DCacheWordOffset) 
+  println("  DCacheBankOffset: " + DCacheBankOffset) 
+  println("  DCacheSetOffset: " + DCacheSetOffset) 
+  println("  DCacheTagOffset: " + DCacheTagOffset) 
+  println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset) 
 
   //----------------------------------------
   // core data structures
