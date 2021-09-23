@@ -880,6 +880,9 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
   val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
   XSPerfAccumulate("commitInstrLoad", ifCommit(PopCount(commitLoadValid)))
+  val commitIsBranch = io.commits.info.map(_.commitType).map(_ === CommitType.BRANCH)
+  val commitBranchValid = io.commits.valid.zip(commitIsBranch).map{ case (v, t) => v && t }
+  XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
   val commitLoadWaitBit = commitDebugUop.map(_.cf.loadWaitBit)
   XSPerfAccumulate("commitInstrLoadWait", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w })))
   val commitIsStore = io.commits.info.map(_.commitType).map(_ === CommitType.STORE)
@@ -982,6 +985,16 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.wdest    := RegNext(uop.ctrl.ldest)
 
       // XSDebug(p"[difftest-instr-commit]valid:${difftest.io.valid},pc:${difftest.io.pc},instr:${difftest.io.instr},skip:${difftest.io.skip},isRVC:${difftest.io.isRVC},scFailed:${difftest.io.scFailed},wen:${difftest.io.wen},wdata:${difftest.io.wdata},wdest:${difftest.io.wdest}\n")
+
+      // runahead commit hint
+      val runahead_commit = Module(new DifftestRunaheadCommitEvent)
+      runahead_commit.io.clock := clock
+      runahead_commit.io.coreid := hardId.U
+      runahead_commit.io.index := i.U
+      runahead_commit.io.valid := difftest.io.valid && 
+        (commitBranchValid(i) || commitIsStore(i))
+      // TODO: is branch or store
+      runahead_commit.io.pc    := difftest.io.pc
     }
   }
 

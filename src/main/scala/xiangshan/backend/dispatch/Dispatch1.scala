@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import difftest._
 import xiangshan.backend.roq.{RoqEnqIO, RoqPtr}
 import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.mem.LsqEnqIO
@@ -121,6 +122,10 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val updatedPsrc2 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
   val updatedPsrc3 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
   val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
+  val checkpoint_id = RegInit(0.U(64.W))
+  checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
+    io.fromRename(i).fire()
+  ))
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -190,6 +195,66 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
+
+    if (!env.FPGAPlatform) {
+      // debug runahead hint
+      val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
+      if(i == 0){
+        debug_runahead_checkpoint_id := checkpoint_id
+      } else {
+        debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i => 
+          io.fromRename(i).fire()
+        ))
+      }
+
+      val runahead = Module(new DifftestRunaheadEvent)
+      runahead.io.clock         := clock
+      runahead.io.coreid        := hardId.U
+      runahead.io.index         := i.U
+      runahead.io.valid         := io.fromRename(i).fire()
+      runahead.io.branch        := isBranch(i) || isStore(i) // setup checkpoint for branch and store, as they may rollback
+      runahead.io.pc            := updatedUop(i).cf.pc
+      runahead.io.checkpoint_id := debug_runahead_checkpoint_id 
+
+      when(runahead.io.valid){
+        printf("XS runahead " + i + " : %d: pc %x branch %x cpid %x\n",
+          GTimer(),
+          runahead.io.pc,
+          runahead.io.branch,
+          runahead.io.checkpoint_id
+        );
+      }
+
+      val mempred_check = Module(new DifftestRunaheadMemdepPred)
+      mempred_check.io.clock     := clock
+      mempred_check.io.coreid    := hardId.U
+      mempred_check.io.index     := i.U
+      mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
+      mempred_check.io.is_load   := !isStore(i)
+      mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
+      mempred_check.io.pc        := updatedUop(i).cf.pc 
+
+      when(mempred_check.io.valid){
+        printf("XS mempred_check " + i + " : %d: pc %x ld %x need_wait %x\n",
+          GTimer(),
+          mempred_check.io.pc,
+          mempred_check.io.is_load,
+          mempred_check.io.need_wait
+        );
+      }
+      updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
+    }
+  }
+
+  // recover checkpoint if redirect
+  if (!env.FPGAPlatform) {
+    val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
+    runahead_redirect.io.clock := clock
+    runahead_redirect.io.coreid := hardId.U
+    runahead_redirect.io.valid := io.redirect.valid
+    runahead_redirect.io.pc :=  DontCare // for debug only
+    runahead_redirect.io.target_pc := DontCare // for debug only
+    runahead_redirect.io.checkpoint_id := io.redirect.bits.debug_runahead_checkpoint_id // make sure it is right
   }
 
   // store set perf count
