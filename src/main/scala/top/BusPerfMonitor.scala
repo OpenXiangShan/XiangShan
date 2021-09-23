@@ -76,8 +76,8 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
     }
   }
 
-  for((in, edgeIn) <- outer.node.in) {
-    val clientName = edgeIn.master.masters.head.name
+  for(((in, edgeIn), i) <- outer.node.in.zipWithIndex) {
+    val clientName = s"${edgeIn.master.masters.head.name}_bank_$i"
     PERF_CHN(clientName, in.a)
     PERF_CHN(clientName, in.d)
     if(in.params.hasBCE){
