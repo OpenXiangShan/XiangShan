@@ -328,9 +328,11 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   roq.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
+  val timer = GTimer()
   for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
     roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(stage2Redirect, flushReg))
     roq_wb.bits := RegNext(wb.bits)
+    roq_wb.bits.uop.debugInfo.writebackTime := timer
   }
 
   // TODO: is 'backendRedirect' necesscary?

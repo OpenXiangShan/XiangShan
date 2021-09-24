@@ -110,7 +110,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 trait HaveSlaveAXI4Port {
   this: BaseXSSoc =>
 
-  val idBits = 16
+  val idBits = 14
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -128,6 +128,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
@@ -328,6 +329,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
+      val sram_config = Input(UInt(5.W))
+      val osc_clock = Input(Bool())
+      val pll_output = Output(UInt(14.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
@@ -340,6 +344,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       }
       // val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
+    io.pll_output := DontCare
+    dontTouch(io.sram_config)
+    dontTouch(io.osc_clock)
+    dontTouch(io.pll_output)
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {

@@ -95,19 +95,20 @@ package object xiangshan {
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int to float",
+      i2f.litValue() -> "int_to_float",
       csr.litValue() -> "csr",
       alu.litValue() -> "alu",
       mul.litValue() -> "mul",
       div.litValue() -> "div",
       fence.litValue() -> "fence",
+      bmu.litValue() -> "bmu",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
       fDivSqrt.litValue() -> "fdiv/fsqrt",
       ldu.litValue() -> "load",
-      stu.litValue() -> "store"
+      stu.litValue() -> "store",
+      mou.litValue() -> "mou"
     )
-
   }
 
   object FuOpType {
@@ -432,7 +433,7 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
-  def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
+  def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
   def bmuGen(p: Parameters) = new Bmu()(p)

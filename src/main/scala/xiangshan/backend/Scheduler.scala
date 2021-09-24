@@ -24,6 +24,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
+import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
@@ -147,13 +148,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   // print rs info
   println("Scheduler: ")
-  for ((rs, i) <- rs_all.zipWithIndex) {
-    println(s"RS $i: $rs")
-    println(s"  innerIntUop: ${outer.innerIntFastSources(i).map(_._2)}")
-    println(s"  innerFpUop: ${outer.innerFpFastSources(i).map(_._2)}")
-    println(s"  innerFastPorts: ${outer.innerFastPorts(i)}")
-    println(s"  outFastPorts: ${outer.outFastPorts(i)}")
-  }
   println(s"  number of issue ports: ${outer.numIssuePorts}")
   println(s"  number of replay ports: ${outer.numReplayPorts}")
   println(s"  size of load and store RSes: ${outer.getMemRsEntries}")
@@ -165,6 +159,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
   if (fpRfConfig._1) {
     println(s"FP  Regfile: ${fpRfConfig._2}R${fpRfConfig._3}W")
+  }
+  for ((rs, i) <- rs_all.zipWithIndex) {
+    println(s"RS $i: $rs")
+    println(s"  innerIntUop: ${outer.innerIntFastSources(i).map(_._2)}")
+    println(s"  innerFpUop: ${outer.innerFpFastSources(i).map(_._2)}")
+    println(s"  innerFastPorts: ${outer.innerFastPorts(i)}")
+    println(s"  outFastPorts: ${outer.outFastPorts(i)}")
+    println(s"  loadBalance: ${rs_all(i).params.needBalance}")
   }
 
   class SchedulerExtraIO extends XSBundle {
@@ -191,6 +193,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       new SchedulerExtraIO().asInstanceOf[this.type]
   }
 
+  val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
+
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
@@ -204,7 +208,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
     // feedback ports
     val extra = new SchedulerExtraIO
+    val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
+
+  if (io.fmaMid.isDefined) {
+    io.fmaMid.get <> outer.reservationStations.flatMap(_.module.io.fmaMid.getOrElse(Seq()))
+  }
 
   def extraReadRf(numRead: Seq[Int]): Seq[UInt] = {
     require(numRead.length == io.allocate.length)
@@ -220,50 +229,35 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   def readFpRf: Seq[UInt] = extraReadRf(outer.numDpPortFpRead) ++ io.extra.fpRfReadOut.getOrElse(Seq()).map(_.addr)
   def stData: Seq[ValidIO[StoreDataBundle]] = io.extra.stData.getOrElse(Seq())
 
-  def regfile(raddr: Seq[UInt], numWrite: Int, hasZero: Boolean, len: Int): Option[Regfile] = {
-    val numReadPorts = raddr.length
-    if (numReadPorts > 0) {
-      val rf = Module(new Regfile(numReadPorts, numWrite, hasZero, len))
-      rf.io.readPorts.map(_.addr).zip(raddr).foreach{ case (r1, r2) => r1 := r2 }
-      rf.io.debug_rports := DontCare
-      Some(rf)
+  def genRegfile(isInt: Boolean): Seq[UInt] = {
+    val wbPorts = if (isInt) io.writeback.take(intRfWritePorts) else io.writeback.drop(intRfWritePorts)
+    val waddr = wbPorts.map(_.bits.uop.pdest)
+    val wdata = wbPorts.map(_.bits.data)
+    val debugReadPorts = Some(if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat)
+    val debugRead = if (env.FPGAPlatform) None else debugReadPorts
+    if (isInt) {
+      val wen = wbPorts.map(wb => wb.valid && wb.bits.uop.ctrl.rfWen)
+      Regfile(NRPhyRegs, readIntRf, wen, waddr, wdata, true, debugRead = debugRead)
     }
     else {
-      None.asInstanceOf[Option[Regfile]]
+      // For floating-point function units, every instruction writes either int or fp regfile.
+      val wen = wbPorts.map(_.valid)
+      Regfile(NRPhyRegs, readFpRf, wen, waddr, wdata, false, debugRead = debugRead)
     }
   }
 
-  val intRf = regfile(readIntRf, intRfWritePorts, true, XLEN)
-  val fpRf = if (outer.numFpRfReadPorts > 0) regfile(readFpRf, fpRfWritePorts, false, XLEN) else None
-  val intRfReadData = if (intRf.isDefined) intRf.get.io.readPorts.map(_.data) else Seq()
-  val fpRfReadData = if (fpRf.isDefined) fpRf.get.io.readPorts.map(_.data) else io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)
-
-  // write ports: 0-3 ALU, 4-5 MUL, 6-7 LOAD
-  // regfile write ports
-  if (intRf.isDefined) {
-    intRf.get.io.writePorts.zip(io.writeback.take(intRfWritePorts)).foreach {
-      case (rf, wb) =>
-        rf.wen := wb.valid && wb.bits.uop.ctrl.rfWen
-        rf.addr := wb.bits.uop.pdest
-        rf.data := wb.bits.data
-    }
-  }
-  if (fpRf.isDefined) {
-    fpRf.get.io.writePorts.zip(io.writeback.drop(intRfWritePorts)).foreach {
-      case (rf, wb) =>
-        rf.wen := wb.valid
-        rf.addr := wb.bits.uop.pdest
-        rf.data := wb.bits.data
-    }
-  }
+  val intRfReadData = if (intRfConfig._1) genRegfile(true) else Seq()
+  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)
 
   if (io.extra.fpRfReadIn.isDefined) {
     io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
   }
 
   if (io.extra.fpRfReadOut.isDefined) {
-    io.extra.fpRfReadOut.get.map(_.data).zip(fpRfReadData.takeRight(outer.outFpRfReadPorts)).foreach{ case (a, b) => a := b}
+    val extraFpReadData = fpRfReadData.dropRight(32).takeRight(outer.outFpRfReadPorts)
+    io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
   }
+
   var issueIdx = 0
   var feedbackIdx = 0
   var stDataIdx = 0
@@ -377,23 +371,17 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
-  if (!env.FPGAPlatform && intRf.isDefined) {
-    for ((rport, rat) <- intRf.get.io.debug_rports.zip(io.extra.debug_int_rat)) {
-      rport.addr := rat
-    }
+  if (!env.FPGAPlatform && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.gpr := VecInit(intRf.get.io.debug_rports.map(_.data))
+    difftest.io.gpr := intRfReadData.takeRight(32)
   }
-  if (!env.FPGAPlatform && fpRf.isDefined) {
-    for ((rport, rat) <- fpRf.get.io.debug_rports.zip(io.extra.debug_fp_rat)) {
-      rport.addr := rat
-    }
+  if (!env.FPGAPlatform && fpRfConfig._1) {
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.fpr := VecInit(fpRf.get.io.debug_rports.map(_.data))
+    difftest.io.fpr := fpRfReadData.takeRight(32)
   }
 
   XSPerfAccumulate("allocate_valid", PopCount(io.allocate.map(_.valid)))
