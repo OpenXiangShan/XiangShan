@@ -216,45 +216,34 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       runahead.io.pc            := updatedUop(i).cf.pc
       runahead.io.checkpoint_id := debug_runahead_checkpoint_id 
 
-      when(runahead.io.valid){
-        printf("XS runahead " + i + " : %d: pc %x branch %x cpid %x\n",
-          GTimer(),
-          runahead.io.pc,
-          runahead.io.branch,
-          runahead.io.checkpoint_id
-        );
-      }
+      // when(runahead.io.valid){
+      //   printf("XS runahead " + i + " : %d: pc %x branch %x cpid %x\n",
+      //     GTimer(),
+      //     runahead.io.pc,
+      //     runahead.io.branch,
+      //     runahead.io.checkpoint_id
+      //   );
+      // }
 
       val mempred_check = Module(new DifftestRunaheadMemdepPred)
       mempred_check.io.clock     := clock
       mempred_check.io.coreid    := hardId.U
       mempred_check.io.index     := i.U
       mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
-      mempred_check.io.is_load   := !isStore(i)
+      mempred_check.io.is_load   := !isStore(i) && isLs(i)
       mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
       mempred_check.io.pc        := updatedUop(i).cf.pc 
 
-      when(mempred_check.io.valid){
-        printf("XS mempred_check " + i + " : %d: pc %x ld %x need_wait %x\n",
-          GTimer(),
-          mempred_check.io.pc,
-          mempred_check.io.is_load,
-          mempred_check.io.need_wait
-        );
-      }
+      // when(mempred_check.io.valid){
+      //   printf("XS mempred_check " + i + " : %d: pc %x ld %x need_wait %x\n",
+      //     GTimer(),
+      //     mempred_check.io.pc,
+      //     mempred_check.io.is_load,
+      //     mempred_check.io.need_wait
+      //   );
+      // }
       updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
-  }
-
-  // recover checkpoint if redirect
-  if (!env.FPGAPlatform) {
-    val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
-    runahead_redirect.io.clock := clock
-    runahead_redirect.io.coreid := hardId.U
-    runahead_redirect.io.valid := io.redirect.valid
-    runahead_redirect.io.pc :=  DontCare // for debug only
-    runahead_redirect.io.target_pc := DontCare // for debug only
-    runahead_redirect.io.checkpoint_id := io.redirect.bits.debug_runahead_checkpoint_id // make sure it is right
   }
 
   // store set perf count
