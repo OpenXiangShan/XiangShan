@@ -26,6 +26,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.PMPChecker
 
 class PTW()(implicit p: Parameters) extends LazyModule with HasXSParameter {
 

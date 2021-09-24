@@ -343,6 +343,7 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
+  val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
   val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
@@ -585,7 +586,7 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
-  val pf  = Bool()
+  val pf = Bool()
 
   def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
     this.entry.level.map(_ := level)

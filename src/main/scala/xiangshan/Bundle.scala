@@ -36,6 +36,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -358,6 +359,8 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
+
+  val pmp = Vec(NumPMP, new PMPEntry())
 
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +

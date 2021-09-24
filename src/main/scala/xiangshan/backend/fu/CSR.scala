@@ -19,6 +19,8 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util._
+import utils.MaskedRegMap.WritableMask
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -380,15 +382,33 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
-  val pmpcfg0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg3 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr3 = RegInit(UInt(XLEN.W), 0.U)
-
+  // PMP Mapping
+  val pmp = Reg(Vec(NumPMP, new PMPEntry()))
+  val pmpMapping = if (NumPMP > 0) {
+    val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
+    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
+    val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
+      MaskedRegMap(
+        addr = PmpcfgBase + pmpCfgIndex(i),
+        reg = pmp.map(_.cfg).slice(i, i + pmpCfgPerCSR).asUInt,
+        wmask = WritableMask,
+        wfn = new PMPConfig().write_cfg_vec
+      ))
+    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
+    val addr_mapping = (0 until NumPMP).map(i => {Map(
+      MaskedRegMap(
+        addr = PmpaddrBase + i,
+        reg = pmp(i).addr,
+        wmask = WritableMask,
+        wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1)) else pmp(i).write_addr },
+        rmask = WritableMask,
+        rfn = new PMPEntry().read_addr(pmp(i).cfg)
+      ))
+    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
+    cfg_mapping ++ addr_mapping
+  } else {
+    Map()
+  }
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
@@ -452,6 +472,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+
   csrio.tlb := tlbBundle
 
   // User-Level CSRs
@@ -633,18 +654,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Dscratch1, dscratch1)
   )
 
-  // PMP is unimplemented yet
-  val pmpMapping = Map(
-    MaskedRegMap(Pmpcfg0, pmpcfg0),
-    MaskedRegMap(Pmpcfg1, pmpcfg1),
-    MaskedRegMap(Pmpcfg2, pmpcfg2),
-    MaskedRegMap(Pmpcfg3, pmpcfg3),
-    MaskedRegMap(PmpaddrBase + 0, pmpaddr0),
-    MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
-    MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
-    MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
-  )
-
   var perfCntMapping = Map(
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
@@ -667,6 +676,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   //   perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
+
+
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
@@ -787,6 +798,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
   tlbBundle.priv.imode := priviledgeMode
   tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
+
+  // PMP
+  tlbBundle.pmp := pmp
 
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))

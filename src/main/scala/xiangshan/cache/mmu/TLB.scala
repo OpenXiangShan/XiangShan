@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
+import xiangshan.backend.fu.PMPChecker
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -116,6 +117,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
+    val sizeReg = if (!q.sameCycle) RegNext(req(i).bits.size) else req(i).bits.size
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
@@ -142,19 +144,26 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
+    val pmp_checker = Module(new PMPChecker(log2Ceil(XLEN/8)))
+    pmp_checker.io.env.priv := mode
+    pmp_checker.io.env.pmp := io.csr.pmp
+    pmp_checker.io.req.addr := resp(i).bits.paddr
+    pmp_checker.io.req.size := sizeReg
+    val pmp = pmp_checker.io.resp
+
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
+    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !(perm.pr && pmp.r)) && TlbCmd.isRead(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !(perm.pw && pmp.w)) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !(perm.pe && pmp.x)) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
     when(!vmEnable) {
       resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
-      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
-      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
+      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !(PMAMode.read(pmaMode) && pmp.r)) && TlbCmd.isRead(cmdReg)
+      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !(PMAMode.write(pmaMode) && pmp.w)) && TlbCmd.isWrite(cmdReg)
+      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !(PMAMode.execute(pmaMode) && pmp.x))
     }
 
     (hit, miss, normal_hitVec, super_hitVec, validReg)
