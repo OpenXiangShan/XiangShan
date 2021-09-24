@@ -58,6 +58,9 @@ jobs:
       - name: Basic Test - riscv-tests
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --rvtest /home/ci-runner/xsenv/riscv-tests --ci riscv-tests 2> /dev/zero
+      - name: Misc Bitmanip Test
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci bitMisc 2> /dev/zero
       - name: Simple Test - microbench
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci microbench 2> perf.log
