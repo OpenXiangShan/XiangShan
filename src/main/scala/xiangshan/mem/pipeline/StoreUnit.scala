@@ -63,6 +63,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.miss := DontCare
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.isFirstIssue := io.isFirstIssue
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
@@ -75,13 +76,16 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   ))
   io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
 
+  XSPerfAccumulate("in_valid", io.in.valid)
+  XSPerfAccumulate("in_fire", io.in.fire)
+  XSPerfAccumulate("in_fire_first_issue", io.in.fire && io.isFirstIssue)
   XSPerfAccumulate("addr_spec_success", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("addr_spec_failed", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("addr_spec_success_once", io.out.fire() && saddr(VAddrBits-1, 12) === io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
   XSPerfAccumulate("addr_spec_failed_once", io.out.fire() && saddr(VAddrBits-1, 12) =/= io.in.bits.src(0)(VAddrBits-1, 12) && io.isFirstIssue)
 }
 
-// Load Pipeline Stage 1
+// Store Pipeline Stage 1
 // TLB resp (send paddr to dcache)
 class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -127,6 +131,12 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   // mmio inst with exception will be writebacked immediately
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
+
+  XSPerfAccumulate("in_valid", io.in.valid)
+  XSPerfAccumulate("in_fire", io.in.fire)
+  XSPerfAccumulate("in_fire_first_issue", io.in.fire && io.in.bits.isFirstIssue)
+  XSPerfAccumulate("tlb_miss", io.in.fire && s1_tlb_miss)
+  XSPerfAccumulate("tlb_miss_first_issue", io.in.fire && s1_tlb_miss && io.in.bits.isFirstIssue)
 }
 
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
