@@ -14,6 +14,9 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+// See LICENSE.SiFive for license details.
+// See LICENSE.Berkeley for license details.
+
 package xiangshan.backend.decode
 
 import chisel3._

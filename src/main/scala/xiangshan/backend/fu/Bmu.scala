@@ -115,20 +115,7 @@ class MiscModule(implicit p: Parameters) extends XSModule {
   (0 until 8).map( i => xpermbVec(i) := Mux(src2(i*8+7, i*8+3).orR, 0.U, xpermLUT(src1, src2(i*8+2, i*8), 8)))
   val xpermb = Cat(xpermbVec.reverse)
 
-  val pack = Cat(src2(31,0), src1(31,0))
-  val packh = Cat(src2(7,0), src1(7,0))
-  val packw = SignExt(Cat(src2(15,0), src1(15,0)), XLEN)
-  val revb = Cat(Reverse(src1(63,56)), Reverse(src1(55,48)), Reverse(src1(47,40)), Reverse(src1(39,32)),
-                    Reverse(src1(31,24)), Reverse(src1(23,16)), Reverse(src1(15,8)), Reverse(src1(7,0)))
- 
-  io.out := RegNext(LookupTreeDefault(io.func, revb, List(
-    BMUOpType.xpermn  -> xpermn,
-    BMUOpType.xpermb  -> xpermb,
-    BMUOpType.pack    -> pack,
-    BMUOpType.packh   -> packh,
-    BMUOpType.packw   -> packw,
-    BMUOpType.revb    -> revb
-  )))
+  io.out := RegNext(Mux(io.func(0), xpermb, xpermn))
 }
 
 class Bmu(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
