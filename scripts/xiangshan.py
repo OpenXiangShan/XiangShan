@@ -78,6 +78,8 @@ class XSArgs(object):
 
     def get_makefile_args(self):
         makefile_args = [
+
+
             (self.threads, "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
             (self.trace, "EMU_TRACE"),
@@ -214,6 +216,7 @@ class XiangShan(object):
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
+            "bitmanip": "bitMisc.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",

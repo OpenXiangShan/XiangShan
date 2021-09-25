@@ -85,8 +85,9 @@ class FusedZexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.PACKW)
     cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := 0.U
     cs
   }
 
@@ -183,7 +184,7 @@ class FusedSzewl1(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl1
     cs.fuOpType := ALUOpType.szewl1
     cs.lsrc(0) := instr1Rs1
@@ -202,7 +203,7 @@ class FusedSzewl2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl2
     cs.fuOpType := ALUOpType.szewl2
     cs.lsrc(0) := instr1Rs1
@@ -221,7 +222,7 @@ class FusedSzewl3(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl3
     cs.fuOpType := ALUOpType.szewl3
     cs.lsrc(0) := instr1Rs1
@@ -240,7 +241,7 @@ class FusedByte2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with byte2
     cs.fuOpType := ALUOpType.byte2
     cs.lsrc(0) := instr1Rs1
