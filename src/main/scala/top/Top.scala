@@ -24,58 +24,35 @@ import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chipsalliance.rocketchip.config._
-import device.{AXI4Plic, TLTimer, DebugModule}
-import firrtl.stage.RunFirrtlTransformAnnotation
+import device.{AXI4Plic, DebugModule, TLTimer}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.stage.phases.GenerateArtefacts
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import freechips.rocketchip.tilelink
 import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
+import huancun.debug.TLLogger
+import huancun.{HCCacheParamsKey, HuanCun}
 import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import xiangshan.cache.prefetch.L2Prefetcher
-
-
 
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-  private val l2prefetcher = LazyModule(new L2Prefetcher())
   private val busPMU = BusPerfMonitor(enable = true)
-  private val l2cache = if (useFakeL2Cache) null else LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 2,
-      ways = L2NWays,
-      sets = L2NSets,
-      blockBytes = L2BlockSize,
-      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2",
-      uncachedGet = true,
-      enablePerf = false
-    ),
-    InclusiveCacheMicroParameters(
-      memCycles = 25,
-      writeBytes = 32
-    ),
-    fpga = debugOpts.FPGAPlatform
-  ))
-  if(!useFakeL2Cache) {
-    ResourceBinding {
-      Resource(l2cache.device, "reg").bind(ResourceAddress(hardId))
-    }
-  }
+  private val l2cache = if(useFakeL2Cache) null else
+    LazyModule(new HuanCun()(new Config((_, _, _) => {
+      case HCCacheParamsKey => coreParams.L2CacheParams
+    })))
 
   val memory_port = TLIdentityNode()
   val uncache = TLXbar()
 
   if (!useFakeDCache) {
-    busPMU := TLBuffer() := core.memBlock.dcache.clientNode
+    busPMU := TLLogger(s"L2_L1D_$hardId") := TLBuffer() := core.memBlock.dcache.clientNode
   }
   //if (!useFakeL1plusCache) {
     busPMU := TLBuffer() := core.frontend.icache.clientNode
@@ -83,7 +60,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   if (!useFakePTW) {
     busPMU := TLBuffer() := core.ptw.node
   }
-  busPMU := TLBuffer() := l2prefetcher.clientNode
   if (useFakeL2Cache) {
     memory_port := TLXbar() :=* busPMU
   }
@@ -103,13 +79,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
-    l2prefetcher.module.io.enable := core.module.io.l2_pf_enable
-    if (useFakeL2Cache) {
-      l2prefetcher.module.io.in := DontCare
-    }
-    else {
-      l2prefetcher.module.io.in <> l2cache.module.io
-    }
+
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error
     io.dcache_error <> core.module.io.dcache_error
@@ -118,7 +88,6 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.reset := core_reset_gen.io.out
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    l2prefetcher.module.reset := l2_reset_gen.io.out
     if (!useFakeL2Cache) {
       l2cache.module.reset := l2_reset_gen.io.out
     }
@@ -141,7 +110,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 trait HaveSlaveAXI4Port {
   this: BaseXSSoc =>
 
-  val idBits = 16
+  val idBits = 14
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -159,6 +128,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
@@ -284,7 +254,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := core_with_l2(i).memory_port
+    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -326,38 +296,20 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   }
   plic.intnode := beu.intNode
   plic.intnode := plicSource.sourceNode
-  
+
   plic.node := peripheralXbar
 
-  val l3cache = if (useFakeL3Cache) null else LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 3,
-      ways = L3NWays,
-      sets = L3NSets,
-      blockBytes = L3BlockSize,
-      beatBytes = L3InnerBusWidth / 8,
-      cacheName = "L3",
-      uncachedGet = false,
-      enablePerf = false
-    ),
-    InclusiveCacheMicroParameters(
-      memCycles = 25,
-      writeBytes = 32
-    ),
-    fpga = debugOpts.FPGAPlatform
-  ))
-  if(!useFakeL3Cache){
-    ResourceBinding{
-      Resource(l3cache.device, "reg").bind(ResourceAddress(0))
-    }
-  }
+  val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
+    case HCCacheParamsKey => soc.L3CacheParams
+  })))
+
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= TLLogger("MEM_L3") :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
@@ -377,6 +329,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
+      val sram_config = Input(UInt(5.W))
+      val osc_clock = Input(Bool())
+      val pll_output = Output(UInt(14.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
@@ -389,6 +344,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       }
       // val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
+    io.pll_output := DontCare
+    dontTouch(io.sram_config)
+    dontTouch(io.osc_clock)
+    dontTouch(io.pll_output)
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {

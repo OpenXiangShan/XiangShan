@@ -66,12 +66,15 @@ object `rocket-chip` extends SbtModule with CommonModule {
 
 }
 
-object `block-inclusivecache-sifive` extends CommonModule {
+object huancun extends SbtModule with CommonModule {
+
   override def ivyDeps = super.ivyDeps() ++ chisel
 
-  override def millSourcePath = super.millSourcePath / 'design / 'craft / 'inclusivecache
+  override def millSourcePath = super.millSourcePath
 
-  override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`)
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    `rocket-chip`
+  )
 }
 
 object chiseltest extends CommonModule with SbtModule {
@@ -103,9 +106,9 @@ object XiangShan extends CommonModule with SbtModule {
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
     `rocket-chip`,
-    `block-inclusivecache-sifive`,
     chiseltest,
     difftest,
+    huancun,
     fudian
   )
 

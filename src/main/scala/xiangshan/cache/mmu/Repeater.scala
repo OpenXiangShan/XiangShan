@@ -61,6 +61,7 @@ class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with 
   XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
+  TimeOutAssert(sent && !recv, timeOutThreshold, "Repeater doesn't recv resp in time")
 }
 
 /* dtlb
@@ -115,7 +116,6 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     }
     reqs
   }
-
 
   val reqs = filter_req()
   val req_ports = filter_ports
@@ -194,7 +194,6 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     counter := 0.U
   }
 
-
   // perf
   val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
   when (io.ptw.req(0).fire() =/= io.ptw.resp.fire()) {
@@ -212,5 +211,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
   for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)
+  }
+
+  for (i <- 0 until Size) {
+    TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
   }
 }

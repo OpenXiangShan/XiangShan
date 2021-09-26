@@ -35,6 +35,7 @@ import utils._
 import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -110,9 +111,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  // This inst will flush all the pipe when it is the oldest inst in ROB,
-  // then replay from this inst itself
-  val replayInst = Bool() 
 }
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
@@ -152,14 +150,23 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
+  val isFused = UInt(3.W)
+  // This inst will flush all the pipe when it is the oldest inst in ROB,
+  // then replay from this inst itself
+  val replayInst = Bool()
 
-  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
+  private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
+    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+
+  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
-    val signals =
-      Seq(srcType(0), srcType(1), srcType(2), fuType, fuOpType, rfWen, fpWen,
-        isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
-    signals zip decoder map { case (s, d) => s := d }
+    allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
+    this
+  }
+
+  def decode(bit: List[BitPat]): CtrlSignals = {
+    allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
     this
   }
 }
@@ -172,10 +179,12 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
-  val renameTime = UInt(64.W)
-  val dispatchTime = UInt(64.W)
-  val issueTime = UInt(64.W)
-  val writebackTime = UInt(64.W)
+  val renameTime = UInt(XLEN.W)
+  val dispatchTime = UInt(XLEN.W)
+  val enqRsTime = UInt(XLEN.W)
+  val selectTime = UInt(XLEN.W)
+  val issueTime = UInt(XLEN.W)
+  val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
 }
 
@@ -208,10 +217,16 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     }
   }
   def srcIsReady: Vec[Bool] = {
-    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcImm(t) || s === SrcState.rdy })
+    VecInit(ctrl.srcType.zip(srcState).map{ case (t, s) => SrcType.isPcOrImm(t) || s === SrcState.rdy })
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
+  def clearExceptions(): MicroOp = {
+    cf.exceptionVec.map(_ := false.B)
+    ctrl.replayInst := false.B
+    ctrl.flushPipe := false.B
+    this
+  }
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
@@ -300,6 +315,7 @@ class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)

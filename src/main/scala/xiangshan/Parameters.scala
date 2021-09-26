@@ -20,11 +20,10 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
-import xiangshan.backend.fu._
-import xiangshan.backend.fu.fpu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
-import xiangshan.cache.prefetch.{BOPParameters, L1plusPrefetcherParameters, L2PrefetcherParameters, StreamPrefetchParameters}
+import xiangshan.cache.prefetch._
+import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
@@ -148,7 +147,9 @@ case class XSCoreParameters
     fetchi = true,
     useDmode = false,
     sameCycle = true,
+    normalNWays = 32,
     normalReplacer = Some("plru"),
+    superNWays = 4,
     superReplacer = Some("plru"),
     shouldBlock = true
   ),
@@ -172,6 +173,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = true
   ),
+  refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
     normalNSets = 1,
@@ -202,8 +204,14 @@ case class XSCoreParameters
     nReleaseEntries = 16,
     nStoreReplayEntries = 16
   ),
-  L2Size: Int = 512 * 1024, // 512KB
-  L2NWays: Int = 8,
+  L2CacheParams: HCCacheParameters = HCCacheParameters(
+    name = "l2",
+    level = 2,
+    ways = 8,
+    sets = 1024, // default 512KB L2
+    prefetch = Some(huancun.prefetch.BOPParameters())
+  ),
+  usePTWRepeater: Boolean = false,
   useFakePTW: Boolean = false,
   useFakeDCache: Boolean = false,
   useFakeL1plusCache: Boolean = false,
@@ -320,6 +328,7 @@ trait HasXSParameter {
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val refillBothTlb = coreParams.refillBothTlb
   val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
@@ -347,10 +356,7 @@ trait HasXSParameter {
   // L2 configurations
   val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
   val L1BusWidth = 256
-  val L2Size = coreParams.L2Size
   val L2BlockSize = 64
-  val L2NWays = coreParams.L2NWays
-  val L2NSets = L2Size / L2BlockSize / L2NWays
 
   // L3 configurations
   val L2BusWidth = 256
@@ -367,29 +373,6 @@ trait HasXSParameter {
       reallocStreamOnMissInstantly = true,
       cacheName = "icache"
     )
-  )
-
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "bop", // "stream" or "bop"
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "dcache"
-    ),
-    bopParams = BOPParameters(
-      rrTableEntries = 256,
-      rrTagBits = 12,
-      scoreBits = 5,
-      roundMax = 50,
-      badScore = 1,
-      blockBytes = L2BlockSize,
-      nEntries = dcacheParameters.nMissEntries * 2 // TODO: this is too large
-    ),
   )
 
   // load violation predict

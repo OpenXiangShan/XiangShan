@@ -127,6 +127,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
     val readResp = Output(new ICacheMetaRespBundle)
+    val fencei   = Input(Bool())
   }}
 
   io.read.ready := !io.write.valid
@@ -164,6 +165,8 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   when(io.write.valid){
     validArray := validArray.bitSet(validPtr, true.B)
   }
+
+  when(io.fencei){ validArray := 0.U }
 
   (io.readResp.tags zip tagArrays).map    {case (io, sram) => io  := sram.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))}
   (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
@@ -377,6 +380,7 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
     val flush       = Input(Bool())
+    val fencei       = Input(Bool())
 
   })
 
@@ -392,7 +396,7 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     val entry = Module(new ICacheMissEntry(edge))
 
     entry.io.id := i.U(1.W)
-    entry.io.flush := io.flush
+    entry.io.flush := io.flush || io.fencei
 
     // entry req
     entry.io.req.valid := io.req(i).valid
@@ -428,6 +432,11 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
 
+  (0 until nWays).map{ w =>
+    XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)
+    XSPerfAccumulate("line_1_refill_way_" + Integer.toString(w, 10),  entries(1).io.meta_write.valid && OHToUInt(entries(1).io.meta_write.bits.waymask)  === w.U)
+  }
+
 }
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
@@ -435,6 +444,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val metaRead    = new ICacheCommonReadBundle(isMeta = true)
   val dataRead    = new ICacheCommonReadBundle(isMeta = false)
   val missQueue   = new ICacheMissBundle
+  val fencei      = Input(Bool())
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -475,6 +485,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   }  
 
   missQueue.io.flush := io.missQueue.flush
+  missQueue.io.fencei := io.fencei
+  metaArray.io.fencei := io.fencei
   bus.a <> missQueue.io.mem_acquire  
   missQueue.io.mem_grant      <> bus.d
 

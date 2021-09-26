@@ -52,10 +52,11 @@ class DataArrayMultiWriteIO(numEntries: Int, numSrc: Int, dataBits: Int)(implici
 }
 
 class DataArrayIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
-  val read = Vec(params.numDeq, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
+  val read = Vec(params.numDeq + 1, new DataArrayReadIO(params.numEntries, params.numSrc, params.dataBits))
   val write = Vec(params.numEnq, new DataArrayWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val multiWrite = Vec(params.numWakeup, new DataArrayMultiWriteIO(params.numEntries, params.numSrc, params.dataBits))
   val delayedWrite = if (params.delayedRf) Vec(params.numEnq, Flipped(ValidIO(UInt(params.dataBits.W)))) else null
+  val partialWrite = if (params.hasMidState) Vec(params.numDeq, new DataArrayWriteIO(params.numEntries, params.numSrc - 1, params.dataBits)) else null
 
   override def cloneType: DataArrayIO.this.type =
     new DataArrayIO(params).asInstanceOf[this.type]
@@ -69,18 +70,22 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
     val delayedWaddr = if (i == 1 && params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
     val delayedWdata = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
 
-    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen
-    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr
-    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata
+    val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(_.enable) else Seq()
+    val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(_.addr) else Seq()
+    val partialWdata = if (i < 2 && params.hasMidState) io.partialWrite.map(_.data(i)) else Seq()
 
-    val dataModule = Module(new AsyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
+    val wen = io.write.map(w => w.enable && w.mask(i)) ++ io.multiWrite.map(_.enable) ++ delayedWen ++ partialWen
+    val waddr = io.write.map(_.addr) ++ io.multiWrite.map(_.addr(i)) ++ delayedWaddr ++ partialWaddr
+    val wdata = io.write.map(_.data(i)) ++ io.multiWrite.map(_.data) ++ delayedWdata ++ partialWdata
+
+    val dataModule = Module(new SyncRawDataModuleTemplate(UInt(params.dataBits.W), params.numEntries, io.read.length, wen.length))
     dataModule.io.rvec := VecInit(io.read.map(_.addr))
-    io.read.map(_.data(i)).zip(dataModule.io.rdata).map{ case (d, r) => d := r }
+    io.read.map(_.data(i)).zip(dataModule.io.rdata).foreach{ case (d, r) => d := r }
     dataModule.io.wen := wen
     dataModule.io.wvec := waddr
     dataModule.io.wdata := wdata
     for (i <- 0 until params.numEntries) {
-      val w = VecInit((0 until wen.length).map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
+      val w = VecInit(wen.indices.map(j => dataModule.io.wen(j) && dataModule.io.wvec(j)(i)))
       assert(RegNext(PopCount(w) <= 1.U))
       when(PopCount(w) > 1.U) {
         XSDebug("ERROR: RS DataArray write overlap!\n")
