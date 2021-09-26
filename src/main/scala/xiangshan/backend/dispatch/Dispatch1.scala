@@ -212,7 +212,8 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       runahead.io.coreid        := hardId.U
       runahead.io.index         := i.U
       runahead.io.valid         := io.fromRename(i).fire()
-      runahead.io.branch        := isBranch(i) || isStore(i) // setup checkpoint for branch and store, as they may rollback
+      runahead.io.branch        := isBranch(i) // setup checkpoint for branch
+      runahead.io.may_replay    := isLs(i) && !isStore(i) // setup checkpoint for load, as load may replay
       runahead.io.pc            := updatedUop(i).cf.pc
       runahead.io.checkpoint_id := debug_runahead_checkpoint_id 
 
@@ -234,14 +235,15 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
       mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
       mempred_check.io.pc        := updatedUop(i).cf.pc 
 
-      // when(mempred_check.io.valid){
-      //   printf("XS mempred_check " + i + " : %d: pc %x ld %x need_wait %x\n",
-      //     GTimer(),
-      //     mempred_check.io.pc,
-      //     mempred_check.io.is_load,
-      //     mempred_check.io.need_wait
-      //   );
-      // }
+      when(RegNext(mempred_check.io.valid)){
+        XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
+          RegNext(GTimer()),
+          RegNext(mempred_check.io.pc),
+          RegNext(mempred_check.io.is_load),
+          RegNext(mempred_check.io.need_wait),
+          mempred_check.io.oracle_vaddr 
+        );
+      }
       updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
   }
