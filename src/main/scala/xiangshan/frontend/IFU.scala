@@ -113,7 +113,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f0_doubleLine                        = f0_situation(0) || f0_situation(1)
   val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.fallThruAddr))
   val f0_fire                              = fromFtq.req.fire()
-  
+
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
   val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
   
@@ -137,6 +137,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   }
 
   fromFtq.req.ready := fetch_req(0).ready && fetch_req(1).ready && f1_ready && GTimer() > 500.U
+
+  XSPerfAccumulate("ifu_bubble_ftq_not_valid",   !f0_valid )
+  XSPerfAccumulate("ifu_bubble_pipe_stall",    f0_valid && fetch_req(0).ready && fetch_req(1).ready && !f1_ready )
+  XSPerfAccumulate("ifu_bubble_sram_0_busy",   f0_valid && !fetch_req(0).ready  )
+  XSPerfAccumulate("ifu_bubble_sram_1_busy",   f0_valid && !fetch_req(1).ready  )
 
   //---------------------------------------------
   //  Fetch Stage 2 :
@@ -189,7 +194,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
   val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
-  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid), fromITLB.map(port => port.bits.excp.af.instr && port.valid))
+  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid), fromITLB.map(port => (port.bits.excp.af.instr || port.bits.mmio) && port.valid)) //TODO: Temp treat mmio req as access fault
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 
@@ -216,6 +221,23 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     bank_hit_data
   })
 
+  (0 until nWays).map{ w =>
+    XSPerfAccumulate("line_0_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_bank_hit(0) && OHToUInt(f1_bank_hit_vec(0))  === w.U)
+  }
+
+  (0 until nWays).map{ w =>
+    XSPerfAccumulate("line_0_victim_way_" + Integer.toString(w, 10),  f1_fire && !f1_bank_hit(0) && OHToUInt(f1_victim_masks(0))  === w.U)
+  }
+
+  (0 until nWays).map{ w =>
+    XSPerfAccumulate("line_1_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && f1_bank_hit(1) && OHToUInt(f1_bank_hit_vec(1))  === w.U)
+  }
+
+  (0 until nWays).map{ w =>
+    XSPerfAccumulate("line_1_victim_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && !f1_bank_hit(1) && OHToUInt(f1_victim_masks(1))  === w.U)
+  }
+
+  XSPerfAccumulate("ifu_bubble_f1_tlb_miss",    f1_valid && !tlbRespAllValid )
 
   //---------------------------------------------
   //  Fetch Stage 3 :
@@ -261,6 +283,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (bank0_fix, bank1_fix)   = (miss0_resp  && !f2_bank_hit(0), miss1_resp && f2_doubleLine && !f2_bank_hit(1))
 
   val  only_0_miss = f2_valid && !f2_hit && !f2_doubleLine && !f2_has_except
+  val  only_0_hit  = f2_valid && f2_hit && !f2_doubleLine
+  val  hit_0_hit_1  = f2_valid && f2_hit && f2_doubleLine
   val (hit_0_miss_1 ,  miss_0_hit_1,  miss_0_miss_1) = (  (f2_valid && !f2_bank_hit(1) && f2_bank_hit(0) && f2_doubleLine  && !f2_has_except),
                                                           (f2_valid && !f2_bank_hit(0) && f2_bank_hit(1) && f2_doubleLine  && !f2_has_except),
                                                           (f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && f2_doubleLine && !f2_has_except),
@@ -352,6 +376,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   
   f2_fetchFinish         := ((f2_valid && f2_hit) || miss_all_fix || hit_0_except_1 || except_0)
 
+  XSPerfAccumulate("ifu_bubble_f2_miss",    f2_valid && !f2_fetchFinish )
 
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
@@ -457,6 +482,20 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
 
+  //performance counter
+  val f3_only_0_hit     = RegEnable(next = only_0_hit, enable = f2_fire)
+  val f3_only_0_miss    = RegEnable(next = only_0_miss, enable = f2_fire)
+  val f3_hit_0_hit_1    = RegEnable(next = hit_0_hit_1, enable = f2_fire)
+  val f3_hit_0_miss_1   = RegEnable(next = hit_0_miss_1, enable = f2_fire)
+  val f3_miss_0_hit_1   = RegEnable(next = miss_0_hit_1, enable = f2_fire)
+  val f3_miss_0_miss_1  = RegEnable(next = miss_0_miss_1, enable = f2_fire)
+
+  val f3_bank_hit = RegEnable(next = f2_bank_hit, enable = f2_fire)
+  val f3_req_0 = io.toIbuffer.fire()
+  val f3_req_1 = io.toIbuffer.fire() && f3_doubleLine
+  val f3_hit_0 = io.toIbuffer.fire() & f3_bank_hit(0)
+  val f3_hit_1 = io.toIbuffer.fire() && f3_doubleLine & f3_bank_hit(1)
+
   
   preDecoderIn.instValid     :=  f3_valid && !f3_has_except
   preDecoderIn.data          :=  f3_cut_data
@@ -512,16 +551,22 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
+
   f3_redirect := !predecodeFlushReg && predecodeFlush
 
-  // Performance Counter
-  XSPerfAccumulate("req",   io.toIbuffer.fire() )
-  XSPerfAccumulate("miss",  io.toIbuffer.fire() && !f3_hit )
+  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
+  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
+  XSPerfAccumulate("ifu_req_cacheline_0", f3_req_0  )
+  XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
+  XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
+  XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
   XSPerfAccumulate("frontendFlush",  f3_redirect )
-  XSPerfAccumulate("only_0_miss",   only_0_miss )
-  XSPerfAccumulate("hit_0_miss_1",  hit_0_miss_1 )
-  XSPerfAccumulate("miss_0_hit_1",  miss_0_hit_1 )
-  XSPerfAccumulate("miss_0_miss_1", miss_0_miss_1 )
-  XSPerfAccumulate("crossLine", io.toIbuffer.fire() && f3_situation(0) )
-  XSPerfAccumulate("lastInLin", io.toIbuffer.fire() && f3_situation(1) )
+  XSPerfAccumulate("only_0_hit",      f3_only_0_hit   && io.toIbuffer.fire()  )
+  XSPerfAccumulate("only_0_miss",     f3_only_0_miss  && io.toIbuffer.fire()  )
+  XSPerfAccumulate("hit_0_hit_1",     f3_hit_0_hit_1  && io.toIbuffer.fire()  )
+  XSPerfAccumulate("hit_0_miss_1",    f3_hit_0_miss_1 && io.toIbuffer.fire()  )
+  XSPerfAccumulate("miss_0_hit_1",    f3_miss_0_hit_1  && io.toIbuffer.fire() )
+  XSPerfAccumulate("miss_0_miss_1",   f3_miss_0_miss_1 && io.toIbuffer.fire() )
+  XSPerfAccumulate("cross_line_block", io.toIbuffer.fire() && f3_situation(0) )
+  XSPerfAccumulate("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1) )
 }
