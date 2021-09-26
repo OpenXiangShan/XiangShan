@@ -56,6 +56,7 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
   }))
   val sfence = Input(new SfenceBundle)
+  val asid = Input(UInt(AsidLength.W))
 }
 
 
@@ -140,7 +141,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && l1v(i) }
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && l1v(i) && e.asid === io.asid }
     val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
     val hit = ParallelOR(hitVec) && second_valid
@@ -169,7 +170,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     l2.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l2.io.r.resp.data
     // val hitVec = VecInit(ramDatas.map{wayData => wayData.hit(first_req.vpn) })
-    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.hit(second_req.vpn) && v })
+    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.hit(second_req.vpn) && v && wayData.asids( (second_req.vpn(vpnLen - 1,vpnnLen))(log2Up(PtwL2SectorSize - 1) - 1 , 0) ) === io.asid })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
     val hit = ParallelOR(hitVec) && second_valid
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U))
@@ -201,7 +202,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     l3.io.r.req.valid := first_fire
     l3.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l3.io.r.resp.data
-    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.hit(second_req.vpn) && v })
+    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.hit(second_req.vpn) && v && wayData.asids( (second_req.vpn)(log2Up(PtwL2SectorSize - 1) - 1 , 0) ) === io.asid })
     val hitWayData = ParallelPriorityMux(hitVec zip ramDatas)
     val hit = ParallelOR(hitVec) && second_valid
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U))
@@ -224,12 +225,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     (hit, hitWayData)
   }
   val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(second_req.vpn))
+  val l3HitAsid = l3HitData.asids(genPtwL3SectorIdx(second_req.vpn))
   val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(second_req.vpn))
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && spv(i) }
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && spv(i) && e.asid === io.asid }
     val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec) && second_valid
@@ -248,6 +250,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     (hit, hitData)
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
+  val spHitAsid = spHitData.asid
   val spHitLevel = spHitData.level.getOrElse(0.U)
 
   val resp = Wire(io.resp.bits.cloneType)
@@ -265,6 +268,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   resp.toTlb.ppn   := Mux(l3Hit, l3HitPPN, spHitData.ppn)
   resp.toTlb.perm.map(_ := Mux(l3Hit, l3HitPerm, spHitPerm))
   resp.toTlb.level.map(_ := Mux(l3Hit, 2.U, spHitLevel))
+  resp.toTlb.asid := Mux(l3Hit, l3HitAsid, spHitAsid)
 
   io.resp.valid := second_valid
   io.resp.bits := Mux(resp_latch_valid, resp_latch, resp)
@@ -305,7 +309,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
       refillIdx.suggestName(s"PtwL1RefillIdx")
       val rfOH = UIntToOH(refillIdx)
-      l1(refillIdx).refill(refill.vpn, memSelData)
+      l1(refillIdx).refill(refill.vpn, memSelData, 0.U, io.asid)
       ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
@@ -314,7 +318,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         l1RefillPerf(i) := i.U === refillIdx
       }
 
-      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.vpn, memSelData)}\n")
+      XSDebug(p"[l1 refill] refillIdx:${refillIdx} refillEntry:${l1(refillIdx).genPtwEntry(refill.vpn, memSelData, 0.U, io.asid)}\n")
       XSDebug(p"[l1 refill] l1v:${Binary(l1v)}->${Binary(l1v | rfOH)} l1g:${Binary(l1g)}->${Binary((l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
       refillIdx.suggestName(s"l1_refillIdx")
@@ -330,7 +334,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         valid = true.B,
         setIdx = refillIdx,
         data = (new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)).genEntries(
-          vpn = refill.vpn, data = memRdata, levelUInt = 1.U
+          vpn = refill.vpn, data = memRdata, levelUInt = 1.U, asid_now = io.asid
         ),
         waymask = victimWayOH
       )
@@ -345,7 +349,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       XSDebug(p"[l2 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l2 refill] refilldata:0x${
         (new PtwEntries(num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)).genEntries(
-          vpn = refill.vpn, data = memRdata, levelUInt = 1.U)
+          vpn = refill.vpn, data = memRdata, levelUInt = 1.U, asid_now = io.asid)
       }\n")
       XSDebug(p"[l2 refill] l2v:${Binary(l2v)} -> ${Binary(l2v | rfvOH)}\n")
       XSDebug(p"[l2 refill] l2g:${Binary(l2g)} -> ${Binary(l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
@@ -365,7 +369,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         valid = true.B,
         setIdx = refillIdx,
         data = (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
-          vpn = refill.vpn, data = memRdata, levelUInt = 2.U
+          vpn = refill.vpn, data = memRdata, levelUInt = 2.U, asid_now = io.asid
         ),
         waymask = victimWayOH
       )
@@ -380,7 +384,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       XSDebug(p"[l3 refill] refillIdx:0x${Hexadecimal(refillIdx)} victimWay:${victimWay} victimWayOH:${Binary(victimWayOH)} rfvOH(in UInt):${Cat(refillIdx, victimWay)}\n")
       XSDebug(p"[l3 refill] refilldata:0x${
         (new PtwEntries(num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)).genEntries(
-          vpn = refill.vpn, data = memRdata, levelUInt = 2.U)
+          vpn = refill.vpn, data = memRdata, levelUInt = 2.U, asid_now = io.asid)
       }\n")
       XSDebug(p"[l3 refill] l3v:${Binary(l3v)} -> ${Binary(l3v | rfvOH)}\n")
       XSDebug(p"[l3 refill] l3g:${Binary(l3g)} -> ${Binary(l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U))}\n")
@@ -393,7 +397,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     when ((refill.level === 0.U || refill.level === 1.U) && memPte.isLeaf()) {
       val refillIdx = spreplace.way// LFSR64()(log2Up(l2tlbParams.spSize)-1,0) // TODO: may be LRU
       val rfOH = UIntToOH(refillIdx)
-      sp(refillIdx).refill(refill.vpn, memSelData, refill.level)
+      sp(refillIdx).refill(refill.vpn, memSelData, refill.level, io.asid)
       spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
@@ -402,7 +406,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         spRefillPerf(i) := i.U === refillIdx
       }
 
-      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.vpn, memSelData, refill.level)}\n")
+      XSDebug(p"[sp refill] refillIdx:${refillIdx} refillEntry:${sp(refillIdx).genPtwEntry(refill.vpn, memSelData, refill.level, io.asid)}\n")
       XSDebug(p"[sp refill] spv:${Binary(spv)}->${Binary(spv | rfOH)} spg:${Binary(spg)}->${Binary(spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U))}\n")
 
       refillIdx.suggestName(s"sp_refillIdx")

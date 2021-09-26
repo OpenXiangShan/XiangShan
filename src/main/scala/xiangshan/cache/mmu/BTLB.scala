@@ -36,8 +36,8 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   val ptw = io.ptw
 
   val sfence = io.sfence
-  // val csr    = io.csr
-  // val satp   = csr.satp
+  val csr    = io.csr
+  val satp   = csr.satp
   // val priv   = csr.priv
   // val mode   = priv.dmode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
@@ -58,7 +58,7 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
     val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
-      e.entry.hit(vpn, allType = true) && entries_v(i) && ~refillMask(i)
+      e.entry.hit(vpn, allType = true) && entries_v(i) && ~refillMask(i) && e.entry.asid === satp.asid
     })
 
     hitVec.suggestName("hitVec")

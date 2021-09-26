@@ -104,6 +104,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.req.bits.source := arb2.io.out.bits.source
   cache.io.req.bits.isReplay := arb2.io.chosen === 0.U
   cache.io.sfence := sfence
+  cache.io.asid := satp.asid
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
 
   val mq_in_arb = Module(new Arbiter(new L2TlbMQInBundle, 2))
@@ -248,6 +249,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := pte_in.isPf(2.U)
+    ptw_resp.entry.asid := satp.asid
+
     ptw_resp
   }
 

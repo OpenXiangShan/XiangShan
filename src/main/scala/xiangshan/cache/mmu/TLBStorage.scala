@@ -41,6 +41,7 @@ class TLBFA(
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
+  val asids = entries.map(_.asid)
 
   for (i <- 0 until ports) {
     val req = io.r.req(i)
@@ -50,7 +51,7 @@ class TLBFA(
     val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
 
     val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit(entries.zip(v zip refill_mask.asBools).map{case (e, m) => e.hit(vpn) && m._1 && !m._2})
+    val hitVec = VecInit(entries.zip(v zip refill_mask.asBools).map{case (e, m) => e.hit(vpn) && m._1 && !m._2 && e.asid === io.asid})
 
     hitVec.suggestName("hitVec")
 
@@ -83,7 +84,7 @@ class TLBFA(
         v.map(_ := false.B)
       }.otherwise {
         // all addr but specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & g(i) }
+        v.zipWithIndex.map{ case (a,i) => a := a & ( g(i) | !(asids(i) === sfence.bits.asid) ) }
       }
     }.otherwise {
       when (sfence.bits.rs2) {
@@ -91,7 +92,7 @@ class TLBFA(
         v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit(i) }
       }.otherwise {
         // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
+        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && asids(i) === sfence.bits.asid && !g(i)) }
       }
     }
   }
@@ -105,6 +106,7 @@ class TLBFA(
     n.perm := ns.perm
     n.ppn := ns.ppn
     n.tag := ns.tag
+    n.asid := ns.asid
     n
   }
 
@@ -160,7 +162,7 @@ class TLBSA(
     entries.io.r.req.bits.apply(setIdx = ridx)
 
     val data = entries.io.r.resp.data
-    val hitVec = VecInit(data.zip(vidx).map{ case (e, vi) => e.hit(vpn_reg) && vi})
+    val hitVec = VecInit(data.zip(vidx).map{ case (e, vi) => e.hit(vpn_reg) && vi && e.asid === io.asid})
     resp.bits.hit := Cat(hitVec).orR
     resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
     resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))

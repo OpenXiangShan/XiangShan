@@ -371,6 +371,7 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+    val asid = UInt(AsidLength.W)
   }
 
   override def toPrintable: Printable = {

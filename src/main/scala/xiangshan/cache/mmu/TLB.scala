@@ -43,6 +43,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val sfence = io.sfence
   val csr = io.csr
   val satp = csr.satp
+  val asid = csr.satp.asid
   val priv = csr.priv
   val ifecth = if (q.fetchi) true.B else false.B
   val mode = if (q.useDmode) priv.dmode else priv.imode
@@ -101,7 +102,9 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
+  normalPage.asid := asid
   superPage.sfence <> io.sfence
+  superPage.asid := asid
 
   def TLBNormalRead(i: Int) = {
     val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)

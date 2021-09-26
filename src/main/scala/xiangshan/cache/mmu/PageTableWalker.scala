@@ -128,7 +128,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val source = RegEnable(io.req.bits.source, io.req.fire())
   io.resp.valid := state === s_check_pte && find_pte
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault, level, memPte, vpn)
+  io.resp.bits.resp.apply(pageFault, level, memPte, vpn, satp.asid)
 
   io.mq.valid := state === s_check_pte && to_find_pte
   io.mq.bits.source := source
