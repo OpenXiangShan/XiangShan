@@ -215,7 +215,8 @@ class XiangShan(object):
             "bitmanip/bitMisc.bin",
             "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
             "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
-            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin"
+            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "ext_intr/amtest-riscv64-xs.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
