@@ -34,7 +34,7 @@ case class DCacheParameters
 (
   nSets: Int = 256,
   nWays: Int = 8,
-  rowBits: Int = 64,
+  rowBits: Int = 128,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("random"),
