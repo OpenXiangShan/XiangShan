@@ -45,6 +45,7 @@ case class XSCoreParameters
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   FetchWidth: Int = 8,
+  AsidLength: Int = 16,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -262,6 +263,7 @@ trait HasXSParameter {
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
+  val AsidLength = coreParams.AsidLength
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
