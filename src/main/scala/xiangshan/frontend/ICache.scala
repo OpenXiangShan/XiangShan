@@ -53,6 +53,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
   def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
   def dataEntryBits = dataCodeBits * dataUnitNum
 
+
+  def nMissEntries = cacheParams.nMissEntries
+
+  require(isPow2(nMissEntries), s"nMissEntries($nMissEntries) must be pow2")
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }
@@ -86,7 +90,7 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def apply(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx
     this.phyTag  := tag
     this.waymask := waymask
@@ -102,7 +106,7 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def apply(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx
     this.data    := data
     this.waymask := waymask
@@ -320,40 +324,37 @@ class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 {
     val addr      = UInt(PAddrBits.W)
     val vSetIdx   = UInt(idxBits.W)
-    val waymask   = UInt(16.W)
-    val clientID  = UInt(1.W)
-    def apply(missAddr:UInt, missIdx:UInt, missWaymask:UInt, source:UInt) = {
+    val waymask   = UInt(nWays.W)
+
+    def generate(missAddr:UInt, missIdx:UInt, missWaymask:UInt) = {
       this.addr := missAddr
       this.vSetIdx  := missIdx
       this.waymask := missWaymask
-      this.clientID := source
     }
     override def toPrintable: Printable = {
-      p"addr=0x${Hexadecimal(addr)} vSetIdx=0x${Hexadecimal(vSetIdx)} waymask=${Binary(waymask)} clientID=${Binary(clientID)}"
+      p"addr=0x${Hexadecimal(addr)} vSetIdx=0x${Hexadecimal(vSetIdx)} waymask=${Binary(waymask)}"
     }
 }
 
 class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
 {
     val data     = UInt(blockBits.W)
-    val clientID = UInt(1.W)
 }
 
 class ICacheMissBundle(implicit p: Parameters) extends ICacheBundle{
     val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
-    val resp        = Vec(2,DecoupledIO(new ICacheMissResp))
+    val resp        = Vec(2,ValidIO(new ICacheMissResp))
     val flush       = Input(Bool())
 }
 
-class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissQueueModule
+class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
-        // MSHR ID
-        val id          = Input(UInt(1.W))
+        val id          = Input(UInt(log2Ceil(nMissEntries).W))
 
-        val req         = Flipped(DecoupledIO(new ICacheMissReq))
-        val resp        = DecoupledIO(new ICacheMissResp)
-
+        val req         = Flipped(ValidIO(new ICacheMissReq))
+        val resp        = ValidIO(new ICacheMissResp)
+      
         val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
         val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
@@ -363,10 +364,24 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
         val flush = Input(Bool())
     })
 
+    def generateStateReg(enable: Bool, release: Bool): Bool = {
+      val stateReg = RegInit(false.B)
+      when(enable)       {stateReg := true.B }
+      .elsewhen(release && stateReg) {stateReg := false.B}
+      stateReg
+    }
+
+    /** default value for control signals*/
+    io.resp        := DontCare
+    io.mem_acquire.bits := DontCare
+    io.mem_grant.ready  := true.B
+    io.meta_write.bits  := DontCare
+    io.data_write.bits  := DontCare
     val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_resp :: Nil = Enum(5)
     val state = RegInit(s_idle)
 
-    //req register
+    /** control logic transformation*/
+    //request register
     val req = Reg(new ICacheMissReq)
     val req_idx = req.vSetIdx         //virtual index
     val req_tag = get_phy_tag(req.addr)           //physical tag
@@ -374,7 +389,13 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
 
     val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
-    //8 for 64 bits bus and 2 for 256 bits
+    //flush register
+    val has_flushed = generateStateReg(enable = io.flush && (state =/= s_idle) && (state =/= s_wait_resp), release = (state=== s_wait_resp))
+    //    when(io.flush && (state =/= s_idle) && (state =/= s_wait_resp)){ has_flushed := true.B }
+    //    .elsewhen((state=== s_wait_resp) && has_flushed){ has_flushed := false.B }
+
+    //cacheline register
+    //refullCycles: 8 for 64-bit bus bus and 2 for 256-bit
     val readBeatCnt = Reg(UInt(log2Up(refillCycles).W))
     val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
@@ -384,19 +405,31 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     io.mem_grant.ready := true.B
     io.meta_write.bits := DontCare
     io.data_write.bits := DontCare
+    def shoud_direct_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
+       req_valid && (req.addr === get_block_addr(new_req.addr).asUInt) && state === s_wait_resp && has_flushed
+    }
+
+     //WARNING: directly response may be timing critical
+     def should_merge_before_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
+       req_valid &&  (req.addr === get_block_addr(new_req.addr).asUInt) && state =/= s_idle && state =/= s_wait_resp && has_flushed
+     }
+
+     val req_should_merge = should_merge_before_resp(new_req = io.req.bits, req_valid = io.req.valid)
+     val has_merged = generateStateReg(enable = req_should_merge, release = io.resp.fire() )
+     val req_should_direct_resp = shoud_direct_resp(new_req = io.req.bits, req_valid = io.req.valid)
+
+     when(req_should_merge){
+       req.waymask := io.req.bits.waymask
+     }
 
     io.req.ready := (state === s_idle)
-    io.mem_acquire.valid := state === s_memReadReq
+    io.mem_acquire.valid := (state === s_memReadReq) && !io.flush
 
-    //flush register
-    val needFlush = RegInit(false.B)
-    when(io.flush && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
-    .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
     //state change
     switch(state){
       is(s_idle){
-        when(io.req.fire()){
+        when(io.req.valid && !io.flush){
           readBeatCnt := 0.U
           state := s_memReadReq
           req := io.req.bits
@@ -404,8 +437,8 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
       }
 
       // memory request
-      is(s_memReadReq){
-        when(io.mem_acquire.fire()){
+      is(s_memReadReq){ 
+        when(io.mem_acquire.fire() && !io.flush){
           state := s_memReadResp
         }
       }
@@ -417,8 +450,7 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
             respDataReg(readBeatCnt) := io.mem_grant.bits.data
             when (readBeatCnt === (refillCycles - 1).U) {
               assert(refill_done, "refill not done!")
-              //state := Mux(needFlush || io.flush, s_wait_resp, s_write_back)
-              state := s_write_back
+              state :=s_write_back
             }
           }
         }
@@ -430,44 +462,42 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
 
       is(s_wait_resp){
         io.resp.bits.data := respDataReg.asUInt
-	      io.resp.bits.clientID := req.clientID
-        when(io.resp.fire() || needFlush ){ state := s_idle }
+        when(io.resp.fire() || has_flushed){ state := s_idle }
       }
-
     }
 
-    //refill write and meta write
-    //WARNING: Maybe could not finish refill in 1 cycle
-    io.meta_write.valid := (state === s_write_back) //&& !needFlush
-    io.meta_write.bits.apply(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    /** refill write and meta write */
+    io.meta_write.valid := (state === s_write_back)
+    io.meta_write.bits.generate(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
-    io.data_write.valid := (state === s_write_back) //&& !needFlush
-    io.data_write.bits.apply(data=respDataReg.asUInt, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    io.data_write.valid := (state === s_write_back)
+    io.data_write.bits.generate(data=respDataReg.asUInt, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
-    //mem request
+    /** Tilelink request for next level cache/memory */
     io.mem_acquire.bits  := edge.Get(
       fromSource      = io.id,
       toAddress       = Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
       lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
 
+    //resp to ifu
+    io.resp.valid := (state === s_wait_resp && !has_flushed) || req_should_direct_resp || (has_merged && state === s_wait_resp)
 
-    //resp to icache
-    io.resp.valid := (state === s_wait_resp) && !needFlush
+    XSPerfAccumulate(
+      "entryPenalty" + Integer.toString(id, 10),
+      BoolStopWatch(
+        start = io.req.fire(),
+        stop =  io.resp.valid || io.flush,
+        startHighPriority = true)
+    )
+    XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire())
 
-    XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
-    XSDebug("[ICache MSHR %d] (Info)state:%d  needFlush:%d\n",io.id.asUInt,state,needFlush)
-    XSDebug("[ICache MSHR %d] (mem_acquire) valid%d ready:%d\n",io.id.asUInt,io.mem_acquire.valid,io.mem_acquire.ready)
-    XSDebug("[ICache MSHR %d] (mem_grant)   valid%d ready:%d data:%x \n",io.id.asUInt,io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data)
-    XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.phyTag)
-    XSDebug("[ICache MSHR %d] (refill)  valid%d ready:%d  data:%x \n",io.id.asUInt,io.data_write.valid,io.data_write.ready,io.data_write.bits.data.asUInt())
-    XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
 }
 
 class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
     val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
-    val resp        = Vec(2, DecoupledIO(new ICacheMissResp))
+    val resp        = Vec(2, ValidIO(new ICacheMissResp))
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
@@ -489,7 +519,7 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   io.mem_grant.ready := true.B
 
   val entries = (0 until 2) map { i =>
-    val entry = Module(new ICacheMissEntry(edge))
+    val entry = Module(new ICacheMissEntry(edge, i))
 
     entry.io.id := i.U(1.W)
     entry.io.flush := io.flush || io.fencei
