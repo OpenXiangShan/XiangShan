@@ -349,7 +349,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // AMO hits
   
-  val s2_data_word = s2_store_data_merged(get_word(s2_req.addr))
+  val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
   dump_pipeline_reqs("MainPipe s2", s2_valid, s2_req)
 
@@ -514,7 +514,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // generate write mask
   // which word do we need to write
-  val banked_amo_wmask = UIntToOH(get_word(s3_req.addr))
+  val banked_amo_wmask = UIntToOH(s3_req.word_idx)
   val banked_wmask = Mux(s3_req.miss, banked_full_wmask,
     Mux(s3_store_hit, s3_banked_store_wmask,
     Mux(s3_can_do_amo_write, banked_amo_wmask,
@@ -534,7 +534,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   for (i <- 0 until DCacheBanks) {
     val old_data = s3_store_data_merged(i)
     val new_data = amoalu.io.out
-    val wmask = Mux(s3_can_do_amo_write && get_word(s3_req.addr) === i.U,
+    val wmask = Mux(s3_can_do_amo_write && s3_req.word_idx === i.U,
       ~0.U(wordBytes.W), 0.U(wordBytes.W))
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
   }
