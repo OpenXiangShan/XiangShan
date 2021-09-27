@@ -23,18 +23,17 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import xiangshan.frontend.{ICacheParameters}
+import xiangshan.frontend.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
+import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
-import xiangshan.cache.prefetch._
 import device.{EnableJtag, XSDebugModuleParams}
-import huancun.{CacheParameters, HCCacheParameters}
+import huancun._
 
-class DefaultConfig(n: Int) extends Config((site, here, up) => {
+class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
   case SoCParamsKey => SoCParameters(
@@ -53,7 +52,7 @@ class DefaultConfig(n: Int) extends Config((site, here, up) => {
 // * L2 cache NOT included
 // * L3 cache included
 class MinimalConfig(n: Int = 1) extends Config(
-  new DefaultConfig(n).alter((site, here, up) => {
+  new BaseConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
         DecodeWidth = 2,
@@ -96,7 +95,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2
         ),
         dcacheParameters = DCacheParameters(
-          nSets = 64, // 32KB DCache
+          nSets = 64, // 128KB DCache
           nWays = 8,
           tagECC = Some("secded"),
           dataECC = Some("secded"),
@@ -179,7 +178,20 @@ class MinimalSimConfig(n: Int = 1) extends Config(
   })
 )
 
-class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config((site, here, up) => {
+class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val upParams = up(SoCParamsKey)
+    val sets = n * 1024 / ways / 64
+    upParams.copy(cores = upParams.cores.map(p => p.copy(
+      dcacheParameters = p.dcacheParameters.copy(
+        nSets = sets,
+        nWays = ways
+      )
+    )))
+}
+)
+
+class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseData: Boolean = false) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
     val l2sets = n * 1024 / ways / 64
@@ -191,7 +203,17 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true) extends Config
           ways = ways,
           sets = l2sets,
           inclusive = inclusive,
-          prefetch = Some(huancun.prefetch.BOPParameters())
+          alwaysReleaseData = alwaysReleaseData,
+          clientCaches = Seq(CacheParameters(
+            "dcache",
+            sets = 2 * p.dcacheParameters.nSets,
+            ways = p.dcacheParameters.nWays + 2,
+            aliasBitsOpt = p.dcacheParameters.aliasBitsOpt
+          )),
+          reqField = Seq(PreferCacheField()),
+          echoField = Seq(DirtyField()),
+          prefetch = Some(huancun.prefetch.BOPParameters()),
+          enablePerf = true
         ),
         useFakeL2Cache = false,
         useFakeDCache = false,
@@ -216,7 +238,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         clientCaches = upParams.cores.map{ core =>
           val l2params = core.L2CacheParams.toCacheParams
           l2params.copy(ways = 2 * l2params.ways)
-        }
+        },
+        enablePerf = true
       )
     )
 })
@@ -230,9 +253,19 @@ class MinimalL3DebugConfig(n: Int = 1) extends Config(
 )
 
 class DefaultL3DebugConfig(n: Int = 1) extends Config(
-  new WithL3DebugConfig ++ new DefaultConfig(n)
+  new WithL3DebugConfig ++ new BaseConfig(n)
 )
 
-class NonInclusiveL3Config(n: Int = 1) extends Config(
-  new WithNKBL3(4096, inclusive = false, banks = 4) ++ new WithNKBL2(512) ++ new DefaultConfig(n)
+class MinimalAliasDebugConfig(n: Int = 1) extends Config(
+  new WithNKBL3(512, inclusive = false) ++
+    new WithNKBL2(256, inclusive = false, alwaysReleaseData = true) ++
+    new WithNKBL1D(128) ++
+    new MinimalConfig(n)
+)
+
+class DefaultConfig(n: Int = 1) extends Config(
+  new WithNKBL3(4096, inclusive = false, banks = 4)
+    ++ new WithNKBL2(512, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
 )
