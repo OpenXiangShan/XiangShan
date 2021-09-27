@@ -10,9 +10,6 @@ class ReplacePipeReq(implicit p: Parameters) extends DCacheBundle {
   // if dcache size > 32KB, vaddr is also needed for store
   // vaddr is used to get extra index bits
   val vaddr  = UInt(VAddrBits.W)
-  // must be aligned to block
-  val addr   = UInt(PAddrBits.W)
-  val id = UInt(reqIdWidth.W)
 }
 
 class ReplacePipeResp(implicit p: Parameters) extends DCacheBundle {
