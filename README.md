@@ -11,9 +11,18 @@ Copyright 2020-2021 by Peng Cheng Laboratory.
 ## Docs and slides
 We gave 20+ presentations on RISC-V World Conference China 2021. XiangShan tutorial was held at the same place. Our slides for RVWC2021 have been updated on [our doc repo](https://github.com/OpenXiangShan/XiangShan-doc) (in Chinese).
 
-我们在2021年RISC-V中国峰会的报告已经更新到[这里](https://github.com/OpenXiangShan/XiangShan-doc)。未来的文档和相关信息也将更新到相同的仓库。
+我们在2021年RISC-V中国峰会的报告已经更新到[这里](https://github.com/OpenXiangShan/XiangShan-doc)。文档和相关信息也将持续更新到相同的仓库。
 
-## Mail list
+## Follow us
+
+Wechat/微信：香山开源处理器
+
+<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
+
+Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
+
+Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
+
 You can contact us through [our mail list](mailto:xiangshan-all@ict.ac.cn). All mails from this list will be archived to [here](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/).
 
 ## Architecture
@@ -22,7 +31,7 @@ The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) o
 
 The micro-architecture overview is shown below.
 
-![xs-arch-single](xs-arch-simple.svg)
+![xs-arch-single](images/xs-arch-simple.svg)
 
 
 
