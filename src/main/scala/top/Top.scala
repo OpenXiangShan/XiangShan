@@ -317,8 +317,11 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
-  val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
-  debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+  val debugIntSink = Array.fill(NumCores){
+    val debugSink = LazyModule(new IntSinkNodeToModule(1))
+    debugSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+    debugSink
+  }
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
@@ -370,7 +373,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         core_with_l2(i).module.io.externalInterrupt.msip := clintIntSinks(i).module.out(0)
         core_with_l2(i).module.io.externalInterrupt.mtip := clintIntSinks(i).module.out(1)
         core_with_l2(i).module.io.externalInterrupt.meip := plicIntSinks(i).module.out(0)
-        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink.module.out(i)
+        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink(i).module.out(0)
         beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
         beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error

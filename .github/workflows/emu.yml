@@ -24,7 +24,7 @@ jobs:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate verilog file
         run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --dual-core
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
       - name: check pc usages
         run:
           python3 $GITHUB_WORKSPACE/.github/workflows/check_pc.py build/XSTop.v
