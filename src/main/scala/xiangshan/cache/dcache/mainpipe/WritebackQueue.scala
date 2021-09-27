@@ -129,7 +129,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
   when(busy) {
-    assert(!req.voluntary || req.hasData)
+    assert(!req.dirty || req.hasData)
   }
 
   io.mem_release.valid := busy

@@ -195,11 +195,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   
   val banked_need_data = miss_need_data || banked_store_need_data || amo_need_data || probe_need_data
 
-  def rowWordBits = log2Floor(rowWords)
-  val amo_row = s0_req.word_idx >> rowWordBits
-  val amo_word = if (rowWordBits == 0) 0.U else s0_req.word_idx(rowWordBits - 1, 0)
-  val amo_word_addr = s0_req.addr + (s0_req.word_idx << wordOffBits)
-
   val s0_banked_rmask = Mux(banked_store_need_data, banked_store_rmask,
     Mux(amo_need_data || probe_need_data || miss_need_data, 
       banked_full_rmask, 
@@ -208,15 +203,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // generate wmask here and use it in stage 2
   val banked_store_wmask = bank_write
-  val banked_amo_wmask = WireInit(VecInit((0 until DCacheBanks).map(i => i.U === s0_req.word_idx))).asUInt
   val banked_full_wmask = ~0.U(DCacheBanks.W)
   val banked_none_wmask = 0.U(DCacheBanks.W)
 
   dump_pipeline_reqs("MainPipe s0", s0_valid, s0_req)
-
-  // --------------------------------------------------------------------------------
-  // stage 1
-  // read data, get meta, check hit or miss
   val s1_valid = RegInit(false.B)
   val s1_need_data = RegEnable(banked_need_data, s0_fire)
   val s1_fire = s1_valid && s2_ready && (!s1_need_data || io.banked_data_read.ready)
@@ -225,12 +215,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
-  val s1_banked_amo_wmask = RegEnable(banked_amo_wmask, s0_fire)
-
-  val s1_amo_row = RegEnable(amo_row, s0_fire)
-  val s1_amo_word = RegEnable(amo_word, s0_fire)
-  val s1_amo_word_addr = RegEnable(amo_word_addr, s0_fire)
-
   s1_s0_set_conflict := s1_valid && get_idx(s1_req.vaddr) === get_idx(s0_req.vaddr)
   // assert(!(s1_valid && s1_req.vaddr === 0.U)) // probe vaddr may be 0
 
@@ -298,11 +282,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   s2_ready := !s2_valid || s2_fire
 
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
-  val s2_banked_amo_wmask = RegEnable(s1_banked_amo_wmask, s1_fire)
-
-  val s2_amo_row = RegEnable(s1_amo_row, s1_fire)
-  val s2_amo_word = RegEnable(s1_amo_word, s1_fire)
-  val s2_amo_word_addr = RegEnable(s1_amo_word_addr, s1_fire)
 
   s2_s0_set_conflict := s2_valid && get_idx(s2_req.vaddr) === get_idx(s0_req.vaddr)  
 
@@ -364,7 +343,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   }
 
   // AMO hits
-  val s2_data_word = s2_store_data_merged(Cat(s2_amo_row, s2_amo_word))
+  
+  val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
   dump_pipeline_reqs("MainPipe s2", s2_valid, s2_req)
 
@@ -377,11 +357,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   s3_ready := !s3_valid || s3_fire
 
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire)
-  val s3_banked_amo_wmask = RegEnable(s2_banked_amo_wmask, s2_fire)
 
-  val s3_amo_row = RegEnable(s2_amo_row, s2_fire)
-  val s3_amo_word = RegEnable(s2_amo_word, s2_fire)
-  val s3_amo_word_addr = RegEnable(s2_amo_word_addr, s2_fire)
   val s3_data_word = RegEnable(s2_data_word, s2_fire)
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire)
   val s3_data = RegEnable(s2_data, s2_fire)
@@ -533,9 +509,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // generate write mask
   // which word do we need to write
+  val banked_amo_wmask = UIntToOH(s3_req.word_idx)
   val banked_wmask = Mux(s3_req.miss, banked_full_wmask,
     Mux(s3_store_hit, s3_banked_store_wmask,
-    Mux(s3_can_do_amo_write, s3_banked_amo_wmask,
+    Mux(s3_can_do_amo_write, banked_amo_wmask,
       banked_none_wmask)))
   val banked_need_write_data = VecInit(banked_wmask.orR).asUInt.orR
 
@@ -552,7 +529,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   for (i <- 0 until DCacheBanks) {
     val old_data = s3_store_data_merged(i)
     val new_data = amoalu.io.out
-    val wmask = Mux(s3_can_do_amo_write && Cat(s3_amo_row, s3_amo_word) === i.U,
+    val wmask = Mux(s3_can_do_amo_write && s3_req.word_idx === i.U,
       ~0.U(wordBytes.W), 0.U(wordBytes.W))
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
   }
@@ -575,8 +552,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
-  val writeback_data = s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
-    s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  val writeback_data = if (dcacheParameters.alwaysReleaseData) {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
+      s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  } else {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
+  }
 
   val writeback_paddr = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 

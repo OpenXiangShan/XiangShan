@@ -21,6 +21,7 @@ import os
 import random
 import subprocess
 import sys
+import time
 
 
 class XSArgs(object):
@@ -46,7 +47,7 @@ class XSArgs(object):
             set_func(self.__extract_path(arg_in, env, default))
         # Chisel arguments
         self.disable_log = args.disable_log
-        self.dual_core = args.dual_core
+        self.num_cores = args.num_cores
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
@@ -68,8 +69,7 @@ class XSArgs(object):
 
     def get_chisel_args(self, prefix=None):
         chisel_args = [
-            (self.disable_log, "disable-log"),
-            (self.dual_core,   "dual-core")
+            (self.disable_log, "disable-log")
         ]
         args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
         if prefix is not None:
@@ -78,10 +78,11 @@ class XSArgs(object):
 
     def get_makefile_args(self):
         makefile_args = [
-            (self.threads, "EMU_THREADS"),
+            (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
-            (self.trace, "EMU_TRACE"),
-            (self.config, "CONFIG")
+            (self.trace,         "EMU_TRACE"),
+            (self.config,        "CONFIG"),
+            (self.num_cores,     "NUM_CORES")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -188,7 +189,10 @@ class XiangShan(object):
         env = dict(os.environ)
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
+        start = time.time()
         return_code = subprocess.call(cmd, shell=True, env=env)
+        end = time.time()
+        print(f"Elapsed time: {end - start} seconds")
         return return_code
 
     def __get_ci_cputest(self, name=None):
@@ -206,6 +210,18 @@ class XiangShan(object):
         riscv_tests = filter(lambda x: x[:6] in all_rv_tests, riscv_tests)
         riscv_tests = map(lambda x: os.path.join(base_dir, x), riscv_tests)
         return riscv_tests
+
+    def __get_ci_misc(self, name=None):
+        base_dir = "/home/ci-runner/xsenv/workloads"
+        workloads = [
+            "bitmanip/bitMisc.bin",
+            "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
+            "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
+            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "ext_intr/amtest-riscv64-xs.bin"
+        ]
+        misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return misc_tests
 
     def __am_apps_path(self, bench):
         filename = f"{bench}-riscv64-noop.bin"
@@ -229,6 +245,7 @@ class XiangShan(object):
         all_tests = {
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
+            "misc-tests": self.__get_ci_misc,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
         }
@@ -254,7 +271,7 @@ if __name__ == "__main__":
     parser.add_argument('--rvtest', nargs='?', type=str, help='path to riscv-tests')
     # chisel arguments
     parser.add_argument('--disable-log', action='store_true', help='disable log')
-    parser.add_argument('--dual-core', action='store_true', help='dual core')
+    parser.add_argument('--num-cores', type=int, help='number of cores')
     # makefile arguments
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')

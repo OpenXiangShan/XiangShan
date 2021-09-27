@@ -34,7 +34,7 @@ case class DCacheParameters
 (
   nSets: Int = 256,
   nWays: Int = 8,
-  rowBits: Int = 64,
+  rowBits: Int = 128,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("random"),
@@ -44,7 +44,8 @@ case class DCacheParameters
   nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  alwaysReleaseData: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -114,14 +115,21 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheLineWords = DCacheLineBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
+<<<<<<< HEAD:src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala
   val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
+=======
+>>>>>>> master:src/main/scala/xiangshan/cache/DCacheWrapper.scala
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = 0
   val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
+<<<<<<< HEAD:src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrOffset
+=======
+  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
+>>>>>>> master:src/main/scala/xiangshan/cache/DCacheWrapper.scala
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -303,6 +311,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
+
+  println("DCache:") 
+  println("  DCacheSets: " + DCacheSets) 
+  println("  DCacheWays: " + DCacheWays) 
+  println("  DCacheBanks: " + DCacheBanks) 
+  println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits) 
+  println("  DCacheWordOffset: " + DCacheWordOffset) 
+  println("  DCacheBankOffset: " + DCacheBankOffset) 
+  println("  DCacheSetOffset: " + DCacheSetOffset) 
+  println("  DCacheTagOffset: " + DCacheTagOffset) 
+  println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset) 
 
   //----------------------------------------
   // core data structures
