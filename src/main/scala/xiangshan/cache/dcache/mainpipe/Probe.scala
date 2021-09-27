@@ -30,7 +30,7 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
   // TODO: l2 should use vaddr index to probe l1
-  val vaddr  = UInt(VAddrBits.W) 
+  val vaddr  = UInt(VAddrBits.W)
   val param  = UInt(TLPermissions.bdWidth.W)
   val needData = Bool()
 

@@ -383,7 +383,7 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
   redirectOutValid := io.out.valid && isBranch
   redirectOut := DontCare
   redirectOut.level := RedirectLevel.flushAfter
-  redirectOut.roqIdx := uop.roqIdx
+  redirectOut.robIdx := uop.robIdx
   redirectOut.ftqIdx := uop.cf.ftqPtr
   redirectOut.ftqOffset := uop.cf.ftqOffset
   redirectOut.cfiUpdate.isMisPred := dataModule.io.mispredict

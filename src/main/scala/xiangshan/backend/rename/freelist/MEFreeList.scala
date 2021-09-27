@@ -98,7 +98,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
 
   /*
-  Decrements: from roq commits
+  Decrements: from rob commits
    */
   val freeVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B))) // if dec(i).bits is freed and ready for writing back to free list
 
@@ -166,16 +166,16 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   // set counters-update flag
   for (preg <- 1 until NRPhyRegs) {
     // set clear bit
-    freeVec.zipWithIndex.foreach { case (ready, idx) => 
-      when (ready && preg.U === freePhyReg(idx)) { 
+    freeVec.zipWithIndex.foreach { case (ready, idx) =>
+      when (ready && preg.U === freePhyReg(idx)) {
         clearArchRefCounter(preg) := true.B
         clearSpecRefCounter(preg) := true.B
         clearCmtCounter(preg) := true.B
-      } 
+      }
     }
 
     // set update bit
-    updateCmtCounterVec.zipWithIndex.foreach { case (ready, idx) => 
+    updateCmtCounterVec.zipWithIndex.foreach { case (ready, idx) =>
       when (ready && preg.U === freePhyReg(idx)) {
         updateCmtCounter(preg) := true.B
         // cmt counter after incrementing/ stay not change
@@ -184,7 +184,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
       }
     }
 
-    updateArchRefCounterVec.zipWithIndex.foreach { case (ready, idx) => 
+    updateArchRefCounterVec.zipWithIndex.foreach { case (ready, idx) =>
       when (ready && preg.U === multiRefPhyReg(idx)) {
         updateArchRefCounter(preg) := true.B
         // arch ref counter of pdest
@@ -243,7 +243,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val dupRegCntPos = RegInit(0.U(5.W))
   val dupCntIncVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => Mux(updateArchRefCounterVec(i), pdests_times(i) + 1.U, 0.U))))
   dupRegCntPos := Mux(!flush && !walk, dupRegCntPos + dupCntIncVec.reduceTree(_ + _), dupRegCntPos)
-  
+
   val dupRegCntNeg = RegInit(0.U(5.W))
   val dupCntDecVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i =>
     Mux(updateCmtCounterVec(i) && !freeVec(i), old_pdests_times(i) + 1.U,
@@ -259,7 +259,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   // update head pointer
   val walkValidVec = WireInit(VecInit(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }))
   val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegCnt - archRefCntZero,
-                      Mux(walk, headPtr - PopCount(walkValidVec), 
+                      Mux(walk, headPtr - PopCount(walkValidVec),
                       headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
 
   freeRegCnt := distanceBetween(tailPtr, headPtrNext)
@@ -270,7 +270,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
   // update reg counter
   for (i <- 1 until NRPhyRegs) {
-    specRefCounter(i) := Mux(flush, archRefCounter(i), 
+    specRefCounter(i) := Mux(flush, archRefCounter(i),
                            Mux(clearSpecRefCounter(i), 0.U, Mux(updateSpecRefCounter(i), specRefCounterNext(i), specRefCounter(i))))
     archRefCounter(i) :=   Mux(clearArchRefCounter(i), 0.U, Mux(updateArchRefCounter(i), archRefCounterNext(i), archRefCounter(i) ))
     cmtCounter(i)     :=   Mux(clearCmtCounter(i),     0.U, Mux(updateCmtCounter(i),     cmtCounterNext(i),     cmtCounter(i)     ))

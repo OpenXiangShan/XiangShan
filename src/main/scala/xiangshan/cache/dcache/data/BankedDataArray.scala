@@ -58,11 +58,11 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
 // -----------------------------------------------------------------
 // | Bank0 | Bank1 | Bank2 | Bank3 | Bank4 | Bank5 | Bank6 | Bank7 |
 // -----------------------------------------------------------------
-// | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  | 
-// | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | 
-// | ....  | ....  | ....  | ....  | ....  | ....  | ....  | ....  | 
+// | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  | Way0  |
+// | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  |
+// | ....  | ....  | ....  | ....  | ....  | ....  | ....  | ....  |
 // -----------------------------------------------------------------
-abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule 
+abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new DCacheBundle {
     // load pipeline read word req
@@ -78,7 +78,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
   })
-  assert(LoadPipelineWidth == 2) // BankedDataArray is designed for 2 port 
+  assert(LoadPipelineWidth == 2) // BankedDataArray is designed for 2 port
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until LoadPipelineWidth).map(f))
 
@@ -255,17 +255,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.bank_conflict_slow(0) := RegNext(io.bank_conflict_fast(0))
   io.bank_conflict_fast(1) := rw_bank_conflict_1 || rrl_bank_conflict_1 || rr_bank_conflict
   io.bank_conflict_slow(1) := RegNext(io.bank_conflict_fast(1))
-  XSPerfAccumulate("data_array_multi_read", perf_multi_read) 
-  XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict) 
-  XSPerfAccumulate("data_array_rrl_bank_conflict_0", rrl_bank_conflict_0) 
-  XSPerfAccumulate("data_array_rrl_bank_conflict_1", rrl_bank_conflict_1) 
-  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict_0) 
-  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict_1) 
-  XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid) 
-  XSPerfAccumulate("data_array_read_0", io.read(0).valid) 
-  XSPerfAccumulate("data_array_read_1", io.read(1).valid) 
-  XSPerfAccumulate("data_array_read_line", io.readline.valid) 
-  XSPerfAccumulate("data_array_write", io.write.valid) 
+  XSPerfAccumulate("data_array_multi_read", perf_multi_read)
+  XSPerfAccumulate("data_array_rr_bank_conflict", rr_bank_conflict)
+  XSPerfAccumulate("data_array_rrl_bank_conflict_0", rrl_bank_conflict_0)
+  XSPerfAccumulate("data_array_rrl_bank_conflict_1", rrl_bank_conflict_1)
+  XSPerfAccumulate("data_array_rw_bank_conflict_0", rw_bank_conflict_0)
+  XSPerfAccumulate("data_array_rw_bank_conflict_1", rw_bank_conflict_1)
+  XSPerfAccumulate("data_array_access_total", io.read(0).valid +& io.read(1).valid)
+  XSPerfAccumulate("data_array_read_0", io.read(0).valid)
+  XSPerfAccumulate("data_array_read_1", io.read(1).valid)
+  XSPerfAccumulate("data_array_read_line", io.readline.valid)
+  XSPerfAccumulate("data_array_write", io.write.valid)
 
   for (bank_index <- 0 until DCacheBanks) {
     //     Set Addr & Read Way Mask
@@ -285,11 +285,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       bank_addrs(i) === bank_index.U && io.read(i).valid
     })))
     val readline_match = io.readline.valid && io.readline.bits.rmask(bank_index)
-    val bank_way_en = Mux(readline_match, 
+    val bank_way_en = Mux(readline_match,
       io.readline.bits.way_en,
       Mux(bank_addr_matchs(0), way_en(0), way_en(1))
     )
-    val bank_set_addr = Mux(readline_match, 
+    val bank_set_addr = Mux(readline_match,
       addr_to_dcache_set(io.readline.bits.addr),
       Mux(bank_addr_matchs(0), set_addrs(0), set_addrs(1))
     )
@@ -345,7 +345,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         sram_waddr,
         getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))),
         io.write.bits.way_en
-      );  
+      );
     }
   }
 
