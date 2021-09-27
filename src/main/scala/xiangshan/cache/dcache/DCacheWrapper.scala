@@ -44,7 +44,8 @@ case class DCacheParameters
   nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  alwaysReleaseData: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
