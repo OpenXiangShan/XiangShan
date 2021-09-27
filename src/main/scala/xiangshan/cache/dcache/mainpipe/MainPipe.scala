@@ -557,8 +557,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
-  val writeback_data = s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
-    s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  val writeback_data = if (dcacheParameters.alwaysReleaseData) {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
+      s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  } else {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
+  }
 
   val writeback_paddr = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 
