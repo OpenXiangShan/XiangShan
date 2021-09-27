@@ -23,6 +23,7 @@ import utils._
 import freechips.rocketchip.tilelink._
 import bus.tilelink.TLMessages._
 import difftest._
+import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
 
 class MissReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -30,6 +31,7 @@ class MissReq(implicit p: Parameters) extends DCacheBundle
   val cmd    = UInt(M_SZ.W)
   // must be aligned to block
   val addr   = UInt(PAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W)
 
   // store
   val store_data   = UInt((cfg.blockBytes * 8).W)
@@ -175,6 +177,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     new_mask(i) := Mux(req.isStore, req.store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
   }
   val hasData = RegInit(true.B)
+  val isDirty = RegInit(false.B)
   when (io.mem_grant.fire()) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
@@ -213,6 +216,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     refill_data_raw(refill_count) := io.mem_grant.bits.data
+    isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
   }
 
   when (io.mem_finish.fire()) {
@@ -221,6 +225,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   when (io.pipe_req.fire()) {
     s_pipe_req := true.B
+    assert(!io.pipe_req.bits.vaddr === 0.U)
   }
 
   when (io.pipe_resp.valid) {
@@ -301,6 +306,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     growPermissions = grow_param
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
+  // resolve cache alias by L2
+  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+  // trigger prefetch
+  io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := true.B)
+  // prefer not to cache data in L2 by default
+  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  require(nSets <= 256) // dcache size should not be more than 128KB
   io.mem_grant.ready := !w_grantlast && s_acquire
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
   val is_grant = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
@@ -312,13 +324,16 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   pipe_req.miss := true.B
   pipe_req.miss_id := io.id
   pipe_req.miss_param := grant_param
+  pipe_req.miss_dirty := isDirty
 
   pipe_req.probe := false.B
   pipe_req.probe_param := DontCare
+  pipe_req.probe_need_data := false.B
 
   pipe_req.source := req.source
   pipe_req.cmd    := req.cmd
   pipe_req.addr   := req.addr
+  pipe_req.vaddr   := req.vaddr
   pipe_req.store_data := refill_data.asUInt
   // full overwrite
   pipe_req.store_mask := Fill(cfg.blockBytes, "b1".U)
@@ -373,6 +388,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     val full = Output(Bool())
   })
+
+  // 128KBL1: FIXME: provide vaddr for l2
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nMissEntries))
   val refill_arb   = Module(new Arbiter(new Refill, cfg.nMissEntries))

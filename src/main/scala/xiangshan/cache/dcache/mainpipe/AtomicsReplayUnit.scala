@@ -24,7 +24,7 @@ import utils.XSDebug
 class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
-    val lsu  = Flipped(new DCacheWordIO)
+    val lsu  = Flipped(new DCacheWordIOWithVaddr)
     val pipe_req  = Decoupled(new MainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
 
@@ -34,7 +34,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   val s_invalid :: s_pipe_req :: s_pipe_resp :: s_resp :: Nil = Enum(4)
   val state = RegInit(s_invalid)
 
-  val req = Reg(new DCacheWordReq)
+  val req = Reg(new DCacheWordReqWithVaddr)
 
   // assign default values to output signals
   io.lsu.req.ready     := state === s_invalid
@@ -70,15 +70,18 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req := DontCare
     pipe_req.miss := false.B
     pipe_req.probe := false.B
+    pipe_req.probe_need_data := false.B
     pipe_req.source := AMO_SOURCE.U
     pipe_req.cmd    := req.cmd
     pipe_req.addr   := get_block_addr(req.addr)
+    pipe_req.vaddr  := get_block_addr(req.vaddr)
     pipe_req.word_idx  := get_word(req.addr)
     pipe_req.amo_data  := req.data
     pipe_req.amo_mask  := req.mask
 
     when (io.pipe_req.fire()) {
       state := s_pipe_resp
+      assert(!io.pipe_req.bits.vaddr === 0.U)
     }
   }
 

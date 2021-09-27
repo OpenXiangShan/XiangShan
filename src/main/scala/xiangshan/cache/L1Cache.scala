@@ -30,6 +30,7 @@ trait L1CacheParameters {
   def nWays:         Int
   def rowBits:       Int
   def blockBytes:    Int
+  val pageSize = 4 * 1024
 }
 
 trait HasL1CacheParameters extends HasXSParameter
@@ -75,14 +76,10 @@ trait HasL1CacheParameters extends HasXSParameter
   def blockWords = blockBytes / wordBytes
   def refillWords = refillBytes / wordBytes
 
-  def idxMSB = untagBits-1
-  def idxLSB = blockOffBits
-  def offsetmsb = idxLSB-1
-  def offsetlsb = wordOffBits
-
-  def get_tag(addr: UInt) = (addr >> untagBits).asUInt()
   def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
+  def get_tag(addr: UInt) = get_phy_tag(addr)
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
+  def get_untag(addr: UInt) = addr(pgUntagBits-1, 0)
   def get_block(addr: UInt) = addr >> blockOffBits
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
   def get_refill_addr(addr: UInt) = (addr >> refillOffBits) << refillOffBits

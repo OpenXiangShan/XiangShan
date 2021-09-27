@@ -22,7 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{XSDebug, XSPerfAccumulate}
 
-class LoadPipe(implicit p: Parameters) extends DCacheModule {
+class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
   def encMetaBits = cacheParams.tagCode.width(metaBits)
   def getMeta(encMeta: UInt): UInt = {
@@ -37,10 +37,14 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
     val nack      = Input(Bool())
 
     // meta and data array read port
-    val data_read = DecoupledIO(new L1DataReadReq)
-    val data_resp = Input(Vec(blockRows, Bits(encRowBits.W)))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
+    val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
+    val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
+
+    // banked data read conflict
+    val bank_conflict_slow = Input(Bool())
+    val bank_conflict_fast = Input(Bool())
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -87,6 +91,8 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   val s1_req = RegEnable(s0_req, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_addr = io.lsu.s1_paddr
+  val s1_vaddr = s1_req.addr
+  val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_req.addr))
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
@@ -114,12 +120,9 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   val s1_hit_coh = s1_hit_meta.coh
 
   // data read
-  val data_read = io.data_read.bits
-  data_read.addr := s1_addr
-  data_read.way_en := s1_tag_match_way
-  // only needs to read the specific row
-  data_read.rmask := UIntToOH(get_row(s1_addr))
-  io.data_read.valid := s1_fire && !s1_nack
+  io.banked_data_read.valid := s1_fire && !s1_nack
+  io.banked_data_read.bits.addr := s1_vaddr
+  io.banked_data_read.bits.way_en := s1_tag_match_way
 
   io.replace_access.valid := RegNext(RegNext(io.meta_read.fire()) && s1_tag_match && s1_valid)
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
@@ -134,6 +137,8 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_addr = RegEnable(s1_addr, s1_fire)
+  val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
+  val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   s2_ready := true.B
 
   when (s1_fire) { s2_valid := !io.lsu.s1_kill }
@@ -158,28 +163,13 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   // can no allocate mshr for load miss
   val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
   // Bank conflict on data arrays
-  val s2_nack_data = RegEnable(!io.data_read.ready, s1_fire)
+  val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
 
-  // select the row we are interested in
-  val data_resp = io.data_resp
-  val s2_data = data_resp(get_row(s2_addr))
-
-  // select the word
-  // the index of word in a row, in case rowBits != wordBits
-  val s2_word_idx = if (rowWords == 1) 0.U else s2_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
-
-  // load data gen
-  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
-  for (w <- 0 until rowWords) {
-    s2_data_words(w) := s2_data(encWordBits * (w + 1) - 1, encWordBits * w)
-  }
-  val s2_word = s2_data_words(s2_word_idx)
-  // val s2_decoded = cacheParams.dataCode.decode(s2_word)
-  // val s2_word_decoded = s2_decoded.corrected
-  val s2_word_decoded = s2_word(wordBits - 1, 0)
-  assert(RegNext(!(s2_valid && s2_hit && !s2_nack && cacheParams.dataCode.decode(s2_word).uncorrectable)))
-
+  val banked_data_resp = io.banked_data_resp
+  val s2_bank_addr = addr_to_dcache_bank(s2_addr)
+  val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
+  dontTouch(s2_bank_addr)
 
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
@@ -192,20 +182,32 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := LOAD_SOURCE.U
   io.miss_req.bits.cmd := s2_req.cmd
-  io.miss_req.bits.addr := get_refill_addr(s2_addr)
+  io.miss_req.bits.addr := get_block_addr(s2_addr)
+  io.miss_req.bits.vaddr := s2_vaddr
   io.miss_req.bits.coh := s2_hit_coh
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid := s2_valid
   resp.bits := DontCare
-  resp.bits.data := s2_word_decoded
-  // on miss or nack, upper level should replay request
+  // resp.bits.data := s2_word_decoded
+  resp.bits.data := banked_data_resp_word.raw_data
+  // * on miss or nack, upper level should replay request
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
-  resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
+  // 
+  // * report a miss if bank conflict is detected
+  val real_miss = !s2_hit || s2_nack
+  resp.bits.miss := real_miss || io.bank_conflict_slow
+  if (id == 0) {
+    // load pipe 0 will not be influenced by bank conflict
+    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
+  } else {
+    // load pipe 1 need replay when there is a bank conflict
+    resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
+    XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
+  }
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -242,8 +244,11 @@ class LoadPipe(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("load_replay", io.lsu.resp.fire() && resp.bits.replay)
   XSPerfAccumulate("load_replay_for_data_nack", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data)
   XSPerfAccumulate("load_replay_for_no_mshr", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !resp.bits.miss)
-  XSPerfAccumulate("load_miss", io.lsu.resp.fire() && resp.bits.miss)
+  XSPerfAccumulate("load_replay_for_conflict", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_hit", io.lsu.resp.fire() && !real_miss)
+  XSPerfAccumulate("load_miss", io.lsu.resp.fire() && real_miss)
+  XSPerfAccumulate("load_succeed", io.lsu.resp.fire() && !resp.bits.miss)
+  XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire() && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
-  XSPerfAccumulate("ideal_ld_fast_wakeup", io.data_read.fire() && s1_tag_match)
+  XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 }

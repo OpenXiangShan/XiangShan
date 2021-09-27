@@ -24,10 +24,6 @@ import utils._
 import xiangshan.cache._
 import difftest._
 
-class SBufferWordReq(implicit p: Parameters) extends DCacheWordReq {
-  val vaddr = UInt(VAddrBits.W)
-}
-
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
   val empty = Input(Bool())
@@ -93,7 +89,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
 class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new SBufferWordReq)))  //Todo: store logic only support Width == 2 now
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
@@ -388,10 +384,12 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
-  val evictionTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionVTag = RegEnable(vtag(evictionIdx), enable = willSendDcacheReq)
 
   io.dcache.req.valid := prepareValidReg
-  io.dcache.req.bits.addr := getAddr(evictionTag)
+  io.dcache.req.bits.vaddr := getAddr(evictionVTag)
+  io.dcache.req.bits.addr := getAddr(evictionPTag)
   io.dcache.req.bits.data := data(evictionIdxReg).asUInt
   io.dcache.req.bits.mask := mask(evictionIdxReg).asUInt
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR

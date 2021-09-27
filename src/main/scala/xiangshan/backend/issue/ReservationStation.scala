@@ -490,18 +490,22 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   /**
     * S2: to function units
     */
+  val s1_issue_index = issueVec.map(iss => OHToUInt(iss.bits))
+  val s1_first_issue = statusArray.io.isFirstIssue
+  val s1_out_fire = s1_out.zip(s2_deq).map(x => x._1.valid && x._2.ready)
+  val s2_issue_index = s1_issue_index.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
+  val s2_first_issue = s1_first_issue.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
   for (i <- 0 until params.numDeq) {
     // payload: send to function units
     // TODO: these should be done outside RS
     PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.roqIdx.needFlush(io.redirect, io.flush), false.B)
-    val pipeline_fire = s1_out(i).valid && s2_deq(i).ready
     if (params.hasFeedback) {
-      io.feedback.get(i).rsIdx := RegEnable(OHToUInt(issueVec(i).bits), pipeline_fire)
-      io.feedback.get(i).isFirstIssue := RegEnable(statusArray.io.isFirstIssue(i), pipeline_fire)
+      io.feedback.get(i).rsIdx := s2_issue_index(i)
+      io.feedback.get(i).isFirstIssue := s2_first_issue(i)
     }
     if (params.hasMidState) {
-      io.fmaMid.get(i).waitForAdd := !RegEnable(statusArray.io.allSrcReady(i), pipeline_fire)
-      io.fmaMid.get(i).in.valid := !RegEnable(statusArray.io.isFirstIssue(i), pipeline_fire)
+      io.fmaMid.get(i).waitForAdd := !RegEnable(statusArray.io.allSrcReady(i), s1_out_fire(i))
+      io.fmaMid.get(i).in.valid := !s2_first_issue(i)
       XSPerfAccumulate(s"fma_partial2_issue_$i", io.deq(i).fire && io.fmaMid.get(i).waitForAdd)
       XSPerfAccumulate(s"fma_final_issue_$i", io.deq(i).fire && io.fmaMid.get(i).in.valid)
     }
@@ -554,8 +558,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         }
         io.load.get.fastMatch(i) := Mux(s2_deq(i).valid, 0.U, ldCanBeFast)
         when (!s2_deq(i).valid) {
-          io.feedback.get(i).rsIdx := OHToUInt(issueVec(i).bits)
-          io.feedback.get(i).isFirstIssue := statusArray.io.isFirstIssue(i)
+          io.feedback.get(i).rsIdx := s1_issue_index(i)
+          io.feedback.get(i).isFirstIssue := s1_first_issue(i)
         }
         XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
         XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
@@ -653,6 +657,19 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       }
       val cond2Selected = statusArray.io.issueGranted(i).valid && VecInit(cond2).asUInt.orR
       XSPerfAccumulate(s"fma_final_selected_cond2_$i", cond2Selected)
+    }
+  }
+
+  if (params.isJump) {
+    val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
+    for (i <- 0 until params.numEnq) {
+      when (dataArray.io.write(i).enable) {
+        val waddr = OHToUInt(dataArray.io.write(i).addr)
+        pcMem(waddr) := io.jump.get.jumpPc
+      }
+    }
+    for (i <- 0 until params.numDeq) {
+      io.deq(i).bits.uop.cf.pc := pcMem(s2_issue_index(i))
     }
   }
 

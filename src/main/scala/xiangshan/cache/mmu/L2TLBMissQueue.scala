@@ -63,7 +63,8 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(MSHRSize).W))
     }))
-
+    val enq_ptr = Output(UInt(log2Ceil(MSHRSize).W))
+    val buffer_it = Output(Vec(MSHRSize, Bool()))
     val refill_vpn = Output(UInt(vpnLen.W))
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
@@ -74,7 +75,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
-  val state_idle :: state_cache_high :: state_cache_low :: state_cache_next :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
+  val state_idle :: state_cache_high :: state_cache_low :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(6)
   val state = RegInit(VecInit(Seq.fill(MSHRSize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_caches_high = state.map(_ === state_cache_high)
@@ -82,7 +83,6 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
-  val is_cache_next = state.map(_ === state_cache_next)
 
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
@@ -117,26 +117,25 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m} // already some req are state_mem_req
   val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // already some req are state_mem_wait
   val dup_vec_wait_id = dup_vec_mem.zip(dup_vec_wait).map{case (a, b) => a || b} // get the wait_id from above reqs
-  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && (is_having(i) || is_caches_low(i) || is_cache_next(i))}
+  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)}
   val wait_id = ParallelMux(dup_vec_wait_id zip entries.map(_.wait_id))
   val dup_wait_resp = io.mem.resp.valid && VecInit(dup_vec_wait)(io.mem.resp.bits.id)
-  val to_wait = Cat(dup_vec_mem).orR || (Cat(dup_vec_wait).orR && !dup_wait_resp)
-  val to_cache = Cat(dup_vec_having).orR || dup_wait_resp
+  val to_wait = Cat(dup_vec_mem).orR || Cat(dup_vec_wait).orR
+  val to_mem_out = dup_wait_resp
+  val to_cache_low = Cat(dup_vec_having).orR
 
-  for (i <- 0 until MSHRSize) {
-    when (state(i) === state_cache_next) {
-      state(i) := state_cache_low
-    }
-  }
-  val enq_state = Mux(to_cache, state_cache_next, // relay one cycle to wait for refill
-    Mux(to_wait, state_mem_waiting,
-    Mux(io.in.bits.l3.valid, state_mem_req, state_cache_high)))
+  val mem_resp_hit = RegInit(VecInit(Seq.fill(MSHRSize)(false.B)))
+  val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
+    Mux(to_cache_low, state_cache_low, // same to the below, but the mem resp last cycle
+    Mux(to_wait, state_mem_waiting, // wait for the prev mem resp
+    Mux(io.in.bits.l3.valid, state_mem_req, state_cache_high))))
   when (io.in.fire()) {
     state(enq_ptr) := enq_state
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
+    mem_resp_hit(enq_ptr) := to_mem_out
   }
   when (mem_arb.io.out.fire()) {
     state(mem_arb.io.chosen) := state_mem_waiting
@@ -144,13 +143,11 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   when (io.mem.resp.fire()) {
     state.indices.map{i =>
-      when (state(i) === state_mem_waiting &&
-        io.mem.resp.bits.id === entries(i).wait_id &&
-        i.U =/= entries(i).wait_id) {
-        state(i) := state_cache_low
+      when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
+        state(i) := state_mem_out
+        mem_resp_hit(i) := true.B
       }
     }
-    state(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0)) := state_mem_out
   }
   when (io.out.fire()) {
     assert(state(mem_ptr) === state_mem_out)
@@ -159,6 +156,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   when (io.cache.fire()) {
     state(cache_ptr) := state_idle
   }
+
+  mem_resp_hit.map(a => when (a) { a := false.B } )
 
   when (io.sfence.valid) {
     state.map(_ := state_idle)
@@ -177,6 +176,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
   io.mem.refill_vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
+  io.mem.buffer_it := mem_resp_hit
+  io.mem.enq_ptr := enq_ptr
 
   XSPerfAccumulate("mq_in_count", io.in.fire())
   XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)

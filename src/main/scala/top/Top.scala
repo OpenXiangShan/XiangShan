@@ -254,7 +254,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := core_with_l2(i).memory_port
+    val l2_l3_pmu = BusPerfMonitor(enable = true)
+    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := l2_l3_pmu := core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -303,13 +304,15 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     case HCCacheParamsKey => soc.L3CacheParams
   })))
 
+  val l3_mem_pmu = BusPerfMonitor(enable = true)
+
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= TLLogger("MEM_L3") :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= TLLogger("MEM_L3") :*= l3_mem_pmu :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))

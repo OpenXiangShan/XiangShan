@@ -29,7 +29,10 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val source = UInt()
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
+  // TODO: l2 should use vaddr index to probe l1
+  val vaddr  = UInt(VAddrBits.W) 
   val param  = UInt(TLPermissions.bdWidth.W)
+  val needData = Bool()
 
   def dump() = {
     XSDebug("ProbeReq source: %d opcode: %d addr: %x param: %d\n",
@@ -87,6 +90,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.probe := true.B
     pipe_req.probe_param := req.param
     pipe_req.addr   := req.addr
+    pipe_req.vaddr  := req.vaddr
+    pipe_req.probe_need_data := req.needData
 
     when (io.pipe_req.fire()) {
       state := s_invalid
@@ -117,10 +122,22 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   // translate to inner req
   val req = Wire(new ProbeReq)
+  val alias_addr_frag = io.mem_probe.bits.data(2, 1) // add extra 2 bits from vaddr to get vindex
   req.source := io.mem_probe.bits.source
   req.opcode := io.mem_probe.bits.opcode
   req.addr := io.mem_probe.bits.address
+  if(DCacheAboveIndexOffset > DCacheTagOffset) {
+    // have alias problem, extra alias bits needed for index
+    req.vaddr := Cat(
+      io.mem_probe.bits.address(VAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
+      io.mem_probe.bits.address(DCacheTagOffset - 1, 0)                 // index & others
+    )
+  } else { // no alias problem
+    req.vaddr := io.mem_probe.bits.address
+  }
   req.param := io.mem_probe.bits.param
+  req.needData := io.mem_probe.bits.data(0)
 
   io.mem_probe.ready := allocate
 
