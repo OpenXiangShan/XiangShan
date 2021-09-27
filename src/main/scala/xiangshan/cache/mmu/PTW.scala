@@ -132,6 +132,12 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   def blockBytes_align(addr: UInt) = {
     Cat(addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W))
   }
+  def addr_low_from_vpn(vpn: UInt) = {
+    vpn(log2Ceil(l2tlbParams.blockBytes)-log2Ceil(XLEN/8)-1, 0)
+  }
+  def addr_low_from_paddr(paddr: UInt) = {
+    paddr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
+  }
   def from_missqueue(id: UInt) = {
     (id =/= MSHRSize.U)
   }
@@ -153,8 +159,12 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
+  when (missQueue.io.in.fire()) {
+    // when enq miss queue, set the req_addr_low to receive the mem resp data part
+    req_addr_low(mq_mem.enq_ptr) := addr_low_from_vpn(missQueue.io.in.bits.vpn)
+  }
   when (mem_arb.io.out.fire()) {
-    req_addr_low(mem_arb.io.out.bits.id) := mem_arb.io.out.bits.addr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
+    req_addr_low(mem_arb.io.out.bits.id) := addr_low_from_paddr(mem_arb.io.out.bits.addr)
     waiting_resp(mem_arb.io.out.bits.id) := true.B
   }
   // mem read
@@ -179,7 +189,8 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until MemReqWidth).map(i =>
-    DataHoldBypass(get_part(refill_data, RegNext(req_addr_low(mem.d.bits.source))), RegNext(i.U === mem.d.bits.source && mem.d.valid))
+    if (i == MSHRSize) {DataHoldBypass(get_part(refill_data, req_addr_low(i)), RegNext(mem_resp_done && !mem_resp_from_mq)) }
+    else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), mq_mem.buffer_it(i)) }
   ))
   // mem -> control signal
   when (mem_resp_done) {

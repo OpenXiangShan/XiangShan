@@ -64,6 +64,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
 
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
+
+  // For debug usage
+  val isFirstIssue = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {

@@ -110,7 +110,7 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 trait HaveSlaveAXI4Port {
   this: BaseXSSoc =>
 
-  val idBits = 16
+  val idBits = 14
 
   val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
@@ -128,6 +128,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
@@ -253,7 +254,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := core_with_l2(i).memory_port
+    val l2_l3_pmu = BusPerfMonitor(enable = true)
+    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := l2_l3_pmu := core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -302,13 +304,15 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     case HCCacheParamsKey => soc.L3CacheParams
   })))
 
+  val l3_mem_pmu = BusPerfMonitor(enable = true)
+
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= TLLogger("MEM_L3") :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= TLLogger("MEM_L3") :*= l3_mem_pmu :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
@@ -328,6 +332,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
+      val sram_config = Input(UInt(5.W))
+      val osc_clock = Input(Bool())
+      val pll_output = Output(UInt(14.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(debugOpts.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
@@ -340,6 +347,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
       }
       // val resetCtrl = new ResetCtrlIO(NumCores)(p)
     })
+    io.pll_output := DontCare
+    dontTouch(io.sram_config)
+    dontTouch(io.osc_clock)
+    dontTouch(io.pll_output)
     childClock := io.clock.asClock()
 
     withClockAndReset(childClock, io.reset) {

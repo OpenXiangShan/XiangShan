@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
+import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
@@ -173,6 +173,7 @@ case class XSCoreParameters
     normalAsVictim = true,
     outReplace = true
   ),
+  refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
     normalNSets = 1,
@@ -187,12 +188,6 @@ case class XSCoreParameters
     dataECC = Some("parity"),
     replacer = Some("setplru"),
     nMissEntries = 2
-  ),
-  l1plusCacheParameters: L1plusCacheParameters = L1plusCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
-    nMissEntries = 8
   ),
   dcacheParameters: DCacheParameters = DCacheParameters(
     tagECC = Some("secded"),
@@ -327,6 +322,7 @@ trait HasXSParameter {
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  val refillBothTlb = coreParams.refillBothTlb
   val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
@@ -339,7 +335,6 @@ trait HasXSParameter {
   val instOffsetBits = log2Ceil(instBytes)
 
   val icacheParameters = coreParams.icacheParameters
-  val l1plusCacheParameters = coreParams.l1plusCacheParameters
   val dcacheParameters = coreParams.dcacheParameters
 
   val LRSCCycles = 100
@@ -358,20 +353,6 @@ trait HasXSParameter {
 
   // L3 configurations
   val L2BusWidth = 256
-
-  // icache prefetcher
-  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = true,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 2,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = l1plusCacheParameters.blockBytes,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "icache"
-    )
-  )
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576

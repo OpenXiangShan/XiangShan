@@ -73,6 +73,9 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   // the scheduler issues instructions to function units
   scheduler.io.issue <> fuBlock.io.issue
+  if (scheduler.io.fmaMid.isDefined) {
+    scheduler.io.fmaMid.get <> fuBlock.io.fmaMid.get
+  }
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect
@@ -169,24 +172,11 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     }
   }
 
-  // Optimizations for load balance between different issue ports
-  // When a reservation station has at least two issue ports and
-  // the corresponding function unit does not have fixed latency (not pipelined),
-  // we let the function units alternate between each two issue ports.
-  val multiIssueFuConfigs = fuConfigs.filter(_._2 >= 2).filter(_._1.needLoadBalance).map(_._1)
-  val multiIssuePortsIdx = flattenFuConfigs.zipWithIndex.filter(x => multiIssueFuConfigs.contains(x._1))
-  val multiIssue = multiIssueFuConfigs.map(cfg => multiIssuePortsIdx.filter(_._1 == cfg).map(_._2))
-  multiIssue.foreach(ports => {
-    val numPingPong = ports.length / 2
-    for (i <- 0 until numPingPong) {
-      val index = ports.drop(2 * i).take(2)
-      println(s"Enable issue load balance between ports $index")
-      val pingpong = RegInit(false.B)
-      pingpong := !pingpong
-      when (pingpong) {
-        scheduler.io.issue(index(0)) <> fuBlock.io.issue(index(1))
-        scheduler.io.issue(index(1)) <> fuBlock.io.issue(index(0))
-      }
-    }
-  })
+  // By default, instructions do not have exceptions when they enter the function units.
+  fuBlock.io.issue.map(_.bits.uop.clearExceptions())
+  // For exe units that don't have exceptions, we assign zeroes to their exception vector.
+  for ((cfg, wb) <- flattenFuConfigs.zip(io.fuWriteback).filterNot(_._1.hasExceptionOut)) {
+    wb.bits.uop.clearExceptions()
+  }
+
 }

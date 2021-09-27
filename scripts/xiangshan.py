@@ -78,6 +78,8 @@ class XSArgs(object):
 
     def get_makefile_args(self):
         makefile_args = [
+
+
             (self.threads, "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
             (self.trace, "EMU_TRACE"),
@@ -207,6 +209,18 @@ class XiangShan(object):
         riscv_tests = map(lambda x: os.path.join(base_dir, x), riscv_tests)
         return riscv_tests
 
+    def __get_ci_misc(self, name=None):
+        base_dir = "/home/ci-runner/xsenv/workloads"
+        workloads = [
+            "bitmanip/bitMisc.bin",
+            "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
+            "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
+            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "ext_intr/amtest-riscv64-xs.bin"
+        ]
+        misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return misc_tests
+
     def __am_apps_path(self, bench):
         filename = f"{bench}-riscv64-noop.bin"
         return [os.path.join(self.args.am_home, "apps", bench, "build", filename)]
@@ -214,14 +228,14 @@ class XiangShan(object):
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
-            "povray": "_3400001000_.gz",
-            "mcf": "_2550001000_.gz",
-            "xalancbmk": "_6600001000_.gz",
-            "gcc": "_1250001000_.gz",
-            "namd": "_4850001000_.gz",
-            "milc": "_4150001000_.gz",
-            "lbm": "_7550001000_.gz",
-            "gromacs": "_3150001000_.gz"
+            "povray": "_700480000000_.gz",
+            "mcf": "_17520000000_.gz",
+            "xalancbmk": "_266100000000_.gz",
+            "gcc": "_39720000000_.gz",
+            "namd": "_434640000000_.gz",
+            "milc": "_103620000000_.gz",
+            "lbm": "_140840000000_.gz",
+            "gromacs": "_275480000000_.gz"
         }
         return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
 
@@ -229,6 +243,7 @@ class XiangShan(object):
         all_tests = {
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
+            "misc-tests": self.__get_ci_misc,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
         }

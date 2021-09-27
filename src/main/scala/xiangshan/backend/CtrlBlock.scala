@@ -123,7 +123,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
   val target = Mux(s1_isReplay,
-    real_pc, // repaly from itself
+    real_pc, // replay from itself
     Mux(s1_redirect_bits_reg.cfiUpdate.taken,
       Mux(s1_isJump, s1_jumpTarget, brTarget),
       snpc
@@ -328,9 +328,11 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   roq.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
+  val timer = GTimer()
   for((roq_wb, wb) <- roq.io.exeWbResults.zip(exeWbResults)) {
     roq_wb.valid := RegNext(wb.valid && !wb.bits.uop.roqIdx.needFlush(stage2Redirect, flushReg))
     roq_wb.bits := RegNext(wb.bits)
+    roq_wb.bits.uop.debugInfo.writebackTime := timer
   }
 
   // TODO: is 'backendRedirect' necesscary?

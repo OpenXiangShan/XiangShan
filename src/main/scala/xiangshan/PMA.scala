@@ -21,7 +21,7 @@ import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, L1plusCache, L1plusCacheParameters, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, Uncache}
 import xiangshan.cache.mmu.PTW
 
 object MemMap {

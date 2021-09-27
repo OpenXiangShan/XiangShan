@@ -39,9 +39,13 @@ func get_self_dir(code){
   return str
 }
 
+func get_client_dir(dir){
+  return dir
+}
+
 func get_dir(typeId, dir){
   if(typeId > 1){
-    return get_state(dir)
+    return get_client_dir(dir)
   } else {
     return get_self_dir(dir)
   }

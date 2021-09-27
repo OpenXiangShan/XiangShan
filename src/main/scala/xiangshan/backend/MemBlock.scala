@@ -139,14 +139,23 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_st.map(_.sfence := sfence)
   dtlb_ld.map(_.csr := tlbcsr)
   dtlb_st.map(_.csr := tlbcsr)
-  if (ldtlbParams.outReplace) {
-    val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
-    replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+  if (refillBothTlb) {
+    require(ldtlbParams.outReplace == sttlbParams.outReplace)
+    require(ldtlbParams.outReplace)
+
+    val replace = Module(new TlbReplace(exuParameters.LduCnt + exuParameters.StuCnt, ldtlbParams))
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+  } else {
+    if (ldtlbParams.outReplace) {
+      val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+    }
+    if (sttlbParams.outReplace) {
+      val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
+    }
   }
-  if (sttlbParams.outReplace) {
-    val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-    replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
-  }
+
 
   if (!useBTlb) {
     (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
@@ -154,8 +163,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
     dtlb_ld.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
     dtlb_st.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
-    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
-    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
+    if (refillBothTlb) {
+      dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
+      dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
+    } else {
+      dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
+      dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
+    }
   } else {
     val btlb = Module(new BridgeTLB(BTLBWidth, btlbParams))
     btlb.suggestName("btlb")

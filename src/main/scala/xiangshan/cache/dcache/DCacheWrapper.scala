@@ -24,8 +24,141 @@ import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util.BundleFieldBase
 import system.L1CacheErrorInfo
 import device.RAMHelper
+import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+
+// DCache specific parameters
+case class DCacheParameters
+(
+  nSets: Int = 256,
+  nWays: Int = 8,
+  rowBits: Int = 128,
+  tagECC: Option[String] = None,
+  dataECC: Option[String] = None,
+  replacer: Option[String] = Some("random"),
+  nMissEntries: Int = 1,
+  nProbeEntries: Int = 1,
+  nReleaseEntries: Int = 1,
+  nStoreReplayEntries: Int = 1,
+  nMMIOEntries: Int = 1,
+  nMMIOs: Int = 1,
+  blockBytes: Int = 64
+) extends L1CacheParameters {
+  // if sets * blockBytes > 4KB(page size),
+  // cache alias will happen,
+  // we need to avoid this by recoding additional bits in L2 cache
+  val setBytes = nSets * blockBytes
+  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val reqFields: Seq[BundleFieldBase] = Seq(
+    PrefetchField(),
+    PreferCacheField()
+  ) ++ aliasBitsOpt.map(AliasField)
+  val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
+
+  def tagCode: Code = Code.fromString(tagECC)
+
+  def dataCode: Code = Code.fromString(dataECC)
+}
+
+//           Physical Address
+// --------------------------------------
+// |   Physical Tag |  PIndex  | Offset |
+// --------------------------------------
+//                  |
+//                  DCacheTagOffset
+// 
+//           Virtual Address
+// --------------------------------------
+// | Above index  | Set | Bank | Offset |
+// --------------------------------------
+//                |     |      |        |
+//                |     |      |        DCacheWordOffset
+//                |     |      DCacheBankOffset
+//                |     DCacheSetOffset
+//                DCacheAboveIndexOffset
+
+// Default DCache size = 64 sets * 8 ways * 8 banks * 8 Byte = 32K Byte
+
+trait HasDCacheParameters extends HasL1CacheParameters {
+  val cacheParams = dcacheParameters
+  val cfg = cacheParams
+
+  def encWordBits = cacheParams.dataCode.width(wordBits)
+
+  def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
+  def eccBits = encWordBits - wordBits
+
+  def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
+  def lrscBackoff = 3 // disallow LRSC reacquisition briefly
+  def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
+
+  def nSourceType = 3
+  def sourceTypeWidth = log2Up(nSourceType)
+  def LOAD_SOURCE = 0
+  def STORE_SOURCE = 1
+  def AMO_SOURCE = 2
+
+  // each source use a id to distinguish its multiple reqs
+  def reqIdWidth = 64
+
+  // banked dcache support
+  val DCacheSets = cacheParams.nSets
+  val DCacheWays = cacheParams.nWays
+  val DCacheBanks = 8
+  val DCacheSRAMRowBits = 64 // hardcoded
+
+  val DCacheLineBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
+  val DCacheLineBytes = DCacheLineBits / 8
+  val DCacheLineWords = DCacheLineBits / 64 // TODO
+
+  val DCacheSameVPAddrLength = 12
+
+  val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
+  val DCacheWordOffset = 0
+  val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
+  val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
+  val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
+  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
+  val DCacheIndexOffset = DCacheBankOffset
+
+  def addr_to_dcache_bank(addr: UInt) = {
+    require(addr.getWidth >= DCacheSetOffset)
+    addr(DCacheSetOffset-1, DCacheBankOffset)
+  }
+
+  def addr_to_dcache_set(addr: UInt) = {
+    require(addr.getWidth >= DCacheAboveIndexOffset)
+    addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
+  }
+
+  def get_data_of_bank(bank: Int, data: UInt) = {
+    require(data.getWidth >= (bank+1)*DCacheSRAMRowBits)
+    data(DCacheSRAMRowBits * (bank + 1) - 1, DCacheSRAMRowBits * bank)
+  }
+
+  def get_mask_of_bank(bank: Int, data: UInt) = {
+    require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
+    data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
+  }
+
+  require(isPow2(nSets), s"nSets($nSets) must be pow2")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
+  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+}
+
+abstract class DCacheModule(implicit p: Parameters) extends L1CacheModule
+  with HasDCacheParameters
+
+abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
+  with HasDCacheParameters
+
+class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
+  val set = UInt(log2Up(nSets).W)
+  val way = UInt(log2Up(nWays).W)
+}
 
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
@@ -45,6 +178,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
+  val vaddr  = UInt(VAddrBits.W)
   val addr   = UInt(PAddrBits.W)
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
@@ -53,6 +187,10 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
     XSDebug("DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
+}
+
+class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
@@ -102,6 +240,12 @@ class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
+class DCacheWordIOWithVaddr(implicit p: Parameters) extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheWordReqWithVaddr)
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
+}
+
 // used by load unit
 class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
@@ -116,7 +260,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheLineReq )
+  val req  = DecoupledIO(new DCacheLineReq)
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
@@ -124,7 +268,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = Flipped(new DCacheLineIO) // for sbuffer
-  val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
+  val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -141,7 +285,9 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
       name = "dcache",
       sourceId = IdRange(0, cfg.nMissEntries+1),
       supportsProbe = TransferSizes(cfg.blockBytes)
-    ))
+    )),
+    requestFields = cacheParams.reqFields,
+    echoFields = cacheParams.echoFields
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -157,20 +303,30 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
+  println("DCache:") 
+  println("  DCacheSets: " + DCacheSets) 
+  println("  DCacheWays: " + DCacheWays) 
+  println("  DCacheBanks: " + DCacheBanks) 
+  println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits) 
+  println("  DCacheWordOffset: " + DCacheWordOffset) 
+  println("  DCacheBankOffset: " + DCacheBankOffset) 
+  println("  DCacheSetOffset: " + DCacheSetOffset) 
+  println("  DCacheTagOffset: " + DCacheTagOffset) 
+  println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset) 
+
   //----------------------------------------
   // core data structures
-  val dataArray = Module(new DuplicatedDataArray)
-  val metaArray = Module(new DuplicatedMetaArray)
-  /*
-  dataArray.dump()
-  metaArray.dump()
-  */
-  val errors = dataArray.io.errors ++ metaArray.io.errors
+  val bankedDataArray = Module(new BankedDataArray)
+  val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
+  bankedDataArray.dump()
+
+  val errors = bankedDataArray.io.errors ++ metaArray.io.errors
   io.error <> RegNext(Mux1H(errors.map(e => e.ecc_error.valid -> e)))
+  // assert(!io.error.ecc_error.valid)
 
   //----------------------------------------
   // core modules
-  val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
+  val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val storeReplayUnit = Module(new StoreReplayQueue)
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
 
@@ -192,47 +348,30 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMetaReadPort = 0
   val LoadPipeMetaReadPort = 1
 
-  val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
+  metaArray.io.read(LoadPipelineWidth) <> mainPipe.io.meta_read
+  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth)
 
-  metaReadArb.io.in(LoadPipeMetaReadPort) <> ldu(LoadPipelineWidth - 1).io.meta_read
-  metaReadArb.io.in(MainPipeMetaReadPort) <> mainPipe.io.meta_read
-
-  metaArray.io.read(LoadPipelineWidth - 1) <> metaReadArb.io.out
-
-  ldu(LoadPipelineWidth - 1).io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
-  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth - 1)
-
-  for (w <- 0 until (LoadPipelineWidth - 1)) {
+  for (w <- 0 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
     ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
 
   //----------------------------------------
   // data array
-  val DataWritePortCount = 1
-  val MainPipeDataWritePort = 0
 
-  dataArray.io.write <> mainPipe.io.data_write
+  bankedDataArray.io.write <> mainPipe.io.banked_data_write
+  bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
+  bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
+  bankedDataArray.io.readline <> mainPipe.io.banked_data_read
 
-  // give priority to MainPipe
-  val DataReadPortCount = 2
-  val MainPipeDataReadPort = 0
-  val LoadPipeDataReadPort = 1
+  ldu(0).io.banked_data_resp := bankedDataArray.io.resp
+  ldu(1).io.banked_data_resp := bankedDataArray.io.resp
+  mainPipe.io.banked_data_resp := bankedDataArray.io.resp
 
-  val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
-
-  dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(LoadPipelineWidth - 1).io.data_read
-  dataReadArb.io.in(MainPipeDataReadPort)  <> mainPipe.io.data_read
-
-  dataArray.io.read(LoadPipelineWidth - 1) <> dataReadArb.io.out
-
-  dataArray.io.resp(LoadPipelineWidth - 1) <> ldu(LoadPipelineWidth - 1).io.data_resp
-  dataArray.io.resp(LoadPipelineWidth - 1) <> mainPipe.io.data_resp
-
-  for (w <- 0 until (LoadPipelineWidth - 1)) {
-    dataArray.io.read(w) <> ldu(w).io.data_read
-    dataArray.io.resp(w) <> ldu(w).io.data_resp
-  }
+  ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
+  ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
+  ldu(0).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(0)
+  ldu(1).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(1)
 
   //----------------------------------------
   // load pipe
@@ -245,7 +384,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
 
-    ldu(w).io.disable_ld_fast_wakeup := mainPipe.io.disable_ld_fast_wakeup(w)
+    ldu(w).io.disable_ld_fast_wakeup := 
+      mainPipe.io.disable_ld_fast_wakeup(w) || 
+      bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
   //----------------------------------------
@@ -386,53 +527,6 @@ class AMOHelper() extends ExtModule {
 //  })
 }
 
-class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
-  val io = IO(new DCacheIO)
-
-  io := DontCare
-  // to LoadUnit
-  for (i <- 0 until LoadPipelineWidth) {
-    val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-    fakeRAM.clk   := clock
-    fakeRAM.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3)
-    fakeRAM.wIdx  := 0.U
-    fakeRAM.wdata := 0.U
-    fakeRAM.wmask := 0.U
-    fakeRAM.wen   := false.B
-
-    io.lsu.load(i).req.ready := true.B
-    io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
-    io.lsu.load(i).resp.bits.data := fakeRAM.rdata
-    io.lsu.load(i).resp.bits.miss := false.B
-    io.lsu.load(i).resp.bits.replay := false.B
-    io.lsu.load(i).resp.bits.id := DontCare
-    io.lsu.load(i).s1_hit_way := 1.U
-    io.lsu.load(i).s1_disable_fast_wakeup := false.B
-  }
-  // to LSQ
-  io.lsu.lsq.valid := false.B
-  io.lsu.lsq.bits := DontCare
-  // to Store Buffer
-  io.lsu.store.req.ready := true.B
-  io.lsu.store.resp := DontCare
-  io.lsu.store.resp.valid := RegNext(io.lsu.store.req.valid)
-  io.lsu.store.resp.bits.id := RegNext(io.lsu.store.req.bits.id)
-  // to atomics
-  val amoHelper = Module(new AMOHelper)
-  amoHelper.clock := clock
-  amoHelper.enable := io.lsu.atomics.req.valid && !reset.asBool
-  amoHelper.cmd := io.lsu.atomics.req.bits.cmd
-  amoHelper.addr := io.lsu.atomics.req.bits.addr
-  amoHelper.wdata := io.lsu.atomics.req.bits.data
-  amoHelper.mask := io.lsu.atomics.req.bits.mask
-  io.lsu.atomics.req.ready := true.B
-  io.lsu.atomics.resp.valid := RegNext(io.lsu.atomics.req.valid)
-  assert(!io.lsu.atomics.resp.valid || io.lsu.atomics.resp.ready)
-  io.lsu.atomics.resp.bits.data := amoHelper.rdata
-  io.lsu.atomics.resp.bits.replay := false.B
-  io.lsu.atomics.resp.bits.id := 1.U
-}
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 

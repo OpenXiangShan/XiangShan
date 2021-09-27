@@ -155,6 +155,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
+  // This inst will flush all the pipe when it is the oldest inst in ROB,
+  // then replay from this inst itself
+  val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
     isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
@@ -180,10 +183,12 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
-  val renameTime = UInt(64.W)
-  val dispatchTime = UInt(64.W)
-  val issueTime = UInt(64.W)
-  val writebackTime = UInt(64.W)
+  val renameTime = UInt(XLEN.W)
+  val dispatchTime = UInt(XLEN.W)
+  val enqRsTime = UInt(XLEN.W)
+  val selectTime = UInt(XLEN.W)
+  val issueTime = UInt(XLEN.W)
+  val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
 }
 
@@ -220,6 +225,12 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
+  def clearExceptions(): MicroOp = {
+    cf.exceptionVec.map(_ := false.B)
+    ctrl.replayInst := false.B
+    ctrl.flushPipe := false.B
+    this
+  }
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {

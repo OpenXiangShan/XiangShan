@@ -25,6 +25,9 @@ jobs:
       - name: generate verilog file
         run:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --dual-core
+      - name: check pc usages
+        run:
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_pc.py build/XSTop.v
       - name: build MinimalConfig emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -58,9 +61,12 @@ jobs:
       - name: Basic Test - riscv-tests
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --rvtest /home/ci-runner/xsenv/riscv-tests --ci riscv-tests 2> /dev/zero
+      - name: Basic Test - misc-tests
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci misc-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci microbench 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci microbench 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/microbench.log
       - name: Simple Test - CoreMark
         run: |
