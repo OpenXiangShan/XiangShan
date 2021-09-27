@@ -74,7 +74,7 @@ case class DCacheParameters
 // | Above index  | Set | Bank | Offset |
 // --------------------------------------
 //                |     |      |        |
-//                |     |      |        DCacheWordOffset
+//                |     |      |        0
 //                |     |      DCacheBankOffset
 //                |     DCacheSetOffset
 //                DCacheAboveIndexOffset
@@ -108,19 +108,23 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64 // hardcoded
+  val DCacheWordBits = 64 // hardcoded
+  val DCacheWordBytes = DCacheWordBits / 8
 
-  val DCacheLineBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
-  val DCacheLineBytes = DCacheLineBits / 8
-  val DCacheLineWords = DCacheLineBits / 64 // TODO
+  val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
+  val DCacheSizeBytes = DCacheSizeBits / 8
+  val DCacheSizeWords = DCacheSizeBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
-  val DCacheWordOffset = 0
-  val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
+  val DCacheWordOffset = log2Up(DCacheWordBytes)
+
+  val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
+  val DCacheLineOffset = DCacheSetOffset
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -191,6 +195,7 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val vaddr = UInt(VAddrBits.W)
+  val wline = Bool()
 }
 
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle

@@ -224,10 +224,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
+      paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
       paddrModule.io.wen(i) := true.B
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
+      vaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
       vaddrModule.io.wen(i) := true.B
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
@@ -453,11 +455,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     // Note that store data/addr should both be valid after store's commit
     assert(!io.sbuffer(i).valid || allvalid(ptr))
+    // Write line request should have all 1 mask
+    assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr  := paddrModule.io.rdata(i)
     io.sbuffer(i).bits.vaddr := vaddrModule.io.rdata(i)
     io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
+    io.sbuffer(i).bits.wline := paddrModule.io.rlineflag(i)
     io.sbuffer(i).bits.id    := DontCare
 
     when (io.sbuffer(i).fire()) {
