@@ -102,6 +102,7 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     io.out.valid := false.B
     io.out.bits := DontCare
   }
+
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out

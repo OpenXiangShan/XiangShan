@@ -276,7 +276,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = new RobCommitIO
     val lsq = new RobLsqIO
-    val bcommit = Output(UInt((log2Up(CommitWidth + 1).W)))
+    val bcommit = Output(UInt(log2Up(CommitWidth + 1).W))
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
     val robFull = Output(Bool())

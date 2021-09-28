@@ -30,9 +30,12 @@ class ExuBlock(
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
   val outFastPorts: Seq[Seq[Int]],
-  val outFpRfReadPorts: Int
+  val outIntRfReadPorts: Int,
+  val outFpRfReadPorts: Int,
+  val hasIntRf: Boolean,
+  val hasFpRf: Boolean
 )(implicit p: Parameters) extends LazyModule {
-  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outFpRfReadPorts))
+  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
 
   val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)

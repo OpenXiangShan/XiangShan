@@ -106,14 +106,14 @@ case class XSCoreParameters
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
-  NRPhyRegs: Int = 160,
+  NRPhyRegs: Int = 192,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
-  RobSize: Int = 192,
+  RobSize: Int = 256,
   EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
@@ -211,11 +211,10 @@ case class XSCoreParameters
   useFakeL2Cache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
   val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg) ++
-    Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg)
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
