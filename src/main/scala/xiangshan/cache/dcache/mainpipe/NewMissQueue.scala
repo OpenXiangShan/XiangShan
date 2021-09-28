@@ -349,8 +349,8 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
     }
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
-    for ((arb, req) <- arb.io.in.zip(in)) {
-      arb <> req
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
     }
     out <> arb.io.out
   }

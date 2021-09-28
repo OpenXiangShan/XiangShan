@@ -115,21 +115,13 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheLineWords = DCacheLineBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
-<<<<<<< HEAD:src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala
-  val DCacheSameVPAddrOffset = DCacheSameVPAddrLength - 1
-=======
->>>>>>> master:src/main/scala/xiangshan/cache/DCacheWrapper.scala
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
   val DCacheWordOffset = 0
   val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
-<<<<<<< HEAD:src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala
-  val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrOffset
-=======
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
->>>>>>> master:src/main/scala/xiangshan/cache/DCacheWrapper.scala
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -140,6 +132,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def addr_to_dcache_set(addr: UInt) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
     addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
+  }
+
+  def addr_to_dcache_tag(addr: UInt) = {
+    require(addr.getWidth == (DCacheTagOffset + tagBits))
+    addr.tail(DCacheTagOffset)
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
