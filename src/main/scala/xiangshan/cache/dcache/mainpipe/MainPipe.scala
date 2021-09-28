@@ -192,12 +192,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val banked_store_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === STORE_SOURCE.U && banked_store_rmask.orR
   val amo_need_data = !s0_req.miss && !s0_req.probe && s0_req.source === AMO_SOURCE.U
   val probe_need_data = s0_req.probe
-  
+
   val banked_need_data = miss_need_data || banked_store_need_data || amo_need_data || probe_need_data
 
   val s0_banked_rmask = Mux(banked_store_need_data, banked_store_rmask,
-    Mux(amo_need_data || probe_need_data || miss_need_data, 
-      banked_full_rmask, 
+    Mux(amo_need_data || probe_need_data || miss_need_data,
+      banked_full_rmask,
       banked_none_rmask
     ))
 
@@ -234,7 +234,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val ecc_meta_resp = WireInit(VecInit(Seq.fill(nWays)(0.U(encMetaBits.W))))
   ecc_meta_resp := Mux(RegNext(s0_fire), io.meta_resp, RegNext(ecc_meta_resp))
   val meta_resp = ecc_meta_resp.map(m => getMeta(m).asTypeOf(new L1Metadata))
-  
+
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_req.addr))).asUInt
@@ -288,7 +288,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
 
-  s2_s0_set_conflict := s2_valid && get_idx(s2_req.vaddr) === get_idx(s0_req.vaddr)  
+  s2_s0_set_conflict := s2_valid && get_idx(s2_req.vaddr) === get_idx(s0_req.vaddr)
 
   when (s1_fire) { s2_valid := true.B }
   .elsewhen(s2_fire) { s2_valid := false.B }
@@ -330,7 +330,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     val full_wmask = FillInterleaved(8, wmask)
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
-  
+
   val s2_data = WireInit(VecInit((0 until DCacheBanks).map(i => {
     val decoded = cacheParams.dataCode.decode(banked_data_resp(i).asECCData())
     // assert(!RegNext(s2_valid && s2_hit && decoded.uncorrectable))
@@ -348,7 +348,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   }
 
   // AMO hits
-  
+
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
   dump_pipeline_reqs("MainPipe s2", s2_valid, s2_req)
@@ -506,7 +506,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   //   1. not store and not amo, data: store_data mask: store_mask(full_mask)
   //   2. store, data: store_data mask: store_mask(full_mask)
   //   3. amo, data: merge(store_data, amo_data, amo_mask) mask: store_mask(full_mask)
-  // 
+  //
   // Probe: do not write data, DontCare
   // Store hit: data: merge(s3_data, store_data, store_mask) mask: store_mask
   // AMO hit: data: merge(s3_data, amo_data, amo_mask) mask: store_mask
@@ -557,8 +557,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
   val writeback_param = Mux(miss_writeback, miss_shrink_param, probe_shrink_param)
 
-  val writeback_data = s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
-    s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  val writeback_data = if (dcacheParameters.alwaysReleaseData) {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
+      s3_coh === ClientStates.Dirty || miss_writeback && s3_coh.state =/= ClientStates.Nothing
+  } else {
+    s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
+  }
 
   val writeback_paddr = Cat(s3_meta.tag, get_untag(s3_req.vaddr))
 

@@ -66,9 +66,9 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val noIter = Wire(Bool()) // this is output of reg!
   val finalIter = Wire(Bool())
   val aLZC = Wire(UInt((lzc_width + 1).W))
-  val dLZC = Wire(UInt((lzc_width + 1).W))  
+  val dLZC = Wire(UInt((lzc_width + 1).W))
   val aNormAbs = Wire(UInt((len + 1).W))
-  val dNormAbs = Wire(UInt((len + 1).W))  
+  val dNormAbs = Wire(UInt((len + 1).W))
   val aInverter = Wire(UInt(len.W)) // results of global inverter
   val dInverter = Wire(UInt(len.W))
 
@@ -108,7 +108,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
     state := state
   }
 
-  // First cycle: 
+  // First cycle:
   // State is idle, we gain absolute value of a and b, using global inverter
 
   io.in_ready := state(s_idle)
@@ -127,7 +127,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   aNormAbs := Mux1H(Seq(
     state(s_idle) -> Cat(0.U(1.W), aAbs), // 65, 0
     state(s_pre_0) -> Cat(0.U(1.W), aNorm), // 65, 0
-    state(s_post_0) -> rNext(len + 3, 3) // remainder 65, 64. highest is sign bit 
+    state(s_post_0) -> rNext(len + 3, 3) // remainder 65, 64. highest is sign bit
   ))
   dNormAbs := Mux1H(Seq(
     state(s_idle) -> Cat(0.U(1.W), dAbs),
@@ -149,39 +149,39 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val lzcRegDiff = Cat(0.U(1.W), dLZCReg(lzc_width - 1, 0)) - Cat(0.U(1.W), aLZCReg(lzc_width - 1, 0))
   val lzcDiff = Mux(state(s_pre_0), lzcWireDiff, lzcRegDiff)
   aIsZero := aLZC(lzc_width) // this is state pre_0
-  dIsZero := dLZCReg(lzc_width) // this is pre_1 and all stages after 
+  dIsZero := dLZCReg(lzc_width) // this is pre_1 and all stages after
   val dIsOne = dLZC(lzc_width - 1, 0).andR() // this is pre_0
   val noIterReg = RegEnable(dIsOne & aNormAbsReg(len - 1), state(s_pre_0)) // This means dividend has lzc 0 so iter is 17
   noIter := noIterReg
   val aTooSmallReg = RegEnable(aIsZero | lzcDiff(lzc_width), state(s_pre_0)) // a is zero or a smaller than d
   aTooSmall := aTooSmallReg
 
-  val quotSign = Mux(state(s_idle), aSign ^ dSign, true.B) // if not s_idle then must be s_pre_1 & dIsZero, and that we have 
+  val quotSign = Mux(state(s_idle), aSign ^ dSign, true.B) // if not s_idle then must be s_pre_1 & dIsZero, and that we have
   val rSign = aSign
   val quotSignReg = RegEnable(quotSign, startHandShake | (state(s_pre_1) & dIsZero))
   val rSignReg = RegEnable(rSign, startHandShake)
-  
+
   val rShift = lzcDiff(0) // odd lzc diff, for SRT4
   val rightShifted = Wire(UInt(len.W))
   val rSumInit = Mux(aTooSmallReg | aIsZero, Cat(0.U(1.W), rightShifted, 0.U(3.W)), // right shift the dividend (which is already l-shifted)
                     Mux(noIterReg, 0.U(itn_len.W), //
-                      Cat(0.U(3.W), 
+                      Cat(0.U(3.W),
                           Mux(rShift, Cat(0.U(1.W), aNormAbsReg(len - 1, 0)), Cat(aNormAbsReg(len - 1, 0), 0.U(1.W)))
                         ) // Normal init value. 68, 67; For even lzcDiff, 0.001xxx0; for odd lzcDiff 0.0001xxx
                       )
-                    ) // state is s_pre_1                     
+                    ) // state is s_pre_1
   val rCarryInit = 0.U(itn_len.W)
 
   val rightShifter = Module(new RightShifter(len, lzc_width))
   rightShifter.io.in := Mux(state(s_pre_1), aNormAbsReg(len - 1, 0), rPreShifted(len - 1, 0))
-  rightShifter.io.shiftNum := Mux(state(s_pre_1), aLZCReg, 
+  rightShifter.io.shiftNum := Mux(state(s_pre_1), aLZCReg,
                                   Mux(aTooSmallReg | dIsZero, 0.U(lzc_width.W), dLZCReg))
   rightShifter.io.msb := state(s_post_1) & rSignReg & rPreShifted(len)
   rightShifted := rightShifter.io.out
 
   // obtaining 1st quotient
   val rSumInitTrunc = Cat(0.U(1.W), rSumInit(itn_len - 4, itn_len - 4 - 4 + 1)) // 0.00___
-  val mInitPos1 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b00100".U(5.W), 
+  val mInitPos1 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b00100".U(5.W),
     Array(
       0.U -> "b00100".U(5.W),
       1.U -> "b00100".U(5.W),
@@ -193,7 +193,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
       7.U -> "b01000".U(5.W),
     )
   )
-  val mInitPos2 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b01100".U(5.W), 
+  val mInitPos2 = MuxLookup(dNormAbsReg(len - 2, len - 2 - 3 + 1), "b01100".U(5.W),
     Array(
       0.U -> "b01100".U(5.W),
       1.U -> "b01110".U(5.W),
@@ -211,7 +211,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val qPrev = Mux(state(s_pre_1), qInit, qIterEnd)
   val qPrevReg = RegEnable(qPrev, state(s_pre_1) | state(s_iter))
   val specialDivisorReg = RegEnable(dNormAbsReg(len - 2, len - 2 - 3 + 1) === 0.U, state(s_pre_1)) // d=0.1000xxx
-  
+
   // rCarry and rSum in Iteration
   val qXd = Mux1H(Seq(
     qPrevReg(quot_neg_2) -> Cat(dNormAbsReg(len - 1, 0), 0.U(4.W)), // 68, 67 1.xxxxx0000
@@ -257,18 +257,18 @@ class SRT4DividerDataModule(len: Int) extends Module {
   ))
 
 
-  quotIter := Mux(state(s_pre_1), 
-                      Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt, 
+  quotIter := Mux(state(s_pre_1),
+                      Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt,
                         Mux(noIterReg, aNormAbsReg(len - 1, 0), 0.U(len.W))),
-                      Mux(state(s_iter), quotIterNext, 
+                      Mux(state(s_iter), quotIterNext,
                         Mux(quotSignReg, aInverter, quotIterReg)))
-  quotM1Iter := Mux(state(s_pre_1), 
+  quotM1Iter := Mux(state(s_pre_1),
                         0.U(len.W), Mux(state(s_iter), quotIterM1Next,
                           Mux(quotSignReg, dInverter, quotM1IterReg)))
 
 
   // iter num
-  val iterNum = Wire(UInt((lzc_width - 1).W))  
+  val iterNum = Wire(UInt((lzc_width - 1).W))
   val iterNumReg = RegEnable(iterNum, state(s_pre_1) | state(s_iter))
 
   iterNum := Mux(state(s_pre_1), lzcDiff(lzc_width - 1, 1) +% lzcDiff(0), iterNumReg -% 1.U)
@@ -291,7 +291,7 @@ class SRT4DividerDataModule(len: Int) extends Module {
   rPreShifted := Mux(needCorr, rPd, r)
   val rFinal = RegEnable(rightShifted, state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = Mux(needCorr, quotM1IterReg, quotIterReg)
-  
+
   val res = Mux(isHi, rFinal, qFinal)
   io.out_data := Mux(isW,
     SignExt(res(31, 0), len),
@@ -321,7 +321,7 @@ class RightShifter(len: Int, lzc_width: Int) extends Module {
     s5 := Mux(shift(5), Cat(VecInit(Seq.fill(32)(msb)).asUInt, s4(len - 1, 32)), s4)
   } else if (len == 32) {
     s5 := s4
-  } 
+  }
   io.out := s5
 }
 
@@ -405,22 +405,22 @@ class SRT4QDS(len: Int, itn_len: Int) extends Module {
       val csa2 = Module(new CSA3_2(7))
       if (i == 1 || i == 2) {
         csa1.io.in(0) := trunc34(remSumX16)
-        csa1.io.in(1) := trunc34(remCarryX16)        
+        csa1.io.in(1) := trunc34(remCarryX16)
         csa2.io.in(2) := trunc34(dXq)
       } else {
         csa1.io.in(0) := trunc25(remSumX16)
-        csa1.io.in(1) := trunc25(remCarryX16)        
+        csa1.io.in(1) := trunc25(remCarryX16)
         csa2.io.in(2) := trunc25(dXq)
-      }        
+      }
       csa1.io.in(2) := MuxLookup(dForLookup, "b0000000".U, mLookUpTable.minus_m(i))
-      csa2.io.in(0) := csa1.io.out(0) 
-      csa2.io.in(1) := csa1.io.out(1)(5, 0) << 1 
+      csa2.io.in(0) := csa1.io.out(0)
+      csa2.io.in(1) := csa1.io.out(1)(5, 0) << 1
       (csa2.io.out(0) + (csa2.io.out(1)(5, 0) << 1))(6)
     }
   })
   val qVec = Wire(Vec(5, Bool()))
   qVec(quot_neg_2) := signs(0) && signs(1) && signs(2)
-  qVec(quot_neg_1) := ~signs(0) && signs(1) && signs(2) 
+  qVec(quot_neg_1) := ~signs(0) && signs(1) && signs(2)
   qVec(quot_0) := signs(2) && ~signs(1)
   qVec(quot_pos_1) := signs(3) && ~signs(2) && ~signs(1)
   qVec(quot_pos_2) := ~signs(3) && ~signs(2) && ~signs(1)
@@ -439,8 +439,8 @@ class SRT4Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len)
 
   val divDataModule = Module(new SRT4DividerDataModule(len))
 
-  val kill_w = uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
-  val kill_r = !divDataModule.io.in_ready && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_w = uop.robIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_r = !divDataModule.io.in_ready && uopReg.robIdx.needFlush(io.redirectIn, io.flushIn)
 
   divDataModule.io.src(0) := io.in.bits.src(0)
   divDataModule.io.src(1) := io.in.bits.src(1)

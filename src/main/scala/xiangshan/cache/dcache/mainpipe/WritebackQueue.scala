@@ -129,7 +129,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
   when(busy) {
-    assert(!req.voluntary || req.hasData)
+    assert(!req.dirty || req.hasData)
   }
 
   io.mem_release.valid := busy
@@ -168,7 +168,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    
+
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
   })

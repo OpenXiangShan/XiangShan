@@ -48,7 +48,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
     val mmio_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mmio_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    
+
     val flush = Input(Bool())
   })
 
@@ -76,8 +76,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
   XSDebug("[ICache MMIO]entry: %d state: %d needFlush%d  flush:%d\n", io.id, state, needFlush,io.flush)
   XSDebug("[ICache MMIO]req.addr: %x req.id \n", req.addr)
-  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
-  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready)
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready)
 
   XSDebug("[ICache MMIO]respReg:  %x\n",respDataReg.asUInt)
 

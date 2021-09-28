@@ -102,14 +102,15 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     io.out.valid := false.B
     io.out.bits := DontCare
   }
+
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out
     XSDebug(in.valid, p"fromInt(${in.valid} ${in.ready}) toInt(${out.valid} ${out.ready})\n")
-    XSDebug(io.redirect.valid, p"Redirect:(${io.redirect.valid}) roqIdx:${io.redirect.bits.roqIdx}\n")
+    XSDebug(io.redirect.valid, p"Redirect:(${io.redirect.valid}) robIdx:${io.redirect.bits.robIdx}\n")
     XSDebug(in.valid, p"src1:${Hexadecimal(in.bits.src(0))} src2:${Hexadecimal(in.bits.src(1))} " +
-      p"func:${Binary(in.bits.uop.ctrl.fuOpType)} pc:${Hexadecimal(in.bits.uop.cf.pc)} roqIdx:${in.bits.uop.roqIdx}\n")
-    XSDebug(out.valid, p"out res:${Hexadecimal(out.bits.data)} roqIdx:${out.bits.uop.roqIdx}\n")
+      p"func:${Binary(in.bits.uop.ctrl.fuOpType)} pc:${Hexadecimal(in.bits.uop.cf.pc)} robIdx:${in.bits.uop.robIdx}\n")
+    XSDebug(out.valid, p"out res:${Hexadecimal(out.bits.data)} robIdx:${out.bits.uop.robIdx}\n")
   }
 
 }

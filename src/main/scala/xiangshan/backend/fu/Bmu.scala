@@ -24,7 +24,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
       Cat(left(msb) && right(msb), !right(msb), if(msb==1)right(0) else right(msb-1, 0)),
       left)
   }
-  
+
   val c0 = Wire(Vec(32, UInt(2.W)))
   val c1 = Wire(Vec(16, UInt(3.W)))
   val c2 = Reg(Vec(8, UInt(4.W)))
@@ -46,7 +46,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
   for(i <- 0 until 4){
     cpopTmp(i) := PopCount(io.src(i*16+15, i*16))
   }
-  
+
   val cpopLo32 = cpopTmp(0) +& cpopTmp(1)
   val cpopHi32 = cpopTmp(2) +& cpopTmp(3)
 
@@ -79,13 +79,13 @@ class ClmulModule(implicit p: Parameters) extends XSModule {
   (0 until 32) map { i => mul1(i) := mul0(i*2) ^ mul0(i*2+1)}
   (0 until 16) map { i => mul2(i) := mul1(i*2) ^ mul1(i*2+1)}
   (0 until 8) map { i => mul3(i) := mul2(i*2) ^ mul2(i*2+1)}
- 
+
   val res = ParallelXOR(mul3)
- 
+
   val clmul  = res(63,0)
   val clmulh = res(127,64)
   val clmulr = res(126,63)
- 
+
   io.out := LookupTreeDefault(funcReg, clmul, List(
     BMUOpType.clmul  -> clmul,
     BMUOpType.clmulh -> clmulh,

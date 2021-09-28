@@ -44,7 +44,8 @@ case class DCacheParameters
   nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  alwaysReleaseData: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -68,7 +69,7 @@ case class DCacheParameters
 // --------------------------------------
 //                  |
 //                  DCacheTagOffset
-// 
+//
 //           Virtual Address
 // --------------------------------------
 // | Above index  | Set | Bank | Offset |
@@ -303,16 +304,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
-  println("DCache:") 
-  println("  DCacheSets: " + DCacheSets) 
-  println("  DCacheWays: " + DCacheWays) 
-  println("  DCacheBanks: " + DCacheBanks) 
-  println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits) 
-  println("  DCacheWordOffset: " + DCacheWordOffset) 
-  println("  DCacheBankOffset: " + DCacheBankOffset) 
-  println("  DCacheSetOffset: " + DCacheSetOffset) 
-  println("  DCacheTagOffset: " + DCacheTagOffset) 
-  println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset) 
+  println("DCache:")
+  println("  DCacheSets: " + DCacheSets)
+  println("  DCacheWays: " + DCacheWays)
+  println("  DCacheBanks: " + DCacheBanks)
+  println("  DCacheSRAMRowBits: " + DCacheSRAMRowBits)
+  println("  DCacheWordOffset: " + DCacheWordOffset)
+  println("  DCacheBankOffset: " + DCacheBankOffset)
+  println("  DCacheSetOffset: " + DCacheSetOffset)
+  println("  DCacheTagOffset: " + DCacheTagOffset)
+  println("  DCacheAboveIndexOffset: " + DCacheAboveIndexOffset)
 
   //----------------------------------------
   // core data structures
@@ -384,8 +385,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // TODO: remove replay and nack
     ldu(w).io.nack := false.B
 
-    ldu(w).io.disable_ld_fast_wakeup := 
-      mainPipe.io.disable_ld_fast_wakeup(w) || 
+    ldu(w).io.disable_ld_fast_wakeup :=
+      mainPipe.io.disable_ld_fast_wakeup(w) ||
       bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
   }
 

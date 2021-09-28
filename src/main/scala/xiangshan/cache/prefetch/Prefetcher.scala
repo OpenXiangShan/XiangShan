@@ -42,11 +42,11 @@ class PrefetchReq(implicit p: Parameters) extends PrefetchBundle {
 }
 
 class PrefetchResp(implicit p: Parameters) extends PrefetchBundle {
-  
+
 }
 
 class PrefetchFinish(implicit p: Parameters) extends PrefetchBundle {
-  
+
 }
 
 class PrefetchTrain(implicit p: Parameters) extends PrefetchBundle {

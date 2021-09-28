@@ -57,7 +57,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val quotIter = Wire(UInt(len.W))
   val quotM1Iter = Wire(UInt(len.W))
   val aLZC = Wire(UInt((lzc_width + 1).W))
-  val dLZC = Wire(UInt((lzc_width + 1).W)) 
+  val dLZC = Wire(UInt((lzc_width + 1).W))
 
   val rNext = Wire(UInt(itn_len.W))
   val rNextPd = Wire(UInt(itn_len.W))
@@ -156,7 +156,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val remSpecialReg = RegEnable(remSpecial, state(s_pre_1))
 
   // s_pre_1
-  val quotSign = Mux(state(s_idle), aSign ^ dSign, true.B) // if not s_idle then must be s_pre_1 & dIsZero, and that we have 
+  val quotSign = Mux(state(s_idle), aSign ^ dSign, true.B) // if not s_idle then must be s_pre_1 & dIsZero, and that we have
   val rSign = aSign
   val quotSignReg = RegEnable(quotSign, in_fire | (state(s_pre_1) & dIsZero))
   val rSignReg = RegEnable(rSign, in_fire)
@@ -201,7 +201,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val qInit = Mux(initCmpPos2, UIntToOH(quot_pos_2, 5), Mux(initCmpPos1, UIntToOH(quot_pos_1, 5), UIntToOH(quot_0, 5)))
 
   // in pre_1 we also obtain m_i + 16u * d for all u
-  // udNeg -> (rud, r2ud) -> (rudPmNeg, r2udPmNeg) 
+  // udNeg -> (rud, r2ud) -> (rudPmNeg, r2udPmNeg)
   val dPos = Cat(0.U(1.W), dNormReg)                          // +d, 0.1xxx, (1, 64)
   val dNeg = -Cat(0.U(1.W), dNormReg) // -d, 1.xxxx, (1, 64)
   // val m = Wire(Vec(4, UInt(7.W)))     // we have to sigext them to calculate rqd-m_k
@@ -245,11 +245,11 @@ class SRT16DividerDataModule(len: Int) extends Module {
   )
   udNeg := VecInit( Cat(SignExt(dPos, 66), 0.U(2.W)),
                     Cat(SignExt(dPos, 67), 0.U(1.W)),
-                    0.U, 
+                    0.U,
                     Cat(SignExt(dNeg, 67), 0.U(1.W)),
                     Cat(SignExt(dNeg, 66), 0.U(2.W))
   )
-  
+
   rudNeg := VecInit(Seq.tabulate(5){i => udNeg(i)(itn_len-2, itn_len-11)})
   r2udNeg := VecInit(Seq.tabulate(5){i => udNeg(i)(itn_len-2, itn_len-13)})
   // r3udNeg := VecInit(Seq.tabulate(5){i => udNeg(i)(itn_len-2, itn_len-13)})
@@ -269,7 +269,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   def DetectSign(signs: UInt, name: String): UInt = {
     val qVec = Wire(Vec(5, Bool())).suggestName(name)
     qVec(quot_neg_2) := signs(0) && signs(1) && signs(2)
-    qVec(quot_neg_1) := ~signs(0) && signs(1) && signs(2) 
+    qVec(quot_neg_1) := ~signs(0) && signs(1) && signs(2)
     qVec(quot_0) := signs(2) && ~signs(1)
     qVec(quot_pos_1) := signs(3) && ~signs(2) && ~signs(1)
     qVec(quot_pos_2) := ~signs(3) && ~signs(2) && ~signs(1)
@@ -346,7 +346,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   // quotIter := Mux(state(s_pre_1),  0.U(len.W),
   //                     Mux(state(s_iter), quotIterNext,
   //                       Mux(quotSignReg, aInverter, quotIterReg)))
-  // quotM1Iter := Mux(state(s_pre_1), 
+  // quotM1Iter := Mux(state(s_pre_1),
   //                       0.U(len.W), Mux(state(s_iter), quotM1IterNext,
   //                         Mux(quotSignReg, dInverter, quotM1IterReg)))
 
@@ -381,7 +381,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val rShifted = rightShifter.io.out
   val rFinal = RegEnable(Mux(specialReg, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = RegEnable(Mux(specialReg, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))
-  
+
   val res = Mux(isHi, rFinal, qFinal)
   io.out_data := Mux(isW,
     SignExt(res(31, 0), len),
@@ -448,8 +448,8 @@ class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len
 
   val divDataModule = Module(new SRT16DividerDataModule(len))
 
-  val kill_w = uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
-  val kill_r = !divDataModule.io.in_ready && uopReg.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_w = uop.robIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_r = !divDataModule.io.in_ready && uopReg.robIdx.needFlush(io.redirectIn, io.flushIn)
 
   divDataModule.io.src(0) := io.in.bits.src(0)
   divDataModule.io.src(1) := io.in.bits.src(1)

@@ -102,7 +102,7 @@ trait HasPipelineReg {
 
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
-  val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.roqIdx.needFlush(io.redirectIn, io.flushIn))
+  val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.robIdx.needFlush(io.redirectIn, io.flushIn))
 
   for (i <- 0 until latency - 1) {
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
