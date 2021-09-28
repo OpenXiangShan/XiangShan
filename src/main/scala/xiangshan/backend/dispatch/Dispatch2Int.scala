@@ -36,10 +36,18 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
   io.enqIQCtrl <> DontCare
   for (i <- 0 until exuParameters.AluCnt) {
     io.enqIQCtrl(i) <> io.fromDq(i)
-    if (i > 0) {
-      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
-      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+
+    val jmpCanAccept = FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+    val mduCanAccept = FuType.mduCanAccept(io.fromDq(i).bits.ctrl.fuType)
+    if (i >= exuParameters.MduCnt) {
+      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !jmpCanAccept && !mduCanAccept
+      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !jmpCanAccept && !mduCanAccept
     }
+    else if (i >= exuParameters.JmpCnt) {
+      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !jmpCanAccept
+      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !jmpCanAccept
+    }
+
     io.readRf(2*i) := io.enqIQCtrl(i).bits.psrc(0)
     io.readRf(2*i + 1) := io.enqIQCtrl(i).bits.psrc(1)
 
