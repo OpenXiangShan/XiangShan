@@ -47,6 +47,8 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
 
   val entries = Reg(Vec(q.normalNWays, new PtwResp))
   val entries_v = RegInit(VecInit(Seq.fill(q.normalNWays)(false.B)))
+  // val entries_asid = RegInit(VecInit(Seq.fill(q.normalNWays)(0.U(AsidLength.W))))
+  val entries_asid = VecInit(entries.map(_.asid))
   val replace = ReplacementPolicy.fromString(Some("random"), q.normalNWays)
   val refillIdx = replaceWrapper(entries_v, replace.way)
 
@@ -58,7 +60,7 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
   for (i <- req.indices) {
     val vpn = req(i)(0).bits.vpn
     val hitVec = VecInit(entries.zipWithIndex.map{ case (e, i) =>
-      e.entry.hit(vpn, allType = true) && entries_v(i) && ~refillMask(i) && e.entry.asid === satp.asid
+      e.entry.hit(vpn, allType = true) && entries_v(i) && ~refillMask(i) && entries_asid(i) === satp.asid
     })
 
     hitVec.suggestName("hitVec")
@@ -102,13 +104,13 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
       when (sfence.bits.rs2) {
         entries_v := 0.U.asTypeOf(entries_v.cloneType)
       }.otherwise {
-        entries_v.zipWithIndex.map{a => a._1 := a._1 & entries(a._2).entry.perm.get.g & !(entries(a._2).entry.asid === satp.asid)}
+        entries_v.zipWithIndex.map{a => a._1 := a._1 & entries(a._2).entry.perm.get.g & !(entries_asid(a._2) === satp.asid)}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
         entries_v := (entries_v.zip(sfence_hit).map(a => a._1 & !a._2))
       }.otherwise {
-        entries_v := (entries_v.zipWithIndex.map(a => a._1 & !(sfence_hit(a._2) && entries(a._2).entry.asid === satp.asid && !entries(a._2).entry.perm.get.g)))
+        entries_v := (entries_v.zipWithIndex.map(a => a._1 & !(sfence_hit(a._2) && entries_asid(a._2) === satp.asid && !entries(a._2).entry.perm.get.g)))
       }
     }
   }

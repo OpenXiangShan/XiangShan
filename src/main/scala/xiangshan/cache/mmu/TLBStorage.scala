@@ -41,7 +41,7 @@ class TLBFA(
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
-  val asids = entries.map(_.asid)
+  val asids = RegInit(VecInit(Seq.fill(nWays)(0.U(AsidLength.W))))
 
   for (i <- 0 until ports) {
     val req = io.r.req(i)
@@ -51,7 +51,7 @@ class TLBFA(
     val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
 
     val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit(entries.zip(v zip refill_mask.asBools).map{case (e, m) => e.hit(vpn) && m._1 && !m._2 && e.asid === io.asid})
+    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn) && m._1 && !m._2 && asids(e._2) === io.asid})
 
     hitVec.suggestName("hitVec")
 
@@ -72,6 +72,7 @@ class TLBFA(
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
     entries(io.w.bits.wayIdx).apply(io.w.bits.data)
+    asids(io.w.bits.wayIdx) := io.w.bits.data.asid
   }
 
   val sfence = io.sfence
@@ -99,14 +100,14 @@ class TLBFA(
 
   val victim_idx = io.w.bits.wayIdx
   io.victim.out.valid := v(victim_idx) && io.w.valid && entries(victim_idx).level.getOrElse(3.U) === 2.U
-  io.victim.out.bits := ns_to_n(entries(victim_idx))
+  io.victim.out.bits.entry := ns_to_n(entries(victim_idx))
+  io.victim.out.bits.asid := asids(victim_idx)
 
   def ns_to_n(ns: TlbEntry): TlbEntry = {
     val n = Wire(new TlbEntry(pageNormal = true, pageSuper = false))
     n.perm := ns.perm
     n.ppn := ns.ppn
     n.tag := ns.tag
-    n.asid := ns.asid
     n
   }
 
@@ -160,11 +161,12 @@ class TLBSA(
 
     val ridx = get_idx(vpn, nSets)
     val vidx = RegNext(Mux(req.fire(), v(ridx), VecInit(Seq.fill(nWays)(false.B))))
+    val asids_idx = RegNext(Mux(req.fire(), asids(ridx), VecInit(Seq.fill(nWays)(0.U(AsidLength.W)))))
     entries.io.r.req.valid := req.valid
     entries.io.r.req.bits.apply(setIdx = ridx)
 
     val data = entries.io.r.resp.data
-    val hitVec = VecInit(data.zip(vidx).map{ case (e, vi) => e.hit(vpn_reg) && vi && e.asid === io.asid})
+    val hitVec = VecInit(data.zip(vidx.zip(asids_idx)).map{ case (e, vi) => e.hit(vpn_reg) && vi._1 && vi._2 === io.asid})
     resp.bits.hit := Cat(hitVec).orR
     resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
     resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
@@ -178,8 +180,8 @@ class TLBSA(
 
     entries.io.w.apply(
       valid = io.w.valid || io.victim.in.valid,
-      setIdx = Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)),
-      data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
+      setIdx = Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.entry.tag, nSets)),
+      data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits.entry),
       waymask = UIntToOH(io.w.bits.wayIdx)
     )
 
@@ -190,7 +192,7 @@ class TLBSA(
 
   asids.zipWithIndex.map{ case (a , i) => a.zipWithIndex.map{ case (b , j) => {
     when(entries.io.w.req.valid && entries.io.w.req.bits.setIdx === i.U && io.w.bits.wayIdx === j.U) {
-      b := entries.io.w.req.bits.data(0).asid
+      b := Mux(io.w.valid, io.w.bits.data.asid, io.victim.in.bits.asid)
     }
   }}}
 
@@ -200,7 +202,7 @@ class TLBSA(
     v(get_idx(io.w.bits.data.entry.tag, nSets))(io.w.bits.wayIdx) := true.B
   }
   when (io.victim.in.valid) {
-    v(get_idx(io.victim.in.bits.tag, nSets))(io.w.bits.wayIdx) := true.B
+    v(get_idx(io.victim.in.bits.entry.tag, nSets))(io.w.bits.wayIdx) := true.B
   }
 
   val sfence = io.sfence
@@ -234,7 +236,7 @@ class TLBSA(
   for (i <- 0 until nSets) {
     for (j <- 0 until nWays) {
       XSPerfAccumulate(s"refill${i}_${j}", (io.w.valid || io.victim.in.valid) &&
-        (Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.tag, nSets)) === i.U) &&
+        (Mux(io.w.valid, get_idx(io.w.bits.data.entry.tag, nSets), get_idx(io.victim.in.bits.entry.tag, nSets)) === i.U) &&
         (j.U === io.w.bits.wayIdx)
       )
     }

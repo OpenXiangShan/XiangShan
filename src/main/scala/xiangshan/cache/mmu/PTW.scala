@@ -209,6 +209,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
     outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(0).bits.pf := false.B
+    outArb(i).in(0).bits.asid := cache.io.resp.bits.asid
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := mq_out.valid && mq_out.bits.source===i.U
@@ -249,7 +250,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
     ptw_resp.pf := pte_in.isPf(2.U)
-    ptw_resp.entry.asid := satp.asid
+    ptw_resp.asid := satp.asid
 
     ptw_resp
   }

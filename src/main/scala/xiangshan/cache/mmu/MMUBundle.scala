@@ -188,8 +188,6 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
             else UInt(ppnLen.W)
   val perm = new TlbPermBundle
 
-  val asid = UInt(AsidLength.W)
-
   def hit(vpn: UInt): Bool = {
     if (!pageSuper) vpn === tag
     else if (!pageNormal) MuxLookup(level.get, false.B, Seq(
@@ -229,8 +227,6 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.pa := PMAMode.atomic(pmaMode)
     this.perm.pi := PMAMode.icache(pmaMode)
     this.perm.pd := PMAMode.dcache(pmaMode)
-
-    this.asid := item.entry.asid
 
     this
   }
@@ -289,8 +285,14 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
     val data = Output(new PtwResp)
   }))
   val victim = new Bundle {
-    val out = ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false)))
-    val in = Flipped(ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false))))
+    val out = ValidIO(Output(new Bundle {
+      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
+      val asid = UInt(AsidLength.W)
+    }))
+    val in = Flipped(ValidIO(Output(new Bundle {
+      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
+      val asid = UInt(AsidLength.W)
+    })))
   }
   val sfence = Input(new SfenceBundle())
   val asid = Input(UInt(AsidLength.W))
@@ -492,7 +494,6 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
-  val asid = UInt(AsidLength.W)
 
   def hit(vpn: UInt, allType: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
@@ -511,17 +512,16 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U, asid_now: UInt) {
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.level.map(_ := level)
-    this.asid := asid_now
   }
 
-  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U, asid_now: UInt) = {
+  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, pte, level, asid_now)
+    e.refill(vpn, pte, level)
     e
   }
 
@@ -543,7 +543,6 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
-  val asids = Vec(num,UInt(AsidLength.W))
 
   def tagClip(vpn: UInt) = {
     require(vpn.getWidth == vpnLen)
@@ -558,7 +557,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
   }
 
-  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt, asid_now: UInt) : PtwEntries = {
+  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) : PtwEntries = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
@@ -569,7 +568,6 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
       ps.ppns(i) := pte.ppn
       ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.perms.map(_(i) := pte.perm)
-      ps.asids(i) := asid_now
     }
     ps
   }
@@ -595,6 +593,7 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf  = Bool()
+  val asid = UInt(AsidLength.W)
 
   def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid_now: UInt) = {
     this.entry.level.map(_ := level)
@@ -602,7 +601,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
     this.pf := pf
-    this.entry.asid := asid_now
+    this.asid := asid_now
   }
 
   override def toPrintable: Printable = {
