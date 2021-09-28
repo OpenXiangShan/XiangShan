@@ -28,6 +28,7 @@ class NewMissReq(implicit p: Parameters) extends DCacheBundle {
 
   val req_coh = new ClientMetadata
   val replace_coh = new ClientMetadata
+  val replace_tag = UInt(tagBits.W)
   val id = UInt(reqIdWidth.W)
 
   def isLoad = source === LOAD_SOURCE.U
@@ -266,7 +267,9 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.replace_pipe_req.valid := !s_replace_req
   val replace = io.replace_pipe_req.bits
   replace.miss_id := io.id
+  replace.way_en := req.way_en
   replace.vaddr := req.vaddr // TODO: make sure only set in vaddr is used
+  replace.tag := req.replace_tag
 
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   val refill = io.refill_pipe_req.bits
