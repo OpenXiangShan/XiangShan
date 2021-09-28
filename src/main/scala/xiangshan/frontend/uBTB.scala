@@ -64,7 +64,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
     dataMem.io.r.req.valid := io.read_pc.valid
     dataMem.io.r.req.bits.setIdx := ubtbAddr.getIdx(io.read_pc.bits)
-    
+
     io.read_pc.ready := dataMem.io.r.req.ready
 
     val hit_entry = dataMem.io.r.resp.data(0)
@@ -86,7 +86,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   bank.read_pc.valid := io.s0_fire
   bank.read_pc.bits := s0_pc
-  
+
   io.s1_ready := bank.read_pc.ready
 
   io.out.resp := io.in.bits.resp_in(0)

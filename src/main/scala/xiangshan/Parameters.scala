@@ -93,7 +93,7 @@ case class XSCoreParameters
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
       ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
       ras.io.in.bits.resp_in(0) := ittage.io.out.resp
-      
+
       (preds, ras.io.out.resp)
     }),
 
@@ -103,7 +103,6 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  BrqSize: Int = 32,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
@@ -114,7 +113,7 @@ case class XSCoreParameters
   NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
-  RoqSize: Int = 192,
+  RobSize: Int = 192,
   EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
@@ -293,14 +292,12 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
-  val BrqSize = coreParams.BrqSize
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
-  val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val RoqSize = coreParams.RoqSize
+  val RobSize = coreParams.RobSize
   val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32

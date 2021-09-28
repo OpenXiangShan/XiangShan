@@ -306,19 +306,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
-  csrioIn.perf.retiredInstr <> ctrlBlock.io.roqio.toCSR.perfinfo.retiredInstr
+  csrioIn.perf.retiredInstr <> ctrlBlock.io.robio.toCSR.perfinfo.retiredInstr
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
 
-  csrioIn.fpu.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B
-  csrioIn.fpu.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  csrioIn.fpu.dirty_fs <> ctrlBlock.io.robio.toCSR.dirty_fs
   csrioIn.fpu.frm <> exuBlocks(2).io.fuExtra.frm.get
-  csrioIn.exception <> ctrlBlock.io.roqio.exception
-  csrioIn.isXRet <> ctrlBlock.io.roqio.toCSR.isXRet
-  csrioIn.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
-  csrioIn.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
+  csrioIn.exception <> ctrlBlock.io.robio.exception
+  csrioIn.isXRet <> ctrlBlock.io.robio.toCSR.isXRet
+  csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
+  csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   csrioIn.externalInterrupt <> io.externalInterrupt
 
@@ -334,10 +334,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.stData := stData
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
-  memBlock.io.lsqio.roq <> ctrlBlock.io.roqio.lsq
-  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.uop.lqIdx
-  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.uop.sqIdx
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.uop.ctrl.commitType)
+  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
+  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.robio.exception.bits.uop.lqIdx
+  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.robio.exception.bits.uop.sqIdx
+  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater(2))
   val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize-1))

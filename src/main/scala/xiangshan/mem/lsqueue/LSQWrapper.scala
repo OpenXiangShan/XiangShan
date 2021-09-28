@@ -25,7 +25,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbRequestIO}
 import xiangshan.mem._
-import xiangshan.backend.roq.RoqLsqIO
+import xiangshan.backend.rob.RobLsqIO
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val lsIdx = Input(new LSIdx)
@@ -67,7 +67,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
-    val roq = Flipped(new RoqLsqIO)
+    val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect))
     val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
@@ -108,7 +108,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.loadDataForwarded <> io.loadDataForwarded
   loadQueue.io.needReplayFromRS <> io.needReplayFromRS
   loadQueue.io.ldout <> io.ldout
-  loadQueue.io.roq <> io.roq
+  loadQueue.io.rob <> io.rob
   loadQueue.io.rollback <> io.rollback
   loadQueue.io.dcache <> io.dcache
   loadQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
@@ -122,7 +122,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.storeDataIn <> io.storeDataIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
-  storeQueue.io.roq <> io.roq
+  storeQueue.io.rob <> io.rob
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt

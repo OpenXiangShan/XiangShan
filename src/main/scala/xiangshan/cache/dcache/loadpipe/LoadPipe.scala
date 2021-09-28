@@ -196,7 +196,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
-  // 
+  //
   // * report a miss if bank conflict is detected
   val real_miss = !s2_hit || s2_nack
   resp.bits.miss := real_miss || io.bank_conflict_slow

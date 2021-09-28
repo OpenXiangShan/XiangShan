@@ -463,7 +463,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     XSPerf(
       "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
       BoolStopWatch(
-        start = entry.io.req.fire(), 
+        start = entry.io.req.fire(),
         stop = entry.io.resp.fire(),
         startHighPriority = true)
     )

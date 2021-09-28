@@ -24,7 +24,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.mem._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 
 
 // Data module define
@@ -174,7 +174,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
     }
 
     val parallelFwdResult = parallelFwd(matchResultVec).asTypeOf(new FwdEntry)
-  
+
     // validFast is generated the same cycle with query
     io.forwardValidFast(i) := parallelFwdResult.validFast
     // valid is generated 1 cycle after query request
