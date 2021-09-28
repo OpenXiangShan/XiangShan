@@ -95,7 +95,6 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
-    val pmpResp = Input(new PMPRespBundle())
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
@@ -119,7 +118,6 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     io.rsFeedback.bits.hit,
     io.rsFeedback.bits.rsIdx
   )
-
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
@@ -145,11 +143,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
+    val pmpResp = Input(new PMPRespBundle)
     val out = Decoupled(new LsPipelineBundle)
   })
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.storeAccessFault || io.pmpResp.ld
   io.out.valid := io.in.valid
 
 }
@@ -202,11 +202,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
-  store_s1.io.pmpResp <> io.pmp
   store_s1.io.rsFeedback <> io.rsFeedback
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
+  store_s2.io.pmpResp <> io.pmp
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout

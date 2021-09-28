@@ -331,7 +331,8 @@ class PMPChecker(lgMaxSize: Int)(implicit p: Parameters) extends PMPModule {
     Mux(is_match, cur, prev)
   }
 
-  io.resp.ld := TlbCmd.isRead(req.cmd) && !TlbCmd.isAtom(req.cmd) && !res.cfg.r
-  io.resp.st := (TlbCmd.isWrite(req.cmd) || TlbCmd.isAtom(req.cmd)) && !res.cfg.w
-  io.resp.instr := TlbCmd.isExec(req.cmd) && !res.cfg.x
+  // NOTE: if itlb or dtlb may get blocked, this may also need do it
+  io.resp.ld := RegNext(TlbCmd.isRead(req.cmd) && !TlbCmd.isAtom(req.cmd) && !res.cfg.r)
+  io.resp.st := RegNext((TlbCmd.isWrite(req.cmd) || TlbCmd.isAtom(req.cmd)) && !res.cfg.w)
+  io.resp.instr := RegNext(TlbCmd.isExec(req.cmd) && !res.cfg.x)
 }

@@ -35,7 +35,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
-  // load to load fast path is limited to ld (64 bit) used as vaddr src1 only 
+  // load to load fast path is limited to ld (64 bit) used as vaddr src1 only
   val data = UInt(XLEN.W)
   val valid = Bool()
 }
@@ -73,8 +73,8 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   val fastpath_mask  = Mux1H(io.loadFastMatch, fastpath_masks)
 
   // select vaddr from 2 alus
-  val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr) 
-  val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask) 
+  val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr)
+  val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
   XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
   // query DTLB
@@ -137,7 +137,6 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
-    val pmpResp = Input(new PMPRespBundle())
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
     val fullForwardFast = Output(Bool())
@@ -187,7 +186,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.mmio := s1_mmio && !s1_exception
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
-  io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld | io.pmpResp.ld
+  io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
@@ -209,22 +208,30 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val out = Decoupled(new LsPipelineBundle)
     val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
+    val pmpResp = Input(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
+
+    val dcache_kill = Output(Bool())
   })
+
+  val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
+  excep(loadAccessFault) := io.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmp.ld
+  val s2_exception = selectLoad(excep, false).asUInt.orR
 
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_data_invalid = io.lsq.dataInvalid
-  val s2_exception = selectLoad(io.in.bits.uop.cf.exceptionVec, false).asUInt.orR
   val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
+
+
 
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
@@ -233,7 +240,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
 
   // assert(!s2_forward_fail)
-
+  io.dcache_kill := io.in.valid && io.pmp.ld
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
@@ -290,7 +297,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // if forward fail, replay this inst
   io.out.bits.uop.ctrl.replayInst := s2_forward_fail && !s2_mmio
   io.out.bits.mmio := s2_mmio
-  
+  io.out.bits.uop.cf.exceptionVec := excep
+
   // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
   // We use io.dataForwarded instead. It means forward logic have prepared all data needed,
@@ -388,6 +396,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
 
+  io.dcache.s2_kill <> load_s2.io.dcache_kill
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
