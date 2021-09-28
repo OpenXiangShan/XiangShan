@@ -191,7 +191,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val disableSfence = Output(Bool())
 }
 
-class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst
 {
   val csrio = IO(new CSRFileIO)
 
@@ -383,14 +383,23 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
   // PMP Mapping
-  val pmp = Reg(Vec(NumPMP, new PMPEntry()))
+  val pmp = Wire(Vec(NumPMP, new PMPEntry()))
   val pmpMapping = if (NumPMP > 0) {
     val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
     def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
+
+    /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
+    val cfgMerged = Reg(Vec(NumPMP / pmpCfgPerCSR, UInt(XLEN.W)))
+    val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
+    val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
+    for (i <- pmp.indices) {
+      pmp(i).gen(cfgs(i), addr(i))
+    }
+
     val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
       MaskedRegMap(
         addr = PmpcfgBase + pmpCfgIndex(i),
-        reg = pmp.map(_.cfg).slice(i, i + pmpCfgPerCSR).asUInt,
+        reg = cfgMerged(i/pmpCfgPerCSR),
         wmask = WritableMask,
         wfn = new PMPConfig().write_cfg_vec
       ))
@@ -398,7 +407,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     val addr_mapping = (0 until NumPMP).map(i => {Map(
       MaskedRegMap(
         addr = PmpaddrBase + i,
-        reg = pmp(i).addr,
+        reg = addr(i),
         wmask = WritableMask,
         wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1)) else pmp(i).write_addr },
         rmask = WritableMask,

@@ -337,7 +337,7 @@ trait HasXSParameter {
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPMP = coreParams.NumPMP
-  val PlatformGrain: Int = log2Up(coreParams.RefillSize) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
+  val PlatformGrain: Int = 2 // log2Up(coreParams.RefillSize) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4

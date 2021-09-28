@@ -172,10 +172,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   toITLB(0).valid         := f1_valid
+  toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := align(f1_ftq_req.startAddr, blockBytes)
   toITLB(0).bits.debug.pc := align(f1_ftq_req.startAddr, blockBytes)
   
   toITLB(1).valid         := f1_valid && f1_doubleLine
+  toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := align(f1_ftq_req.fallThruAddr, blockBytes)
   toITLB(1).bits.debug.pc := align(f1_ftq_req.fallThruAddr, blockBytes)
 

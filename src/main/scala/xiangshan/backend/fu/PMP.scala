@@ -25,11 +25,11 @@ import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 
 trait PMPConst {
-  val OffBits = 2 // minimal 4bytes
+  val PMPOffBits = 2 // minimal 4bytes
 }
 
 abstract class PMPBundle(implicit p: Parameters) extends XSBundle with PMPConst {
-  val CoarserGrain: Boolean = PlatformGrain > OffBits
+  val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
 }
 
 abstract class PMPModule(implicit p: Parameters) extends XSModule with PMPConst with HasCSRConst
@@ -55,26 +55,29 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
 
   def write_cfg_vec(cfgs: UInt): UInt = {
-    val cfgVec = WireInit(Vec(cfgs.getWidth/8, new PMPConfig))
+    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
-      val tmp = cfgs((i+1)*8-1, (i+1)*8).asUInt.asTypeOf(new PMPConfig)
+      val tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
       cfgVec(i) := tmp
       cfgVec(i).w := tmp.w && tmp.r
       if (CoarserGrain) { cfgVec(i).a := Cat(tmp.a(1), tmp.a.orR) }
     }
     cfgVec.asUInt
   }
+
+  def reset() = {
+    l := false.B
+    a := 0.U
+  }
 }
 
+/** PMPBase for CSR unit
+  * with only read and write logic
+  */
 @chiselName
-class PMPEntry(implicit p: Parameters) extends PMPBundle {
+class PMPBase(implicit p: Parameters) extends PMPBundle {
   val cfg = new PMPConfig
-  val addr = UInt((PAddrBits - OffBits).W)
-
-  def mask = match_mask(addr) // help to match in napot
-
-  /** compare_addr is used to compare with input addr */
-  def compare_addr = ((addr << OffBits) & ~(((1 << PlatformGrain) - 1).U(PAddrBits.W))).asUInt
+  val addr = UInt((PAddrBits - PMPOffBits).W)
 
   /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
     * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
@@ -82,7 +85,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBundle {
     * The low OffBits is dropped
     */
   def read_addr() = {
-    val G = PlatformGrain - OffBits
+    val G = PlatformGrain - PMPOffBits
     require(G >= 0)
     if (G == 0) {
       addr
@@ -94,7 +97,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBundle {
   }
 
   def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
-    val G = PlatformGrain - OffBits
+    val G = PlatformGrain - PMPOffBits
     require(G >= 0)
     if (G == 0) {
       addr
@@ -109,11 +112,31 @@ class PMPEntry(implicit p: Parameters) extends PMPBundle {
     * paddr for outside addr.
     */
   def write_addr(next: PMPEntry)(paddr: UInt) = {
-    Mux(!cfg.addr_locked(next.cfg), paddr(PAddrBits-1, OffBits), addr)
+    Mux(!cfg.addr_locked(next.cfg), paddr, addr)
   }
   def write_addr(paddr: UInt) = {
-    Mux(!cfg.addr_locked, paddr(PAddrBits-1, OffBits), addr)
+    Mux(!cfg.addr_locked, paddr, addr)
   }
+
+  /** mask the data's low num bits (lsb) */
+  def mask_low_bits(data: UInt, num: Int): UInt = {
+    require(num >= 0)
+    // use Cat instead of & with mask to avoid "Signal Width" problem
+    if (num == 0) { data }
+    else { Cat(data(data.getWidth-1, num), 0.U((num-1).U)) }
+  }
+}
+
+/** PMPEntry for outside pmp copies
+  * with one more elements mask to help napot match
+  * TODO: make mask an element, not an method, for timing opt
+  */
+@chiselName
+class PMPEntry(implicit p: Parameters) extends PMPBase {
+  def mask = match_mask(addr) // help to match in napot
+
+  /** compare_addr is used to compare with input addr */
+  def compare_addr = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PAddrBits.W))).asUInt
 
   /** size and maxSize are all log2 Size
     * for dtlb, the maxSize is bXLEN which is 8
@@ -126,20 +149,10 @@ class PMPEntry(implicit p: Parameters) extends PMPBundle {
       Mux(cfg.tor, torMatch(paddr, lgSize, lgMaxSize, last_pmp), false.B))
   }
 
-  /** the below methods are used to generate the above methods */
-
-  /** mask the data's low num bits (lsb) */
-  def mask_low_bits(data: UInt, num: Int): UInt = {
-    require(num >= 0)
-    // use Cat instead of & with mask to avoid "Signal Width" problem
-    if (num == 0) { data }
-    else { Cat(data(data.getWidth-1, num), 0.U((num-1).U)) }
-  }
-
   /** generate match mask to help match in napot mode */
   def match_mask(paddr: UInt) = {
-    val tmp_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> OffBits).U((paddr.getWidth + 1).W)
-    ~Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << OffBits) - 1).U(OffBits.W))
+    val tmp_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    ~Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
   def boundMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int) = {
@@ -198,6 +211,12 @@ class PMPEntry(implicit p: Parameters) extends PMPBundle {
   def reset() = {
     cfg.l := 0.U
     cfg.a := 0.U
+  }
+
+  def gen(cfg: PMPConfig, addr: UInt) = {
+    require(addr.getWidth == this.addr.getWidth)
+    this.cfg := cfg
+    this.addr := addr
   }
 }
 
