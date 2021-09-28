@@ -23,8 +23,8 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.prefetch.L1plusPrefetcher
-import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.cache.mmu.{TLB, TlbPtwIO, TlbRequestIO}
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker}
 import system.L1CacheErrorInfo
 
 
@@ -66,14 +66,26 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
   //icache
 
+  // pmp
+  val pmp = Module(new PMP())
+  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3)).io))
+  pmp.io.distribute_csr := io.csrCtrl.distribute_csr
+  for (i <- pmp_check.indices) {
+    pmp_check(i).env.pmp  := pmp.io.pmp
+    pmp_check(i).env.mode := io.tlbCsr.priv.imode
+    ifu.io.pmp(i) <> pmp_check(i).resp
+  }
+
+
   io.ptw <> TLB(
     in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
     sfence = io.sfence,
     csr = io.tlbCsr,
     width = 2,
     shouldBlock = true,
-    itlbParams
-  )  
+    itlbParams,
+    Seq(pmp_check(0).req, pmp_check(1).req)
+  )
   //TODO: modules need to be removed
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module

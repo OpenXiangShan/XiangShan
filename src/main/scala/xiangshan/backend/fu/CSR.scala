@@ -189,6 +189,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
+  // distributed csr w
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst
@@ -383,13 +384,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
   // PMP Mapping
-  val pmp = Wire(Vec(NumPMP, new PMPEntry()))
-  val pmpMapping = if (NumPMP > 0) {
+  val pmp = Wire(Vec(NumPMP, new PMPBase()))
+  val pmpMapping = if (NumPMP > 0) { // TODO: remove duplicate codes
     val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
     def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
 
     /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
-    val cfgMerged = Reg(Vec(NumPMP / pmpCfgPerCSR, UInt(XLEN.W)))
+    val cfgMerged = RegInit(VecInit(Seq.fill(NumPMP / pmpCfgPerCSR)(0.U(XLEN.W))))
     val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
     val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
     for (i <- pmp.indices) {
@@ -411,7 +412,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         wmask = WritableMask,
         wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1)) else pmp(i).write_addr },
         rmask = WritableMask,
-        rfn = new PMPEntry().read_addr(pmp(i).cfg)
+        rfn = new PMPBase().read_addr(pmp(i).cfg)
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
     cfg_mapping ++ addr_mapping
@@ -732,6 +733,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   io.out.bits.uop.cf := cfOut
   io.out.bits.uop.ctrl.flushPipe := flushPipe
 
+  // send distribute csr a w signal
+  csrio.customCtrl.distribute_csr.w.valid := wen && permitted
+  csrio.customCtrl.distribute_csr.w.bits.data := wdata
+  csrio.customCtrl.distribute_csr.w.bits.addr := addr
+
   // Fix Mip/Sip write
   val fixMapping = Map(
     MaskedRegMap(Mip, mipReg.asUInt, mipFixMask),
@@ -807,9 +813,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
   tlbBundle.priv.imode := priviledgeMode
   tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
-
-  // PMP
-  tlbBundle.pmp := pmp
 
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))

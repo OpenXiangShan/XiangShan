@@ -182,7 +182,7 @@ case class XSCoreParameters
   ),
   useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
-  NumPMP: Int = 64, // 0 or 16 or 64
+  NumPMP: Int = 16, // 0 or 16 or 64
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),

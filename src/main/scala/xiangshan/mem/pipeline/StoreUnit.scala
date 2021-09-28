@@ -22,8 +22,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbPtwIO, TlbRequestIO, TlbReq, TlbResp, TlbCmd, TLB}
+import xiangshan.cache.mmu.{TLB, TlbCmd, TlbPtwIO, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
@@ -94,6 +95,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
+    val pmpResp = Input(new PMPRespBundle())
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
@@ -127,7 +129,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.bits.miss := false.B
   io.lsq.bits.mmio := s1_mmio && !s1_exception
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
-  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
+  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st || io.pmpResp.st
 
   // mmio inst with exception will be writebacked immediately
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
@@ -179,6 +181,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val flush = Input(Bool())
     val rsFeedback = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
+    val pmp = Input(new PMPRespBundle())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -199,6 +202,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
+  store_s1.io.pmpResp <> io.pmp
   store_s1.io.rsFeedback <> io.rsFeedback
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
@@ -219,5 +223,4 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   printPipeLine(store_s0.io.out.bits, store_s0.io.out.valid, "S0")
   printPipeLine(store_s1.io.out.bits, store_s1.io.out.valid, "S1")
-
 }

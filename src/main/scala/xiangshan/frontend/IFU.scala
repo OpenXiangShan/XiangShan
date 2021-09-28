@@ -24,6 +24,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu._
 import chisel3.experimental.verification
 import utils._
+import xiangshan.backend.fu.PMPRespBundle
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -61,7 +62,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface  
   val icacheInter     = new ICacheInterface 
   val toIbuffer       = Decoupled(new FetchToIBuffer)
-  val iTLBInter       = Vec(2, new BlockTlbRequestIO) 
+  val iTLBInter       = Vec(2, new BlockTlbRequestIO)
+  val pmp             = Vec(2, Input(new PMPRespBundle()))
 }
 
 // record the situation in which fallThruAddr falls into
@@ -95,7 +97,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (toMeta, toData, meta_resp, data_resp) =  (io.icacheInter.toIMeta, io.icacheInter.toIData, io.icacheInter.fromIMeta, io.icacheInter.fromIData)
   val (toMissQueue, fromMissQueue) = (io.icacheInter.toMissQueue, io.icacheInter.fromMissQueue)
   val (toITLB, fromITLB) = (VecInit(io.iTLBInter.map(_.req)), VecInit(io.iTLBInter.map(_.resp)))
-  
+  val fromPMP = io.pmp
+
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
   def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(blockOffBits - 1, 1) === 0.U
@@ -191,7 +194,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
   val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
-  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid), fromITLB.map(port => port.bits.excp.af.instr && port.valid))
+  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
+    (fromITLB zip fromPMP).map{ case (port, pmp) => (port.bits.excp.af.instr || pmp.instr) && port.valid})
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 

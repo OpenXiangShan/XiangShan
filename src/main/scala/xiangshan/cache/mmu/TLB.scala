@@ -23,7 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
-import xiangshan.backend.fu.PMPChecker
+import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -40,6 +40,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
+  val pmp = io.pmp
 
   val sfence = io.sfence
   val csr = io.csr
@@ -135,6 +136,10 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
+    pmp(i).addr := resp(i).bits.paddr
+    pmp(i).size := sizeReg
+    pmp(i).cmd := cmdReg
+
     val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
@@ -144,26 +149,19 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
-    val pmp_checker = Module(new PMPChecker(log2Ceil(XLEN/8)))
-    pmp_checker.io.env.priv := mode
-    pmp_checker.io.env.pmp := io.csr.pmp
-    pmp_checker.io.req.addr := resp(i).bits.paddr
-    pmp_checker.io.req.size := sizeReg
-    val pmp = pmp_checker.io.resp
-
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !(perm.pr && pmp.r)) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !(perm.pw && pmp.w)) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !(perm.pe && pmp.x)) && vmEnable && hit
+    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
+    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
     when(!vmEnable) {
       resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !(PMAMode.read(pmaMode) && pmp.r)) && TlbCmd.isRead(cmdReg)
-      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !(PMAMode.write(pmaMode) && pmp.w)) && TlbCmd.isWrite(cmdReg)
-      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !(PMAMode.execute(pmaMode) && pmp.x))
+      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
+      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
+      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
     (hit, miss, normal_hitVec, super_hitVec, validReg)
@@ -310,7 +308,8 @@ object TLB {
     csr: TlbCsrBundle,
     width: Int,
     shouldBlock: Boolean,
-    q: TLBParameters
+    q: TLBParameters,
+    pmp: Seq[PMPReqBundle]
   )(implicit p: Parameters) = {
     require(in.length == width)
 
@@ -319,6 +318,8 @@ object TLB {
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")
+    (pmp zip tlb.io.pmp).map(a => a._1 <> a._2)
+    require(pmp(0).size.getWidth == tlb.io.pmp(0).size.getWidth)
 
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

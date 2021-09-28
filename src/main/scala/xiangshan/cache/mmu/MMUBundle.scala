@@ -25,6 +25,7 @@ import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.PMPReqBundle
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
@@ -355,21 +356,19 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   }
 }
 
+class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
+  val ld = Bool()
+  val st = Bool()
+  val instr = Bool()
+}
+
 class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = UInt(PAddrBits.W)
   val miss = Bool()
   val mmio = Bool()
   val excp = new Bundle {
-    val pf = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
-    val af = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
+    val pf = new TlbExceptionBundle()
+    val af = new TlbExceptionBundle()
   }
   val ptwBack = Bool() // when ptw back, wake up replay rs's state
 
@@ -409,6 +408,7 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
+  val pmp = Vec(Width, new PMPReqBundle())
 
   override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }
