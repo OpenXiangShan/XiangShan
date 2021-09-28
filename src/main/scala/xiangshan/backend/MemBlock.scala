@@ -234,7 +234,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stdExeUnits(i).io.redirect <> io.redirect
     stdExeUnits(i).io.flush <> io.flush
-    stdExeUnits(i).io.fromInt <> io.issue(i + 4)
+    stdExeUnits(i).io.fromInt <> io.issue(i + 4) // FIXME: hardcoded
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 

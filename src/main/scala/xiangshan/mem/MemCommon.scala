@@ -118,5 +118,5 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
   val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new StoreDataBundle))
+  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 }
