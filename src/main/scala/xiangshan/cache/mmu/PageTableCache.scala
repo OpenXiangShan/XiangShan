@@ -88,6 +88,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1 = Reg(Vec(l2tlbParams.l1Size, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v = RegInit(0.U(l2tlbParams.l1Size.W))
   val l1g = Reg(UInt(l2tlbParams.l1Size.W))
+  val l1asids = Reg(Vec(l2tlbParams.l1Size, UInt(AsidLength.W)))
 
   // l2: level 1 non-leaf pte
   val l2 = Module(new SRAMTemplate(
@@ -98,6 +99,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   ))
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
+  val l2asids = Reg(Vec(l2tlbParams.l2nSets, Vec(l2tlbParams.l2nWays, UInt(AsidLength.W))))
   def getl2vSet(vpn: UInt) = {
     require(log2Up(l2tlbParams.l2nWays) == log2Down(l2tlbParams.l2nWays))
     val set = genPtwL2SetIdx(vpn)
@@ -115,6 +117,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   ))
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
+  val l3asids = Reg(Vec(l2tlbParams.l3nSets, Vec(l2tlbParams.l3nWays, UInt(AsidLength.W))))
   def getl3vSet(vpn: UInt) = {
     require(log2Up(l2tlbParams.l3nWays) == log2Down(l2tlbParams.l3nWays))
     val set = genPtwL3SetIdx(vpn)
@@ -127,6 +130,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val sp = Reg(Vec(l2tlbParams.spSize, new PtwEntry(tagLen = SPTagLen, hasPerm = true, hasLevel = true)))
   val spv = RegInit(0.U(l2tlbParams.spSize.W))
   val spg = Reg(UInt(l2tlbParams.spSize.W))
+  val spasids = Reg(Vec(l2tlbParams.spSize, UInt(AsidLength.W)))
 
   // Access Perf
   val l1AccessPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
@@ -313,6 +317,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       ptwl1replace.access(refillIdx)
       l1v := l1v | rfOH
       l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
+      l1asids(refillIdx) := io.asid
 
       for (i <- 0 until l2tlbParams.l1Size) {
         l1RefillPerf(i) := i.U === refillIdx
@@ -341,6 +346,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       ptwl2replace.access(refillIdx, victimWay)
       l2v := l2v | rfvOH
       l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+      l2asids(refillIdx)(victimWay) := io.asid
 
       for (i <- 0 until l2tlbParams.l2nWays) {
         l2RefillPerf(i) := i.U === victimWay
@@ -376,6 +382,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       ptwl3replace.access(refillIdx, victimWay)
       l3v := l3v | rfvOH
       l3g := l3g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
+      l3asids(refillIdx)(victimWay) := io.asid
 
         for (i <- 0 until l2tlbParams.l3nWays) {
           l3RefillPerf(i) := i.U === victimWay
@@ -401,6 +408,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       spreplace.access(refillIdx)
       spv := spv | rfOH
       spg := spg & ~rfOH | Mux(memPte.perm.g, rfOH, 0.U)
+      spasids(refillIdx) := io.asid
 
       for (i <- 0 until l2tlbParams.spSize) {
         spRefillPerf(i) := i.U === refillIdx
@@ -425,10 +433,19 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         spv := 0.U
       } .otherwise {
         // all va && specific asid except global
-        l1v := l1v & l1g
-        l2v := l2v & l2g
-        l3v := l3v & l3g
-        spv := spv & spg
+        val l3flushSetIdxOH = UIntToOH(genPtwL3SetIdx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+        val l2flushSetIdxOH = UIntToOH(genPtwL2SetIdx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+        val l1flushMask = VecInit(l1asids.map(_ === io.asid)).asUInt
+        val l2asidmask = VecInit(l2asids(OHToUInt(l2flushSetIdxOH)).map(_ === io.asid)).asUInt
+        val l3asidmask = VecInit(l3asids(OHToUInt(l3flushSetIdxOH)).map(_ === io.asid)).asUInt
+        val l2flushMask = VecInit(l2flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l2nWays, a.asUInt) & l2asidmask }).asUInt
+        val l3flushMask = VecInit(l3flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l3nWays, a.asUInt) & l3asidmask }).asUInt
+        val spflushMask = VecInit(spasids.map(_ === io.asid)).asUInt
+
+        l1v := l1v & (~l1flushMask | l1g)
+        l2v := l2v & (~l2flushMask | l2g)
+        l3v := l3v & (~l3flushMask | l3g)
+        spv := spv & (~spflushMask | spg)
       }
     } .otherwise {
       // val flushMask = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
@@ -443,11 +460,15 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
         l3g := l3g & ~flushMask
       } .otherwise {
         // specific leaf of addr && specific asid
-        l3v := l3v & (~flushMask | l3g)
+        val l3asidmask = VecInit(l3asids(OHToUInt(flushSetIdxOH)).map(_ === io.asid)).asUInt
+        val l3flushMask = VecInit(flushSetIdxOH.asBools.map { a => Fill(l2tlbParams.l3nWays, a.asUInt) & l3asidmask }).asUInt
+        l3v := l3v & (~l3flushMask | l3g)
       }
       spv := 0.U
     }
   }
+
+  l2asids(0).map(a => printf("%x",a))
 
   // Perf Count
   XSPerfAccumulate("access", second_valid)

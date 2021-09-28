@@ -102,13 +102,13 @@ class BridgeTLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends Tl
       when (sfence.bits.rs2) {
         entries_v := 0.U.asTypeOf(entries_v.cloneType)
       }.otherwise {
-        entries_v.zipWithIndex.map{a => a._1 := a._1 & entries(a._2).entry.perm.get.g}
+        entries_v.zipWithIndex.map{a => a._1 := a._1 & entries(a._2).entry.perm.get.g & !(entries(a._2).entry.asid === satp.asid)}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
         entries_v := (entries_v.zip(sfence_hit).map(a => a._1 & !a._2))
       }.otherwise {
-        entries_v := (entries_v.zipWithIndex.map(a => a._1 & !(sfence_hit(a._2) && !entries(a._2).entry.perm.get.g)))
+        entries_v := (entries_v.zipWithIndex.map(a => a._1 & !(sfence_hit(a._2) && entries(a._2).entry.asid === satp.asid && !entries(a._2).entry.perm.get.g)))
       }
     }
   }

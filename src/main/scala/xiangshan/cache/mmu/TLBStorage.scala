@@ -141,6 +141,8 @@ class TLBSA(
 
   io.r.req.map(_.ready := { if (sramSinglePort) !io.w.valid else true.B })
   val v = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
+  val g = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(false.B)))))
+  val asids = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(0.U(AsidLength.W))))))
 
   for (i <- 0 until ports) { // duplicate sram
     val entries = Module(new SRAMTemplate(
@@ -180,6 +182,18 @@ class TLBSA(
       data = Mux(io.w.valid, (Wire(new TlbEntry(normalPage, superPage)).apply(io.w.bits.data)), io.victim.in.bits),
       waymask = UIntToOH(io.w.bits.wayIdx)
     )
+
+    g.zipWithIndex.map{ case (a , i) => a.zipWithIndex.map{ case (b , j) => {
+    b := entries.io.w.req.valid && entries.io.w.req.bits.setIdx === i.U && 
+         entries.io.w.req.bits.data(0).perm.g && io.w.bits.wayIdx === j.U
+  }}}
+
+  asids.zipWithIndex.map{ case (a , i) => a.zipWithIndex.map{ case (b , j) => {
+    when(entries.io.w.req.valid && entries.io.w.req.bits.setIdx === i.U && io.w.bits.wayIdx === j.U) {
+      b := entries.io.w.req.bits.data(0).asid
+    }
+  }}}
+
   }
 
   when (io.w.valid) {
@@ -193,13 +207,13 @@ class TLBSA(
   val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
   when (io.sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
-      when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
+      when (sfence.bits.rs2) { // asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
         v.map(a => a.map(b => b := false.B))
       }.otherwise {
         // all addr but specific asid
         // v.zipWithIndex.map{ case (a,i) => a := a & g(i) }
-        v.map(a => a.map(b => b := false.B)) // TODO: handle g
+        v.zip(g).zip(asids).map{ case ((a,c),asid_way) => a.zip(c).zip(asid_way).map{ case ((b,d),asid) => b := b & d & !(asid === io.asid)}} 
       }
     }.otherwise {
       when (sfence.bits.rs2) {
@@ -207,7 +221,7 @@ class TLBSA(
         v(get_idx(sfence_vpn, nSets)).map(_ := false.B)
       }.otherwise {
         // specific addr and specific asid
-        v(get_idx(sfence_vpn, nSets)).map(_ := false.B)
+        v(get_idx(sfence_vpn, nSets)).zip(g(get_idx(sfence_vpn, nSets))).zip(asids(get_idx(sfence_vpn, nSets))).map{ case ((a,b),asid) => a := a & !(asid === io.asid & !b) }
       }
     }
   }
