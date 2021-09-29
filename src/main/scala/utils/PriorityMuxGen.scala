@@ -39,7 +39,7 @@ class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends M
 // this could be used to handle the situation
 // in which we have mux sources at multiple
 // locations, and this is same to multiple
-// when clauses as below, but collect them 
+// when clauses as below, but collect them
 // and put them into a ParallelPrioriyMux
 // when (sel1) { x := in1 }
 // when (sel2) { x := in2 }

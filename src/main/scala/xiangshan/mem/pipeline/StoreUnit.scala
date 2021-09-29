@@ -114,7 +114,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
   XSDebug(io.rsFeedback.valid,
-    "S1 Store: tlbHit: %d roqIdx: %d\n",
+    "S1 Store: tlbHit: %d robIdx: %d\n",
     io.rsFeedback.bits.hit,
     io.rsFeedback.bits.rsIdx
   )
@@ -198,13 +198,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.rsFeedback
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   store_s2.io.pmpResp <> io.pmp
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))

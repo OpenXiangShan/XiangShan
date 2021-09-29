@@ -287,7 +287,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  // when exception occurs, set it to not miss and let it write back to roq (via int port)
+  // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
     io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
   } else {
@@ -385,7 +385,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s0.io.fastpath := io.fastpathIn
   load_s0.io.loadFastMatch := io.loadFastMatch
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   load_s1.io.dtlbResp <> io.tlb.resp
   load_s1.io.pmpResp <> io.pmp
@@ -394,7 +394,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   io.dcache.s2_kill <> load_s2.io.dcache_kill
   load_s2.io.dcacheResp <> io.dcache.resp
@@ -411,7 +411,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   load_s2.io.fastpath <> io.fastpathOut
   io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
-  io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding

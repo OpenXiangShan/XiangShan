@@ -32,7 +32,7 @@ class FlashHelper extends ExtModule with HasExtModuleInline {
   setInline("FlashHelper.v",
     s"""
        |import "DPI-C" function void flash_read
-       |(  
+       |(
        |  input int addr,
        |  output longint data
        |);

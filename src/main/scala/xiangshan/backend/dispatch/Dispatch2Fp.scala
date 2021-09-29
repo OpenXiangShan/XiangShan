@@ -36,6 +36,13 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
   io.enqIQCtrl <> DontCare
   for (i <- 0 until exuParameters.FmacCnt) {
     io.enqIQCtrl(i) <> io.fromDq(i)
+
+    val fmiscCanAccept = FuType.fmiscCanAccept(io.fromDq(i).bits.ctrl.fuType)
+    if (i >= exuParameters.FmiscCnt) {
+      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !fmiscCanAccept
+      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !fmiscCanAccept
+    }
+
     io.readRf(3*i) := io.enqIQCtrl(i).bits.psrc(0)
     io.readRf(3*i+1) := io.enqIQCtrl(i).bits.psrc(1)
     io.readRf(3*i+2) := io.enqIQCtrl(i).bits.psrc(2)

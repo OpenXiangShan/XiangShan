@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
+import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
@@ -93,7 +93,7 @@ case class XSCoreParameters
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
       ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
       ras.io.in.bits.resp_in(0) := ittage.io.out.resp
-      
+
       (preds, ras.io.out.resp)
     }),
 
@@ -103,18 +103,17 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  BrqSize: Int = 32,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
-  NRPhyRegs: Int = 160,
+  NRPhyRegs: Int = 192,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 64,
   StoreQueueSize: Int = 48,
-  RoqSize: Int = 192,
+  RobSize: Int = 256,
   EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
@@ -190,12 +189,6 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2
   ),
-  l1plusCacheParameters: L1plusCacheParameters = L1plusCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
-    nMissEntries = 8
-  ),
   dcacheParameters: DCacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -219,11 +212,10 @@ case class XSCoreParameters
   useFakeL2Cache: Boolean = false
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
   val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg) ++
-    Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg)
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
@@ -300,14 +292,12 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
-  val BrqSize = coreParams.BrqSize
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
-  val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val RoqSize = coreParams.RoqSize
+  val RobSize = coreParams.RobSize
   val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32
@@ -344,7 +334,6 @@ trait HasXSParameter {
   val instOffsetBits = log2Ceil(instBytes)
 
   val icacheParameters = coreParams.icacheParameters
-  val l1plusCacheParameters = coreParams.l1plusCacheParameters
   val dcacheParameters = coreParams.dcacheParameters
 
   val LRSCCycles = 100
@@ -363,20 +352,6 @@ trait HasXSParameter {
 
   // L3 configurations
   val L2BusWidth = 256
-
-  // icache prefetcher
-  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = true,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 2,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = l1plusCacheParameters.blockBytes,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "icache"
-    )
-  )
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576

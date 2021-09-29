@@ -24,10 +24,6 @@ import utils._
 import xiangshan.cache._
 import difftest._
 
-class SBufferWordReq(implicit p: Parameters) extends DCacheWordReq {
-  val vaddr = UInt(VAddrBits.W)
-}
-
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
   val empty = Input(Bool())
@@ -93,7 +89,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
 class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new SBufferWordReq)))  //Todo: store logic only support Width == 2 now
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
     val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
@@ -205,7 +201,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   }
 
   val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)
-  val secondInsertIdx = Mux(sameTag, 
+  val secondInsertIdx = Mux(sameTag,
     firstInsertIdx,
     Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
   )
@@ -251,10 +247,10 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     }
     // check if vtag is the same, if not, trigger sbuffer flush
     when(reqvtag =/= vtag(mergeIdx)) {
-      XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n", 
-        reqvtag << OffsetWidth, 
+      XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
+        reqvtag << OffsetWidth,
         reqptag << OffsetWidth,
-        vtag(mergeIdx) << OffsetWidth, 
+        vtag(mergeIdx) << OffsetWidth,
         ptag(mergeIdx) << OffsetWidth
       )
       need_uarch_drain := true.B
@@ -388,10 +384,12 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
-  val evictionTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
+  val evictionVTag = RegEnable(vtag(evictionIdx), enable = willSendDcacheReq)
 
   io.dcache.req.valid := prepareValidReg
-  io.dcache.req.bits.addr := getAddr(evictionTag)
+  io.dcache.req.bits.vaddr := getAddr(evictionVTag)
+  io.dcache.req.bits.addr := getAddr(evictionPTag)
   io.dcache.req.bits.data := data(evictionIdxReg).asUInt
   io.dcache.req.bits.mask := mask(evictionIdxReg).asUInt
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
@@ -432,13 +430,13 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
     val tag_matches = vtag_matches
-    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w => 
+    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
       RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((validMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
-      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n", 
-        RegNext(ptag_matches.asUInt), 
+      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
+        RegNext(ptag_matches.asUInt),
         RegNext(vtag_matches.asUInt),
         RegNext(forward.vaddr),
         RegNext(forward.paddr)
@@ -483,7 +481,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   }
 
   for (i <- 0 until StoreBufferSize) {
-    XSDebug("ptag %x vtag %x valid %x inflight %x\n", 
+    XSDebug("ptag %x vtag %x valid %x inflight %x\n",
       ptag(i) << OffsetWidth,
       vtag(i) << OffsetWidth,
       validMask(i),

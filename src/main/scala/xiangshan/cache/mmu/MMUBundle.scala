@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
@@ -352,7 +352,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} robIdx:${robIdx}"
   }
 }
 

@@ -254,7 +254,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := core_with_l2(i).memory_port
+    val l2_l3_pmu = BusPerfMonitor(enable = true)
+    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := l2_l3_pmu := core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -303,19 +304,24 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
     case HCCacheParamsKey => soc.L3CacheParams
   })))
 
+  val l3_mem_pmu = BusPerfMonitor(enable = true)
+
   val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
 
   if (useFakeL3Cache) {
     bankedNode :*= l3Ignore :*= l3_xbar
   }
   else {
-    bankedNode :*= TLLogger("MEM_L3") :*= l3cache.node :*= BusPerfMonitor(enable = true) :*= TLBuffer() :*= l3_xbar
+    bankedNode :*= TLLogger("MEM_L3") :*= l3_mem_pmu :*= l3cache.node :*= TLBuffer() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
-  val debugIntSink = LazyModule(new IntSinkNodeToModule(NumCores))
-  debugIntSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+  val debugIntSink = Array.fill(NumCores){
+    val debugSink = LazyModule(new IntSinkNodeToModule(1))
+    debugSink.sinkNode := debugModule.debug.dmOuter.dmOuter.intnode
+    debugSink
+  }
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
@@ -367,7 +373,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         core_with_l2(i).module.io.externalInterrupt.msip := clintIntSinks(i).module.out(0)
         core_with_l2(i).module.io.externalInterrupt.mtip := clintIntSinks(i).module.out(1)
         core_with_l2(i).module.io.externalInterrupt.meip := plicIntSinks(i).module.out(0)
-        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink.module.out(i)
+        core_with_l2(i).module.io.externalInterrupt.debug := debugIntSink(i).module.out(0)
         beu.module.io.errors.l1plus(i) := core_with_l2(i).module.io.l1plus_error
         beu.module.io.errors.icache(i) := core_with_l2(i).module.io.icache_error
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
