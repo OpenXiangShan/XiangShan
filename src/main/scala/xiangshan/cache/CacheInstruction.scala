@@ -8,35 +8,41 @@ import utils._
 import chipsalliance.rocketchip.config.Parameters
 
 object CacheOpMap{
-    def apply(opcode: String,  name: String ): Map[String, String] = {
+    def apply(opcode: String, optype: String,  name: String ): Map[String, String] = {
         Map(
             "opcode" -> opcode,
+            "optype" -> optype,
             "name"   -> name,
         )
     }
 }
 
 object CacheRegMap{ 
-    def apply(offset: String,  width: String, name: String ): Map[String, String] = {
+    def apply(offset: String,  width: String, authority: String, name: String ): Map[String, String] = {
         Map(
             "offset" -> offset,
             "width"  -> width,
+            "authority" -> authority,
             "name"   -> name,
         )
     }
 }
 
+trait CacheControlConst{
+    def maxDataRowSupport = 8
+}
+
 object CacheInstrucion{
     def CacheOperation = List(
-        CCOpMap("b00000", "CHECK",  "READ_TAG_ECC"),
-        CCOpMap("b00001", "CHECK",  "READ_DATA_ECC"),
-        CCOpMap("b00010", "LOAD",   "READ_TAG"),
-        CCOpMap("b00011", "LOAD",   "READ_DATA"),
-        CCOpMap("b00100", "STORE",  "WRITE_TAG_ECC"),
-        CCOpMap("b00101", "STORE",  "WRITE_DATA_ECC"),
-        CCOpMap("b00110", "STORE",  "WRITE_TAG"),
-        CCOpMap("b00111", "STORE",  "WRITE_DATA"),
-        CCOpMap("b01000", "FLUSH",  "FLUSH_BLOCK"),
+        CacheOpMap("b00000", "CHECK",  "READ_TAG_ECC"),
+        CacheOpMap("b00001", "CHECK",  "READ_DATA_ECC"),
+        CacheOpMap("b00010", "LOAD",   "READ_TAG"),
+        CacheOpMap("b00011", "LOAD",   "READ_DATA"),
+        CacheOpMap("b00100", "STORE",  "WRITE_TAG_ECC"),
+        CacheOpMap("b00101", "STORE",  "WRITE_DATA_ECC"),
+        CacheOpMap("b00110", "STORE",  "WRITE_TAG"),
+        CacheOpMap("b00111", "STORE",  "WRITE_DATA"),
+        CacheOpMap("b01000", "FLUSH",  "FLUSH_BLOCK")
     )
 
     def CacheInsRegisterList = List(
@@ -49,7 +55,7 @@ object CacheInstrucion{
         CacheRegMap("5",      "64",     "RW",       "CACHE_TAG_LOW"),
         CacheRegMap("6",      "64",     "RW",       "CACHE_TAG_HIGH"),
         CacheRegMap("7",      "64",     "R",        "CACHE_ECC_WIDTH"),
-        CacheRegMap("8",      "64",     "R",        "CACHE_ECC_NUM"),
+        CacheRegMap("8",      "64",     "RW",       "CACHE_ECC_NUM"),
         CacheRegMap("9",      "64",     "RW",       "CACHE_DATA_ECC"),
         CacheRegMap("10",     "64",     "RW",       "CACHE_DATA_0"),
         CacheRegMap("11",     "64",     "RW",       "CACHE_DATA_1"),
@@ -59,7 +65,9 @@ object CacheInstrucion{
         CacheRegMap("15",     "64",     "RW",       "CACHE_DATA_5"),
         CacheRegMap("16",     "64",     "RW",       "CACHE_DATA_6"),
         CacheRegMap("17",     "64",     "RW",       "CACHE_DATA_7"),
-        CacheRegMap("18",     "64",     "R",        "OP_FINISH"),
+        CacheRegMap("18",     "64",     "R",        "OP_FINISH") ,
+        CacheRegMap("19",     "64",     "RW",       "CACHE_OP")
+    )
     
     val opList = CacheOperation
     val regiterList = CacheInsRegisterList
@@ -115,4 +123,31 @@ object CacheInstrucion{
     def isWriteData(opcode: UInt)             = opcode === "b00111".U
     def isFlush(opcode: UInt)                 = opcode === "b01000".U
 
+}
+
+class CSRInfo(implicit p: Parameters) extends XSBundle with CacheControlConst {
+  val wayNum          = UInt(XLEN.W)
+  val index           = UInt(XLEN.W)
+  val opCode          = UInt(XLEN.W)
+  val write_tag_high  = UInt(XLEN.W)
+  val write_tag_low   = UInt(XLEN.W)
+  val write_tag_ecc   = UInt(XLEN.W)
+  val write_data_vec  = Vec(maxDataRowSupport, UInt(XLEN.W))
+  val write_data_ecc  = UInt(XLEN.W)
+  val ecc_num         = UInt(XLEN.W)
+}
+
+class CSRWriteBack(implicit p: Parameters) extends XSBundle with HasICacheParameters with CacheControlConst{
+    val read_tag_high  = UInt(XLEN.W)
+    val read_tag_low   = UInt(XLEN.W)
+    val read_tag_ecc   = UInt(XLEN.W)
+    val read_data_vec  = Vec(maxDataRowSupport, UInt(XLEN.W))
+    val read_data_ecc  = UInt(XLEN.W)
+    val ecc_num        = UInt(XLEN.W)
+}
+
+
+class CSRCacheInsIO(implicit p: Parameters) extends XSModule{
+    val CSR = new CSRInterface
+    val CacheInterface = new CacheInterface
 }

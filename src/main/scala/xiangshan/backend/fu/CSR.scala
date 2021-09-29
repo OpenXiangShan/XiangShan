@@ -625,6 +625,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_6")._1, scmap("CACHE_DATA_6")),
     MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_7")._1, scmap("CACHE_DATA_7")),
     MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("OP_FINISH")._1, scmap("OP_FINISH")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_OP")._1, scmap("CACHE_OP")),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
