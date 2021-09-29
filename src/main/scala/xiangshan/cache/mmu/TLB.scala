@@ -144,7 +144,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
 
     // if vmenable, use pre-calcuated pma check result
-    resp(i).bits.mmio := (Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) || (pbmt === 2.U)) && vmEnable && hit
+    when(io.csrCtrl.spbmt_enable) {
+      resp(i).bits.mmio := (Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) || (pbmt === 2.U)) && vmEnable && hit
+      // resp(i).bits.mmio := (pbmt === 2.U) && vmEnable && hit
+    }.otherwise {
+      resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
+    }
     resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
     resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
     resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
@@ -302,6 +307,7 @@ object TLB {
     csr: TlbCsrBundle,
     width: Int,
     shouldBlock: Boolean,
+    csrCtrl: CustomCSRCtrlIO,
     q: TLBParameters
   )(implicit p: Parameters) = {
     require(in.length == width)
@@ -334,6 +340,7 @@ object TLB {
         in(i).resp.bits := tlb.io.requestor(i).resp.bits
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
+      tlb.io.csrCtrl := csrCtrl
     }
 
     tlb.io.ptw

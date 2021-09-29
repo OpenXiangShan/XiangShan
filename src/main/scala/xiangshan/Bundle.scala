@@ -398,6 +398,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  val spbmt_enable = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
 }

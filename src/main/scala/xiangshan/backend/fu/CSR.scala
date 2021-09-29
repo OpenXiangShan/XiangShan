@@ -449,6 +449,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val srnctl = RegInit(UInt(XLEN.W), "h1".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
+  
+  // spbmtctl : used to contol Svpbmt extension
+  // HasSvbpmtExtension controls whether pbmt bits exist in PTE
+  // spbmtctl controls whether pbmt bits will work
+  // enable the extension by setting HasSvbpmtExtension and spbmtctl as true
+  val spbmtctl = RegInit(UInt(XLEN.W), "h0".U)
+  csrio.customCtrl.spbmt_enable := spbmtctl(0)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
@@ -603,6 +610,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
+    MaskedRegMap(Spbmtctl, spbmtctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),

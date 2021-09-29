@@ -72,6 +72,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     csr = io.tlbCsr,
     width = 2,
     shouldBlock = true,
+    csrCtrl = io.csrCtrl,
     itlbParams
   )  
   //TODO: modules need to be removed

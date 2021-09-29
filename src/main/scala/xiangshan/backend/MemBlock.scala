@@ -139,6 +139,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb_st.map(_.sfence := sfence)
   dtlb_ld.map(_.csr := tlbcsr)
   dtlb_st.map(_.csr := tlbcsr)
+  dtlb_ld.map(_.csrCtrl := io.csrCtrl)
+  dtlb_st.map(_.csrCtrl := io.csrCtrl)
   if (ldtlbParams.outReplace) {
     val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
     replace_ld.io.apply_sep(dtlb_ld.map(_.replace), io.ptw.resp.bits.data.entry.tag)
