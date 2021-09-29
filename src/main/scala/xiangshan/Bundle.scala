@@ -400,4 +400,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val sbuffer_threshold = Output(UInt(4.W))
   // Rename
   val move_elim_enable = Output(Bool())
+  // Decode
+  val svinval_enable = Output(Bool())
 }

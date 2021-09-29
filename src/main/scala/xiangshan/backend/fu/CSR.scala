@@ -450,6 +450,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val srnctl = RegInit(UInt(XLEN.W), "h1".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
 
+  // for Svinval extension
+  val sinvalctl = RegInit(UInt(XLEN.W), "h1".U)
+  csrio.customCtrl.svinval_enable := sinvalctl(0)
+
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   csrio.tlb := tlbBundle
@@ -603,6 +607,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
+    MaskedRegMap(Sinvalctl, sinvalctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
