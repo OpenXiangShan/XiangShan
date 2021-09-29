@@ -35,6 +35,7 @@ class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val source = UInt(bPtwWidth.W)
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(MSHRSize).W)
+  val af = Bool()
 }
 
 class L2TlbMQInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
@@ -57,6 +58,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val source = Output(UInt(bPtwWidth.W))
     val id = Output(UInt(bMemID.W))
     val vpn = Output(UInt(vpnLen.W))
+    val af = Output(Bool())
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
@@ -68,6 +70,10 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val refill_vpn = Output(UInt(vpnLen.W))
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
+  val pmp = new Bundle {
+    val req = new PMPReqBundle()
+    val resp = Flipped(new PMPRespBundle())
+  }
 }
 
 @chiselName
@@ -75,7 +81,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
-  val state_idle :: state_cache_high :: state_cache_low :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(6)
+  val state_idle :: state_cache_high :: state_cache_low :: s_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
   val state = RegInit(VecInit(Seq.fill(MSHRSize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_caches_high = state.map(_ === state_cache_high)
@@ -128,13 +134,14 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
     Mux(to_cache_low, state_cache_low, // same to the below, but the mem resp last cycle
     Mux(to_wait, state_mem_waiting, // wait for the prev mem resp
-    Mux(io.in.bits.l3.valid, state_mem_req, state_cache_high))))
+    Mux(io.in.bits.l3.valid, state_addr_check, state_cache_high))))
   when (io.in.fire()) {
     state(enq_ptr) := enq_state
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
+    entries(enq_ptr).af := false.B
     mem_resp_hit(enq_ptr) := to_mem_out
   }
   when (mem_arb.io.out.fire()) {
@@ -167,10 +174,24 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.cache.valid := cache_arb.io.out.valid
   io.cache.bits.vpn := cache_arb.io.out.bits.vpn
   io.cache.bits.source := cache_arb.io.out.bits.source
+
   io.out.valid := ParallelOR(is_having).asBool()
   io.out.bits.source := entries(mem_ptr).source
   io.out.bits.vpn := entries(mem_ptr).vpn
   io.out.bits.id := mem_ptr
+  io.out.bits.af := entries(mem_ptr).af
+  
+  val enq_ptr_reg = RegNext(enq_ptr)
+  val enq_ptr_reg_reg = RegNext(enq_ptr_reg)
+  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === s_addr_check && !sfence.valid) && !sfence.valid)
+  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg), 0))
+  io.pmp.req.cmf := TlbCmd.read
+  io.pmp.req.size := 3.U // TODO: fix it
+  when (pmp_resp_valid) {
+    entries(enq_ptr_reg_reg).af := io.pmp.resp.ld
+    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, s_mem_out, s_mem_req)
+  }
+
   io.mem.req.valid := mem_arb.io.out.valid
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen

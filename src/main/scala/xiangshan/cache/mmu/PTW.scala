@@ -213,6 +213,11 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
   cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
 
+  // pmp
+  pmp_check(0).req <> fsm.io.pmp.req
+  fsm.io.pmp.resp <> pmp_check(0).resp
+  pmp_check(1).req <> missQueue.io.pmp.req
+  missQueue.io.pmp.resp <> pmp_check(2).resp
 
   mq_out.ready := MuxLookup(missQueue.io.out.bits.source, false.B,
     (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
@@ -220,10 +225,11 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.source===i.U
     outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
     outArb(i).in(0).bits.pf := false.B
+    outArb(i).in(0).bits.af := false.B
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := mq_out.valid && mq_out.bits.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(mq_out.bits.id), mq_out.bits.vpn)
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(mq_out.bits.id), mq_out.bits.vpn, mq_out.bits.af, true)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -252,14 +258,15 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
     inner_data(index)
   }
 
-  def pte_to_ptwResp(pte: UInt, vpn: UInt) : PtwResp = {
+  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean) : PtwResp = {
     val pte_in = pte.asTypeOf(new PteBundle())
     val ptw_resp = Wire(new PtwResp())
     ptw_resp.entry.ppn := pte_in.ppn
     ptw_resp.entry.level.map(_ := 2.U)
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
-    ptw_resp.pf := pte_in.isPf(2.U)
+    ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
+    ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && af 
     ptw_resp
   }
 
@@ -325,6 +332,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.tlb(i).resp.bits.entry.perm.map(_ := pte.getPerm())
     io.tlb(i).resp.bits.entry.level.map(_ := level)
     io.tlb(i).resp.bits.pf := pf
+    io.tlb(i).resp.bits.af := DontCare // TODO: implement it
   }
 }
 

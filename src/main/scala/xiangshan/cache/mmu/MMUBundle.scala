@@ -58,6 +58,7 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
 
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
+  val af = Bool() // NOTE: if this is true, just raise af
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -75,7 +76,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pd = Bool() //dcacheable
 
   override def toPrintable: Printable = {
-    p"pf:${pf} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
+    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
   }
 }
 
@@ -143,12 +144,13 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     }
   }
 
-  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool) = {
+  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool, af) = {
     this.level.map(_ := level(0))
     this.ppn := ppn
     // refill pagetable perm
     val ptePerm = perm.asTypeOf(new PtePermBundle)
     this.perm.pf:= pf
+    this.perm.af:= af
     this.perm.d := ptePerm.d
     this.perm.a := ptePerm.a
     this.perm.g := ptePerm.g
@@ -212,6 +214,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
                   else item.entry.ppn }
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.perm.pf := item.pf
+    this.perm.af := item.af
     this.perm.d := ptePerm.d
     this.perm.a := ptePerm.a
     this.perm.g := ptePerm.g
@@ -587,17 +590,19 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf = Bool()
+  val af = Bool()
 
-  def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
     this.pf := pf
+    this.af := af
   }
 
   override def toPrintable: Printable = {
-    p"entry:${entry} pf:${pf}"
+    p"entry:${entry} pf:${pf} af:${af}"
   }
 }
 

@@ -200,7 +200,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
   val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
   val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
-    fromITLB.map(port => (port.bits.excp.af.instr) && port.valid) //TODO: Temp treat mmio req as access fault
+    fromITLB.map(port => (port.bits.excp.af.instr) && port.valid)) //TODO: Temp treat mmio req as access fault
   val pmpExcpAF = fromPMP.map(port => port.instr)
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
