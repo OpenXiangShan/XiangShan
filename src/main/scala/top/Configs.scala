@@ -195,7 +195,14 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
     )))
 })
 
-class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseData: Boolean = false) extends Config((site, here, up) => {
+class WithNKBL2
+(
+  n: Int,
+  ways: Int = 8,
+  inclusive: Boolean = true,
+  banks: Int = 1,
+  alwaysReleaseData: Boolean = false
+) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
     val l2sets = n * 1024 / ways / 64
@@ -219,7 +226,8 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseD
           prefetch = Some(huancun.prefetch.BOPParameters()),
           enablePerf = true
         )
-      )))
+      ), L2NBanks = banks
+      ))
     )
 })
 
@@ -266,6 +274,13 @@ class MinimalAliasDebugConfig(n: Int = 1) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
     ++ new WithNKBL2(512, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+class LargeConfig(n: Int = 1) extends Config(
+  new WithNKBL3(16 * 1024, inclusive = false, banks = 4)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 2, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )

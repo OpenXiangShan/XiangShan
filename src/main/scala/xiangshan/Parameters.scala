@@ -201,6 +201,7 @@ case class XSCoreParameters
     sets = 1024, // default 512KB L2
     prefetch = Some(huancun.prefetch.BOPParameters())
   )),
+  L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only
 ){

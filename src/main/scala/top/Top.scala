@@ -64,7 +64,8 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   l1_xbar :=* busPMU
   l2cacheOpt match {
     case Some(l2) =>
-      memory_port := l2.node := l1_xbar
+      val l2_binder = BankBinder(coreParams.L2NBanks, 64)
+      memory_port :=* l2_binder :*= l2.node :*= l1_xbar
     case None =>
       memory_port := l1_xbar
   }
@@ -254,8 +255,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    val l2_l3_pmu = BusPerfMonitor(enable = true)
-    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := l2_l3_pmu := core_with_l2(i).memory_port
+    val l2_l3_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+    l3_xbar :=* TLBuffer() :=* TLLogger(s"L3_L2_$i") :=* l2_l3_pmu :=* core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
