@@ -122,7 +122,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
 
   val lsq     = Module(new LsqWrappper)
-  val sbuffer = Module(new NewSbuffer)
+  val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
   io.stIssuePtr := lsq.io.issuePtrExt
@@ -288,9 +288,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
-  sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
-  assert(sbuffer.io.dcache.resp.ready === true.B)
+  sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
+  sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb

@@ -41,7 +41,6 @@ case class DCacheParameters
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
-  nStoreReplayEntries: Int = 1,
   nMMIOEntries: Int = 1,
   nMMIOs: Int = 1,
   blockBytes: Int = 64,
@@ -265,10 +264,16 @@ class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
+class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle { 
+  // sbuffer will directly send request to dcache main pipe
+  val pipe_req  = Flipped(Decoupled(new MainPipeReq))
+  val pipe_resp = ValidIO(new MainPipeResp)
+}
+
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
-  val store = Flipped(new DCacheLineIO) // for sbuffer
+  val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
 }
 
@@ -328,7 +333,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
-  val storeReplayUnit = Module(new StoreReplayQueue)
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
 
   val mainPipe   = Module(new MainPipe)
@@ -391,10 +395,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   //----------------------------------------
-  // store pipe and store miss queue
-  storeReplayUnit.io.lsu    <> io.lsu.store
-
-  //----------------------------------------
   // atomics
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
@@ -438,7 +438,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val mainPipeReqArb = Module(new RRArbiter(new MainPipeReq, MainPipeReqPortCount))
   mainPipeReqArb.io.in(MissMainPipeReqPort)    <> missQueue.io.pipe_req
-  mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> storeReplayUnit.io.pipe_req
+  mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> io.lsu.store.pipe_req
   mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
   mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
 
@@ -455,7 +455,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
 
   missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
-  storeReplayUnit.io.pipe_resp   <> mainPipe.io.store_resp
+  io.lsu.store.pipe_resp         <> mainPipe.io.store_resp
   atomicsReplayUnit.io.pipe_resp <> mainPipe.io.amo_resp
 
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block

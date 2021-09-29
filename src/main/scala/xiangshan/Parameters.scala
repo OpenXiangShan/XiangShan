@@ -195,7 +195,6 @@ case class XSCoreParameters
     nMissEntries = 16,
     nProbeEntries = 16,
     nReleaseEntries = 16,
-    nStoreReplayEntries = 16
   ),
   L2CacheParams: HCCacheParameters = HCCacheParameters(
     name = "l2",

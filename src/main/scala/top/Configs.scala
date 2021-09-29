@@ -102,7 +102,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 4,
           nProbeEntries = 4,
           nReleaseEntries = 4,
-          nStoreReplayEntries = 4,
         ),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
