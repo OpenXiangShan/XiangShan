@@ -319,9 +319,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.flush <> ctrlBlock.io.flush
-  memBlock.io.replay <> memScheduler.io.extra.feedback.get.map(_.replay)
-  memBlock.io.rsIdx <> memScheduler.io.extra.feedback.get.map(_.rsIdx)
-  memBlock.io.isFirstIssue <> memScheduler.io.extra.feedback.get.map(_.isFirstIssue)
+  memBlock.io.rsfeedback <> memScheduler.io.extra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq

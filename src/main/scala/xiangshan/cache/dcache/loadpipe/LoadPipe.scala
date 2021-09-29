@@ -219,6 +219,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
   io.lsu.s1_hit_way := s1_tag_match_way
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
+  io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------
