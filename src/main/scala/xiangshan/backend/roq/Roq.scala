@@ -382,8 +382,11 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       when(FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
       {
         isSvinvalEnd := true.B
+      }.otherwise
+      {
+        isSvinvalEnd := false.B
       }
-      assert( !isSvinvalBegin || FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      // assert( !isSvinvalBegin || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || isSvinvalEnd))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
