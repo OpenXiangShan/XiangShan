@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.SqPtr
 
 class StatusArrayUpdateIO(params: RSParams)(implicit p: Parameters) extends Bundle {
@@ -49,7 +49,7 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   // data
   val psrc = Vec(params.numSrc, UInt(params.dataIdBits.W))
   val srcType = Vec(params.numSrc, SrcType())
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
   val sqIdx = new SqPtr
   // misc
   val isFirstIssue = Bool()
@@ -70,7 +70,7 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   override def cloneType: StatusEntry.this.type =
     new StatusEntry(params).asInstanceOf[this.type]
   override def toPrintable: Printable = {
-    p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $roqIdx"
+    p"$valid, $scheduled, ${Binary(srcState.asUInt)}, $psrc, $robIdx"
   }
 }
 
@@ -165,7 +165,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     // valid: when the entry holds a valid instruction, mark it true.
     // Set when (1) not (flushed or deq); AND (2) update.
-    val isFlushed = status.valid && status.roqIdx.needFlush(io.redirect, io.flush)
+    val isFlushed = status.valid && status.robIdx.needFlush(io.redirect, io.flush)
     val (deqRespValid, deqRespSucc, deqRespType) = deqResp(i)
     flushedVec(i) := isFlushed || (deqRespValid && deqRespSucc)
     val realUpdateValid = updateValid(i) && !io.redirect.valid && !io.flush
@@ -222,7 +222,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     // static data fields (only updated when instructions enqueue)
     statusNext.psrc := Mux(updateValid(i), updateVal(i).psrc, status.psrc)
     statusNext.srcType := Mux(updateValid(i), updateVal(i).srcType, status.srcType)
-    statusNext.roqIdx := Mux(updateValid(i), updateVal(i).roqIdx, status.roqIdx)
+    statusNext.robIdx := Mux(updateValid(i), updateVal(i).robIdx, status.robIdx)
     statusNext.sqIdx := Mux(updateValid(i), updateVal(i).sqIdx, status.sqIdx)
 
     // isFirstIssue: indicate whether the entry has been issued before

@@ -22,7 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
+import xiangshan.backend.rob.{RobPtr, RobEnqIO}
 import xiangshan.backend.rename.{RenameBypassInfo, BusyTableReadIO}
 import xiangshan.mem.LsqEnqIO
 
@@ -47,8 +47,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     val preDpInfo = Input(new PreDispatchInfo)
     // to busytable: set pdest to busy (not ready) when they are dispatched
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
-    // enq Roq
-    val enqRoq = Flipped(new RoqEnqIO)
+    // enq Rob
+    val enqRob = Flipped(new RobEnqIO)
     // enq Lsq
     val enqLsq = Flipped(new LsqEnqIO)
     // read regfile
@@ -64,7 +64,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     // LFST state sync
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     val ctrlInfo = new Bundle {
-      val roqFull   = Output(Bool())
+      val robFull   = Output(Bool())
       val intdqFull = Output(Bool())
       val fpdqFull  = Output(Bool())
       val lsdqFull  = Output(Bool())
@@ -89,7 +89,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   // dispatch1.io.redirect <> io.redirect
   dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.preDpInfo := RegEnable(io.preDpInfo, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
-  dispatch1.io.enqRoq <> io.enqRoq
+  dispatch1.io.enqRob <> io.enqRob
   dispatch1.io.enqLsq <> io.enqLsq
   dispatch1.io.toIntDq <> intDq.io.enq
   dispatch1.io.toFpDq <> fpDq.io.enq

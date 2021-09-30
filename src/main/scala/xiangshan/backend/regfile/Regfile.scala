@@ -77,7 +77,7 @@ object Regfile {
     waddr: Seq[UInt],
     wdata: Seq[UInt],
     hasZero: Boolean,
-    withReset: Boolean = true,
+    withReset: Boolean = false,
     debugRead: Option[Seq[UInt]] = None
   )(implicit p: Parameters): Seq[UInt] = {
     val numReadPorts = raddr.length

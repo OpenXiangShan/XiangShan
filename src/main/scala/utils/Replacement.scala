@@ -353,7 +353,7 @@ class SetAssocLRU(n_sets: Int, n_ways: Int, policy: String) extends SetAssocRepl
 class SetAssocRandom(n_sets : Int, n_ways: Int) extends SetAssocReplacementPolicy {
   val random = new RandomReplacement(n_ways)
 
-  def miss(set: UInt) =  random.miss 
+  def miss(set: UInt) =  random.miss
   def way(set: UInt) = random.way
 
   def access(set: UInt, touch_way: UInt) = random.access(touch_way)

@@ -19,11 +19,12 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.{Definition, instantiable, public}
 import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FPUSubModule, FMA}
+import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
@@ -32,7 +33,9 @@ class FenceIO(implicit p: Parameters) extends XSBundle {
   val sbuffer = new FenceToSbuffer
 }
 
-class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: ExuConfig) {
+@instantiable
+class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
+
   val disableSfence = WireInit(false.B)
   val csr_frm = WireInit(frm.getOrElse(0.U(3.W)))
 
@@ -99,14 +102,15 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config: Exu
     io.out.valid := false.B
     io.out.bits := DontCare
   }
+
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out
     XSDebug(in.valid, p"fromInt(${in.valid} ${in.ready}) toInt(${out.valid} ${out.ready})\n")
-    XSDebug(io.redirect.valid, p"Redirect:(${io.redirect.valid}) roqIdx:${io.redirect.bits.roqIdx}\n")
+    XSDebug(io.redirect.valid, p"Redirect:(${io.redirect.valid}) robIdx:${io.redirect.bits.robIdx}\n")
     XSDebug(in.valid, p"src1:${Hexadecimal(in.bits.src(0))} src2:${Hexadecimal(in.bits.src(1))} " +
-      p"func:${Binary(in.bits.uop.ctrl.fuOpType)} pc:${Hexadecimal(in.bits.uop.cf.pc)} roqIdx:${in.bits.uop.roqIdx}\n")
-    XSDebug(out.valid, p"out res:${Hexadecimal(out.bits.data)} roqIdx:${out.bits.uop.roqIdx}\n")
+      p"func:${Binary(in.bits.uop.ctrl.fuOpType)} pc:${Hexadecimal(in.bits.uop.cf.pc)} robIdx:${in.bits.uop.robIdx}\n")
+    XSDebug(out.valid, p"out res:${Hexadecimal(out.bits.data)} robIdx:${out.bits.uop.robIdx}\n")
   }
 
 }
@@ -118,16 +122,16 @@ class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
 
-object ExeUnit {
-  def apply(cfg: ExuConfig)(implicit p: Parameters): ExeUnit = {
+object ExeUnitDef {
+  def apply(cfg: ExuConfig)(implicit p: Parameters): Definition[ExeUnit] = {
     cfg match {
-      case JumpExeUnitCfg => Module(new JumpExeUnit)
-      case AluExeUnitCfg => Module(new AluExeUnit)
-      case MulDivExeUnitCfg => Module(new MulDivExeUnit)
-      case JumpCSRExeUnitCfg => Module(new JumpCSRExeUnit)
-      case FmacExeUnitCfg => Module(new FmacExeUnit)
-      case FmiscExeUnitCfg => Module(new FmiscExeUnit)
-      case StdExeUnitCfg => Module(new StdExeUnit)
+      case JumpExeUnitCfg => Definition(new JumpExeUnit)
+      case AluExeUnitCfg => Definition(new AluExeUnit)
+      case MulDivExeUnitCfg => Definition(new MulDivExeUnit)
+      case JumpCSRExeUnitCfg => Definition(new JumpCSRExeUnit)
+      case FmacExeUnitCfg => Definition(new FmacExeUnit)
+      case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
+      case StdExeUnitCfg => Definition(new StdExeUnit)
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null
