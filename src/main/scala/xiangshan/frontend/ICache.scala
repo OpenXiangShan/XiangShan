@@ -137,10 +137,10 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegNext(port_0_read_0)
-  val port_0_read_1_reg = RegNext(port_0_read_1)
-  val port_1_read_1_reg = RegNext(port_1_read_1)
-  val port_1_read_0_reg = RegNext(port_1_read_0)
+  val port_0_read_0_reg = RegEnable(next = port_0_read_0, enable = io.read.fire())
+  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
+  val port_1_read_1_reg = RegEnable(next = port_1_read_1, enable = io.read.fire())
+  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -223,10 +223,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegNext(port_0_read_0)
-  val port_0_read_1_reg = RegNext(port_0_read_1)
-  val port_1_read_1_reg = RegNext(port_1_read_1)
-  val port_1_read_0_reg = RegNext(port_1_read_0)
+  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
+  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -260,18 +258,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     dataArray
   }
 
-  io.readResp.datas <> DontCare
-  when(port_0_read_0_reg){
-    io.readResp.datas(0) := dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
-  }.elsewhen(port_0_read_1_reg){
-    io.readResp.datas(0) := dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
-  }
-
-  when(port_1_read_0_reg){
-    io.readResp.datas(1) := dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
-  }.elsewhen(port_1_read_1_reg){
-    io.readResp.datas(1) := dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
-  }
+  io.readResp.datas(0) := Mux( port_0_read_1_reg, dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))) , dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))))
+  io.readResp.datas(1) := Mux( port_1_read_0_reg, dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))) , dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))))
   
   io.write.ready := true.B
 }
@@ -429,7 +417,6 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
 }
 
-//TODO: This is a stupid missqueue that has only 2 entries
 class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMissQueueModule
 {
   val io = IO(new Bundle{
@@ -558,4 +545,4 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.c.bits  := DontCare
   bus.e.valid := false.B
   bus.e.bits  := DontCare
-}
+} 
