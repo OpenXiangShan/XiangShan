@@ -468,7 +468,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   when (io.sbuffer(1).fire()) {
     assert(io.sbuffer(0).fire())
   }
-  if (useFakeDCache) {
+  if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until StorePipelineWidth) {
       val ptr = deqPtrExt(i).value
       val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))

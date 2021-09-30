@@ -327,16 +327,17 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
-  val node = if (!useFakePTW) TLIdentityNode() else null
-  val ptw = if (!useFakePTW) LazyModule(new PTW()) else null
-  if (!useFakePTW) {
+class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  val useSoftPTW = coreParams.softPTW
+  val node = if (!useSoftPTW) TLIdentityNode() else null
+  val ptw = if (!useSoftPTW) LazyModule(new PTW()) else null
+  if (!useSoftPTW) {
     node := ptw.node
   }
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new PtwIO)
-    if (useFakePTW) {
+    if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
     }
