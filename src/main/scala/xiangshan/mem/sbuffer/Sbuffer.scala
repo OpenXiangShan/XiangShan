@@ -30,10 +30,11 @@ class SbufferFlushBundle extends Bundle {
 }
 
 trait HasSbufferConst extends HasXSParameter {
-  val evictCycle = 1 << 20
+  val EvictCycles = 1 << 20
   val SbufferReplayDelayCycles = 16
-  require(isPow2(evictCycle))
-  val countBits = log2Up(evictCycle+1)
+  require(isPow2(EvictCycles))
+  val EvictCountBits = log2Up(EvictCycles+1)
+  val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = ptag + offset
@@ -47,9 +48,9 @@ trait HasSbufferConst extends HasXSParameter {
 }
 
 class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
-  val state_valid    = Bool() // this entry is active, and not being write to dcache
+  val state_valid    = Bool() // this entry is active
   val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
-  val s_pipe_req = Bool() // scheduled dcache store pipeline req
+  // val s_pipe_req = Bool() // scheduled dcache store pipeline req
   val w_pipe_resp = Bool() // waiting for dcache store pipeline resp
   val w_timeout = Bool() // waiting for resend store pipeline req timeout
 
@@ -110,8 +111,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val data = dataModule.io.dataOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
-  val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(countBits.W))))
-  val delay_counters = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(log2Up(SbufferReplayDelayCycles).W))))
+  val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
+  val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
   /*
        idle --[flush]   --> drain   --[buf empty]--> idle
@@ -160,12 +161,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   //-------------------------cohCount-----------------------------
   // insert and merge: cohCount=0
   // every cycle cohCount+=1
-  // if cohCount(countBits-1)==1, evict
-  val timeOutMask = VecInit(widthMap(i => cohCount(i)(countBits - 1)))
-  val (timeOutIdx, hasTimeOut) = PriorityEncoderWithFlag(timeOutMask)
+  // if cohCount(EvictCountBits-1)==1, evict
+  val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
+  val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
+  val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
+  val (missqReplayTimeOutIdx, missqReplayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
 
-  val validMask = VecInit(stateVec.map(s => s.isValid()))
-  val drainIdx = PriorityEncoder(validMask)
+  val activeMask = VecInit(stateVec.map(s => s.isActive()))
+  val drainIdx = PriorityEncoder(activeMask)
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
 
@@ -183,7 +186,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   for(i <- 0 until StorePipelineWidth){
     mergeMask(i) := widthMap(j =>
-      inptags(i) === ptag(j) && validMask(j)
+      inptags(i) === ptag(j) && activeMask(j)
     )
   }
 
@@ -225,6 +228,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   def wordReqToBufLine(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateVec(insertIdx).state_valid := true.B
     cohCount(insertIdx) := 0.U
+    missqReplayCount(insertIdx) := 0.U
     ptag(insertIdx) := reqptag
     vtag(insertIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
     when(flushMask){
@@ -244,6 +248,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
     cohCount(mergeIdx) := 0.U
+    missqReplayCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         mask(mergeIdx)(wordOffset)(i) := true.B
@@ -287,7 +292,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   for(i <- 0 until StoreBufferSize){
     XSDebug(stateVec(i).isValid(),
-      p"[$i] timeout:${cohCount(i)(countBits-1)} state:${stateVec(i)}\n"
+      p"[$i] timeout:${cohCount(i)(EvictCountBits-1)} state:${stateVec(i)}\n"
     )
   }
 
@@ -309,7 +314,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val sq_empty = !Cat(io.in.map(_.valid)).orR()
   val empty = sbuffer_empty && sq_empty
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  val validCount = PopCount(validMask)
+  val validCount = PopCount(activeMask)
   val do_eviction = RegNext(validCount >= threshold || validCount === (StoreBufferSize-1).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
@@ -358,14 +363,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(need_drain,
     drainIdx,
-    Mux(hasTimeOut, timeOutIdx, replaceIdx)
+    Mux(cohHasTimeOut, 
+      cohTimeOutIdx, 
+      Mux(missqReplayHasTimeOut, missqReplayTimeOutIdx, replaceIdx)
+    )
   )
+  
   /*
       If there is a inflight dcache req which has same ptag with evictionIdx's ptag,
       current eviction should be blocked.
    */
-  val prepareValid = (need_drain || hasTimeOut || need_replace) &&
-    noSameBlockInflight(evictionIdx) && validMask(evictionIdx)
+  val prepareValid = (need_drain || cohHasTimeOut || need_replace) &&
+    noSameBlockInflight(evictionIdx) && activeMask(evictionIdx)
   val prepareValidReg = RegInit(false.B)
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.pipe_req.ready || !prepareValidReg
@@ -379,17 +388,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
   when(willSendDcacheReq){
     stateVec(evictionIdx).state_inflight := true.B
-    stateVec(evictionIdx).s_pipe_req := true.B
+    stateVec(evictionIdx).w_timeout := false.B
+    // stateVec(evictionIdx).s_pipe_req := true.B
     XSDebug(p"$evictionIdx will be sent to Dcache\n")
   }
-  XSDebug(p"need drain:$need_drain hasTimeOut: $hasTimeOut need replace:$need_replace\n")
-  XSDebug(p"drainIdx:$drainIdx tIdx:$timeOutIdx replIdx:$replaceIdx " +
-    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${validMask(evictionIdx)}\n")
+  XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
+  XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
+    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${activeMask(evictionIdx)}\n")
   XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.pipe_req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may note accurate
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
+    need_replace && !need_drain && !cohHasTimeOut && canSendDcacheReq && activeMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
   val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
@@ -409,9 +419,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.dcache.pipe_req.bits.id := evictionIdxReg
 
   when (io.dcache.pipe_req.fire()) {
-    stateVec(evictionIdxReg).s_pipe_req := false.B
+    // stateVec(evictionIdxReg).s_pipe_req := false.B
     stateVec(evictionIdxReg).w_pipe_resp := true.B
-    assert(stateVec(evictionIdxReg).s_pipe_req === true.B)
+    // assert(stateVec(evictionIdxReg).s_pipe_req === true.B)
     assert(!(io.dcache.pipe_req.bits.vaddr === 0.U))
     assert(!(io.dcache.pipe_req.bits.addr === 0.U))
   }
@@ -430,9 +440,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // -> req missed and fail to enter missQueue, manually replay it later
   // -> is it necessary?
   when (io.dcache.pipe_resp.fire()) {
-    when (io.dcache.pipe_resp.bits.miss && io.dcache.pipe_resp.bits.replay) {
-      delay_counters(dcache_resp_id) := 0.U
-      stateVec(dcache_resp_id).w_timeout := true.B
+    when (io.dcache.pipe_resp.bits.miss) {
+      // if miss && !replay, keep waiting
+      when(io.dcache.pipe_resp.bits.replay) {
+        missqReplayCount(dcache_resp_id) := 0.U
+        stateVec(dcache_resp_id).w_timeout := true.B
+      }
     } .otherwise {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
@@ -444,12 +457,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   
   // TODO: reuse cohCount
   (0 until StoreBufferSize).map(i => {
-    when(stateVec(i).w_timeout && stateVec(i).state_inflight) {
-      delay_counters(i) := delay_counters(i) + 1.U 
-      when(delay_counters(i) === (SbufferReplayDelayCycles - 1).U) {
-        stateVec(i).w_timeout := false.B
-        stateVec(i).s_pipe_req := true.B
-      }
+    when(stateVec(i).w_timeout && stateVec(i).state_inflight && !missqReplayCount(i)(MissqReplayCountBits-1)) {
+      missqReplayCount(i) := missqReplayCount(i) + 1.U 
+      // when(missqReplayCount(i)(MissqReplayCountBits-1)) {
+      //   stateVec(i).w_timeout := false.B
+      //   stateVec(i).s_pipe_req := true.B
+      // }
     }
   })
 
@@ -478,7 +491,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for (i <- 0 until StoreBufferSize) {
-    when(validMask(i) && !timeOutMask(i)){
+    when(activeMask(i) && !cohTimeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U
     }
   }
@@ -491,7 +504,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
     val tag_matches = vtag_matches
     val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
-      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((validMask(w) || inflightMask(w)))
+      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
@@ -503,7 +516,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       )
       do_uarch_drain := true.B
     }
-    val valid_tag_matches = widthMap(w => tag_matches(w) && validMask(w))
+    val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
@@ -541,11 +554,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for (i <- 0 until StoreBufferSize) {
-    XSDebug("ptag %x vtag %x valid %x inflight %x\n",
+    XSDebug("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_resp %x w_timeout %x\n",
       ptag(i) << OffsetWidth,
       vtag(i) << OffsetWidth,
-      validMask(i),
-      inflightMask(i)
+      stateVec(i).isValid(),
+      activeMask(i),
+      inflightMask(i),
+      stateVec(i).w_pipe_resp,
+      stateVec(i).w_timeout
     )
   }
 
