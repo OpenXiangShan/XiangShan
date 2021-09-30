@@ -96,9 +96,6 @@ case class XSCoreParameters
 
       (preds, ras.io.out.resp)
     }),
-
-
-  EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -188,26 +185,23 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2
   ),
-  dcacheParameters: DCacheParameters = DCacheParameters(
+  dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
-    nReleaseEntries = 16,
-  ),
-  L2CacheParams: HCCacheParameters = HCCacheParameters(
+    nReleaseEntries = 16
+  )),
+  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
     prefetch = Some(huancun.prefetch.BOPParameters())
-  ),
+  )),
   usePTWRepeater: Boolean = false,
-  useFakePTW: Boolean = false,
-  useFakeDCache: Boolean = false,
-  useFakeL1plusCache: Boolean = false,
-  useFakeL2Cache: Boolean = false
+  softPTW: Boolean = false // dpi-c debug only
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
@@ -285,7 +279,6 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = coreParams.UBtbWays
   val BtbWays = coreParams.BtbWays
-  val EnableL1plusPrefetcher = coreParams.EnableL1plusPrefetcher
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
@@ -330,24 +323,12 @@ trait HasXSParameter {
   val instOffsetBits = log2Ceil(instBytes)
 
   val icacheParameters = coreParams.icacheParameters
-  val dcacheParameters = coreParams.dcacheParameters
+  val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   val LRSCCycles = 100
 
-
   // cache hierarchy configurations
   val l1BusDataWidth = 256
-
-  val useFakeDCache = coreParams.useFakeDCache
-  val useFakePTW = coreParams.useFakePTW
-  val useFakeL1plusCache = coreParams.useFakeL1plusCache
-  // L2 configurations
-  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
-  val L1BusWidth = 256
-  val L2BlockSize = 64
-
-  // L3 configurations
-  val L2BusWidth = 256
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576
