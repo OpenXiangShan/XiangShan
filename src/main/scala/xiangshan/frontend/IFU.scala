@@ -198,7 +198,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 
-  val f1_pAddrs             = tlbRespPAddr   //TODO: Temporary assignment
+  val f1_pAddrs             = tlbRespPAddr
   val f1_pTags              = VecInit(f1_pAddrs.map(get_phy_tag(_)))
   val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
