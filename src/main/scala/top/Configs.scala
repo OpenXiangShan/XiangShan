@@ -205,7 +205,7 @@ class WithNKBL2
 ) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
-    val l2sets = n * 1024 / ways / 64
+    val l2sets = n * 1024 / banks / ways / 64
     upParams.copy(
       cores = upParams.cores.map(p => p.copy(
         L2CacheParamsOpt = Some(HCCacheParameters(
