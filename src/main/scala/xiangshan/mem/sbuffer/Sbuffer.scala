@@ -373,8 +373,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       If there is a inflight dcache req which has same ptag with evictionIdx's ptag,
       current eviction should be blocked.
    */
-  val prepareValid = (need_drain || cohHasTimeOut || need_replace) &&
-    noSameBlockInflight(evictionIdx) && activeMask(evictionIdx)
+  val prepareValid = missqReplayHasTimeOut || 
+    activeMask(evictionIdx) &&  (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
   val prepareValidReg = RegInit(false.B)
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.pipe_req.ready || !prepareValidReg
@@ -397,9 +397,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     p"blocked:${!noSameBlockInflight(evictionIdx)} v:${activeMask(evictionIdx)}\n")
   XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.pipe_req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
-  // the lru update may note accurate
+  // the lru update may not accurate
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !cohHasTimeOut && canSendDcacheReq && activeMask(replaceIdx))
+    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && canSendDcacheReq && activeMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
   val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
@@ -459,10 +459,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   (0 until StoreBufferSize).map(i => {
     when(stateVec(i).w_timeout && stateVec(i).state_inflight && !missqReplayCount(i)(MissqReplayCountBits-1)) {
       missqReplayCount(i) := missqReplayCount(i) + 1.U 
-      // when(missqReplayCount(i)(MissqReplayCountBits-1)) {
-      //   stateVec(i).w_timeout := false.B
-      //   stateVec(i).s_pipe_req := true.B
-      // }
+    }
+    when(activeMask(i) && !cohTimeOutMask(i)){
+      cohCount(i) := cohCount(i)+1.U
     }
   })
 
@@ -488,12 +487,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     difftest.io.sbufferAddr := getAddr(ptag(dcache_resp_id))
     difftest.io.sbufferData := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
     difftest.io.sbufferMask := mask(dcache_resp_id).asUInt
-  }
-
-  for (i <- 0 until StoreBufferSize) {
-    when(activeMask(i) && !cohTimeOutMask(i)){
-      cohCount(i) := cohCount(i)+1.U
-    }
   }
 
   // ---------------------- Load Data Forward ---------------------
