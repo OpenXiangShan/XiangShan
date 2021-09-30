@@ -25,6 +25,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 /* Miss Queue dont care about duplicate req, which is done by PtwFilter
  * PtwMissQueue is just a Queue inside Chisel with flush
@@ -81,7 +82,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
-  val state_idle :: state_cache_high :: state_cache_low :: s_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
+  val state_idle :: state_cache_high :: state_cache_low :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
   val state = RegInit(VecInit(Seq.fill(MSHRSize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_caches_high = state.map(_ === state_cache_high)
@@ -180,16 +181,16 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.out.bits.vpn := entries(mem_ptr).vpn
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
-  
+
   val enq_ptr_reg = RegNext(enq_ptr)
   val enq_ptr_reg_reg = RegNext(enq_ptr_reg)
-  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === s_addr_check && !sfence.valid) && !sfence.valid)
-  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg), 0))
-  io.pmp.req.cmf := TlbCmd.read
+  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === state_addr_check && !io.sfence.valid) && !io.sfence.valid)
+  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
+  io.pmp.req.cmd := TlbCmd.read
   io.pmp.req.size := 3.U // TODO: fix it
   when (pmp_resp_valid) {
     entries(enq_ptr_reg_reg).af := io.pmp.resp.ld
-    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, s_mem_out, s_mem_req)
+    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
   }
 
   io.mem.req.valid := mem_arb.io.out.valid

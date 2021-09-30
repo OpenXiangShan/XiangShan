@@ -205,7 +205,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
     } else {
       val lowMask = ~mask | OneHot.UIntToOH1(lgSize, lgMaxSize)
       val highMatch = maskEqual(paddr >> lgMaxSize, compare_addr >> lgMaxSize, mask >> lgMaxSize)
-      val lowMatch = maskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), ~lowMask(lgMaxSize-1, 0))
+      val lowMatch = maskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), lowMask(lgMaxSize-1, 0))
       highMatch && lowMatch
     }
   }
@@ -299,7 +299,7 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
 class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle
 
 @chiselName
-class PMPChecker(lgMaxSize: Int)(implicit p: Parameters) extends PMPModule {
+class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
   val io = IO(new Bundle{
     val env = Input(new Bundle {
       val mode = Input(UInt(2.W))

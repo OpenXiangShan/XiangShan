@@ -82,7 +82,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
-  io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
+  io.dtlbReq.bits.robIdx := s0_uop.robIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
@@ -214,12 +214,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
-
     val dcache_kill = Output(Bool())
   })
 
   val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
-  excep(loadAccessFault) := io.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmp.ld
+  excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
   val s2_exception = selectLoad(excep, false).asUInt.orR
 
   val s2_uop = io.in.bits.uop
@@ -231,8 +230,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
-
-
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
   // val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid || cnt === 0.U
@@ -240,7 +237,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
 
   // assert(!s2_forward_fail)
-  io.dcache_kill := io.in.valid && io.pmp.ld
+  io.dcache_kill := io.in.valid && io.pmpResp.ld
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
@@ -388,7 +385,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   load_s1.io.dtlbResp <> io.tlb.resp
-  load_s1.io.pmpResp <> io.pmp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
@@ -398,6 +394,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.dcache.s2_kill <> load_s2.io.dcache_kill
   load_s2.io.dcacheResp <> io.dcache.resp
+  load_s2.io.pmpResp <> io.pmp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2

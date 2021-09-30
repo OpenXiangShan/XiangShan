@@ -276,7 +276,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_waymask  = RegEnable(next = f1_victim_masks, enable = f1_fire)
   //exception information
   val f2_except_pf = RegEnable(next = VecInit(tlbExcpPF), enable = f1_fire)
-  val f2_except_af = RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire)
+  val f2_except_af = VecInit(RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(f1_fire)).asBool))
   val f2_except    = VecInit((0 until 2).map{i => f2_except_pf(i) || f2_except_af(i)})
   val f2_has_except = f2_valid && (f2_except_af.reduce(_||_) || f2_except_pf.reduce(_||_))
 

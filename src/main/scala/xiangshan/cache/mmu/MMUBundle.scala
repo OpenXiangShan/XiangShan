@@ -144,7 +144,7 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     }
   }
 
-  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool, af) = {
+  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool, af: Bool) = {
     this.level.map(_ := level(0))
     this.ppn := ppn
     // refill pagetable perm
@@ -348,7 +348,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
   val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
     val isFirstIssue = Bool()
@@ -360,9 +360,9 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
-  val ld = Bool()
-  val st = Bool()
-  val instr = Bool()
+  val ld = Output(Bool())
+  val st = Output(Bool())
+  val instr = Output(Bool())
 }
 
 class TlbResp(implicit p: Parameters) extends TlbBundle {
@@ -609,7 +609,10 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
 class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
-  val csr = Input(new TlbCsrBundle)
+  val csr = new Bundle {
+    val tlb = Input(new TlbCsrBundle)
+    val distribute_csr = Flipped(new DistributedCSRIO)
+  }
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

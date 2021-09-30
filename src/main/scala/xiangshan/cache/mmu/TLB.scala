@@ -318,7 +318,9 @@ object TLB {
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")
-    (pmp zip tlb.io.pmp).map(a => a._1 <> a._2)
+    for (i <- 0 until width) {
+      pmp(i) := { if (q.sameCycle) RegEnable(tlb.io.pmp(i), tlb.io.requestor(i).resp.fire()) else tlb.io.pmp(i) }
+    }
     require(pmp(0).size.getWidth == tlb.io.pmp(0).size.getWidth)
 
     if (!shouldBlock) { // dtlb

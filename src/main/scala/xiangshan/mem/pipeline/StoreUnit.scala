@@ -51,7 +51,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
-  io.dtlbReq.bits.roqIdx := io.in.bits.uop.roqIdx
+  io.dtlbReq.bits.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
 
@@ -127,7 +127,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.bits.miss := false.B
   io.lsq.bits.mmio := s1_mmio && !s1_exception
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
-  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st || io.pmpResp.st
+  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
 
   // mmio inst with exception will be writebacked immediately
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
@@ -149,7 +149,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
-  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.storeAccessFault || io.pmpResp.ld
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.ld
   io.out.valid := io.in.valid
 
 }
@@ -207,7 +207,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   store_s2.io.pmpResp <> io.pmp
-  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout
 
