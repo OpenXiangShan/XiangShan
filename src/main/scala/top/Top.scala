@@ -55,7 +55,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   val uncache = TLXbar()
 
   if (coreParams.dcacheParametersOpt.nonEmpty) {
-    busPMU := TLLogger(s"L2_L1D_$hardId") := core.memBlock.dcache.clientNode
+    busPMU := TLLogger(s"L2_L1D_$hardId", !debugOpts.FPGAPlatform) := core.memBlock.dcache.clientNode
   }
   busPMU := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
@@ -129,6 +129,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLFIFOFixer() :=
     TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
@@ -256,7 +257,7 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
     val l2_l3_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
-    l3_xbar :=* TLBuffer() :=* TLLogger(s"L3_L2_$i") :=* l2_l3_pmu :=* core_with_l2(i).memory_port
+    l3_xbar :=* TLBuffer() :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* l2_l3_pmu :=* core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -310,8 +311,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   l3cacheOpt match {
     case Some(l3) =>
-      bankedNode :*= TLLogger("MEM_L3") :*= l3_mem_pmu :*= l3.node :*= TLBuffer() :*= l3_xbar
-    case None => bankedNode :*= TLIgnoreNode() :*= l3_xbar
+      bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3.node :*= TLBuffer() :*= l3_xbar
+    case None => bankedNode :*= TLAdapterNode() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
