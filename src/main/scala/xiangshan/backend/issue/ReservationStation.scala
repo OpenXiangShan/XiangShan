@@ -357,12 +357,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect, io.flush)
     statusArray.io.issueGranted(i).valid := issueVec(i).valid && s1_out(i).ready
     statusArray.io.issueGranted(i).bits := issueVec(i).bits
-    // For FMAs that can be scheduled multiple times, only when
-    // all source operands are ready we dequeue the instruction.
-    statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
-    statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
-    statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
-    statusArray.io.deqResp(i).bits.resptype := DontCare
     if (io.feedback.isDefined) {
       // feedbackSlow
       statusArray.io.deqResp(2*i).valid := io.feedback.get(i).feedbackSlow.valid
@@ -374,6 +368,13 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       statusArray.io.deqResp(2*i+1).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackFast.bits.rsIdx)
       statusArray.io.deqResp(2*i+1).bits.success := io.feedback.get(i).feedbackFast.bits.hit
       statusArray.io.deqResp(2*i+1).bits.resptype := io.feedback.get(i).feedbackFast.bits.sourceType
+    } else {
+      // For FMAs that can be scheduled multiple times, only when
+      // all source operands are ready we dequeue the instruction.
+      statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
+      statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
+      statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(i).bits.resptype := DontCare
     }
 
     if (io.fastWakeup.isDefined) {
