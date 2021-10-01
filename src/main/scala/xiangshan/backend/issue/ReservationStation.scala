@@ -133,7 +133,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     // split rs to 2-deq
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
-    val numRS = (params.numDeq + 1) / maxRsDeq
+    val numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
     val rs = (0 until numRS).map(i => {
       val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
       val numEnq = params.numEnq / numRS

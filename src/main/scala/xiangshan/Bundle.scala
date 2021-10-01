@@ -259,7 +259,7 @@ class Dp1ToDp2IO(implicit p: Parameters) extends XSBundle {
   val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
-class ReplayPregReq(implicit p: Parameters) extends XSBundle {
+class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
