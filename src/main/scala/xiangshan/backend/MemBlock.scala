@@ -38,6 +38,13 @@ class Std(implicit p: Parameters) extends FunctionUnit {
   io.out.bits.data := io.in.bits.src(0)
 }
 
+class AmoData(implicit p: Parameters) extends FunctionUnit {
+  io.in.ready := true.B
+  io.out.valid := io.in.valid
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.data := io.in.bits.src(0)
+}
+
 class MemBlock()(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCacheWrapper())
@@ -62,7 +69,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
     val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
     val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))
-//    val stData = Vec(exuParameters.StuCnt, Flipped(ValidIO(new StoreDataBundle)))
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
@@ -119,8 +125,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
   // TODO: fast load wakeup
-
-
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
