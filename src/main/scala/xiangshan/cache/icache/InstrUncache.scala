@@ -138,15 +138,11 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 }
 
-class icacheUncacheIO(implicit p: Parameters) extends DCacheBundle {
-    val req = Flipped(DecoupledIO(new InsUncacheReq ))
+class icacheUncacheIO(implicit p: Parameters) extends XSBundle {
+    val req = Flipped(DecoupledIO(new InsUncacheReq))
     val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())
-
 }
-
-// convert DCacheIO to TileLink
-// for Now, we only deal with TL-UL
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
 
@@ -170,7 +166,6 @@ class icacheUncacheImp(outer: InstrUncache)
   val io = IO(new icacheUncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
-  //require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
   val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 

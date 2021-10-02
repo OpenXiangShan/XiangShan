@@ -133,7 +133,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     // split rs to 2-deq
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
-    val numRS = (params.numDeq + 1) / maxRsDeq
+    val numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
     val rs = (0 until numRS).map(i => {
       val numDeq = Seq(params.numDeq - maxRsDeq * i, maxRsDeq).min
       val numEnq = params.numEnq / numRS
@@ -262,7 +262,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
   // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = io.fromDispatch.map(_.fire && !io.redirect.valid && !io.flush)
+  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid && !io.flush))
   val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect, io.flush))
   XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(1, 1, false))
@@ -347,6 +347,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
 
   // pipeline registers for stage one
+  val s1_do_enqueue = RegNext(doEnqueue)
   val s1_out = Wire(Vec(params.numDeq, Decoupled(new ExuInput)))
   // Do the read data arbitration
   for ((doOverride, i) <- oldestOverride.zipWithIndex) {
@@ -405,12 +406,12 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // dispatch data: the next cycle after enqueue
   for (i <- 0 until params.numEnq) {
-    dataArray.io.write(i).enable := RegNext(doEnqueue(i))
+    dataArray.io.write(i).enable := s1_do_enqueue(i)
     dataArray.io.write(i).mask := RegNext(statusArray.io.update(i).data.srcState)
     dataArray.io.write(i).addr := RegNext(select.io.allocate(i).bits)
     dataArray.io.write(i).data := immBypassedData(i)
     if (params.delayedRf) {
-      dataArray.io.delayedWrite(i).valid := RegNext(RegNext(doEnqueue(i) && needFpSource(i)))
+      dataArray.io.delayedWrite(i).valid := RegNext(s1_do_enqueue(i) && needFpSource(i))
       dataArray.io.delayedWrite(i).bits := io.fpRegValue.get
     }
   }
@@ -454,18 +455,21 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // for read-before-issue, we need to bypass the enqueue data here
   // for read-after-issue, we need to bypass the imm here
   // check enq data bypass (another form of broadcast except that we know where it hits) here
-  for (i <- 0 until params.numDeq) {
-    // enqRegSelected: Vec(config.numEnq, Bool())
-    val enqRegSelected = VecInit(select.io.allocate.map(a => RegNext(a.fire()) && RegNext(a.bits) === issueVec(i).bits))
+  val s1_allocate_index = select.io.allocate.map(a => RegNext(OHToUInt(a.bits)))
+  val s1_issue_index = issueVec.map(iss => OHToUInt(iss.bits))
+  val s1_select_bypass_s0 = Wire(Vec(params.numDeq, Vec(params.numEnq, Bool())))
+  for ((bypass, i) <- s1_select_bypass_s0.zipWithIndex) {
+    // bypass: Vec(config.numEnq, Bool())
+    bypass := s1_do_enqueue.zip(s1_allocate_index).map{ case (enq, idx) => enq && idx === s1_issue_index(i) }
     // enqSrcStateReg: Vec(config.numEnq, Vec(config.numSrc, Bool()))
     // [i][j]: i-th enqueue, j-th source state
     val enqSrcStateReg = RegNext(VecInit(statusArray.io.update.map(_.data.srcState)))
     // enqBypassValid: Vec(config.numEnq, Vec(config.numSrc, Bool()))
-    val enqBypassValid = enqSrcStateReg.zip(enqRegSelected).map { case (state, sel) => VecInit(state.map(_ && sel)) }
+    val enqBypassValid = enqSrcStateReg.zip(bypass).map { case (state, sel) => VecInit(state.map(_ && sel)) }
 
     // bypass data for config.numDeq
-    val deqBypassValid = Mux1H(enqRegSelected, enqBypassValid)
-    val deqBypassData = Mux1H(enqRegSelected, immBypassedData)
+    val deqBypassValid = Mux1H(bypass, enqBypassValid)
+    val deqBypassData = Mux1H(bypass, immBypassedData)
 
     // dequeue data should be bypassed
     deqBypassValid.zip(deqBypassData).zip(s1_out(i).bits.src).foreach{ case ((byValid, byData), o) =>
@@ -490,7 +494,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   /**
     * S2: to function units
     */
-  val s1_issue_index = issueVec.map(iss => OHToUInt(iss.bits))
   val s1_first_issue = statusArray.io.isFirstIssue
   val s1_out_fire = s1_out.zip(s2_deq).map(x => x._1.valid && x._2.ready)
   val s2_issue_index = s1_issue_index.zip(s1_out_fire).map(x => RegEnable(x._1, x._2))
@@ -664,12 +667,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     val pcMem = Reg(Vec(params.numEntries, UInt(VAddrBits.W)))
     for (i <- 0 until params.numEnq) {
       when (dataArray.io.write(i).enable) {
-        val waddr = OHToUInt(dataArray.io.write(i).addr)
-        pcMem(waddr) := io.jump.get.jumpPc
+        pcMem(s1_allocate_index(i)) := io.jump.get.jumpPc
       }
     }
     for (i <- 0 until params.numDeq) {
-      io.deq(i).bits.uop.cf.pc := pcMem(s2_issue_index(i))
+      // currently we assert there's only one enqueue.
+      require(params.numDeq == 1, "only one jump now")
+      val pcRead = Mux(s1_select_bypass_s0.asUInt.orR, io.jump.get.jumpPc, pcMem(s1_issue_index(i)))
+      io.deq(i).bits.uop.cf.pc := RegEnable(pcRead, s1_out_fire(i))
     }
   }
 
