@@ -100,6 +100,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
+  def SOFT_PREFETCH = 3
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
@@ -169,6 +170,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val data   = UInt(DataBits.W)
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
+  val instrtype   = UInt(sourceTypeWidth.W)
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -200,6 +202,8 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
+  val miss_enter = Bool() //add by tjz
+  // cache miss, and enter the missqueue successfully. just for softprefetch
   val replay = Bool()
   val id     = UInt(reqIdWidth.W)
   def dump() = {

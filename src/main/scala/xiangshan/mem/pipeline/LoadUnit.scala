@@ -41,7 +41,7 @@ class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
 
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0(implicit p: Parameters) extends XSModule {
+class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
@@ -76,6 +76,13 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
   XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
+  val isSoftPrefetch = Wire(Bool()) // add by tjz
+  isSoftPrefetch := s0_uop.ctrl.isORI //it's a ORI but it exists in ldu, this means it's a softprefecth
+  val isSoftPrefetchRead = Wire(Bool())
+  val isSoftPrefetchWrite = Wire(Bool())
+  isSoftPrefetchRead := s0_uop.ctrl.isSoftPrefetchRead
+  isSoftPrefetchWrite := s0_uop.ctrl.isSoftPrefetchWrite
+
   // query DTLB
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.vaddr := s0_vaddr
@@ -86,10 +93,21 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
 
   // query DCache
   io.dcacheReq.valid := io.in.valid
-  io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
+  when (isSoftPrefetchRead) {
+    io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFR
+  }.elsewhen (isSoftPrefetchWrite) {
+    io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFW
+  }.otherwise {
+    io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD   
+  }
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
   io.dcacheReq.bits.data := DontCare
+  when(isSoftPrefetch) {
+    io.dcacheReq.bits.instrtype := SOFT_PREFETCH.U
+  }.otherwise {
+    io.dcacheReq.bits.instrtype := LOAD_SOURCE.U
+  }
 
   // TODO: update cache meta
   io.dcacheReq.bits.id   := DontCare
@@ -110,6 +128,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.isSoftPrefetch := isSoftPrefetch //add by tjz
 
   io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
 
@@ -188,6 +207,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
+  io.out.bits.isSoftPrefetch := io.in.bits.isSoftPrefetch //add by tjz
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -223,6 +243,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
+  val s2_cache_miss_enter = io.dcacheResp.bits.miss_enter //add by tjz
 
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
@@ -280,9 +301,19 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits.data := rdataPartialLoad
   // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
-    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
+    when(io.in.bits.isSoftPrefetch) {
+      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward && !s2_cache_miss_enter //add by tjz
+    }.otherwise {
+      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
+    }
+    //io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
   } else {
-    io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
+    when(io.in.bits.isSoftPrefetch) {
+      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !s2_cache_miss_enter //add by tjz
+    }.otherwise {
+      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail 
+    }
+    //io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   // if forward fail, replay this inst
@@ -305,7 +336,12 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // feedback tlb result to RS
   io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+  when (io.in.bits.isSoftPrefetch) {
+    io.rsFeedback.bits.hit := (!s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid) || s2_cache_miss_enter
+  }.otherwise {
+    io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+  }//add by tjz
+  //io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
   io.rsFeedback.bits.sourceType := Mux(s2_tlb_miss, RSFeedbackType.tlbMiss,
