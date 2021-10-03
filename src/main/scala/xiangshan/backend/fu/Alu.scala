@@ -194,7 +194,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val leftShiftModule = Module(new LeftShiftModule)
   val sll = leftShiftModule.io.sll
   val revSll = leftShiftModule.io.revSll
-  leftShiftModule.io.sllSrc := Cat(Fill(32, func(0)), Fill(32, 1.U)) & src1
+  leftShiftModule.io.sllSrc := Cat(Fill(32, func(3)), Fill(32, 1.U)) & src1
   leftShiftModule.io.shamt := shamt
   leftShiftModule.io.revShamt := revShamt
 
