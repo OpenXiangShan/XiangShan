@@ -280,11 +280,10 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sub  = subModule.io.sub
   subModule.io.src(0) := src1
   subModule.io.src(1) := src2
-  val sgtu    = sub(XLEN)
-  val sltu    = !sgtu
+  val sltu    = !sub(XLEN)
   val slt     = src1(XLEN - 1) ^ src2(XLEN - 1) ^ sltu
   val maxMin  = Mux(slt ^ func(0), src2, src1)
-  val maxMinU = Mux((sgtu && func(0)) || ~(sgtu && func(0)), src2, src1)
+  val maxMinU = Mux(sltu ^ func(0), src2, src1)
   val compareRes = Mux(func(2), Mux(func(1), maxMin, maxMinU), Mux(func(1), slt, Mux(func(0), sltu, sub)))
 
   // logic
