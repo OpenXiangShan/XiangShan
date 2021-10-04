@@ -413,9 +413,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
     val (config, firrtlOpts) = ArgParser.parse(args)
+    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     XiangShanStage.execute(firrtlOpts, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop()(config))
         soc.module
       })
     ))
