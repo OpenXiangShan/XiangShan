@@ -190,12 +190,15 @@ class TLBSA(
          entries.io.w.req.bits.data(0).perm.g && io.w.bits.wayIdx === j.U
   }}}
 
-  asids.zipWithIndex.map{ case (a , i) => a.zipWithIndex.map{ case (b , j) => {
-    when(entries.io.w.req.valid && entries.io.w.req.bits.setIdx === i.U && io.w.bits.wayIdx === j.U) {
-      b := Mux(io.w.valid, io.w.bits.data.asid, io.victim.in.bits.asid)
-    }
-  }}}
-
+  // asids.zipWithIndex.map{ case (a , i) => a.zipWithIndex.map{ case (b , j) => {
+  //   when(entries.io.w.req.valid && entries.io.w.req.bits.setIdx === i.U && io.w.bits.wayIdx === j.U) {
+  //     b := Mux(io.w.valid, io.w.bits.data.asid, io.victim.in.bits.asid)
+  //   }
+  // }}}
+  when(entries.io.w.req.valid) {
+    asids(entries.io.w.req.bits.setIdx)(io.w.bits.wayIdx) := Mux(io.w.valid, io.w.bits.data.asid, io.victim.in.bits.asid)
+  }
+  
   }
 
   when (io.w.valid) {
