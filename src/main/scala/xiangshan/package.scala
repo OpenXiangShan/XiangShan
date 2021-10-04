@@ -218,8 +218,8 @@ package object xiangshan {
     def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
     def sra        = "b000_0111".U // sra:     src1 >> src2 (arithmetic)
 
-    def rol        = "b000_1000".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
-    def ror        = "b000_1001".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
+    def rol        = "b000_1001".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
+    def ror        = "b000_1011".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
 
     // RV64 32bit optype
     def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
