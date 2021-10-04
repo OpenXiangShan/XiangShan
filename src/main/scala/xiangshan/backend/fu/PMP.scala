@@ -220,7 +220,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
       val upperBound = ((paddr >> lgMaxSize) === (compare_addr >> lgMaxSize)) &&
         ((compare_addr(lgMaxSize-1, 0) & (paddr(lgMaxSize-1, 0) | lowBitsMask)) =/= 0.U)
       val torAligned = !(lowerBound || upperBound)
-      val napotAligned = (lowBitsMask & mask(lgMaxSize-1, 0)) === 0.U
+      val napotAligned = (lowBitsMask & ~mask(lgMaxSize-1, 0)) === 0.U
       Mux(cfg.na4_napot, napotAligned, torAligned)
     }
   }
@@ -238,6 +238,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
   }
 }
 
+@chiselName
 class PMP(implicit p: Parameters) extends PMPModule {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
@@ -247,40 +248,40 @@ class PMP(implicit p: Parameters) extends PMPModule {
   val w = io.distribute_csr.w
 
   val pmp = Wire(Vec(NumPMP, new PMPEntry()))
-  val pmpMapping = {
-    val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
-    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
 
-    /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
-    val cfgMerged = RegInit(VecInit(Seq.fill(NumPMP / pmpCfgPerCSR)(0.U(XLEN.W))))
-    val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
-    val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
-    val mask = Reg(Vec(NumPMP, UInt(PAddrBits.W)))
+  val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
+  def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
 
-    for (i <- pmp.indices) {
-      pmp(i).gen(cfgs(i), addr(i), mask(i))
-    }
+  /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
+  val cfgMerged = RegInit(VecInit(Seq.fill(NumPMP / pmpCfgPerCSR)(0.U(XLEN.W))))
+  val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
+  val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
+  val mask = Reg(Vec(NumPMP, UInt(PAddrBits.W)))
 
-    val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
-      MaskedRegMap(
-        addr = PmpcfgBase + pmpCfgIndex(i),
-        reg = cfgMerged(i/pmpCfgPerCSR),
-        wmask = WritableMask,
-        wfn = new PMPConfig().write_cfg_vec
-      ))
-    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
-    val addr_mapping = (0 until NumPMP).map(i => {Map(
-      MaskedRegMap(
-        addr = PmpaddrBase + i,
-        reg = addr(i),
-        wmask = WritableMask,
-        wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1), mask(i)) else pmp(i).write_addr(mask(i)) },
-        rmask = WritableMask,
-        rfn = new PMPBase().read_addr(pmp(i).cfg)
-      ))
-    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
-    cfg_mapping ++ addr_mapping
+  for (i <- pmp.indices) {
+    pmp(i).gen(cfgs(i), addr(i), mask(i))
   }
+
+  val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
+    MaskedRegMap(
+      addr = PmpcfgBase + pmpCfgIndex(i),
+      reg = cfgMerged(i/pmpCfgPerCSR),
+      wmask = WritableMask,
+      wfn = new PMPConfig().write_cfg_vec
+    ))
+  }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
+
+  val addr_mapping = (0 until NumPMP).map(i => {Map(
+    MaskedRegMap(
+      addr = PmpaddrBase + i,
+      reg = addr(i),
+      wmask = WritableMask,
+      wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1), mask(i)) else pmp(i).write_addr(mask(i)) },
+      rmask = WritableMask,
+      rfn = new PMPBase().read_addr(pmp(i).cfg)
+    ))
+  }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
+  val pmpMapping =  cfg_mapping ++ addr_mapping
 
   val rdata = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(pmpMapping, w.bits.addr, rdata, w.valid, w.bits.data)
@@ -317,8 +318,8 @@ class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
   pmpMinuxOne.cfg.w := passThrough
   pmpMinuxOne.cfg.x := passThrough
 
-  val res = io.env.pmp.zip(pmpMinuxOne +: io.env.pmp.take(NumPMP-1))
-    .reverse.foldLeft(pmpMinuxOne) { case (prev, (pmp, last_pmp)) =>
+  val res = io.env.pmp.zip(pmpMinuxOne +: io.env.pmp.take(NumPMP-1)).zipWithIndex
+    .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pmp, last_pmp), i)) =>
     val is_match = pmp.is_match(io.req.addr, io.req.size, lgMaxSize, last_pmp)
     val ignore = passThrough && !pmp.cfg.l
     val aligned = pmp.aligned(io.req.addr, io.req.size, lgMaxSize, last_pmp)
@@ -327,6 +328,8 @@ class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
     cur.cfg.r := aligned && (pmp.cfg.r || ignore)
     cur.cfg.w := aligned && (pmp.cfg.w || ignore)
     cur.cfg.x := aligned && (pmp.cfg.x || ignore)
+
+    XSDebug(p"pmp${i.U} cfg:${Hexadecimal(pmp.cfg.asUInt)} addr:${Hexadecimal(pmp.addr)} mask:${Hexadecimal(pmp.mask)} is_match:${is_match} aligned:${aligned}")
 
     Mux(is_match, cur, prev)
   }
