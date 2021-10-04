@@ -169,7 +169,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
   /** generate match mask to help match in napot mode */
   def match_mask(paddr: UInt) = {
     val tmp_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
-    ~Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+    Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
   def boundMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int) = {
@@ -203,9 +203,9 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
     if (lgMaxSize <= PlatformGrain) {
       maskEqual(paddr, compare_addr, mask)
     } else {
-      val lowMask = ~mask | OneHot.UIntToOH1(lgSize, lgMaxSize)
-      val highMatch = maskEqual(paddr >> lgMaxSize, compare_addr >> lgMaxSize, mask >> lgMaxSize)
-      val lowMatch = maskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), lowMask(lgMaxSize-1, 0))
+      val lowMask = mask | OneHot.UIntToOH1(lgSize, lgMaxSize)
+      val highMatch = maskEqual(paddr >> lgMaxSize, compare_addr >> lgMaxSize, (~mask) >> lgMaxSize)
+      val lowMatch = maskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), ~lowMask(lgMaxSize-1, 0))
       highMatch && lowMatch
     }
   }
