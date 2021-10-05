@@ -238,7 +238,9 @@ class XiangShan(object):
             "namd": "_434640000000_.gz",
             "milc": "_103620000000_.gz",
             "lbm": "_140840000000_.gz",
-            "gromacs": "_275480000000_.gz"
+            "gromacs": "_275480000000_.gz",
+            "wrf": "_1916220000000_.gz",
+            "astar": "_122060000000_.gz"
         }
         return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
 

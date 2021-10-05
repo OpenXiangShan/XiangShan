@@ -16,13 +16,12 @@
 
 import chisel3._
 import chisel3.util._
-
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
-import xiangshan.backend.Std
+import xiangshan.backend.{AmoData, Std}
 
 package object xiangshan {
   object SrcType {
@@ -36,9 +35,9 @@ package object xiangshan {
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isFp(srcType: UInt) = srcType===fp
+    def isFp(srcType: UInt) = srcType(1)
     def isPcOrImm(srcType: UInt) = srcType(0)
-    def isRegOrFp(srcType: UInt) = !srcType(1)
+    def isRegOrFp(srcType: UInt) = !srcType(0)
     def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
@@ -219,8 +218,8 @@ package object xiangshan {
     def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
     def sra        = "b000_0111".U // sra:     src1 >> src2 (arithmetic)
 
-    def rol        = "b000_1000".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
-    def ror        = "b000_1001".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
+    def rol        = "b000_1001".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
+    def ror        = "b000_1011".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
 
     // RV64 32bit optype
     def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
@@ -452,6 +451,7 @@ package object xiangshan {
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
+  def mouDataGen(p: Parameters) = new AmoData()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -611,7 +611,7 @@ package object xiangshan {
   val lduCfg = FuConfig(
     "ldu",
     null, // DontCare
-    null,
+    (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
@@ -619,21 +619,29 @@ package object xiangshan {
   val staCfg = FuConfig(
     "sta",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val stdCfg = FuConfig(
     "std",
-    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
     writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
     "mou",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    latency = UncertainLatency(), hasExceptionOut = true
+  )
+
+  val mouDataCfg = FuConfig(
+    "mou",
+    mouDataGen,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
@@ -649,7 +657,7 @@ package object xiangshan {
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
-  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
-  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 }
