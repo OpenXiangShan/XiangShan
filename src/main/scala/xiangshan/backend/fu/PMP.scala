@@ -67,6 +67,20 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
     cfgVec.asUInt
   }
 
+  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
+    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
+    for (i <- cfgVec.indices) {
+      val tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := tmp
+      cfgVec(i).w := tmp.w && tmp.r
+      if (CoarserGrain) { cfgVec(i).a := Cat(tmp.a(1), tmp.a.orR) }
+      when (cfgVec(i).na4_napot) {
+        mask(index + i) := new PMPEntry().match_mask(cfgVec(i), addr(index + i))
+      }
+    }
+    cfgVec.asUInt
+  }
+
   def reset() = {
     l := false.B
     a := 0.U
@@ -172,6 +186,11 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
     Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
+  def match_mask(cfg: PMPConfig, paddr: UInt) = {
+    val tmp_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+  }
+
   def boundMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int) = {
     if (lgMaxSize <= PlatformGrain) {
       paddr < compare_addr
@@ -195,17 +214,17 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
     last_pmp.lowerBoundMatch(paddr, lgSize, lgMaxSize) && higherBoundMatch(paddr, lgMaxSize)
   }
 
-  def maskEqual(a: UInt, b: UInt, m: UInt) = {
-    (a & m) === (b & m)
+  def unmaskEqual(a: UInt, b: UInt, m: UInt) = {
+    (a & ~m) === (b & ~m)
   }
 
   def napotMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int) = {
     if (lgMaxSize <= PlatformGrain) {
-      maskEqual(paddr, compare_addr, mask)
+      unmaskEqual(paddr, compare_addr, mask)
     } else {
       val lowMask = mask | OneHot.UIntToOH1(lgSize, lgMaxSize)
-      val highMatch = maskEqual(paddr >> lgMaxSize, compare_addr >> lgMaxSize, (~mask) >> lgMaxSize)
-      val lowMatch = maskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), ~lowMask(lgMaxSize-1, 0))
+      val highMatch = unmaskEqual(paddr >> lgMaxSize, compare_addr >> lgMaxSize, mask >> lgMaxSize)
+      val lowMatch = unmaskEqual(paddr(lgMaxSize-1, 0), compare_addr(lgMaxSize-1, 0), lowMask(lgMaxSize-1, 0))
       highMatch && lowMatch
     }
   }
@@ -267,7 +286,7 @@ class PMP(implicit p: Parameters) extends PMPModule {
       addr = PmpcfgBase + pmpCfgIndex(i),
       reg = cfgMerged(i/pmpCfgPerCSR),
       wmask = WritableMask,
-      wfn = new PMPConfig().write_cfg_vec
+      wfn = new PMPConfig().write_cfg_vec(mask, addr, i)
     ))
   }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
 
@@ -300,7 +319,7 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
 class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle
 
 @chiselName
-class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
+class PMPChecker(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPModule {
   val io = IO(new Bundle{
     val env = Input(new Bundle {
       val mode = Input(UInt(2.W))
@@ -318,6 +337,18 @@ class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
   pmpMinuxOne.cfg.w := passThrough
   pmpMinuxOne.cfg.x := passThrough
 
+  val match_wave = Wire(Vec(NumPMP, Bool()))
+  val ignore_wave = Wire(Vec(NumPMP, Bool()))
+  val aligned_wave = Wire(Vec(NumPMP, Bool()))
+  val prev_wave = Wire(Vec(NumPMP, new PMPEntry()))
+  val cur_wave = Wire(Vec(NumPMP, new PMPEntry()))
+
+  dontTouch(match_wave)
+  dontTouch(ignore_wave)
+  dontTouch(aligned_wave)
+  dontTouch(prev_wave)
+  dontTouch(cur_wave)
+
   val res = io.env.pmp.zip(pmpMinuxOne +: io.env.pmp.take(NumPMP-1)).zipWithIndex
     .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pmp, last_pmp), i)) =>
     val is_match = pmp.is_match(io.req.addr, io.req.size, lgMaxSize, last_pmp)
@@ -328,6 +359,12 @@ class PMPChecker(lgMaxSize: Int = 2)(implicit p: Parameters) extends PMPModule {
     cur.cfg.r := aligned && (pmp.cfg.r || ignore)
     cur.cfg.w := aligned && (pmp.cfg.w || ignore)
     cur.cfg.x := aligned && (pmp.cfg.x || ignore)
+
+    match_wave(i) := is_match
+    ignore_wave(i) := ignore
+    aligned_wave(i) := aligned
+    cur_wave(i) := cur
+    prev_wave(i) := prev
 
     XSDebug(p"pmp${i.U} cfg:${Hexadecimal(pmp.cfg.asUInt)} addr:${Hexadecimal(pmp.addr)} mask:${Hexadecimal(pmp.mask)} is_match:${is_match} aligned:${aligned}")
 

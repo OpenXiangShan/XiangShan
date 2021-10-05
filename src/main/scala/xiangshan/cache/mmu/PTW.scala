@@ -29,6 +29,7 @@ import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 
+@chiselName
 class PTW()(implicit p: Parameters) extends LazyModule with HasXSParameter {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
