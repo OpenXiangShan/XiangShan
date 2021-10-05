@@ -5,7 +5,9 @@ import chisel3._
 import chisel3.util._
 import utils._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
+import freechips.rocketchip.tilelink.TLPermissions._
 import bus.tilelink.TLMessages._
 import difftest._
 import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
@@ -68,6 +70,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val req = Reg(new NewMissReq)
   val req_valid = RegInit(false.B)
+  val set = addr_to_dcache_set(req.vaddr)
 
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
@@ -124,6 +127,9 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     when (io.req.bits.isStore) {
       req := io.req.bits
       req.addr := get_block_addr(io.req.bits.addr)
+      req.way_en := req.way_en
+      req.replace_coh := req.replace_coh
+      req.replace_tag := req.replace_tag
     }
 
     should_refill_data := should_refill_data_reg || io.req.bits.isLoad
@@ -211,9 +217,15 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   def should_reject(new_req: NewMissReq): Bool = {
     val block_match = req.addr === get_block_addr(new_req.addr)
     val beat_match = new_req.addr(blockBytes - 1, beatOffBits) >= grant_beats
-    block_match && req_valid &&
-    !before_read_sent_can_merge(new_req) &&
-    !(beat_match && before_data_refill_can_merge(new_req))
+    val set_match = set === addr_to_dcache_set(new_req.vaddr)
+
+    req_valid &&
+      Mux(
+        block_match,
+        !before_read_sent_can_merge(new_req) &&
+          !(beat_match && before_data_refill_can_merge(new_req)),
+        set_match && new_req.way_en === req.way_en
+      )
   }
 
   io.primary_ready := !req_valid
@@ -298,7 +310,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
   refill.alias := req.vaddr(13, 12) // TODO
 
-  io.block_addr.vallid := req_valid && w_grantlast && !s_refill
+  io.block_addr.valid := req_valid && w_grantlast && !s_refill
   io.block_addr.bits := req.addr
 }
 
@@ -309,7 +321,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    val mam_finish = DecoupledIO(new TLBundleE(edge.bundle))
+    val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
 
@@ -390,4 +402,6 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, true, Some("replace_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
+
+  io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 }
