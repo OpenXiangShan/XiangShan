@@ -313,7 +313,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
 
     val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
-    val replace_pipe_resp = Flipped(ValidIO(new ReplacePipeResp))
+    val replace_pipe_resp = Flipped(Vec(numReplaceRespPorts, ValidIO(new ReplacePipeResp)))
 
     // block probe
     val probe_addr = Input(UInt(PAddrBits.W))
@@ -375,7 +375,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         e.io.mem_grant <> io.mem_grant
       }
 
-      e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits.miss_id === i.U
+      e.io.replace_pipe_resp := Cat(io.replace_pipe_resp.map { case r => r.valid && r.bits.miss_id === i.U }).orR
   }
 
   io.req.ready := accept

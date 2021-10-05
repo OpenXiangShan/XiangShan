@@ -262,6 +262,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
   val s3_store_data_merged = RegEnable(s2_store_data_merged, s2_fire_to_s3)
+  val s3_data = RegEnable(s2_data, s2_fire_to_s3)
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
 
   val probe_update_meta = s3_req.probe && s3_tag_match && s3_coh =/= probe_new_coh
@@ -270,7 +271,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val banked_wmask = s3_banked_store_wmask
   val update_data = banked_wmask.orR
 
-  val writeback_data = s3_tag_match && s3_req.probe && (s3_req.probe_need_data || )
+  val writeback_data = s3_tag_match && s3_req.probe && (s3_req.probe_need_data || s3_coh === ClientStates.Dirty)
 
   val s3_probe_can_go = s3_req.probe && io.wb.ready && (io.meta_write.ready || !probe_update_meta)
   val s3_store_can_go = s3_req.isStore && (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data)
@@ -344,5 +345,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
   io.wb.bits.param := probe_shrink_param
   io.wb.bits.voluntary := false.B
-  io.wb.bits.hasData :=
+  io.wb.bits.hasData := writeback_data
+  io.wb.bits.dirty := s3_coh === ClientStates.Dirty
+  io.wb.bits.data := s3_data.asUInt()
 }
