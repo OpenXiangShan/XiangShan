@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 
 class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
+  val source = UInt(sourceTypeWidth.W)
   val addr = UInt(PAddrBits.W)
   val way_en = UInt(DCacheWays.W)
   val wmask = UInt(DCacheBanks.W)
@@ -23,6 +24,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val meta_write = DecoupledIO(new MetaWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
+    val store_resp = ValidIO(new DCacheLineResp)
   })
 
   // Assume that write in refill pipe is always ready
@@ -51,4 +53,6 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.tag_write.bits.idx := idx
   io.tag_write.bits.way_en := io.req.bits.way_en
   io.tag_write.bits.tag := tag
+
+  io.store_resp.valid := io.req.fire() && io.req.bits.source === STORE_SOURCE.U
 }
