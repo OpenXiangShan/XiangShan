@@ -275,6 +275,11 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val refill = io.refill_pipe_req.bits
   refill.addr := req.addr
   refill.way_en := req.way_en
+  refill.wmask := Mux(
+    hasData || req.isLoad,
+    ~0.U,
+    VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req.store_mask).orR)).asUInt
+  )
   refill.data := refill_data.asTypeOf((new RefillPipeReq).data)
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)

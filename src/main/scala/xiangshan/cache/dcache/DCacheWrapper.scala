@@ -270,6 +270,18 @@ class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
+class NewDCacheLineIO(implicit p: Parameters) extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheLineReq)
+
+  val main_pipe_hit_resp = Flipped(ValidIO(new DCacheLineResp))
+  val refill_hit_resp = Flipped(ValidIO(new DCacheLineResp))
+
+  val replay_resp = Flipped(ValidIO(new DCacheLineResp))
+
+  def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
+}
+
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses

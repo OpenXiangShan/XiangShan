@@ -10,6 +10,14 @@ class Meta(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
 }
 
+object Meta {
+  def apply(meta: UInt)(implicit p: Parameters) = {
+    val m = Wire(new Meta)
+    m.coh := meta.asTypeOf(new ClientMetadata)
+    m
+  }
+}
+
 class MetaAndTag(implicit p: Parameters) extends DCacheBundle {
   val meta = new Meta
   val tag = UInt(tagBits.W)

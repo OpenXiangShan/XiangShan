@@ -7,7 +7,7 @@ import chisel3.util._
 class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val way_en = UInt(DCacheWays.W)
-  // val wmask = UInt(DCacheBanks.W)
+  val wmask = UInt(DCacheBanks.W)
   val data = Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W))
   val meta = new Meta
   val alias = UInt(2.W) // TODO: parameterize
@@ -38,7 +38,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.data_write.valid := io.req.valid
   io.data_write.bits.addr := idx
   io.data_write.bits.way_en := io.req.bits.way_en
-  io.data_write.bits.wmask := ~0.U(DCacheBanks.W)
+  io.data_write.bits.wmask := io.req.bits.wmask
   io.data_write.bits.data := io.req.bits.data
 
   io.meta_write.valid := io.req.valid
