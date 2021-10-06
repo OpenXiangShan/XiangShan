@@ -212,7 +212,7 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   val waitAddOperand = RegEnable(midResult.waitForAdd, !mul_pipe.io.out.valid || mul_pipe.io.out.ready)
   val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3 && !waitAddOperand
   // However, when sending instructions to add_pipe, we need to determine whether it's flushed.
-  val mulFlushed = mul_pipe.io.out.bits.uop.roqIdx.needFlush(io.redirectIn, io.flushIn)
+  val mulFlushed = mul_pipe.io.out.bits.uop.robIdx.needFlush(io.redirectIn, io.flushIn)
   val isFMAReg = RegNext(isFMA && !mulFlushed)
 
   add_pipe.mulToAdd <> mul_pipe.toAdd

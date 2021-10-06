@@ -141,12 +141,12 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 
-class Uncache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+class Uncache()(implicit p: Parameters) extends LazyModule {
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
       "uncache",
-      sourceId = IdRange(0, cfg.nMMIOEntries)
+      sourceId = IdRange(0, 1)
     ))
   )
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -157,15 +157,13 @@ class Uncache()(implicit p: Parameters) extends LazyModule with HasDCacheParamet
 
 class UncacheImp(outer: Uncache)
   extends LazyModuleImp(outer)
-    with HasDCacheParameters
     with HasTLDump
 {
   val io = IO(new UncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
-  require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
-  val resp_arb = Module(new Arbiter(new DCacheWordResp, cfg.nMMIOEntries))
+  val resp_arb = Module(new Arbiter(new DCacheWordResp, 1))
 
   val req  = io.lsq.req
   val resp = io.lsq.resp
@@ -183,10 +181,11 @@ class UncacheImp(outer: Uncache)
   bus.e.valid := false.B
   bus.e.bits  := DontCare
 
-  val entries = (0 until cfg.nMMIOEntries) map { i =>
+  //TODO: rewrite following code since we only have 1 entry
+  val entries = (0 until 1) map { i =>
     val entry = Module(new MMIOEntry(edge))
 
-    entry.io.id := i.U(log2Up(cfg.nMMIOEntries).W)
+    entry.io.id := i.U(1.W)
 
     // entry req
     entry.io.req.valid := (i.U === entry_alloc_idx) && req.valid

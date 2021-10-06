@@ -140,7 +140,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     }
   }
   val ctrlInfo = new Bundle {
-    val roqFull   = Bool()
+    val robFull   = Bool()
     val intdqFull = Bool()
     val fpdqFull  = Bool()
     val lsdqFull  = Bool()
@@ -150,7 +150,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     val lqFull = Bool()
     val dcacheMSHRFull = Bool()
   }
-  
+
   val cacheInfo = new Bundle {
     val l2MSHRFull = Bool()
     val l3MSHRFull = Bool()
@@ -539,8 +539,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
   val ibufFull  = RegInit(0.U(XLEN.W))
   ibufFull := ibufFull + RegNext(csrio.perf.frontendInfo.ibufFull)
-  val roqFull   = RegInit(0.U(XLEN.W))
-  roqFull := roqFull + RegNext(csrio.perf.ctrlInfo.roqFull)
+  val robFull   = RegInit(0.U(XLEN.W))
+  robFull := robFull + RegNext(csrio.perf.ctrlInfo.robFull)
   val intdqFull = RegInit(0.U(XLEN.W))
   intdqFull := intdqFull + RegNext(csrio.perf.ctrlInfo.intdqFull)
   val fpdqFull  = RegInit(0.U(XLEN.W))
@@ -650,7 +650,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
     MaskedRegMap(Mhpmevent3, ibufFull),
-    MaskedRegMap(Mhpmevent4, roqFull),
+    MaskedRegMap(Mhpmevent4, robFull),
     MaskedRegMap(Mhpmevent5, intdqFull),
     MaskedRegMap(Mhpmevent6, fpdqFull),
     MaskedRegMap(Mhpmevent7, lsdqFull),
@@ -873,7 +873,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
-  // send interrupt information to ROQ
+  // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = Cat(debugIntr, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
@@ -978,7 +978,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
     when (raiseDebugExceptionIntr) {
       when (raiseDebugIntr) {
-        debugModeNew := true.B 
+        debugModeNew := true.B
         mstatusNew.mprv := false.B
         dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
         dcsrNew.cause := 1.U

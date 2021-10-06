@@ -71,7 +71,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     width = 2,
     shouldBlock = true,
     itlbParams
-  )  
+  )
   //TODO: modules need to be removed
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module

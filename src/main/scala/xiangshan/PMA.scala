@@ -109,7 +109,7 @@ object AddressSpace {
       // pma mode check
       val s = i._2.get("mode").get
       if(
-        s.toUpperCase.indexOf("A") >= 0 && 
+        s.toUpperCase.indexOf("A") >= 0 &&
         !(s.toUpperCase.indexOf("R") >= 0 && s.toUpperCase.indexOf("W") >= 0)
       ){
         println("[error] pma atomicable area must be both readable and writeable")

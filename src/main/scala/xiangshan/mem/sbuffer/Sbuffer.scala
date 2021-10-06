@@ -30,19 +30,11 @@ class SbufferFlushBundle extends Bundle {
 }
 
 trait HasSbufferConst extends HasXSParameter {
-
-  // use 1h to speedup selection
-  def s_invalid  = (1<<0).U(3.W)
-  def s_valid    = (1<<1).U(3.W)
-  def s_inflight = (1<<2).U(3.W)
-
-  def isInvalid(i: UInt): Bool = i(0).asBool
-  def isValid(i: UInt): Bool = i(1).asBool
-  def isInflight(i: UInt): Bool = i(2).asBool
-
-  val evictCycle = 1 << 20
-  require(isPow2(evictCycle))
-  val countBits = log2Up(evictCycle+1)
+  val EvictCycles = 1 << 20
+  val SbufferReplayDelayCycles = 16
+  require(isPow2(EvictCycles))
+  val EvictCountBits = log2Up(EvictCycles+1)
+  val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = ptag + offset
@@ -53,6 +45,19 @@ trait HasSbufferConst extends HasXSParameter {
   val PTagWidth: Int = PAddrBits - OffsetWidth
   val VTagWidth: Int = VAddrBits - OffsetWidth
   val WordOffsetWidth: Int = PAddrBits - WordsWidth
+}
+
+class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
+  val state_valid    = Bool() // this entry is active
+  val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
+  // val s_pipe_req = Bool() // scheduled dcache store pipeline req
+  val w_pipe_resp = Bool() // waiting for dcache store pipeline resp
+  val w_timeout = Bool() // waiting for resend store pipeline req timeout
+
+  def isInvalid(): Bool = !state_valid
+  def isValid(): Bool = state_valid
+  def isActive(): Bool = state_valid && !state_inflight
+  def isInflight(): Bool = state_inflight
 }
 
 class SbufferBundle(implicit p: Parameters) extends XSBundle with HasSbufferConst
@@ -87,10 +92,10 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   io.dataOut := data
 }
 
-class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
+class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
-    val dcache = new DCacheLineIO
+    val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
@@ -105,8 +110,9 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
   val mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val data = dataModule.io.dataOut
-  val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
-  val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(countBits.W))))
+  val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
+  val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
+  val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
   /*
        idle --[flush]   --> drain   --[buf empty]--> idle
@@ -155,14 +161,16 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   //-------------------------cohCount-----------------------------
   // insert and merge: cohCount=0
   // every cycle cohCount+=1
-  // if cohCount(countBits-1)==1, evict
-  val timeOutMask = VecInit(widthMap(i => cohCount(i)(countBits - 1)))
-  val (timeOutIdx, hasTimeOut) = PriorityEncoderWithFlag(timeOutMask)
+  // if cohCount(EvictCountBits-1)==1, evict
+  val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
+  val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
+  val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
+  val (missqReplayTimeOutIdx, missqReplayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
 
-  val validMask = VecInit(stateVec.map(s => isValid(s)))
-  val drainIdx = PriorityEncoder(validMask)
+  val activeMask = VecInit(stateVec.map(s => s.isActive()))
+  val drainIdx = PriorityEncoder(activeMask)
 
-  val inflightMask = VecInit(stateVec.map(s => isInflight(s)))
+  val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
 
   val inptags = io.in.map(in => getPTag(in.bits.addr))
   val invtags = io.in.map(in => getVTag(in.bits.vaddr))
@@ -178,7 +186,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
 
   for(i <- 0 until StorePipelineWidth){
     mergeMask(i) := widthMap(j =>
-      inptags(i) === ptag(j) && validMask(j)
+      inptags(i) === ptag(j) && activeMask(j)
     )
   }
 
@@ -186,7 +194,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   // firstInsert: the first invalid entry
   // if first entry canMerge or second entry has the same ptag with the first entry,
   // secondInsert equal the first invalid entry, otherwise, the second invalid entry
-  val invalidMask = VecInit(stateVec.map(s => isInvalid(s)))
+  val invalidMask = VecInit(stateVec.map(s => s.isInvalid()))
   val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
   val oddInvalidMask = GetOddBits(invalidMask.asUInt)
 
@@ -201,7 +209,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   }
 
   val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx)
-  val secondInsertIdx = Mux(sameTag, 
+  val secondInsertIdx = Mux(sameTag,
     firstInsertIdx,
     Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
   )
@@ -218,8 +226,9 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   io.in(1).ready := secondCanInsert && !sameWord && io.in(0).ready
 
   def wordReqToBufLine(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
-    stateVec(insertIdx) := s_valid
+    stateVec(insertIdx).state_valid := true.B
     cohCount(insertIdx) := 0.U
+    missqReplayCount(insertIdx) := 0.U
     ptag(insertIdx) := reqptag
     vtag(insertIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
     when(flushMask){
@@ -239,6 +248,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
 
   def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
     cohCount(mergeIdx) := 0.U
+    missqReplayCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         mask(mergeIdx)(wordOffset)(i) := true.B
@@ -247,10 +257,10 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     }
     // check if vtag is the same, if not, trigger sbuffer flush
     when(reqvtag =/= vtag(mergeIdx)) {
-      XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n", 
-        reqvtag << OffsetWidth, 
+      XSDebug("reqvtag =/= sbufvtag req(vtag %x ptag %x) sbuffer(vtag %x ptag %x)\n",
+        reqvtag << OffsetWidth,
         reqptag << OffsetWidth,
-        vtag(mergeIdx) << OffsetWidth, 
+        vtag(mergeIdx) << OffsetWidth,
         ptag(mergeIdx) << OffsetWidth
       )
       need_uarch_drain := true.B
@@ -281,8 +291,8 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
 
 
   for(i <- 0 until StoreBufferSize){
-    XSDebug(stateVec(i)=/=s_invalid,
-      p"[$i] timeout:${cohCount(i)(countBits-1)} state:${stateVec(i)}\n"
+    XSDebug(stateVec(i).isValid(),
+      p"[$i] timeout:${cohCount(i)(EvictCountBits-1)} state:${stateVec(i)}\n"
     )
   }
 
@@ -304,7 +314,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val sq_empty = !Cat(io.in.map(_.valid)).orR()
   val empty = sbuffer_empty && sq_empty
   val threshold = RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  val validCount = PopCount(validMask)
+  val validCount = PopCount(activeMask)
   val do_eviction = RegNext(validCount >= threshold || validCount === (StoreBufferSize-1).U, init = false.B)
   require((StoreBufferThreshold + 1) <= StoreBufferSize)
 
@@ -353,74 +363,130 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(need_drain,
     drainIdx,
-    Mux(hasTimeOut, timeOutIdx, replaceIdx)
+    Mux(cohHasTimeOut, 
+      cohTimeOutIdx, 
+      Mux(missqReplayHasTimeOut, missqReplayTimeOutIdx, replaceIdx)
+    )
   )
+  
   /*
       If there is a inflight dcache req which has same ptag with evictionIdx's ptag,
       current eviction should be blocked.
    */
-  val prepareValid = (need_drain || hasTimeOut || need_replace) &&
-    noSameBlockInflight(evictionIdx) && validMask(evictionIdx)
+  val prepareValid = missqReplayHasTimeOut || 
+    activeMask(evictionIdx) &&  (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
   val prepareValidReg = RegInit(false.B)
-  val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
+  // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
+  val canSendDcacheReq = io.dcache.pipe_req.ready || !prepareValidReg
+  // when willSendDcacheReq, read dcache req data and store them in a pipeline reg 
   val willSendDcacheReq = prepareValid && canSendDcacheReq
-  when(io.dcache.req.fire()){
+  when(io.dcache.pipe_req.fire()){
     prepareValidReg := false.B
   }
   when(canSendDcacheReq){
     prepareValidReg := prepareValid
   }
   when(willSendDcacheReq){
-    stateVec(evictionIdx) := s_inflight
+    stateVec(evictionIdx).state_inflight := true.B
+    stateVec(evictionIdx).w_timeout := false.B
+    // stateVec(evictionIdx).s_pipe_req := true.B
     XSDebug(p"$evictionIdx will be sent to Dcache\n")
   }
-  XSDebug(p"need drain:$need_drain hasTimeOut: $hasTimeOut need replace:$need_replace\n")
-  XSDebug(p"drainIdx:$drainIdx tIdx:$timeOutIdx replIdx:$replaceIdx " +
-    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${validMask(evictionIdx)}\n")
-  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.req.ready}\n")
+  XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
+  XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
+    p"blocked:${!noSameBlockInflight(evictionIdx)} v:${activeMask(evictionIdx)}\n")
+  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.pipe_req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
-  // the lru update may note accurate
+  // the lru update may not accurate
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !hasTimeOut && canSendDcacheReq && validMask(replaceIdx))
+    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && canSendDcacheReq && activeMask(replaceIdx))
   accessIdx(StorePipelineWidth).bits := replaceIdx
   val evictionIdxReg = RegEnable(evictionIdx, enable = willSendDcacheReq)
   val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
   val evictionVTag = RegEnable(vtag(evictionIdx), enable = willSendDcacheReq)
 
-  io.dcache.req.valid := prepareValidReg
-  io.dcache.req.bits.vaddr := getAddr(evictionVTag)
-  io.dcache.req.bits.addr := getAddr(evictionPTag)
-  io.dcache.req.bits.data := data(evictionIdxReg).asUInt
-  io.dcache.req.bits.mask := mask(evictionIdxReg).asUInt
-  io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
-  io.dcache.req.bits.id := evictionIdxReg
+  io.dcache.pipe_req.valid := prepareValidReg
+  io.dcache.pipe_req.bits := DontCare
+  io.dcache.pipe_req.bits.miss := false.B
+  io.dcache.pipe_req.bits.probe := false.B
+  io.dcache.pipe_req.bits.probe_need_data := false.B
+  io.dcache.pipe_req.bits.source := STORE_SOURCE.U
+  io.dcache.pipe_req.bits.cmd    := MemoryOpConstants.M_XWR
+  io.dcache.pipe_req.bits.addr   := getAddr(evictionPTag)
+  io.dcache.pipe_req.bits.vaddr   := getAddr(evictionVTag)
+  io.dcache.pipe_req.bits.store_data  := data(evictionIdxReg).asUInt
+  io.dcache.pipe_req.bits.store_mask  := mask(evictionIdxReg).asUInt
+  io.dcache.pipe_req.bits.id := evictionIdxReg
 
-  XSDebug(io.dcache.req.fire(),
+  when (io.dcache.pipe_req.fire()) {
+    // stateVec(evictionIdxReg).s_pipe_req := false.B
+    stateVec(evictionIdxReg).w_pipe_resp := true.B
+    // assert(stateVec(evictionIdxReg).s_pipe_req === true.B)
+    assert(!(io.dcache.pipe_req.bits.vaddr === 0.U))
+    assert(!(io.dcache.pipe_req.bits.addr === 0.U))
+  }
+
+  XSDebug(io.dcache.pipe_req.fire(),
     p"send buf [$evictionIdxReg] to Dcache, req fire\n"
   )
 
-  io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
-  val respId = io.dcache.resp.bits.id
-  when(io.dcache.resp.fire()){
-    stateVec(respId) := s_invalid
-    assert(stateVec(respId) === s_inflight)
-    XSDebug(p"recv cache resp: id=[$respId]\n")
+  // TODO: for timing reasons, dcache store pipe resp may need to be delayed
+  val dcache_resp_id = io.dcache.pipe_resp.bits.id
+  // when not miss
+  // -> everything is OK, free that entry in sbuffer
+  // when miss and not replay
+  // -> wait for missQueue to handling miss and replaying our request
+  // when miss and replay
+  // -> req missed and fail to enter missQueue, manually replay it later
+  // -> is it necessary?
+  when (io.dcache.pipe_resp.fire()) {
+    when (io.dcache.pipe_resp.bits.miss) {
+      // if miss && !replay, keep waiting
+      when(io.dcache.pipe_resp.bits.replay) {
+        missqReplayCount(dcache_resp_id) := 0.U
+        stateVec(dcache_resp_id).w_timeout := true.B
+      }
+    } .otherwise {
+      stateVec(dcache_resp_id).state_inflight := false.B
+      stateVec(dcache_resp_id).state_valid := false.B
+      stateVec(dcache_resp_id).w_pipe_resp := false.B
+    }
+    assert(stateVec(dcache_resp_id).w_pipe_resp === true.B)
+    assert(stateVec(dcache_resp_id).state_inflight === true.B)
   }
+  
+  // TODO: reuse cohCount
+  (0 until StoreBufferSize).map(i => {
+    when(stateVec(i).w_timeout && stateVec(i).state_inflight && !missqReplayCount(i)(MissqReplayCountBits-1)) {
+      missqReplayCount(i) := missqReplayCount(i) + 1.U 
+    }
+    when(activeMask(i) && !cohTimeOutMask(i)){
+      cohCount(i) := cohCount(i)+1.U
+    }
+  })
+
+  // TODO: fix perf counter
+  // // performance counters
+  // XSPerfAccumulate("store_req", io.lsu.req.fire())
+  // XSPerfAccumulate("store_penalty", state =/= s_invalid)
+  // // this is useless
+  // // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
+  // XSPerfAccumulate("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
+  // XSPerfAccumulate("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
+  // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
+  // XSPerfAccumulate("store_req", io.lsu.req.fire())
+  // val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
+  // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 
   if (!env.FPGAPlatform) {
     val difftest = Module(new DifftestSbufferEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.sbufferResp := io.dcache.resp.fire()
-    difftest.io.sbufferAddr := getAddr(ptag(respId))
-    difftest.io.sbufferData := data(respId).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
-    difftest.io.sbufferMask := mask(respId).asUInt
-  }
-
-  for (i <- 0 until StoreBufferSize) {
-    when(validMask(i) && !timeOutMask(i)){
-      cohCount(i) := cohCount(i)+1.U
-    }
+    difftest.io.sbufferResp := io.dcache.pipe_resp.fire()
+    difftest.io.sbufferAddr := getAddr(ptag(dcache_resp_id))
+    difftest.io.sbufferData := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+    difftest.io.sbufferMask := mask(dcache_resp_id).asUInt
   }
 
   // ---------------------- Load Data Forward ---------------------
@@ -430,20 +496,20 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(forward.vaddr)))
     val ptag_matches = VecInit(widthMap(w => ptag(w) === getPTag(forward.paddr)))
     val tag_matches = vtag_matches
-    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w => 
-      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((validMask(w) || inflightMask(w)))
+    val tag_mismatch = RegNext(forward.valid) && VecInit(widthMap(w =>
+      RegNext(vtag_matches(w)) =/= RegNext(ptag_matches(w)) && RegNext((activeMask(w) || inflightMask(w)))
     )).asUInt.orR
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
-      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n", 
-        RegNext(ptag_matches.asUInt), 
+      XSDebug("forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
+        RegNext(ptag_matches.asUInt),
         RegNext(vtag_matches.asUInt),
         RegNext(forward.vaddr),
         RegNext(forward.paddr)
       )
       do_uarch_drain := true.B
     }
-    val valid_tag_matches = widthMap(w => tag_matches(w) && validMask(w))
+    val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
@@ -481,22 +547,25 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   }
 
   for (i <- 0 until StoreBufferSize) {
-    XSDebug("ptag %x vtag %x valid %x inflight %x\n", 
+    XSDebug("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_resp %x w_timeout %x\n",
       ptag(i) << OffsetWidth,
       vtag(i) << OffsetWidth,
-      validMask(i),
-      inflightMask(i)
+      stateVec(i).isValid(),
+      activeMask(i),
+      inflightMask(i),
+      stateVec(i).w_pipe_resp,
+      stateVec(i).w_timeout
     )
   }
 
-  val perf_valid_entry_count = PopCount(VecInit(stateVec.map(s => !isInvalid(s))).asUInt)
+  val perf_valid_entry_count = PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt)
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire())).asUInt))
   XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt))
   XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt))
-  XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)
-  XSPerfAccumulate("dcache_req_fire", io.dcache.req.fire())
+  XSPerfAccumulate("dcache_req_valid", io.dcache.pipe_req.valid)
+  XSPerfAccumulate("dcache_req_fire", io.dcache.pipe_req.fire())
   XSPerfAccumulate("sbuffer_idle", sbuffer_state === x_idle)
   XSPerfAccumulate("sbuffer_flush", sbuffer_state === x_drain_sbuffer)
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)

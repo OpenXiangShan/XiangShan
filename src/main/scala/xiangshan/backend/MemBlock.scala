@@ -23,14 +23,22 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.L1CacheErrorInfo
 import xiangshan._
-import xiangshan.backend.roq.RoqLsqIO
+import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
 import utils._
+import xiangshan.backend.exu.StdExeUnit
 
 class Std(implicit p: Parameters) extends FunctionUnit {
+  io.in.ready := true.B
+  io.out.valid := io.in.valid
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.data := io.in.bits.src(0)
+}
+
+class AmoData(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
   io.out.valid := io.in.valid
   io.out.bits.uop := io.in.bits.uop
@@ -56,15 +64,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // in
-    val issue = Vec(exuParameters.LsExuCnt, Flipped(DecoupledIO(new ExuInput)))
+    val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
     val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
     val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
     val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))
-    val stData = Vec(exuParameters.StuCnt, Flipped(ValidIO(new StoreDataBundle)))
     val stIssuePtr = Output(new SqPtr())
     // out
-    val writeback = Vec(exuParameters.LsExuCnt, DecoupledIO(new ExuOutput))
+    val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
     val otherFastWakeup = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
@@ -78,7 +85,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
-      val roq = Flipped(new RoqLsqIO) // roq to lsq
+      val rob = Flipped(new RobLsqIO) // rob to lsq
     }
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val error = new L1CacheErrorInfo
@@ -96,6 +103,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
+  val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
+  val stData = stdExeUnits.map(_.stData.get)
   val exeUnits = loadUnits ++ storeUnits
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
@@ -111,15 +120,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
   val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  io.writeback <> exeWbReqs ++ VecInit(storeUnits.map(_.io.stout))
+  io.writeback <> exeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
   // TODO: fast load wakeup
-
-
   val lsq     = Module(new LsqWrappper)
-  val sbuffer = Module(new NewSbuffer)
+  val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
   io.stIssuePtr := lsq.io.issuePtrExt
@@ -229,6 +236,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.StuCnt) {
     val stu = storeUnits(i)
 
+    stdExeUnits(i).io.redirect <> io.redirect
+    stdExeUnits(i).io.flush <> io.flush
+    stdExeUnits(i).io.fromInt <> io.issue(i + 4)
+    stdExeUnits(i).io.fromFp := DontCare
+    stdExeUnits(i).io.out := DontCare
+
     stu.io.redirect    <> io.redirect
     stu.io.flush       <> io.flush
     stu.io.rsFeedback <> io.replay(exuParameters.LduCnt + i)
@@ -241,8 +254,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.tlb          <> dtlb_st(i).requestor(0)
 
     // Lsq to load unit's rs
-    // rs.io.storeData <> lsq.io.storeDataIn(i)
-    lsq.io.storeDataIn(i) := io.stData(i)
+    lsq.io.storeDataIn(i) := stData(i)
 
     // sync issue info to store set LFST
     io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
@@ -262,7 +274,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // Lsq
-  lsq.io.roq            <> io.lsqio.roq
+  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> io.redirect
   lsq.io.flush          <> io.flush
@@ -280,9 +292,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
-  sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
-  assert(sbuffer.io.dcache.resp.ready === true.B)
+  sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
+  sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
@@ -303,8 +314,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val st0_atomics = io.issue(atomic_rs0).valid && FuType.storeIsAMO(io.issue(atomic_rs0).bits.uop.ctrl.fuType)
   val st1_atomics = io.issue(atomic_rs1).valid && FuType.storeIsAMO(io.issue(atomic_rs1).bits.uop.ctrl.fuType)
 
-  val st0_data_atomics = io.stData(0).valid && FuType.storeIsAMO(io.stData(0).bits.uop.ctrl.fuType)
-  val st1_data_atomics = io.stData(1).valid && FuType.storeIsAMO(io.stData(1).bits.uop.ctrl.fuType)
+  val st0_data_atomics = stData(0).valid && FuType.storeIsAMO(stData(0).bits.uop.ctrl.fuType)
+  val st1_data_atomics = stData(1).valid && FuType.storeIsAMO(stData(1).bits.uop.ctrl.fuType)
 
   when (st0_atomics) {
     io.issue(atomic_rs0).ready := atomicsUnit.io.in.ready
@@ -328,7 +339,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics
   atomicsUnit.io.in.bits  := Mux(st0_atomics, io.issue(atomic_rs0).bits, io.issue(atomic_rs1).bits)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
-  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, io.stData(0).bits, io.stData(1).bits)
+  atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, stData(0).bits, stData(1).bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsIdx(atomic_rs0), io.rsIdx(atomic_rs1))
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
