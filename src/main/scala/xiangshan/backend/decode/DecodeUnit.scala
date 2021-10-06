@@ -367,7 +367,7 @@ object SvinvalDecode extends DecodeConstants {
   /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma 
    * must assure it is the ONLY instrucion executing in backend.
    */
-  SINVAL_VMA        ->List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, N, SelImm.IMM_X),
+  SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, N, SelImm.IMM_X),
   /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals 
    * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit 
    * then dispatch and issue this instrucion to flush sbuffer to dcache
