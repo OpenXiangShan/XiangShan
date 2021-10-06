@@ -168,6 +168,11 @@ class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
   val way = UInt(log2Up(nWays).W)
 }
 
+class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
+  val set = ValidIO(UInt(log2Up(nSets).W))
+  val way = Input(UInt(log2Up(nWays).W))
+}
+
 // memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
 {

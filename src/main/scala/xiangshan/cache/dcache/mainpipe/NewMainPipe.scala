@@ -87,7 +87,9 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
 //    val tag_write = DecoupledIO(new TagWriteReq)
 
     // update state vec in replacement algo
-    val replace_access = Flipped(Vec(LoadPipelineWidth, ValidIO(new ReplacementAccessBundle)))
+    val replace_access = ValidIO(new ReplacementAccessBundle)
+    // find the way to be replaced
+    val replace_way = new ReplacementWayReqIO
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
@@ -178,9 +180,9 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_hit_coh = ClientMetadata(Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap(w => meta_resp(w))), 0.U))
 
   // replacement policy
-  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
+//  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val s1_repl_way_en = WireInit(0.U(nWays.W))
-  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(replacer.way(s1_idx)), RegNext(s1_repl_way_en))
+  s1_repl_way_en := Mux(RegNext(s0_fire), UIntToOH(io.replace_way.way), RegNext(s1_repl_way_en))
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
@@ -283,6 +285,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
     s3_valid := false.B
   }
   s3_ready := !s3_valid || s3_can_go
+  s3_s0_set_conflict := s3_valid && s3_idx === s0_idx
   assert(RegNext(!s3_valid || !s3_req.isStore || s3_hit)) // miss store should never come to s3
 
 
@@ -348,4 +351,11 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.wb.bits.hasData := writeback_data
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
   io.wb.bits.data := s3_data.asUInt()
+
+  io.replace_access.valid := RegNext(s1_fire && s1_req.isStore && s1_tag_match)
+  io.replace_access.bits.set := s2_idx
+  io.replace_access.bits.way := RegNext(OHToUInt(s1_way_en))
+
+  io.replace_way.set.valid := RegNext(s0_fire)
+  io.replace_way.set.bits := s1_idx
 }
