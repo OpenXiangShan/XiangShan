@@ -361,11 +361,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
-  val evictionIdx = Mux(need_drain,
-    drainIdx,
-    Mux(cohHasTimeOut, 
-      cohTimeOutIdx, 
-      Mux(missqReplayHasTimeOut, missqReplayTimeOutIdx, replaceIdx)
+  val evictionIdx = Mux(missqReplayHasTimeOut,
+    missqReplayTimeOutIdx,
+    Mux(need_drain,
+      drainIdx,
+      Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
     )
   )
   
@@ -374,7 +374,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       current eviction should be blocked.
    */
   val prepareValid = missqReplayHasTimeOut || 
-    activeMask(evictionIdx) &&  (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
+    activeMask(evictionIdx) && (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
   val prepareValidReg = RegInit(false.B)
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.pipe_req.ready || !prepareValidReg
