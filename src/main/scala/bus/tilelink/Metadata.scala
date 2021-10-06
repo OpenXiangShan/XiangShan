@@ -174,7 +174,7 @@ class ClientMetadata extends Bundle {
     (r._1, r._2, ClientMetadata(r._3))
   }
 
-  def onProbe(param: UInt): (Bool, UInt, ClientMetadata) = { 
+  def onProbe(param: UInt): (Bool, UInt, ClientMetadata) = {
     val r = shrinkHelper(param)
     (r._1, r._2, ClientMetadata(r._3))
   }

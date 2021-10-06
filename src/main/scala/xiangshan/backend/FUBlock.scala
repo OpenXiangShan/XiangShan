@@ -18,6 +18,7 @@ package xiangshan.backend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.Instance
 import chisel3.util._
 import utils._
 import xiangshan._
@@ -116,7 +117,8 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     val fmaMid = if (numFma > 0) Some(Vec(numFma, new FMAMidResultIO)) else None
   })
 
-  val exeUnits = configs.map(c => Seq.fill(c._2)(ExeUnit(c._1))).reduce(_ ++ _)
+  val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
+  val exeUnits = configs.zip(exuDefs).map(x => Seq.fill(x._1._2)(Instance(x._2))).reduce(_ ++ _)
   println(exeUnits)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
   // TODO: deal with Std units

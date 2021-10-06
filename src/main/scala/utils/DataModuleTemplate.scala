@@ -101,20 +101,20 @@ class Folded1WDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: In
   val nRows = numEntries / width
 
   val data = Mem(nRows, Vec(width, gen))
-  
+
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(nRows).W))
   resetRow := resetRow + doing_reset
   when (resetRow === (nRows-1).U) { doing_reset := false.B }
 
   val raddr = if (isSync) RegNext(io.raddr) else io.raddr
-  
+
   for (i <- 0 until numRead) {
     val addr = raddr(i) >> log2Ceil(width)
     val idx = raddr(i)(log2Ceil(width)-1, 0)
     io.rdata(i) := Mux(doing_reset, 0.U.asTypeOf(gen), data(addr)(idx))
   }
-  
+
   val waddr = io.waddr >> log2Ceil(width)
   val wmask = UIntToOH(io.waddr(log2Ceil(width)-1, 0))
   val wdata = VecInit(Seq.fill(width)(io.wdata))
