@@ -54,15 +54,19 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   val sbEmpty = toSbuffer.sbIsEmpty
   val uop = RegEnable(io.in.bits.uop, io.in.fire())
   val func = uop.ctrl.fuOpType
+  val src1Reg = RegEnable(src1, io.in.fire())
+  val src2Reg = RegEnable(src2, io.in.fire())
 
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := state === s_wait && !(func === FenceOpType.sfence && disableSfence)
   fencei       := state === s_icache
   sfence.valid := state === s_tlb && !disableSfence
-  sfence.bits.rs1  := uop.ctrl.lsrc(0) === 0.U
-  sfence.bits.rs2  := uop.ctrl.lsrc(1) === 0.U
-  sfence.bits.addr := RegEnable(src1, io.in.fire())
-  sfence.bits.asid := RegEnable(src2, io.in.fire())
+  // sfence.bits.rs1  := uop.ctrl.lsrc(0) === 0.U
+  // sfence.bits.rs2  := uop.ctrl.lsrc(1) === 0.U
+  sfence.bits.rs1  := src1Reg === 0.U
+  sfence.bits.rs2  := src2Reg === 0.U
+  sfence.bits.addr := src1Reg
+  sfence.bits.asid := src2Reg
 
   when (state === s_idle && valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
