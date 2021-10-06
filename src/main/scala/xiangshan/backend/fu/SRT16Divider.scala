@@ -102,6 +102,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   val aSign = io.sign && a(len - 1) // 1
   val dSign = io.sign && d(len - 1)
+  val dSignReg = RegEnable(dSign, newReq)
 
   val aAbs = Mux(aSign, aInverter, a) // 64, 0
   val dAbs = Mux(dSign, dInverter, d)
@@ -148,7 +149,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   val quotSpecial = Mux(dIsZero, VecInit(Seq.fill(len)(true.B)).asUInt,
                             Mux(aTooSmall, 0.U,
-                              Mux(dSign && ~(aReg.andR()), -aReg, aReg) //  signed 2^(len-1)
+                              Mux(dSignReg && ~(aReg.andR()), -aReg, aReg) //  signed 2^(len-1)
                             ))
   val remSpecial = Mux(dIsZero, aReg,
                             Mux(aTooSmall, aReg, 0.U))
