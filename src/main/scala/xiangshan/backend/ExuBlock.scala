@@ -46,16 +46,20 @@ class ExuBlock(
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val scheduler = outer.scheduler.module
 
-  val fuConfigs = outer.configs.map(c => (c._1, c._2))
+  val fuConfigs = outer.configs.map(c => (c._1, c._2)).filter(_._1.extendsExu)
   val fuBlock = Module(new FUBlock(fuConfigs))
+
+  val numOutFu = outer.configs.filterNot(_._1.extendsExu).map(_._2).sum
 
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     // dispatch ports
-    val allocate = scheduler.io.allocate.cloneType
+    val allocPregs = scheduler.io.allocPregs.cloneType
+    val in = scheduler.io.in.cloneType
     // issue and wakeup ports
+    val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput))) else None
     val fastUopOut = scheduler.io.fastUopOut.cloneType
     val rfWriteback = scheduler.io.writeback.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
@@ -68,14 +72,15 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   // IO for the scheduler
   scheduler.io.redirect <> io.redirect
   scheduler.io.flush <> io.flush
-  scheduler.io.allocate <> io.allocate
+  scheduler.io.allocPregs <> io.allocPregs
+  scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
   scheduler.io.writeback <> io.rfWriteback
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
 
   // the scheduler issues instructions to function units
-  scheduler.io.issue <> fuBlock.io.issue
+  scheduler.io.issue <> fuBlock.io.issue ++ io.issue.getOrElse(Seq())
   if (scheduler.io.fmaMid.isDefined) {
     scheduler.io.fmaMid.get <> fuBlock.io.fmaMid.get
   }

@@ -206,7 +206,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   fsm.io.mem.resp.bits := resp_pte.last
   // mem -> cache
   val refill_from_mq = RegNext(mem_resp_from_mq)
-  cache.io.refill.valid := RegNext(mem_resp_done && !io.sfence.valid && !sfence_latch(mem.d.bits.source))
+  cache.io.refill.valid := RegNext(mem_resp_done && !sfence.valid && !sfence_latch(mem.d.bits.source))
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.vpn  := Mux(refill_from_mq, mq_mem.refill_vpn, fsm.io.refill.vpn)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
@@ -231,7 +231,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   }
 
   // sfence
-  when (io.sfence.valid) {
+  when (sfence.valid) {
     for (i <- 0 until MemReqWidth) {
       when ((waiting_resp(i) && !(mem_resp_done && mem.d.bits.source =/= i.U)) ||
         (mem.a.fire() && mem_arb.io.out.bits.id === i.U)) {
@@ -266,7 +266,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) {
   for (i <- 0 until PtwWidth) {
     XSDebug(p"[io.tlb(${i.U})] ${io.tlb(i)}\n")
   }
-  XSDebug(p"[io.sfence] ${io.sfence}\n")
+  XSDebug(p"[sfence] ${sfence}\n")
   XSDebug(p"[io.csr] ${io.csr}\n")
 
   for (i <- 0 until PtwWidth) {
@@ -327,16 +327,17 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 }
 
-class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
-  val node = if (!useFakePTW) TLIdentityNode() else null
-  val ptw = if (!useFakePTW) LazyModule(new PTW()) else null
-  if (!useFakePTW) {
+class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  val useSoftPTW = coreParams.softPTW
+  val node = if (!useSoftPTW) TLIdentityNode() else null
+  val ptw = if (!useSoftPTW) LazyModule(new PTW()) else null
+  if (!useSoftPTW) {
     node := ptw.node
   }
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new PtwIO)
-    if (useFakePTW) {
+    if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
     }

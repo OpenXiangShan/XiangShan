@@ -35,11 +35,11 @@ trait HasXSDts {
     )
 
     def tileProperties: PropertyMap = {
-      val dcache = Map(
+      val dcache = if(coreParams.dcacheParametersOpt.nonEmpty) Map(
         "d-cache-block-size" -> dcacheParameters.blockBytes.asProperty,
         "d-cache-sets" -> dcacheParameters.nSets.asProperty,
         "d-cache-size" -> (dcacheParameters.nSets * dcacheParameters.nWays * dcacheParameters.blockBytes).asProperty
-      )
+      ) else Map()
 
       val icache = Map(
         "i-cache-block-size" -> icacheParameters.blockBytes.asProperty,
@@ -68,14 +68,15 @@ trait HasXSDts {
     }
 
     def nextLevelCacheProperty: PropertyOption = {
-      println(memBlock)
-      val outer = memBlock.dcache.clientNode.edges.out.flatMap(_.manager.managers)
-        .filter(_.supportsAcquireB)
-        .flatMap(_.resources.headOption)
-        .map(_.owner.label)
-        .distinct
-      if (outer.isEmpty) None
-      else Some("next-level-cache" -> outer.map(l => ResourceReference(l)).toList)
+      if(coreParams.dcacheParametersOpt.nonEmpty){
+        val outer = memBlock.dcache.clientNode.edges.out.flatMap(_.manager.managers)
+          .filter(_.supportsAcquireB)
+          .flatMap(_.resources.headOption)
+          .map(_.owner.label)
+          .distinct
+        if (outer.isEmpty) None
+        else Some("next-level-cache" -> outer.map(l => ResourceReference(l)).toList)
+      } else None
     }
 
     override def describe(resources: ResourceBindings): Description = {

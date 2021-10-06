@@ -57,7 +57,8 @@ case class ExuConfig
   blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
-  wbFpPriority: Int
+  wbFpPriority: Int,
+  extendsExu: Boolean = true
 ) extends IsLookupable {
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
 
