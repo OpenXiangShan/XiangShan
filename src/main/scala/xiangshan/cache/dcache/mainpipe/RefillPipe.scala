@@ -18,6 +18,7 @@ class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
   def paddrWithVirtualAlias: UInt = {
     Cat(alias, addr(DCacheSameVPAddrLength - 1, 0))
   }
+  def idx: UInt = get_idx(paddrWithVirtualAlias)
 }
 
 class RefillPipe(implicit p: Parameters) extends DCacheModule {
@@ -37,11 +38,11 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
 
   io.req.ready := io.data_write.ready && io.meta_write.ready && io.tag_write.ready
 
-  val idx = io.req.bits.paddrWithVirtualAlias
+  val idx = io.req.bits.idx
   val tag = addr_to_dcache_tag(io.req.bits.addr)
 
   io.data_write.valid := io.req.valid
-  io.data_write.bits.addr := idx
+  io.data_write.bits.addr := io.req.bits.paddrWithVirtualAlias
   io.data_write.bits.way_en := io.req.bits.way_en
   io.data_write.bits.wmask := io.req.bits.wmask
   io.data_write.bits.data := io.req.bits.data

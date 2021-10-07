@@ -43,6 +43,10 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
     val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
     val meta_write = DecoupledIO(new MetaWriteReq)
+
+    val status = new Bundle() {
+      val s1_set, s2_set = ValidIO(UInt(idxBits.W))
+    }
   })
 
   require(numReplaceRespPorts >= 2)
@@ -140,6 +144,11 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
 
   s2_resp.valid := s2_fire
   s2_resp.bits.miss_id := s2_req.miss_id
+
+  io.status.s1_set.valid := s1_valid
+  io.status.s1_set.bits := s1_idx
+  io.status.s2_set.valid := s2_valid
+  io.status.s2_set.bits := s2_idx
 
   // Theoretically s1 and s2 won't resp to the same miss entry
   assert(RegNext(!s1_resp.valid || !s2_resp.valid || s1_resp.bits.miss_id =/= s2_resp.bits.miss_id))

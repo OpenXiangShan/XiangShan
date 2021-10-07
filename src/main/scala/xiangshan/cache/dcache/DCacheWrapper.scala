@@ -199,6 +199,7 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
     XSDebug("DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
+  def idx: UInt = get_idx(vaddr)
 }
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
@@ -307,7 +308,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
-      sourceId = IdRange(0, cfg.nMissEntries+1),
+      sourceId = IdRange(0, cfg.nMissEntries + cfg.nReleaseEntries + 1),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = cacheParams.reqFields,
@@ -341,7 +342,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
-  val metaArray = Module(new DuplicatedMetaArray(numReadPorts = 3))
+  val metaArray = Module(new NewMetaArray(readPorts = 4, writePorts = 3))
+  val tagArray = Module(new NewTagArray(readPorts = 2))
   bankedDataArray.dump()
 
   val errors = bankedDataArray.io.errors ++ metaArray.io.errors
@@ -352,44 +354,67 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
-
-  val mainPipe   = Module(new MainPipe)
-  val missQueue  = Module(new MissQueue(edge))
+  val mainPipe   = Module(new NewMainPipe)
+  val refillPipe = Module(new RefillPipe)
+  val replacePipe = Module(new ReplacePipe)
+  val missQueue  = Module(new NewMissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
 
-
   //----------------------------------------
   // meta array
-  val MetaWritePortCount = 1
-  val MainPipeMetaWritePort = 0
-  metaArray.io.write <> mainPipe.io.meta_write
+  val meta_read_ports = ldu.map(_.io.meta_read) ++
+    Seq(mainPipe.io.meta_read,
+      replacePipe.io.meta_read)
+  val meta_resp_ports = ldu.map(_.io.meta_resp) ++
+    Seq(mainPipe.io.meta_resp,
+      replacePipe.io.meta_resp)
+  val meta_write_ports = Seq(
+    mainPipe.io.meta_write,
+    refillPipe.io.meta_write,
+    replacePipe.io.meta_write
+  )
+  meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
+  meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
+  meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
-  // MainPipe contend MetaRead with Load 0
-  // give priority to MainPipe
-  val MetaReadPortCount = 2
-  val MainPipeMetaReadPort = 0
-  val LoadPipeMetaReadPort = 1
+  //----------------------------------------
+  // tag array
+  require(tagArray.io.read.size == ldu.size)
+  val tag_read_arb = Module(new Arbiter(new TagReadReq, 2))
+  tag_read_arb.io.in(0) <> ldu.last.io.tag_read
+  tag_read_arb.io.in(1) <> mainPipe.io.tag_read
+  tagArray.io.read.last <> tag_read_arb.io.out
 
-  metaArray.io.read(LoadPipelineWidth) <> mainPipe.io.meta_read
-  mainPipe.io.meta_resp <> metaArray.io.resp(LoadPipelineWidth)
+  ldu.last.io.tag_resp := tagArray.io.resp.last
+  mainPipe.io.tag_resp := tagArray.io.resp.last
 
-  for (w <- 0 until LoadPipelineWidth) {
-    metaArray.io.read(w) <> ldu(w).io.meta_read
-    ldu(w).io.meta_resp <> metaArray.io.resp(w)
+  ldu.init.zipWithIndex.foreach {
+    case (ld, i) =>
+      tagArray.io.read(i) <> ld.io.tag_read
+      ld.io.tag_resp := tagArray.io.resp(i)
   }
 
   //----------------------------------------
   // data array
 
-  bankedDataArray.io.write <> mainPipe.io.banked_data_write
+  val dataReadLineArb = Module(new Arbiter(new L1BankedDataReadLineReq, 2))
+  dataReadLineArb.io.in(0) <> replacePipe.io.data_read
+  dataReadLineArb.io.in(1) <> mainPipe.io.data_read
+
+  val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
+  dataWriteArb.io.in(0) <> refillPipe.io.data_write
+  dataWriteArb.io.in(1) <> mainPipe.io.data_write
+
+  bankedDataArray.io.write <> dataWriteArb.io.out
   bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
   bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
-  bankedDataArray.io.readline <> mainPipe.io.banked_data_read
+  bankedDataArray.io.readline <> dataReadLineArb.io.out
 
   ldu(0).io.banked_data_resp := bankedDataArray.io.resp
   ldu(1).io.banked_data_resp := bankedDataArray.io.resp
-  mainPipe.io.banked_data_resp := bankedDataArray.io.resp
+  mainPipe.io.data_resp := bankedDataArray.io.resp
+  replacePipe.io.data_resp := bankedDataArray.io.resp
 
   ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
   ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
@@ -425,7 +450,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Request
   val missReqArb = Module(new RRArbiter(new MissReq, MissReqPortCount))
 
-  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
+  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
@@ -434,12 +459,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
 
   // refill to load queue
-  io.lsu.lsq <> missQueue.io.refill
+  io.lsu.lsq <> missQueue.io.refill_to_ldq
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
-  missQueue.io.probe_req := bus.b.bits.address
+  missQueue.io.probe_addr := bus.b.bits.address
 
   //----------------------------------------
   // probe
@@ -448,44 +473,86 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // mainPipe
-  val MainPipeReqPortCount = 4
-  val MissMainPipeReqPort = 0
-  val StoreMainPipeReqPort = 1
-  val AtomicsMainPipeReqPort = 2
-  val ProbeMainPipeReqPort = 3
+//  val MainPipeReqPortCount = 4
+//  val MissMainPipeReqPort = 0
+//  val StoreMainPipeReqPort = 1
+//  val AtomicsMainPipeReqPort = 2
+//  val ProbeMainPipeReqPort = 3
+//
+//  val mainPipeReqArb = Module(new RRArbiter(new MainPipeReq, MainPipeReqPortCount))
+//  mainPipeReqArb.io.in(MissMainPipeReqPort)    <> missQueue.io.pipe_req
+//  mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> io.lsu.store.pipe_req
+//  mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
+//  mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
+//
+//  // add a stage to break the Arbiter bits.addr to ready path
+//  val mainPipeReq_valid = RegInit(false.B)
+//  val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
+//  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
+//
+//  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
+//  mainPipe.io.req.valid := mainPipeReq_valid
+//  mainPipe.io.req.bits  := mainPipeReq_req
+//
+//  when (mainPipeReqArb.io.out.fire()) { mainPipeReq_valid := true.B }
+//  when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
+//
+//  missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
+//  io.lsu.store.pipe_resp         <> mainPipe.io.store_resp
+//  atomicsReplayUnit.io.pipe_resp <> mainPipe.io.amo_resp
+//
+//  probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
+//
+//  for(i <- 0 until LoadPipelineWidth) {
+//    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
+//  }
 
-  val mainPipeReqArb = Module(new RRArbiter(new MainPipeReq, MainPipeReqPortCount))
-  mainPipeReqArb.io.in(MissMainPipeReqPort)    <> missQueue.io.pipe_req
-  mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> io.lsu.store.pipe_req
-  mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
-  mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
+  // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
+  // block the req in main pipe
+  val refillPipeStatus = Wire(Valid(UInt(idxBits.W)))
+  refillPipeStatus.valid := refillPipe.io.req.valid
+  refillPipeStatus.bits := refillPipe.io.req.bits.paddrWithVirtualAlias
+  val blockMainPipeReqs = Seq(
+    refillPipeStatus,
+    replacePipe.io.status.s1_set,
+    replacePipe.io.status.s2_set
+  )
+  val storeShouldBeBlocked = Cat(blockMainPipeReqs.map(r => r.valid && r.bits === io.lsu.store.req.bits.idx)).orR
+  val probeShouldBeBlocked = Cat(blockMainPipeReqs.map(r => r.valid && r.bits === get_idx(probeQueue.io.pipe_req.bits.vaddr))).orR
 
-  // add a stage to break the Arbiter bits.addr to ready path
-  val mainPipeReq_valid = RegInit(false.B)
-  val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
-  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
+  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, probeShouldBeBlocked)
+  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, storeShouldBeBlocked)
 
-  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
-  mainPipe.io.req.valid := mainPipeReq_valid
-  mainPipe.io.req.bits  := mainPipeReq_req
+  io.lsu.store.replay_resp := mainPipe.io.store_replay_resp
+  io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
-  when (mainPipeReqArb.io.out.fire()) { mainPipeReq_valid := true.B }
-  when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
+  //----------------------------------------
+  // replace pipe
+  val mpStatus = mainPipe.io.status
+  val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
+  val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
+  val replaceShouldBeBlocked = mpStatus.s0_set.valid && replaceSet === mpStatus.s0_set.bits ||
+    Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
+    )).orR()
+  block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
+  missQueue.io.replace_pipe_resp := replacePipe.io.resp
 
-  missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
-  io.lsu.store.pipe_resp         <> mainPipe.io.store_resp
-  atomicsReplayUnit.io.pipe_resp <> mainPipe.io.amo_resp
-
-  probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
-
-  for(i <- 0 until LoadPipelineWidth) {
-    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
-  }
+  //----------------------------------------
+  // refill pipe
+  val mps1 = mpStatus.s1
+  val refillShouldBeBlocked = mps1.valid &&
+    mps1.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
+    mps1.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+  block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
+  io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
 
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-  wb.io.req <> mainPipe.io.wb_req
+  val wbArb = Module(new Arbiter(new WritebackReq, 2))
+  wbArb.io.in.zip(Seq(mainPipe.io.wb, replacePipe.io.wb)).foreach { case (arb, pipe) => arb <> pipe }
+  wb.io.req <> wbArb.io.out
   bus.c     <> wb.io.mem_release
 
   // connect bus d
@@ -504,6 +571,30 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   } .otherwise {
     assert (!bus.d.fire())
   }
+
+  //----------------------------------------
+  // replacement algorithm
+  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
+
+  val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way)
+  replWayReqs.foreach{
+    case req =>
+      req.way := DontCare
+      when (req.set.valid) { req.way := replacer.way(req.set.bits) }
+  }
+
+  val replAccessReqs = ldu.map(_.io.replace_access) ++ Seq(
+    mainPipe.io.replace_access,
+    refillPipe.io.replace_access
+  )
+  val touchWays = Seq.fill(replAccessReqs.size)(Wire(ValidIO(UInt(log2Up(nWays).W))))
+  touchWays.zip(replAccessReqs).foreach {
+    case (w, req) =>
+      w.valid := req.valid
+      w.bits := req.bits.way
+  }
+  val touchSets = replAccessReqs.map(_.bits.set)
+  replacer.access(touchSets, touchWays)
 
   //----------------------------------------
   // assertions

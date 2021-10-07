@@ -109,7 +109,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 {
   val io = IO(new Bundle {
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
-    val pipe_req  = DecoupledIO(new MainPipeReq)
+    val pipe_req  = DecoupledIO(new NewMainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
   })
 
@@ -174,9 +174,9 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     io.mem_probe.bits.dump
   }
 
-  when (io.pipe_req.fire()) {
-    io.pipe_req.bits.dump()
-  }
+//  when (io.pipe_req.fire()) {
+//    io.pipe_req.bits.dump()
+//  }
 
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)

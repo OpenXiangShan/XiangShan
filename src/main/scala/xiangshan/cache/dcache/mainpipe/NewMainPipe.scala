@@ -91,6 +91,14 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
 
+    val status = new Bundle() {
+      val s0_set = ValidIO(UInt(idxBits.W))
+      val s1, s2, s3 = ValidIO(new Bundle() {
+        val set = UInt(idxBits.W)
+        val way_en = UInt(nWays.W)
+      })
+    }
+
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
   })
@@ -268,7 +276,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
 
   val probe_update_meta = s3_req.probe && s3_tag_match && s3_coh =/= probe_new_coh
-  val store_update_meta = s3_req.isStore && s3_hit_coh =/= s3_new_hit_coh
+  val store_update_meta = s3_req.isStore && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh
 
   val banked_wmask = s3_banked_store_wmask
   val update_data = banked_wmask.orR
@@ -276,7 +284,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val writeback_data = s3_tag_match && s3_req.probe && (s3_req.probe_need_data || s3_coh === ClientStates.Dirty)
 
   val s3_probe_can_go = s3_req.probe && io.wb.ready && (io.meta_write.ready || !probe_update_meta)
-  val s3_store_can_go = s3_req.isStore && (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data)
+  val s3_store_can_go = s3_req.isStore && !s3_req.probe && (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data)
   val s3_can_go = s3_probe_can_go || s3_store_can_go
   val s3_fire = s3_valid && s3_can_go
   when (s2_fire_to_s3) {
@@ -286,7 +294,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   }
   s3_ready := !s3_valid || s3_can_go
   s3_s0_set_conflict := s3_valid && s3_idx === s0_idx
-  assert(RegNext(!s3_valid || !s3_req.isStore || s3_hit)) // miss store should never come to s3
+  assert(RegNext(!s3_valid || !(s3_req.isStore && !s3_req.probe) || s3_hit)) // miss store should never come to s3
 
 
   req.ready := s0_can_go
@@ -331,14 +339,14 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := s3_req.id
 
-  io.meta_write.valid := s3_valid && (s3_req.isStore && (io.data_write.ready || !update_data) && store_update_meta ||
+  io.meta_write.valid := s3_valid && (s3_req.isStore && !s3_req.probe && (io.data_write.ready || !update_data) && store_update_meta ||
     s3_req.probe && io.wb.ready && probe_update_meta)
   io.meta_write.bits.idx := s3_idx
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.tag := s3_tag
   io.meta_write.bits.meta.coh := s3_new_hit_coh
 
-  io.data_write.valid := s3_valid && s3_req.isStore && update_data && (io.meta_write.ready || !store_update_meta)
+  io.data_write.valid := s3_valid && s3_req.isStore && !s3_req.probe && update_data && (io.meta_write.ready || !store_update_meta)
   io.data_write.bits.way_en := s3_way_en
   io.data_write.bits.addr := s3_req.vaddr
   io.data_write.bits.wmask := banked_wmask
@@ -352,10 +360,23 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
   io.wb.bits.data := s3_data.asUInt()
 
-  io.replace_access.valid := RegNext(s1_fire && s1_req.isStore && s1_tag_match)
+  io.replace_access.valid := RegNext(s1_fire && s1_req.isStore && !s1_req.probe && s1_tag_match)
   io.replace_access.bits.set := s2_idx
   io.replace_access.bits.way := RegNext(OHToUInt(s1_way_en))
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx
+
+  // TODO: consider block policy of a finer granularity
+  io.status.s0_set.valid := req.valid
+  io.status.s0_set.bits := get_idx(s0_req.vaddr)
+  io.status.s1.valid := s1_valid
+  io.status.s1.bits.set := s1_idx
+  io.status.s1.bits.way_en := s1_way_en
+  io.status.s2.valid := s2_valid
+  io.status.s2.bits.set := s2_idx
+  io.status.s2.bits.way_en := s2_way_en
+  io.status.s3.valid := s3_valid
+  io.status.s3.bits.set := s3_idx
+  io.status.s3.bits.way_en := s3_way_en
 }
