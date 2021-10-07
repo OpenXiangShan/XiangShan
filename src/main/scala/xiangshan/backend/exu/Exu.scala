@@ -18,10 +18,12 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
 import utils.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu._
+import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.StoreDataBundle
 
 case class ExuParameters
@@ -55,8 +57,9 @@ case class ExuConfig
   blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
-  wbFpPriority: Int
-) {
+  wbFpPriority: Int,
+  extendsExu: Boolean = true
+) extends IsLookupable {
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
 
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
@@ -67,6 +70,7 @@ case class ExuConfig
   val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasFastUopOut = fuConfigs.map(_.fastUopOut).reduce(_ || _)
+  val hasExceptionOut = fuConfigs.map(_.hasExceptionOut).reduce(_ || _)
 
   val latency: HasFuLatency = {
     val lats = fuConfigs.map(_.latency)
@@ -89,16 +93,18 @@ case class ExuConfig
   val allWakeupFromRS = !hasUncertainlatency && (wbIntPriority <= 1 || wbFpPriority <= 1)
   val wakeupFromExu = !wakeupFromRS
   val hasExclusiveWbPort = (wbIntPriority == 0 && writeIntRf) || (wbFpPriority == 0 && writeFpRf)
-  val needLoadBalance = hasUncertainlatency && !wakeupFromRS
+  val needLoadBalance = hasUncertainlatency
 
   def canAccept(fuType: UInt): Bool = {
     Cat(fuConfigs.map(_.fuType === fuType)).orR()
   }
 }
 
-abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModule {
+@instantiable
+abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
+  @public val config = cfg
 
-  val io = IO(new Bundle() {
+  @public val io = IO(new Bundle() {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
@@ -106,10 +112,11 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
     val out = DecoupledIO(new ExuOutput)
   })
 
-  val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
-  val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
-  val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
-  val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
+  @public val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
+  @public val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
+  @public val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
+  @public val fmaMid = if (config == FmacExeUnitCfg) Some(IO(new FMAMidResultIO)) else None
+  @public val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
 
   val functionUnits = config.fuConfigs.map(cfg => {
     val mod = Module(cfg.fuGen(p))

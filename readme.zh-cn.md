@@ -11,9 +11,18 @@ English Readme is [here](README.md).
 
 在 2021 年 6 月的 RISC-V 中国峰会上，我们给出了超过 20 个技术报告。报告已经更新到[我们的文档仓库](https://github.com/OpenXiangShan/XiangShan-doc)。
 
-未来更多的文档也将更新到相同的仓库。
+更多的文档也将持续更新到相同的仓库。
 
-## 邮件列表
+## 关注我们
+
+Wechat/微信：香山开源处理器
+
+<div align=left><img width="340" height="117" src="images/wechat.png"/></div>
+
+Zhihu/知乎：[香山开源处理器](https://www.zhihu.com/people/openxiangshan)
+
+Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
+
 可以通过[我们的邮件列表](mailto:xiangshan-all@ict.ac.cn)联系我们。列表中的所有邮件会存档到[这里](https://www.mail-archive.com/xiangshan-all@ict.ac.cn/)。
 
 ## 处理器架构
@@ -21,7 +30,7 @@ English Readme is [here](README.md).
 自 2020 年 6 月开始开发的[雁栖湖](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)为香山处理器的首个稳定的微架构。目前版本的香山（即南湖）正在 master 分支上不断开发中。
 
 微架构概览：
-![xs-arch-single](xs-arch-simple.svg)
+![xs-arch-single](images/xs-arch-simple.svg)
 
 ## 目录概览
 

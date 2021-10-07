@@ -24,7 +24,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.mem._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 
 class LQDataEntry(implicit p: Parameters) extends XSBundle {
   // val vaddr = UInt(VAddrBits.W)

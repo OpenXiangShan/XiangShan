@@ -66,7 +66,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   val oversize    = Bool()
 
   val last_is_rvc = Bool()
-  
+
   val always_taken = Vec(numBr, Bool())
 
   def getTarget(offsetLen: Int)(pc: UInt, lower: UInt, stat: UInt) = {
@@ -89,7 +89,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
 
   def getLowerStatByTarget(offsetLen: Int)(pc: UInt, target: UInt) = {
     val pc_higher = pc(VAddrBits-1, offsetLen)
-    val target_higher = pc(VAddrBits-1, offsetLen)
+    val target_higher = target(VAddrBits-1, offsetLen)
     val stat = WireInit(Mux(target_higher > pc_higher, TAR_OVF,
       Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT)))
     val lower = WireInit(target(offsetLen-1, 0))
@@ -119,7 +119,7 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   def getBrMaskByOffset(offset: UInt) = (brValids zip brOffset).map{
     case (v, off) => v && off <= offset
   }
-  
+
   def brIsSaved(offset: UInt) = (brValids zip brOffset).map{
     case (v, off) => v && off === offset
   }.reduce(_||_)

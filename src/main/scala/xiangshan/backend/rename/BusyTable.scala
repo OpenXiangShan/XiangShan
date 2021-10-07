@@ -32,7 +32,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
     val flush = Input(Bool())
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    // set preg state to ready (write back regfile + roq walk)
+    // set preg state to ready (write back regfile + rob walk)
     val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val read = Vec(numReadPorts, new BusyTableReadIO)

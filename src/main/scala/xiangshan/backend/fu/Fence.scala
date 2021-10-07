@@ -74,11 +74,11 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   io.out.valid := state =/= s_idle && state =/= s_wait
   io.out.bits.data := DontCare
   io.out.bits.uop := uop
-  io.out.bits.uop.cf.exceptionVec(illegalInstr) := uop.cf.exceptionVec(illegalInstr) || (func === FenceOpType.sfence && disableSfence)
+  io.out.bits.uop.cf.exceptionVec(illegalInstr) := func === FenceOpType.sfence && disableSfence
 
-  XSDebug(valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InroqIdx:${io.in.bits.uop.roqIdx}\n")
+  XSDebug(valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InrobIdx:${io.in.bits.uop.robIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
-  XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} OutroqIdx:${io.out.bits.uop.roqIdx}\n")
+  XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} OutrobIdx:${io.out.bits.uop.robIdx}\n")
 
   assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))
   assert(!io.out.valid || io.out.ready, "when fence is out valid, out ready should always be true")
