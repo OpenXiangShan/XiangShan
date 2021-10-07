@@ -351,15 +351,12 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
-  val isSvinvalBegin = RegInit(false.B)
-  val isSvinvalEnd = WireInit(false.B)
+  val doingSvinval = RegInit(false.B)
   // When blockBackward instruction leaves Roq (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
   when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
-  //when end instruction of svinval comes , clear isSvinvalBegin
-  when(isSvinvalEnd) { isSvinvalBegin := false.B }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.resp      := enqPtrVec
@@ -375,18 +372,18 @@ class Roq(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       when (io.enq.req(i).bits.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
       when(FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
       {
-        isSvinvalBegin := true.B
+        doingSvinval := true.B
       }
+      // the end instruction of Svinval enqs so clear doingSvinval 
       when(FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
       {
-        isSvinvalEnd := true.B
-      }.otherwise
-      {
-        isSvinvalEnd := false.B
+        doingSvinval := false.B
       }
-      // assert( !isSvinvalBegin || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || isSvinvalEnd))
+      // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
+      assert( !doingSvinval || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe)))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
