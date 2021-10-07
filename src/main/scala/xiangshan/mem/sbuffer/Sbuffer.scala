@@ -377,10 +377,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     activeMask(evictionIdx) && (need_drain || cohHasTimeOut || need_replace) && noSameBlockInflight(evictionIdx)
   val prepareValidReg = RegInit(false.B)
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
-  val canSendDcacheReq = io.dcache.pipe_req.ready || !prepareValidReg
+  val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
   // when willSendDcacheReq, read dcache req data and store them in a pipeline reg 
   val willSendDcacheReq = prepareValid && canSendDcacheReq
-  when(io.dcache.pipe_req.fire()){
+  when(io.dcache.req.fire()){
     prepareValidReg := false.B
   }
   when(canSendDcacheReq){
@@ -395,7 +395,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSDebug(p"need drain:$need_drain cohHasTimeOut: $cohHasTimeOut need replace:$need_replace\n")
   XSDebug(p"drainIdx:$drainIdx tIdx:$cohTimeOutIdx replIdx:$replaceIdx " +
     p"blocked:${!noSameBlockInflight(evictionIdx)} v:${activeMask(evictionIdx)}\n")
-  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.pipe_req.ready}\n")
+  XSDebug(p"prepareValid:$prepareValid evictIdx:$evictionIdx dcache ready:${io.dcache.req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may not accurate
   accessIdx(StorePipelineWidth).valid := invalidMask(replaceIdx) || (
@@ -405,54 +405,57 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val evictionPTag = RegEnable(ptag(evictionIdx), enable = willSendDcacheReq)
   val evictionVTag = RegEnable(vtag(evictionIdx), enable = willSendDcacheReq)
 
-  io.dcache.pipe_req.valid := prepareValidReg
-  io.dcache.pipe_req.bits := DontCare
-  io.dcache.pipe_req.bits.miss := false.B
-  io.dcache.pipe_req.bits.probe := false.B
-  io.dcache.pipe_req.bits.probe_need_data := false.B
-  io.dcache.pipe_req.bits.source := STORE_SOURCE.U
-  io.dcache.pipe_req.bits.cmd    := MemoryOpConstants.M_XWR
-  io.dcache.pipe_req.bits.addr   := getAddr(evictionPTag)
-  io.dcache.pipe_req.bits.vaddr   := getAddr(evictionVTag)
-  io.dcache.pipe_req.bits.store_data  := data(evictionIdxReg).asUInt
-  io.dcache.pipe_req.bits.store_mask  := mask(evictionIdxReg).asUInt
-  io.dcache.pipe_req.bits.id := evictionIdxReg
+  io.dcache.req.valid := prepareValidReg
+  io.dcache.req.bits := DontCare
+  io.dcache.req.bits.miss := false.B
+  io.dcache.req.bits.probe := false.B
+  io.dcache.req.bits.probe_need_data := false.B
+  io.dcache.req.bits.source := STORE_SOURCE.U
+  io.dcache.req.bits.cmd    := MemoryOpConstants.M_XWR
+  io.dcache.req.bits.addr   := getAddr(evictionPTag)
+  io.dcache.req.bits.vaddr   := getAddr(evictionVTag)
+  io.dcache.req.bits.store_data  := data(evictionIdxReg).asUInt
+  io.dcache.req.bits.store_mask  := mask(evictionIdxReg).asUInt
+  io.dcache.req.bits.id := evictionIdxReg
 
-  when (io.dcache.pipe_req.fire()) {
+  when (io.dcache.req.fire()) {
     // stateVec(evictionIdxReg).s_pipe_req := false.B
     stateVec(evictionIdxReg).w_pipe_resp := true.B
     // assert(stateVec(evictionIdxReg).s_pipe_req === true.B)
-    assert(!(io.dcache.pipe_req.bits.vaddr === 0.U))
-    assert(!(io.dcache.pipe_req.bits.addr === 0.U))
+    assert(!(io.dcache.req.bits.vaddr === 0.U))
+    assert(!(io.dcache.req.bits.addr === 0.U))
   }
 
-  XSDebug(io.dcache.pipe_req.fire(),
+  XSDebug(io.dcache.req.fire(),
     p"send buf [$evictionIdxReg] to Dcache, req fire\n"
   )
 
   // TODO: for timing reasons, dcache store pipe resp may need to be delayed
-  val dcache_resp_id = io.dcache.pipe_resp.bits.id
-  // when not miss
-  // -> everything is OK, free that entry in sbuffer
-  // when miss and not replay
-  // -> wait for missQueue to handling miss and replaying our request
-  // when miss and replay
-  // -> req missed and fail to enter missQueue, manually replay it later
-  // -> is it necessary?
-  when (io.dcache.pipe_resp.fire()) {
-    when (io.dcache.pipe_resp.bits.miss) {
-      // if miss && !replay, keep waiting
-      when(io.dcache.pipe_resp.bits.replay) {
-        missqReplayCount(dcache_resp_id) := 0.U
-        stateVec(dcache_resp_id).w_timeout := true.B
-      }
-    } .otherwise {
+  // update sbuffer status according to dcache resp source
+
+  // hit resp
+  io.dcache.hit_resps.map(resp => {
+  val dcache_resp_id = resp.bits.id
+    when (resp.fire()) {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       stateVec(dcache_resp_id).w_pipe_resp := false.B
     }
+    assert(!resp.bits.replay)
+    assert(!resp.bits.miss) // not need to resp if miss, to be opted
     assert(stateVec(dcache_resp_id).w_pipe_resp === true.B)
     assert(stateVec(dcache_resp_id).state_inflight === true.B)
+  })
+
+  // replay resp
+  val replay_resp_id = io.dcache.replay_resp.bits.id
+  when (io.dcache.replay_resp.fire()) {
+    missqReplayCount(replay_resp_id) := 0.U
+    stateVec(replay_resp_id).w_timeout := true.B
+    // waiting for timeout
+    assert(io.dcache.replay_resp.bits.replay)
+    assert(stateVec(replay_resp_id).w_pipe_resp === true.B)
+    assert(stateVec(replay_resp_id).state_inflight === true.B)
   }
   
   // TODO: reuse cohCount
@@ -480,6 +483,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 
   if (!env.FPGAPlatform) {
+    // TODO: need to be updated
     val difftest = Module(new DifftestSbufferEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -564,8 +568,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire())).asUInt))
   XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt))
   XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt))
-  XSPerfAccumulate("dcache_req_valid", io.dcache.pipe_req.valid)
-  XSPerfAccumulate("dcache_req_fire", io.dcache.pipe_req.fire())
+  XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)
+  XSPerfAccumulate("dcache_req_fire", io.dcache.req.fire())
   XSPerfAccumulate("sbuffer_idle", sbuffer_state === x_idle)
   XSPerfAccumulate("sbuffer_flush", sbuffer_state === x_drain_sbuffer)
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
