@@ -22,7 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -85,7 +85,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // update stage 1
   when(memPredUpdateReqValid){
     switch (Cat(loadAssigned, storeAssigned)) {
-      // 1. "If neither the load nor the store has been assigned a store set, 
+      // 1. "If neither the load nor the store has been assigned a store set,
       // one is allocated and assigned to both instructions."
       is ("b00".U(2.W)) {
         valid(memPredUpdateReqReg.ldpc) := true.B
@@ -95,22 +95,22 @@ class SSIT(implicit p: Parameters) extends XSModule {
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := ssidAllocate
       }
-      // 2. "If the load has been assigned a store set, but the store has not, 
+      // 2. "If the load has been assigned a store set, but the store has not,
       // the store is assigned the load’s store set."
       is ("b10".U(2.W)) {
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := loadOldSSID
       }
-      // 3. "If the store has been assigned a store set, but the load has not, 
+      // 3. "If the store has been assigned a store set, but the load has not,
       // the load is assigned the store’s store set."
       is ("b01".U(2.W)) {
         valid(memPredUpdateReqReg.ldpc) := true.B
         isload(memPredUpdateReqReg.ldpc) := true.B
         ssid(memPredUpdateReqReg.ldpc) := storeOldSSID
       }
-      // 4. "If both the load and the store have already been assigned store sets, 
-      // one of the two store sets is declared the "winner". 
+      // 4. "If both the load and the store have already been assigned store sets,
+      // one of the two store sets is declared the "winner".
       // The instruction belonging to the loser’s store set is assigned the winner’s store set."
       is ("b11".U(2.W)) {
         valid(memPredUpdateReqReg.ldpc) := true.B
@@ -150,12 +150,12 @@ class SSIT(implicit p: Parameters) extends XSModule {
 class LFSTEntry(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
   val sqIdx = new SqPtr
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
 }
 
 class DispatchToLFST(implicit p: Parameters) extends XSBundle  {
   val sqIdx = new SqPtr
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
   val ssid = UInt(SSIDWidth.W)
 }
 
@@ -183,7 +183,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // TODO: use MemTemplate
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
   val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
-  val roqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RoqPtr)))
+  val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
   (0 until LFSTSize).map(i => {
@@ -192,7 +192,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
 
   // read LFST in rename stage
   for (i <- 0 until DecodeWidth) {
-    // If store-load pair is in the same dispatch bundle, loadWaitBit should also be set for load 
+    // If store-load pair is in the same dispatch bundle, loadWaitBit should also be set for load
     val hitInDispatchBundle = if(i > 0){
       (0 until i).map(j =>
         io.dispatch(j).valid && io.dispatch(j).bits.ssid === io.lookup.raddr(i)
@@ -202,7 +202,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
     }
     // Check if store set is valid in LFST
     io.lookup.rdata(i) := (
-        (valid(io.lookup.raddr(i)) || hitInDispatchBundle) && io.lookup.ren(i) || 
+        (valid(io.lookup.raddr(i)) || hitInDispatchBundle) && io.lookup.ren(i) ||
         io.csrCtrl.no_spec_load // set loadWaitBit for all loads
       ) && !io.csrCtrl.lvpred_disable
   }
@@ -225,14 +225,14 @@ class LFST(implicit p: Parameters) extends XSModule  {
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
       sqIdxVec(waddr)(wptr) := io.dispatch(i).bits.sqIdx
-      roqIdxVec(waddr)(wptr) := io.dispatch(i).bits.roqIdx
+      robIdxVec(waddr)(wptr) := io.dispatch(i).bits.robIdx
     }
   })
 
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(roqIdxVec(i)(j).needFlush(io.redirect, io.flush)){
+      when(robIdxVec(i)(j).needFlush(io.redirect, io.flush)){
         validVec(i)(j) := false.B
       }
     })

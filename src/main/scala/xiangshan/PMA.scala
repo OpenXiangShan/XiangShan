@@ -21,7 +21,7 @@ import chisel3.util._
 import utils._
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
-import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, L1plusCache, L1plusCacheParameters, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, HasDCacheParameters, Uncache}
 import xiangshan.cache.mmu.PTW
 
 object MemMap {
@@ -109,7 +109,7 @@ object AddressSpace {
       // pma mode check
       val s = i._2.get("mode").get
       if(
-        s.toUpperCase.indexOf("A") >= 0 && 
+        s.toUpperCase.indexOf("A") >= 0 &&
         !(s.toUpperCase.indexOf("R") >= 0 && s.toUpperCase.indexOf("W") >= 0)
       ){
         println("[error] pma atomicable area must be both readable and writeable")

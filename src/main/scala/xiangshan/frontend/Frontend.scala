@@ -22,7 +22,6 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.prefetch.L1plusPrefetcher
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
 import xiangshan.backend.fu.HasExceptionNO
 import system.L1CacheErrorInfo
@@ -38,7 +37,6 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
 
 
 class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
-  with HasL1plusCacheParameters
   with HasXSParameter
   with HasExceptionNO
 {
@@ -74,10 +72,12 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     shouldBlock = true,
     csrCtrl = io.csrCtrl,
     itlbParams
-  )  
+  )
   //TODO: modules need to be removed
   val instrUncache = outer.instrUncache.module
   val icache       = outer.icache.module
+
+  icache.io.fencei := RegNext(io.fencei)
 
   val needFlush = io.backend.toFtq.stage3Redirect.valid
 

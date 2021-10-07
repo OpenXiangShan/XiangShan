@@ -18,7 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -113,7 +113,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
-  val replayInst = Bool() 
+  val replayInst = Bool()
 }
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
@@ -154,6 +154,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
+  // This inst will flush all the pipe when it is the oldest inst in ROB,
+  // then replay from this inst itself
+  val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
     isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
@@ -179,10 +182,12 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
   // val fetchTime = UInt(64.W)
-  val renameTime = UInt(64.W)
-  val dispatchTime = UInt(64.W)
-  val issueTime = UInt(64.W)
-  val writebackTime = UInt(64.W)
+  val renameTime = UInt(XLEN.W)
+  val dispatchTime = UInt(XLEN.W)
+  val enqRsTime = UInt(XLEN.W)
+  val selectTime = UInt(XLEN.W)
+  val issueTime = UInt(XLEN.W)
+  val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
 }
 
@@ -198,7 +203,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val psrc = Vec(3, UInt(PhyRegIdxWidth.W))
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
@@ -219,6 +224,12 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   }
   def doWriteIntRf: Bool = ctrl.rfWen && ctrl.ldest =/= 0.U
   def doWriteFpRf: Bool = ctrl.fpWen
+  def clearExceptions(): MicroOp = {
+    cf.exceptionVec.map(_ := false.B)
+    ctrl.replayInst := false.B
+    ctrl.flushPipe := false.B
+    this
+  }
 }
 
 class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
@@ -227,7 +238,7 @@ class MicroOpRbExt(implicit p: Parameters) extends XSBundle {
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
-  val roqIdx = new RoqPtr
+  val robIdx = new RobPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val level = RedirectLevel()
@@ -248,7 +259,7 @@ class Dp1ToDp2IO(implicit p: Parameters) extends XSBundle {
   val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
-class ReplayPregReq(implicit p: Parameters) extends XSBundle {
+class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
@@ -296,7 +307,7 @@ class ExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isInterrupt = Bool()
 }
 
-class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
+class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
   val fpWen = Bool()
@@ -313,10 +324,10 @@ class RoqCommitInfo(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
 }
 
-class RoqCommitIO(implicit p: Parameters) extends XSBundle {
+class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val isWalk = Output(Bool())
   val valid = Vec(CommitWidth, Output(Bool()))
-  val info = Vec(CommitWidth, Output(new RoqCommitInfo))
+  val info = Vec(CommitWidth, Output(new RobCommitInfo))
 
   def hasWalkInstr = isWalk && valid.asUInt.orR
 
