@@ -292,8 +292,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
-  sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
+  // TODO: if dcache sbuffer resp needs to ne delayed 
+  // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
+  // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
