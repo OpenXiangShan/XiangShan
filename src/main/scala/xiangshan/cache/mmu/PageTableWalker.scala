@@ -80,8 +80,10 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   io.req.ready := state === s_idle
 
-  val af_reg = RegEnable(io.pmp.resp.ld, RegNext(state === s_addr_check || (state === s_mem_resp && mem.resp.fire())))
-  val accessFault = Mux(RegNext(!sfence.valid && (state === s_addr_check || (state === s_mem_resp && mem.resp.fire())))
+  val finish = WireInit(false.B)
+  val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
+  val af_reg = RegEnable(io.pmp.resp.ld, RegNext(sent_to_pmp))
+  val accessFault = Mux(RegNext(!sfence.valid && sent_to_pmp)
     , io.pmp.resp.ld, af_reg)
   val pageFault = memPte.isPf(level)
   switch (state) {
@@ -123,6 +125,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         when (io.resp.fire()) {
           state := s_idle
         }
+        finish := true.B
       }.otherwise {
         when (level =/= (Level-2).U) { // when level is 1.U, finish
           level := levelNext
@@ -130,6 +133,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         }.otherwise {
           when (io.mq.fire()) {
             state := s_idle
+            finish := true.B
           }
         }
       }
@@ -141,6 +145,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     af_reg := false.B
   }
 
+  // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
   val find_pte = is_pte
   val to_find_pte = level === 1.U && !is_pte
@@ -159,7 +164,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
-  val mem_addr = Mux(level === 0.U, l1addr, l2addr)
+  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
   io.pmp.req.addr := mem_addr
   io.pmp.req.size := 3.U // TODO: fix it
   io.pmp.req.cmd := TlbCmd.read
