@@ -146,9 +146,12 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
     val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
     val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit && !af
+    // NOTE: pf need && with !af, page fault has higher priority than access fault
+    // but ptw may also have access fault, then af happens, the translation is wrong.
+    // In this case, pf has lower priority than af
 
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
