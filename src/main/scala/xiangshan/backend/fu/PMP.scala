@@ -100,16 +100,8 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
     * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
     * The low OffBits is dropped
     */
-  def read_addr() = {
-    val G = PlatformGrain - PMPOffBits
-    require(G >= 0)
-    if (G == 0) {
-      addr
-    } else if (G >= 2) {
-      Mux(cfg.napot, mask_low_bits(addr, G-1), mask_low_bits(addr, G))
-    } else { // G is 1
-      Mux(cfg.off_tor, mask_low_bits(addr, G), addr)
-    }
+  def read_addr(): UInt = {
+    read_addr(cfg)(addr)
   }
 
   def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
@@ -118,9 +110,9 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
     if (G == 0) {
       addr
     } else if (G >= 2) {
-      Mux(cfg.napot, mask_low_bits(addr, G-1), mask_low_bits(addr, G))
+      Mux(cfg.na4_napot, set_low_bits(addr, G-1), clear_low_bits(addr, G))
     } else { // G is 1
-      Mux(cfg.off_tor, mask_low_bits(addr, G), addr)
+      Mux(cfg.off_tor, clear_low_bits(addr, G), addr)
     }
   }
   /** addr for inside addr, drop OffBits with.
@@ -134,12 +126,17 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
     Mux(!cfg.addr_locked, paddr, addr)
   }
 
+  def set_low_bits(data: UInt, num: Int): UInt = {
+    require(num >= 0)
+    data | ((1 << num)-1).U
+  }
+
   /** mask the data's low num bits (lsb) */
-  def mask_low_bits(data: UInt, num: Int): UInt = {
+  def clear_low_bits(data: UInt, num: Int): UInt = {
     require(num >= 0)
     // use Cat instead of & with mask to avoid "Signal Width" problem
     if (num == 0) { data }
-    else { Cat(data(data.getWidth-1, num), 0.U((num-1).U)) }
+    else { Cat(data(data.getWidth-1, num), 0.U(num.W)) }
   }
 
   def gen(cfg: PMPConfig, addr: UInt) = {
