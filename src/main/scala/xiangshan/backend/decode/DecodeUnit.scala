@@ -44,7 +44,7 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  |  isRVF
     //   |            |            |            |           |           |  |  |  |  |  |  |  isORI
     //   |            |            |            |           |           |  |  |  |  |  |  |  |  selImm
-    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, Y,SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
     val table: Array[(BitPat, List[BitPat])]
 }
@@ -503,7 +503,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
   cs.singleStep := false.B
   cs.replayInst := false.B
-  cs.isORI := false.B
   cs.isSoftPrefetchRead := false.B
   cs.isSoftPrefetchWrite := false.B
 
@@ -517,9 +516,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.isMove := isMove
 
   // read src1~3 location
-  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))//(15, 19)
-  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)//(20, 24)
-  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)//(27, 31)
+  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)
+  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)
   // read dest location
   cs.ldest := Mux((cs.fpWen || cs.rfWen) && !(isMove && ctrl_flow.instr(RS1_MSB,RS1_LSB) === ctrl_flow.instr(RD_MSB,RD_LSB)), ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
 
@@ -549,6 +548,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
         cs.isSoftPrefetchRead := false.B
         cs.isSoftPrefetchWrite := true.B
       }
+      cs.selImm := SelImm.IMM_S
       cs.fuType := FuType.ldu
       cs.fuOpType := LSUOpType.ld
     }
@@ -586,10 +586,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
     io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
     io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d imm=%x\n",
+  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d isORI=%x imm=%x\n",
     io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
     io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
-    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.imm)
+    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.isORI, io.deq.cf_ctrl.ctrl.imm)
   XSDebug("out: excepVec=%b intrVec=%b\n",
     io.deq.cf_ctrl.cf.exceptionVec.asUInt, io.deq.cf_ctrl.cf.intrVec.asUInt)
 }

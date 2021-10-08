@@ -154,15 +154,15 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
-  val isORI = Bool()
-  val isSoftPrefetchRead = Bool()
-  val isSoftPrefetchWrite = Bool()
+  val isORI = Bool() //for softprefetch
+  val isSoftPrefetchRead = Bool() //for softprefetch
+  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, isORI, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)

@@ -202,7 +202,7 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
-  val miss_enter = Bool() //add by tjz
+  val miss_enter = Bool()
   // cache miss, and enter the missqueue successfully. just for softprefetch
   val replay = Bool()
   val id     = UInt(reqIdWidth.W)

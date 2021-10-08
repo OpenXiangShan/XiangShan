@@ -507,7 +507,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val source = io.req.bits.source
     val cmd = io.req.bits.cmd
     when (source === LOAD_SOURCE.U || source === SOFT_PREFETCH.U) {
-      assert (cmd === M_XRD)
+      assert (cmd === M_XRD || cmd === M_PFR || cmd === M_PFW)
     }
     when (source === STORE_SOURCE.U) {
       assert (cmd === M_XWR)
