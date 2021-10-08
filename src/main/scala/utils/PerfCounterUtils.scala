@@ -18,7 +18,9 @@ package utils
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
 import xiangshan.DebugOptionsKey
+import xiangshan._
 
 object XSPerfAccumulate {
   def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
@@ -140,3 +142,44 @@ object XSPerfPrint {
     XSLog(XSLogLevel.PERF)(true, true.B, pable)
   }
 }
+
+class PerfBundle(implicit p: Parameters) extends XSBundle {
+  val incr_valid =  Bool()
+  val incr_step  = UInt(6.W)
+}
+
+class PerfEventsBundle (val numPCnt: Int) (implicit p: Parameters)extends XSBundle{
+
+  val PerfEvents = Vec(numPCnt, (new PerfBundle))
+
+}
+
+class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
+  val io = IO(new Bundle {
+    val HPMEvent         = Input(UInt(55.W))
+    val Events_sets      = Input(new PerfEventsBundle(numPCnt))
+    val Event_selected   = Output(new PerfBundle)
+  })
+  
+  val events_incr_0 = io.Events_sets.PerfEvents(io.HPMEvent(9,0))
+  val events_incr_1 = io.Events_sets.PerfEvents(io.HPMEvent(19,10))
+  val events_incr_2 = io.Events_sets.PerfEvents(io.HPMEvent(29,20))
+  val events_incr_3 = io.Events_sets.PerfEvents(io.HPMEvent(39,30))
+
+    val event_op_0 = io.HPMEvent(44,40)
+    val event_op_1 = io.HPMEvent(49,45)
+    val event_op_2 = io.HPMEvent(54,50)
+
+    val event_incr_0 = Mux(event_op_0(0),(events_incr_3.incr_valid && events_incr_2.incr_valid),Mux(event_op_0(1),(events_incr_3.incr_valid ^ events_incr_2.incr_valid), (events_incr_3.incr_valid || events_incr_2.incr_valid))) 
+    val event_incr_1 = Mux(event_op_1(0),(events_incr_1.incr_valid && events_incr_0.incr_valid),Mux(event_op_1(1),(events_incr_1.incr_valid ^ events_incr_0.incr_valid), (events_incr_1.incr_valid || events_incr_0.incr_valid))) 
+
+
+    val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
+                                       Mux(event_op_0(2),(events_incr_3.incr_step + events_incr_2.incr_step),  (events_incr_3.incr_step | events_incr_2.incr_step))))
+    val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
+                                       Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  (events_incr_1.incr_step | events_incr_0.incr_step))))
+
+    io.Event_selected.incr_valid := Mux(event_op_1(0),(event_incr_0 && event_incr_1),Mux(event_op_1(1),(event_incr_0 ^ event_incr_1),(event_incr_0 || event_incr_1)))
+    io.Event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),Mux(event_op_1(1),(event_step_0 ^ event_step_1),Mux(event_op_1(2),(event_step_0 + event_step_1),(event_step_0 | event_step_1))))
+}
+

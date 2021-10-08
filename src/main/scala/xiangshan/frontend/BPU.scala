@@ -179,6 +179,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
 
   val update = Flipped(Valid(new BranchPredictionUpdate))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
+  val perfEvents = Output(new PerfEventsBundle(numPCntFrontend))
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBPUConst with BPUUtils {
@@ -201,6 +202,10 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule with HasBP
   val s1_pc       = RegEnable(s0_pc, resetVector.U, io.s0_fire)
   val s2_pc       = RegEnable(s1_pc, io.s1_fire)
   val s3_pc       = RegEnable(s2_pc, io.s2_fire)
+  for(i <- 0 until numPCntFrontend ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
 }
 
 class FakePredictor(implicit p: Parameters) extends BasePredictor {
@@ -216,6 +221,7 @@ class BpuToFtqIO(implicit p: Parameters) extends XSBundle {
 class PredictorIO(implicit p: Parameters) extends XSBundle {
   val bpu_to_ftq = new BpuToFtqIO()
   val ftq_to_bpu = Flipped(new FtqToBpuIO())
+  val perfEvents = Output(new PerfEventsBundle(numPCntFrontend))
 }
 
 class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
@@ -278,6 +284,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
     s0_ghist := 0.U.asTypeOf(new GlobalHistory)
     s0_phist := 0.U
     s0_pc := resetVector.U
+  }
+  for(i <- 0 until numPCntFrontend ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
 
   // when(toFtq_fire) {
@@ -517,5 +527,21 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   XSPerfAccumulate("s2_redirect", s2_redirect)
   XSPerfAccumulate("s3_redirect", s3_redirect)
+  io.perfEvents.PerfEvents(48).incr_valid :=  s2_redirect
+  io.perfEvents.PerfEvents(48).incr_step  :=  s2_redirect
+  io.perfEvents.PerfEvents(49).incr_valid :=  predictors.io.perfEvents.PerfEvents(49).incr_valid
+  io.perfEvents.PerfEvents(49).incr_step  :=  predictors.io.perfEvents.PerfEvents(49).incr_step 
+  io.perfEvents.PerfEvents(50).incr_valid :=  predictors.io.perfEvents.PerfEvents(50).incr_valid
+  io.perfEvents.PerfEvents(50).incr_step  :=  predictors.io.perfEvents.PerfEvents(50).incr_step 
+  io.perfEvents.PerfEvents(51).incr_valid :=  predictors.io.perfEvents.PerfEvents(51).incr_valid
+  io.perfEvents.PerfEvents(51).incr_step  :=  predictors.io.perfEvents.PerfEvents(51).incr_step 
+  io.perfEvents.PerfEvents(52).incr_valid :=  predictors.io.perfEvents.PerfEvents(52).incr_valid
+  io.perfEvents.PerfEvents(52).incr_step  :=  predictors.io.perfEvents.PerfEvents(52).incr_step 
+  io.perfEvents.PerfEvents(53).incr_valid :=  predictors.io.perfEvents.PerfEvents(53).incr_valid
+  io.perfEvents.PerfEvents(53).incr_step  :=  predictors.io.perfEvents.PerfEvents(53).incr_step 
+  io.perfEvents.PerfEvents(54).incr_valid :=  predictors.io.perfEvents.PerfEvents(54).incr_valid
+  io.perfEvents.PerfEvents(54).incr_step  :=  predictors.io.perfEvents.PerfEvents(54).incr_step 
+  io.perfEvents.PerfEvents(55).incr_valid :=  predictors.io.perfEvents.PerfEvents(55).incr_valid
+  io.perfEvents.PerfEvents(55).incr_step  :=  predictors.io.perfEvents.PerfEvents(55).incr_step 
 
 }

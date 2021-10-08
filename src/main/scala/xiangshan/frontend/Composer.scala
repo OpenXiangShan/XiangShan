@@ -63,6 +63,20 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     update_meta = update_meta >> c.meta_size
   }
 
+  io.perfEvents.PerfEvents(49).incr_valid :=  components(2).io.perfEvents.PerfEvents(49).incr_valid
+  io.perfEvents.PerfEvents(49).incr_step  :=  components(2).io.perfEvents.PerfEvents(49).incr_step 
+  io.perfEvents.PerfEvents(50).incr_valid :=  components(2).io.perfEvents.PerfEvents(50).incr_valid
+  io.perfEvents.PerfEvents(50).incr_step  :=  components(2).io.perfEvents.PerfEvents(50).incr_step 
+  io.perfEvents.PerfEvents(51).incr_valid :=  components(2).io.perfEvents.PerfEvents(51).incr_valid
+  io.perfEvents.PerfEvents(51).incr_step  :=  components(2).io.perfEvents.PerfEvents(51).incr_step 
+  io.perfEvents.PerfEvents(52).incr_valid :=  components(1).io.perfEvents.PerfEvents(52).incr_valid
+  io.perfEvents.PerfEvents(52).incr_step  :=  components(1).io.perfEvents.PerfEvents(52).incr_step 
+  io.perfEvents.PerfEvents(53).incr_valid :=  components(1).io.perfEvents.PerfEvents(53).incr_valid
+  io.perfEvents.PerfEvents(53).incr_step  :=  components(1).io.perfEvents.PerfEvents(53).incr_step 
+  io.perfEvents.PerfEvents(54).incr_valid :=  components(3).io.perfEvents.PerfEvents(54).incr_valid
+  io.perfEvents.PerfEvents(54).incr_step  :=  components(3).io.perfEvents.PerfEvents(54).incr_step 
+  io.perfEvents.PerfEvents(55).incr_valid :=  components(3).io.perfEvents.PerfEvents(55).incr_valid
+  io.perfEvents.PerfEvents(55).incr_step  :=  components(3).io.perfEvents.PerfEvents(55).incr_step 
   def extractMeta(meta: UInt, idx: Int): UInt = {
     var update_meta = meta
     var metas: Seq[UInt] = Nil

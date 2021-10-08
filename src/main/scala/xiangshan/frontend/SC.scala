@@ -383,4 +383,9 @@ trait HasSC extends HasSCParameter { this: Tage =>
   XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
   XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
   XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+
+  io.perfEvents.PerfEvents(50).incr_valid :=  (PopCount(update_on_mispred)).orR
+  io.perfEvents.PerfEvents(50).incr_step  :=  PopCount(update_on_mispred)
+  io.perfEvents.PerfEvents(51).incr_valid :=  (PopCount(update_on_unconf))
+  io.perfEvents.PerfEvents(51).incr_step  :=  PopCount(update_on_unconf)
 }

@@ -19,7 +19,7 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, XSError}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, PerfBundle, PerfEventsBundle, XSError}
 import xiangshan._
 import scala.tools.nsc.doc.model.Val
 import utils.{ParallelPriorityMux, ParallelPriorityEncoder}
@@ -412,6 +412,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val toBpu = new FtqToBpuIO
     val toIfu = new FtqToIfuIO
     val toBackend = new FtqToCtrlIO
+    val perfEvents = Output(new PerfEventsBundle(numPCntFrontend))
 
     val bpuInfo = new Bundle {
       val bpRight = Output(UInt(XLEN.W))
@@ -1157,5 +1158,54 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
+  for(i <- 0 until numPCntFrontend ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(26).incr_valid :=  enq.valid && ~enq.ready
+  io.perfEvents.PerfEvents(26).incr_step  :=  enq.valid && ~enq.ready
+  io.perfEvents.PerfEvents(27).incr_valid :=  perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level
+  io.perfEvents.PerfEvents(27).incr_step  :=  perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level
+  io.perfEvents.PerfEvents(28).incr_valid :=  perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level)
+  io.perfEvents.PerfEvents(28).incr_step  :=  perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level)
+  io.perfEvents.PerfEvents(29).incr_valid :=  fromIfuRedirect.valid
+  io.perfEvents.PerfEvents(29).incr_step  :=  fromIfuRedirect.valid
+  io.perfEvents.PerfEvents(30).incr_valid :=  io.toIfu.req.ready && !io.toIfu.req.valid
+  io.perfEvents.PerfEvents(30).incr_step  :=  io.toIfu.req.ready && !io.toIfu.req.valid
+  io.perfEvents.PerfEvents(31).incr_valid :=  !enq.valid && enq.ready && allowBpuIn
+  io.perfEvents.PerfEvents(31).incr_step  :=  !enq.valid && enq.ready && allowBpuIn
+  io.perfEvents.PerfEvents(32).incr_valid :=  mbpInstrs.orR 
+  io.perfEvents.PerfEvents(32).incr_step  :=  PopCount(mbpInstrs)
+  io.perfEvents.PerfEvents(33).incr_valid :=  mbpBRights.orR | mbpBWrongs.orR
+  io.perfEvents.PerfEvents(33).incr_step  :=  PopCount(mbpBRights | mbpBWrongs)
+  io.perfEvents.PerfEvents(34).incr_valid :=  mbpRights.orR 
+  io.perfEvents.PerfEvents(34).incr_step  :=  PopCount(mbpRights)
+  io.perfEvents.PerfEvents(35).incr_valid :=  mbpWrongs.orR 
+  io.perfEvents.PerfEvents(35).incr_step  :=  PopCount(mbpWrongs)
+  io.perfEvents.PerfEvents(36).incr_valid :=  mbpBRights.orR
+  io.perfEvents.PerfEvents(36).incr_step  :=  PopCount(mbpBRights)
+  io.perfEvents.PerfEvents(37).incr_valid :=  mbpBWrongs.orR
+  io.perfEvents.PerfEvents(37).incr_step  :=  PopCount(mbpBWrongs)
+  io.perfEvents.PerfEvents(38).incr_valid :=  mbpJRights.orR
+  io.perfEvents.PerfEvents(38).incr_step  :=  PopCount(mbpJRights)
+  io.perfEvents.PerfEvents(39).incr_valid :=  mbpJWrongs.orR
+  io.perfEvents.PerfEvents(39).incr_step  :=  PopCount(mbpJWrongs)
+  io.perfEvents.PerfEvents(40).incr_valid :=  mbpIRights.orR
+  io.perfEvents.PerfEvents(40).incr_step  :=  PopCount(mbpIRights)
+  io.perfEvents.PerfEvents(41).incr_valid :=  mbpIWrongs.orR
+  io.perfEvents.PerfEvents(41).incr_step  :=  PopCount(mbpIWrongs)
+  io.perfEvents.PerfEvents(42).incr_valid :=  mbpCRights.orR
+  io.perfEvents.PerfEvents(42).incr_step  :=  PopCount(mbpCRights)
+  io.perfEvents.PerfEvents(43).incr_valid :=  mbpCWrongs.orR
+  io.perfEvents.PerfEvents(43).incr_step  :=  PopCount(mbpCWrongs)
+  io.perfEvents.PerfEvents(44).incr_valid :=  mbpRRights.orR
+  io.perfEvents.PerfEvents(44).incr_step  :=  PopCount(mbpRRights)
+  io.perfEvents.PerfEvents(45).incr_valid :=  mbpRWrongs.orR
+  io.perfEvents.PerfEvents(45).incr_step  :=  PopCount(mbpRWrongs)
+  io.perfEvents.PerfEvents(46).incr_valid :=  ftb_false_hit.orR
+  io.perfEvents.PerfEvents(46).incr_step  :=  PopCount(ftb_false_hit)
+  io.perfEvents.PerfEvents(47).incr_valid :=  ftb_hit.orR
+  io.perfEvents.PerfEvents(47).incr_step  :=  PopCount(ftb_hit)
+
 
 }

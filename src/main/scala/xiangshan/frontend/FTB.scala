@@ -354,4 +354,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_update_req", io.update.valid)
   XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
+  io.perfEvents.PerfEvents(54).incr_valid :=  u_valid  &&  update.preds.hit
+  io.perfEvents.PerfEvents(54).incr_step  :=  u_valid  &&  update.preds.hit
+  io.perfEvents.PerfEvents(55).incr_valid :=  u_valid  && !update.preds.hit
+  io.perfEvents.PerfEvents(55).incr_step  :=  u_valid  && !update.preds.hit
 }
