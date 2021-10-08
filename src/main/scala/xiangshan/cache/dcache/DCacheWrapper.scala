@@ -395,6 +395,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       ld.io.tag_resp := tagArray.io.resp(i)
   }
 
+  val tag_write_arb = Module(new Arbiter(new TagWriteReq, 2))
+  tag_write_arb.io.in(0) <> mainPipe.io.tag_write
+  tag_write_arb.io.in(1) <> refillPipe.io.tag_write
+  tagArray.io.write <> tag_write_arb.io.out
+
   //----------------------------------------
   // data array
 
@@ -441,6 +446,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
+  atomicsReplayUnit.io.pipe_resp := mainPipe.io.atomic_resp
 
   //----------------------------------------
   // miss queue
@@ -466,10 +472,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
 
+  missQueue.io.main_pipe_resp := mainPipe.io.atomic_resp
+
   //----------------------------------------
   // probe
   // probeQueue.io.mem_probe <> bus.b
   block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
+  probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
 
   //----------------------------------------
   // mainPipe
@@ -525,6 +534,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   io.lsu.store.replay_resp := mainPipe.io.store_replay_resp
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
+
+  val mainPipeAtomicReqArb = Module(new Arbiter(new NewMainPipeReq))
+  mainPipeAtomicReqArb.io.in(0) <> missQueue.io.main_pipe_req
+  mainPipeAtomicReqArb.io.in(1) <> atomicsReplayUnit.io.pipe_req
+  mainPipe.io.atomic_req <> mainPipeAtomicReqArb.io.out
+
+  mainPipe.io.invalid_resv_set := wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits
 
   //----------------------------------------
   // replace pipe

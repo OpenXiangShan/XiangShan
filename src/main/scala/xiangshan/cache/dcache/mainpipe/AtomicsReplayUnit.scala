@@ -21,11 +21,22 @@ import chisel3._
 import chisel3.util._
 import utils.XSDebug
 
+class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
+  val data   = UInt(DataBits.W)
+  val miss   = Bool()
+  val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+  val replay = Bool()
+
+  val ack_miss_queue = Bool()
+
+  val id     = UInt(reqIdWidth.W)
+}
+
 class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
 {
   val io = IO(new Bundle {
     val lsu  = Flipped(new DCacheWordIOWithVaddr)
-    val pipe_req  = Decoupled(new MainPipeReq)
+    val pipe_req  = Decoupled(new NewMainPipeReq)
     val pipe_resp = Flipped(ValidIO(new MainPipeResp))
 
     val block_addr  = Output(Valid(UInt()))

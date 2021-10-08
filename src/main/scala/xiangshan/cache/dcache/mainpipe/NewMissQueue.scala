@@ -35,6 +35,7 @@ class NewMissReq(implicit p: Parameters) extends DCacheBundle {
 
   def isLoad = source === LOAD_SOURCE.U
   def isStore = source === STORE_SOURCE.U
+  def isAMO = source === AMO_SOURCE.U
   def hit = req_coh.isValid()
 }
 
@@ -65,6 +66,10 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
     val replace_pipe_resp = Input(Bool())
 
+    // main pipe: amo miss
+    val main_pipe_req = DecoupledIO(new NewMainPipeReq)
+    val main_pipe_resp = Input(Bool())
+
     val block_addr = ValidIO(UInt(PAddrBits.W))
   })
 
@@ -76,12 +81,14 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val s_grantack = RegInit(true.B)
   val s_replace_req = RegInit(true.B)
   val s_refill = RegInit(true.B)
+  val s_mainpipe_req = RegInit(true.B)
 
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
   val w_replace_resp = RegInit(true.B)
+  val w_mainpipe_resp = RegInit(true.B)
 
-  val release_entry = s_grantack && s_refill
+  val release_entry = s_grantack && s_refill && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantlast
@@ -103,14 +110,22 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     s_acquire := false.B
     s_grantack := false.B
-    s_refill := false.B
 
     w_grantfirst := false.B
     w_grantlast := false.B
 
-    when (!io.req.bits.hit && io.req.bits.replace_coh.isValid) {
+    when (!io.req.bits.isAMO) {
+      s_refill := false.B
+    }
+
+    when (!io.req.bits.hit && io.req.bits.replace_coh.isValid && !io.req.bits.isAMO) {
       s_replace_req := false.B
       w_replace_resp := false.B
+    }
+
+    when (io.req.bits.isAMO) {
+      s_mainpipe_req := false.B
+      w_mainpipe_resp := false.B
     }
 
     should_refill_data_reg := io.req.bits.isLoad
@@ -121,6 +136,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   when (io.req.valid && io.secondary_ready) {
     assert(io.req.bits.req_coh.state <= req.req_coh.state)
+    assert(!(io.req.bits.isAMO || req.isAMO))
     // use the most uptodate meta
     req.req_coh := io.req.bits.req_coh
 
@@ -198,6 +214,14 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     s_refill := true.B
   }
 
+  when (io.main_pipe_req.fire()) {
+    s_mainpipe_req := true.B
+  }
+
+  when (io.main_pipe_resp) {
+    w_mainpipe_resp := true.B
+  }
+
   def before_read_sent_can_merge(new_req: NewMissReq): Bool = {
     acquire_not_sent && req.isLoad && (new_req.isLoad || new_req.isStore)
   }
@@ -247,7 +271,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill_to_ldq.bits.data_raw := refill_data_raw.asUInt
 
   io.mem_acquire.valid := !s_acquire
-  val grow_param = req.coh.onAccess(req.cmd)._2
+  val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
     fromSource = io.id,
     toAddress = req.addr,
@@ -311,6 +335,21 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
   refill.alias := req.vaddr(13, 12) // TODO
 
+  io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
+  io.main_pipe_req.bits.miss := true.B
+  io.main_pipe_req.bits.miss_id := io.id
+  io.main_pipe_req.bits.miss_param := grant_param
+  io.main_pipe_req.bits.miss_dirty := isDirty
+  io.main_pipe_req.bits.probe := false.B
+  io.main_pipe_req.bits.source := req.source
+  io.main_pipe_req.bits.cmd := req.cmd
+  io.main_pipe_req.bits.vaddr := req.vaddr
+  io.main_pipe_req.bits.addr := req.addr
+  io.main_pipe_req.bits.word_idx := req.word_idx
+  io.main_pipe_req.bits.amo_data := req.amo_data
+  io.main_pipe_req.bits.amo_mask := req.amo_mask
+  io.main_pipe_req.bits.id := req.id
+
   io.block_addr.valid := req_valid && w_grantlast && !s_refill
   io.block_addr.bits := req.addr
 }
@@ -328,6 +367,9 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
     val replace_pipe_resp = Flipped(Vec(numReplaceRespPorts, ValidIO(new ReplacePipeResp)))
+
+    val main_pipe_req = DecoupledIO(new NewMainPipeReq)
+    val main_pipe_resp = Flipped(ValidIO(new AtomicsResp))
 
     // block probe
     val probe_addr = Input(UInt(PAddrBits.W))
@@ -390,6 +432,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       }
 
       e.io.replace_pipe_resp := Cat(io.replace_pipe_resp.map { case r => r.valid && r.bits.miss_id === i.U }).orR
+      e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
   }
 
   io.req.ready := accept
@@ -401,6 +444,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   arbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, true, Some("refill_pipe_req"))
   arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, true, Some("replace_pipe_req"))
+  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, true, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
