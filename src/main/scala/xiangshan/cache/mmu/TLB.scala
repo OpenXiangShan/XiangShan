@@ -115,6 +115,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
     val pf = perm.pf && hit
+    val af = perm.af && hit
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -151,9 +152,9 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
+    resp(i).bits.excp.af.ld := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.st := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.instr := (af || Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
