@@ -70,19 +70,22 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --ci microbench 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/microbench.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/microbench.vcd
       - name: Simple Test - CoreMark
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci coremark 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/coremark.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/coremark.vcd
       - name: System Test - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --ci linux-hello 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/linux.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/linux-hello.vcd
       - name: Floating-point Test - povray
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
-          mv $GITHUB_WORKSPACE/build/*.vcd $WAVE_HOME
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/povray.vcd          
   emu-performance:
     runs-on: self-hosted
     continue-on-error: false
@@ -110,37 +113,46 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/mcf.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/mcf.vcd
       - name: SPEC06 Test - xalancbmk
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/xalancbmk.vcd
       - name: SPEC06 Test - gcc
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gcc.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/gcc.vcd
       - name: SPEC06 Test - namd
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/namd.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/namd.vcd
       - name: SPEC06 Test - milc
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/milc.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/milc.vcd
       - name: SPEC06 Test - lbm
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/lbm.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/lbm.vcd        
       - name: SPEC06 Test - gromacs
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/gromacs.vcd        
       - name: SPEC06 Test - wrf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci wrf 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/wrf.log
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/wrf.vcd
       - name: SPEC06 Test - astar
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
-          mv $GITHUB_WORKSPACE/build/*.vcd $WAVE_HOME
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/astar.vcd
+
 
