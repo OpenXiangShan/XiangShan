@@ -22,11 +22,10 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, ImmUnion}
-import xiangshan.backend.rename.{BusyTable, Rename}
-import xiangshan.backend.dispatch.Dispatch
-import xiangshan.backend.exu._
-import xiangshan.frontend.{FtqRead, FtqToCtrlIO, FtqPtr}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
+import xiangshan.backend.rename.Rename
+import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
+import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
 import difftest._
 
@@ -178,7 +177,8 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToCtrlIO)
-    val enqIQ = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
+    val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
+    val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -207,8 +207,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     // redirect out
     val redirect = ValidIO(new Redirect)
     val flush = Output(Bool())
-    val readIntRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
@@ -216,8 +214,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
-  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth, "fp"))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth, "ls"))
   val redirectGen = Module(new RedirectGenerator)
 
   val robWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
@@ -284,17 +283,17 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   decode.io.memPredUpdate(0) <> RegNext(redirectGen.io.memPredUpdate)
   decode.io.memPredUpdate(1) := DontCare
   decode.io.memPredUpdate(1).valid := false.B
-  // decode.io.memPredUpdate <> io.toLsBlock.memPredUpdate
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
 
-  val jumpInst = dispatch.io.enqIQCtrl(0).bits
+  val jumpInst = io.dispatch(0).bits
   val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
   io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
   val jumpTargetRead = io.frontend.fromFtq.target_read
   io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 
-  // pipeline between decode and dispatch
+  // pipeline between decode and rename
+  val redirectValid = stage2Redirect.valid || flushReg
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
       flushReg || io.frontend.toFtq.stage3Redirect.valid)
@@ -303,40 +302,34 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   rename.io.redirect <> stage2Redirect
   rename.io.flush := flushReg
   rename.io.robCommits <> rob.io.commits
-  rename.io.out <> dispatch.io.fromRename
-  rename.io.renameBypass <> dispatch.io.renameBypass
-  rename.io.dispatchInfo <> dispatch.io.preDpInfo
 
+  // pipeline between rename and dispatch
+  for (i <- 0 until RenameWidth) {
+    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), redirectValid)
+  }
+  dispatch.io.renameBypass := RegEnable(rename.io.renameBypass, rename.io.out(0).fire)
+  dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
+
+  dispatch.io.flush <> flushReg
   dispatch.io.redirect <> stage2Redirect
-  dispatch.io.flush := flushReg
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.enqLsq <> io.enqLsq
-  dispatch.io.singleStep := false.B
-  dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
-    intBusyTable.io.allocPregs(i).valid := preg.isInt
-    fpBusyTable.io.allocPregs(i).valid := preg.isFp
-    intBusyTable.io.allocPregs(i).bits := preg.preg
-    fpBusyTable.io.allocPregs(i).bits := preg.preg
-  }
-  dispatch.io.enqIQCtrl := DontCare
-  io.enqIQ <> dispatch.io.enqIQCtrl
+  dispatch.io.toIntDq <> intDq.io.enq
+  dispatch.io.toFpDq <> fpDq.io.enq
+  dispatch.io.toLsDq <> lsDq.io.enq
+  dispatch.io.allocPregs <> io.allocPregs
   dispatch.io.csrCtrl <> io.csrCtrl
   dispatch.io.storeIssue <> io.stIn
-  dispatch.io.readIntRf <> io.readIntRf
-  dispatch.io.readFpRf <> io.readFpRf
+  dispatch.io.singleStep := false.B
 
-  fpBusyTable.io.flush := flushReg
-  intBusyTable.io.flush := flushReg
-  for((wb, setPhyRegRdy) <- io.writeback.take(NRIntWritePorts).zip(intBusyTable.io.wbPregs)){
-    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
-    setPhyRegRdy.bits := wb.bits.uop.pdest
-  }
-  for((wb, setPhyRegRdy) <- io.writeback.drop(NRIntWritePorts).zip(fpBusyTable.io.wbPregs)){
-    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.fpWen
-    setPhyRegRdy.bits := wb.bits.uop.pdest
-  }
-  intBusyTable.io.read <> dispatch.io.readIntState
-  fpBusyTable.io.read <> dispatch.io.readFpState
+  intDq.io.redirect <> stage2Redirect
+  intDq.io.flush <> flushReg
+  fpDq.io.redirect <> stage2Redirect
+  fpDq.io.flush <> flushReg
+  lsDq.io.redirect <> stage2Redirect
+  lsDq.io.flush <> flushReg
+
+  io.dispatch <> intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
 
   rob.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
@@ -347,25 +340,22 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     rob_wb.bits.uop.debugInfo.writebackTime := timer
   }
 
-  // TODO: is 'backendRedirect' necesscary?
   io.redirect <> stage2Redirect
   io.flush <> flushReg
   io.debug_int_rat <> rename.io.debug_int_rat
   io.debug_fp_rat <> rename.io.debug_fp_rat
-
-//  dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
-//  dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr
   io.robio.toCSR.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.uop.cf.pc := flushPC
+
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
-  io.perfInfo.ctrlInfo.intdqFull := RegNext(dispatch.io.ctrlInfo.intdqFull)
-  io.perfInfo.ctrlInfo.fpdqFull := RegNext(dispatch.io.ctrlInfo.fpdqFull)
-  io.perfInfo.ctrlInfo.lsdqFull := RegNext(dispatch.io.ctrlInfo.lsdqFull)
+  io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
+  io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
+  io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
 }

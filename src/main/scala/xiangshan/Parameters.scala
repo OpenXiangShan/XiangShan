@@ -108,8 +108,8 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  LoadQueueSize: Int = 64,
-  StoreQueueSize: Int = 48,
+  LoadQueueSize: Int = 80,
+  StoreQueueSize: Int = 64,
   RobSize: Int = 256,
   EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
@@ -201,6 +201,7 @@ case class XSCoreParameters
     sets = 1024, // default 512KB L2
     prefetch = Some(huancun.prefetch.BOPParameters())
   )),
+  L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
   softPTW: Boolean = false // dpi-c debug only
 ){
