@@ -220,9 +220,7 @@ class XiangShan(object):
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
             "ext_intr/amtest-riscv64-xs.bin",
             "cache-alias/aliastest-riscv64-xs.bin",
-            "pmp/nemu-instr/pmp.riscv.bin",
-            "pmp/nemu-ldst/pmp.riscv.bin",
-            "pmp/nemu-ptw/pmp.riscv.bin"
+            "pmp/pmp.riscv.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
