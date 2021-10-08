@@ -51,7 +51,9 @@ jobs:
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/bigdata/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /bigdata/xs-perf/${HEAD_SHA}
+          mkdir -p /bigdata/xs-wave/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build --disable-log --threads 8
@@ -80,6 +82,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
+          mv $GITHUB_WORKSPACE/build/*.vcd $WAVE_HOME
   emu-performance:
     runs-on: self-hosted
     continue-on-error: false
@@ -95,7 +98,9 @@ jobs:
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/bigdata/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/bigdata/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /bigdata/xs-perf/${HEAD_SHA}
+          mkdir -p /bigdata/xs-wave/${HEAD_SHA}
       - name: Build EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -137,3 +142,5 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
+          mv $GITHUB_WORKSPACE/build/*.vcd $WAVE_HOME
+
