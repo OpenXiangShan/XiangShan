@@ -57,6 +57,7 @@ class XSArgs(object):
         self.max_instr = args.max_instr
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
+        self.fork = not args.disable_fork
 
     def get_env_variables(self):
         all_env = {
@@ -166,7 +167,8 @@ class XiangShan(object):
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
         numa_args = f"numactl -m 1 -C 64-{64+self.args.threads-1}" if self.args.numa else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args}')
+        fork_args = "--enable-fork" if self.args.fork else ""
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args}')
         return return_code
 
     def run(self, args):
@@ -283,6 +285,7 @@ if __name__ == "__main__":
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
+    parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
 
     args = parser.parse_args()
 
