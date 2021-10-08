@@ -1,34 +1,25 @@
 package top
 
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{AdapterNode, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import chisel3._
 import chisel3.util._
 import utils.{XSPerfAccumulate, XSPerfPrint}
 
-class BusPerfMonitor(enable: Boolean)(implicit p: Parameters) extends LazyModule {
-
+class BusPerfMonitor()(implicit p: Parameters) extends LazyModule {
   val node = TLAdapterNode()
-
-  lazy val module = if(enable) {
-    new BusPerfMonitorImp(this)
-  } else new BaseBusPerfMonitorImp(this)
-
+  lazy val module = new BusPerfMonitorImp(this)
 }
 
-class BaseBusPerfMonitorImp(outer: BusPerfMonitor)
+class BusPerfMonitorImp(outer: BusPerfMonitor)
   extends LazyModuleImp(outer)
 {
+
   outer.node.in.zip(outer.node.out).foreach{
     case ((in, edgeIn), (out, edgeOut)) =>
       out <> in
   }
-}
-
-class BusPerfMonitorImp(outer: BusPerfMonitor)
-  extends BaseBusPerfMonitorImp(outer)
-{
 
   def PERF_CHN[T <: TLChannel](clientName: String, chn: DecoupledIO[T]) = {
 
@@ -89,8 +80,12 @@ class BusPerfMonitorImp(outer: BusPerfMonitor)
 }
 
 object BusPerfMonitor {
-  def apply(enable: Boolean = false)(implicit p: Parameters): TLAdapterNode = {
-    val busPMU = LazyModule(new BusPerfMonitor(enable))
-    busPMU.node
+  def apply(enable: Boolean = false)(implicit p: Parameters) = {
+    if(enable){
+      val busPMU = LazyModule(new BusPerfMonitor())
+      busPMU.node
+    } else {
+      TLTempNode()
+    }
   }
 }

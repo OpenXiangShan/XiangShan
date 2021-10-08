@@ -26,8 +26,9 @@ import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.{HasSoCParameter, L1CacheErrorInfo, SoCParamsKey}
+import system.HasSoCParameter
 import utils._
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
@@ -62,6 +63,10 @@ case class EnviromentParameters
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbMappingHelper
 {
+  // interrupt sinks
+  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val plic_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
@@ -166,9 +171,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasExeBlockHelper {
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
-    val externalInterrupt = new ExternalInterruptIO
     val l2_pf_enable = Output(Bool())
-    val l1plus_error, icache_error, dcache_error = Output(new L1CacheErrorInfo)
+    val beu_errors = Output(new XSL1BusErrors())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -212,9 +216,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val rfWriteback = VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  io.l1plus_error <> DontCare
-  io.icache_error <> frontend.io.error
-  io.dcache_error <> memBlock.io.error
+  io.beu_errors.icache <> frontend.io.error
+  io.beu_errors.dcache <> memBlock.io.error
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
@@ -283,7 +286,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
-  csrioIn.externalInterrupt <> io.externalInterrupt
+
+  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
   fenceio.sfence <> memBlock.io.sfence
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer

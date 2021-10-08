@@ -24,7 +24,6 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
 import xiangshan.backend.fu.HasExceptionNO
-import system.L1CacheErrorInfo
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
