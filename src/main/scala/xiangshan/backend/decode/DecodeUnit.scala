@@ -335,19 +335,45 @@ object FDecode extends DecodeConstants{
 object BDecode extends DecodeConstants{
   val table: Array[(BitPat, List[BitPat])] = Array(
     // Basic bit manipulation
-    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    XPERM_B -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.xpermb, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    XPERM_N -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.xpermn, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.clz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZ     -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.ctz, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOP    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.cpop, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    XPERM_B -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.xpermb, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    XPERM_N -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.xpermn, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
-    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bmu, BMUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.clzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.ctzw, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.bku, BKUOpType.cpopw, Y, N, N, N, N, N, N, SelImm.IMM_X),
 
-    CLMUL   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmul, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CLMULH  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulh, Y, N, N, N, N, N, N, SelImm.IMM_X),
-    CLMULR  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bmu, BMUOpType.clmulr, Y, N, N, N, N, N, N, SelImm.IMM_X)
+    CLMUL   -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.clmul, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLMULH  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.clmulh, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    CLMULR  -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.clmulr, Y, N, N, N, N, N, N, SelImm.IMM_X),
+
+    AES64ES     -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.aes64es, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    AES64ESM    -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.aes64esm, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    AES64DS     -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.aes64ds, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    AES64DSM    -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.aes64dsm, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    AES64IM     -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.aes64im, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    AES64KS1I   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.bku, BKUOpType.aes64ks1i, Y, N, N, N, N, N, N, SelImm.IMM_I),
+    AES64KS2    -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.aes64ks2, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA256SUM0  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha256sum0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA256SUM1  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha256sum1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA256SIG0  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha256sig0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA256SIG1  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha256sig1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA512SUM0  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha512sum0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA512SUM1  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha512sum1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA512SIG0  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha512sig0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SHA512SIG1  -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sha512sig1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM3P0       -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sm3p0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM3P1       -> List(SrcType.reg, SrcType.DC,  SrcType.DC, FuType.bku, BKUOpType.sm3p1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4KS0      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ks0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4KS1      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ks1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4KS2      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ks2, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4KS3      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ks3, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4ED0      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ed0, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4ED1      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ed1, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4ED2      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ed2, Y, N, N, N, N, N, N, SelImm.IMM_X),
+    SM4ED3      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.bku, BKUOpType.sm4ed3, Y, N, N, N, N, N, N, SelImm.IMM_X),
   )
 }
 
