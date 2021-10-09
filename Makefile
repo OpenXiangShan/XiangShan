@@ -99,14 +99,14 @@ bsp:
 
 # verilator simulation
 emu:
-	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME_SOFT) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 emu-run:
-	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME_SOFT) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation
 simv:
-	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME_SOFT) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
 
