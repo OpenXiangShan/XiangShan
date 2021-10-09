@@ -107,6 +107,7 @@ object XDecode extends DecodeConstants {
     LHU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lhu, Y, N, N, N, N, N, N, N, SelImm.IMM_I),
     LB      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lb, Y, N, N, N, N, N, N, N, SelImm.IMM_I),
     LBU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lbu, Y, N, N, N, N, N, N, N, SelImm.IMM_I),
+    
     SW      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, N, N, SelImm.IMM_S),
     SH      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sh, N, N, N, N, N, N, N, N, SelImm.IMM_S),
     SB      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sb, N, N, N, N, N, N, N, N, SelImm.IMM_S),
@@ -550,7 +551,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
       }
       cs.selImm := SelImm.IMM_S
       cs.fuType := FuType.ldu
-      cs.fuOpType := LSUOpType.ld
+      cs.fuOpType := LSUOpType.lb
     }
   }
 
