@@ -147,7 +147,7 @@ class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   ))
   val simple = resultSource(io.func(2, 0))
 
-  io.shiftRes := Mux(io.func(3), Mux(io.func(0), io.ror, io.rol), simple)
+  io.shiftRes := Mux(io.func(3), Mux(io.func(1), io.ror, io.rol), simple)
 }
 
 class WordResultSelect(implicit p: Parameters) extends XSModule {
@@ -280,11 +280,10 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sub  = subModule.io.sub
   subModule.io.src(0) := src1
   subModule.io.src(1) := src2
-  val sgtu    = sub(XLEN)
-  val sltu    = !sgtu
+  val sltu    = !sub(XLEN)
   val slt     = src1(XLEN - 1) ^ src2(XLEN - 1) ^ sltu
   val maxMin  = Mux(slt ^ func(0), src2, src1)
-  val maxMinU = Mux((sgtu && func(0)) || ~(sgtu && func(0)), src2, src1)
+  val maxMinU = Mux(sltu ^ func(0), src2, src1)
   val compareRes = Mux(func(2), Mux(func(1), maxMin, maxMinU), Mux(func(1), slt, Mux(func(0), sltu, sub)))
 
   // logic
@@ -383,12 +382,13 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
   redirectOutValid := io.out.valid && isBranch
   redirectOut := DontCare
   redirectOut.level := RedirectLevel.flushAfter
-  redirectOut.roqIdx := uop.roqIdx
+  redirectOut.robIdx := uop.robIdx
   redirectOut.ftqIdx := uop.cf.ftqPtr
   redirectOut.ftqOffset := uop.cf.ftqOffset
   redirectOut.cfiUpdate.isMisPred := dataModule.io.mispredict
   redirectOut.cfiUpdate.taken := dataModule.io.taken
   redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
+  redirectOut.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid

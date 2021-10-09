@@ -19,14 +19,16 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, HasTLDump, XSPerfAccumulate}
-import freechips.rocketchip.tilelink.{TLBundleC, TLBundleD, TLEdgeOut, TLPermissions, TLArbiter}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
+import huancun.{DirtyField, DirtyKey}
 
 class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val param  = UInt(TLPermissions.cWidth.W)
   val voluntary = Bool()
   val hasData = Bool()
+  val dirty = Bool()
   val data = UInt((cfg.blockBytes * 8).W)
 
   def dump() = {
@@ -125,6 +127,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     data = beat_data(beat)
   )._2
 
+  voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
+  when(busy) {
+    assert(!req.dirty || req.hasData)
+  }
+
   io.mem_release.valid := busy
   io.mem_release.bits  := Mux(req.voluntary,
     Mux(req.hasData, voluntaryReleaseData, voluntaryRelease),
@@ -161,7 +168,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    
+
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
   })

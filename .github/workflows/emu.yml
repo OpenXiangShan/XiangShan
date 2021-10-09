@@ -24,7 +24,10 @@ jobs:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate verilog file
         run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --dual-core
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
+      - name: check pc usages
+        run:
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_pc.py build/XSTop.v
       - name: build MinimalConfig emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -126,3 +129,11 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
+      - name: SPEC06 Test - wrf
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci wrf 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/wrf.log
+      - name: SPEC06 Test - astar
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
+          cat perf.log | sort | tee $PERF_HOME/astar.log

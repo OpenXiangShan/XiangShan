@@ -31,13 +31,12 @@ case class SoCParameters
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
   L3NBanks: Int = 4,
-  L3CacheParams: HCCacheParameters = HCCacheParameters(
+  L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l3",
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank
-  ),
-  useFakeL3Cache: Boolean = false,
+  ))
 ){
   val PAddrBits = cores.map(_.PAddrBits).reduce((x, y) => if(x > y) x else y)
   // L3 configurations
@@ -56,7 +55,6 @@ trait HasSoCParameter {
   val EnableILA = soc.EnableILA
 
   // L3 configurations
-  val useFakeL3Cache = soc.useFakeL3Cache
   val L3InnerBusWidth = soc.L3InnerBusWidth
   val L3BlockSize = soc.L3BlockSize
   val L3NBanks = soc.L3NBanks
