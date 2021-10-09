@@ -23,7 +23,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
-import xiangshan.backend.rename.Rename
+import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
@@ -212,6 +212,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   })
 
   val decode = Module(new DecodeStage)
+  val rat = Module(new RenameTableWrapper)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
@@ -285,12 +286,24 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   decode.io.memPredUpdate(1).valid := false.B
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
-
-  val jumpInst = io.dispatch(0).bits
-  val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
-  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
-  val jumpTargetRead = io.frontend.fromFtq.target_read
-  io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+  rat.io.flush := flushReg
+  rat.io.robCommits := rob.io.commits
+  for ((r, i) <- rat.io.intReadPorts.zipWithIndex) {
+    val raddr = decode.io.out(i).bits.ctrl.lsrc.take(2) :+ decode.io.out(i).bits.ctrl.ldest
+    r.map(_.addr).zip(raddr).foreach(x => x._1 := x._2)
+    rename.io.intReadPorts(i) := r.map(_.data)
+    r.foreach(_.hold := !rename.io.in(i).ready)
+  }
+  rat.io.intRenamePorts := rename.io.intRenamePorts
+  for ((r, i) <- rat.io.fpReadPorts.zipWithIndex) {
+    val raddr = decode.io.out(i).bits.ctrl.lsrc.take(3) :+ decode.io.out(i).bits.ctrl.ldest
+    r.map(_.addr).zip(raddr).foreach(x => x._1 := x._2)
+    rename.io.fpReadPorts(i) := r.map(_.data)
+    r.foreach(_.hold := !rename.io.in(i).ready)
+  }
+  rat.io.fpRenamePorts := rename.io.fpRenamePorts
+  rat.io.debug_int_rat <> io.debug_int_rat
+  rat.io.debug_fp_rat <> io.debug_fp_rat
 
   // pipeline between decode and rename
   val redirectValid = stage2Redirect.valid || flushReg
@@ -331,6 +344,12 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   io.dispatch <> intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
 
+  val jumpInst = io.dispatch(0).bits
+  val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
+  io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+  val jumpTargetRead = io.frontend.fromFtq.target_read
+  io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
+
   rob.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
   val timer = GTimer()
@@ -342,8 +361,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   io.redirect <> stage2Redirect
   io.flush <> flushReg
-  io.debug_int_rat <> rename.io.debug_int_rat
-  io.debug_fp_rat <> rename.io.debug_fp_rat
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr
