@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
 import freechips.rocketchip.tilelink._
 import xiangshan._
+
 import xiangshan.cache._
 import utils._
 
@@ -45,6 +46,12 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
   val cacheParams = icacheParameters
+  val dataCodeUnit = 8
+  val dataUnitNum  = blockBits/dataCodeUnit
+
+  def metaEntryBits = cacheParams.tagCode.width(tagBits)
+  def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
+  def dataEntryBits = dataCodeBits * dataUnitNum
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -67,8 +74,9 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 
 class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val tags  = Vec(2,Vec(nWays ,UInt(tagBits.W)))
-  val valid = Vec(2,Vec(nWays ,Bool()))
+  val tags   = Vec(2,Vec(nWays ,UInt(tagBits.W)))
+  val valid  = Vec(2,Vec(nWays ,Bool()))
+  val errors = Vec(2,Vec(nWays ,Bool()))
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
@@ -106,6 +114,7 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
 class ICacheDataRespBundle(implicit p: Parameters) extends ICacheBundle
 {
   val datas = Vec(2,Vec(nWays,UInt(blockBits.W)))
+  val errors = Vec(2, Vec(nWays ,Bool() ))
 }
 
 class ICacheMetaReadBundle(implicit p: Parameters) extends ICacheBundle
@@ -148,9 +157,11 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
 
+  val write_meta_bits = Wire(UInt(metaEntryBits.W))
+
   val tagArrays = (0 until 2) map { bank =>
     val tagArray = Module(new SRAMTemplate(
-      UInt(tagBits.W),
+      UInt(metaEntryBits.W),
       set=nSets/2,
       way=nWays,
       shouldReset = true,
@@ -163,16 +174,31 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
       tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
       tagArray.io.r.req.bits.apply(setIdx=bank_0_idx)
       tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
     }
     else {
       tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
       tagArray.io.r.req.bits.apply(setIdx=bank_1_idx)
       tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
     }
     tagArray
   }
+
+  //Parity Decode
+  val read_tags = Wire(Vec(2,Vec(nWays,UInt(tagBits.W))))
+  for((tagArray,i) <- tagArrays.zipWithIndex){
+    val read_tag_bits = tagArray.io.r.resp.asTypeOf(Vec(nWays,UInt(metaEntryBits.W)))
+    val read_tag_decoded = read_tag_bits.map{ way_bits => cacheParams.tagCode.decode(way_bits)}
+    val read_tag_wrong = read_tag_decoded.map{ way_bits_decoded => way_bits_decoded.error}
+    val read_tag_corrected = VecInit(read_tag_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
+    read_tags(i) := read_tag_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_tag_wrong(w)}
+  }
+
+  //Parity Encode
+  val write = io.write.bits
+  write_meta_bits := cacheParams.tagCode.encode(write.phyTag.asUInt)
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -191,15 +217,15 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
 
   io.readResp.tags <> DontCare
   when(port_0_read_0_reg){
-    io.readResp.tags(0) := tagArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
+    io.readResp.tags(0) := read_tags(0)
   }.elsewhen(port_0_read_1_reg){
-    io.readResp.tags(0) := tagArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
+    io.readResp.tags(0) := read_tags(1)
   }
 
   when(port_1_read_0_reg){
-    io.readResp.tags(1) := tagArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
+    io.readResp.tags(1) := read_tags(0)
   }.elsewhen(port_1_read_1_reg){
-    io.readResp.tags(1) := tagArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))
+    io.readResp.tags(1) := read_tags(1)
   }
 
   (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
@@ -232,9 +258,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
   val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
 
+  val write_data_bits = Wire(UInt(dataEntryBits.W))
+
   val dataArrays = (0 until 2) map { i =>
     val dataArray = Module(new SRAMTemplate(
-      UInt(blockBits.W),
+      UInt(dataEntryBits.W),
       set=nSets/2,
       way=nWays,
       shouldReset = true,
@@ -246,20 +274,37 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       dataArray.io.r.req.valid := port_0_read_0 || port_1_read_0
       dataArray.io.r.req.bits.apply(setIdx=bank_0_idx)
       dataArray.io.w.req.valid := write_bank_0
-      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
     }
     else {
       dataArray.io.r.req.valid := port_0_read_1 || port_1_read_1
       dataArray.io.r.req.bits.apply(setIdx=bank_1_idx)
       dataArray.io.w.req.valid := write_bank_1
-      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
     }
 
     dataArray
   }
+  
+  //Parity Decode
+  val read_datas = Wire(Vec(2,Vec(nWays,UInt(blockBits.W) )))
+  for((dataArray,i) <- dataArrays.zipWithIndex){
+    val read_data_bits = dataArray.io.r.resp.asTypeOf(Vec(nWays,Vec(dataUnitNum, UInt(dataCodeBits.W))))
+    val read_data_decoded = read_data_bits.map{way_bits => way_bits.map(unit =>  cacheParams.dataCode.decode(unit))}
+    val read_data_wrong    = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.error ))})
+    val read_data_corrected = VecInit(read_data_decoded.map{way_bits_decoded => VecInit(way_bits_decoded.map(unit_decoded =>  unit_decoded.corrected )).asUInt})
+    read_datas(i) := read_data_corrected.asTypeOf(Vec(nWays,UInt(blockBits.W)))
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_data_wrong(w).asUInt.orR } 
+  } 
 
-  io.readResp.datas(0) := Mux( port_0_read_1_reg, dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))) , dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))))
-  io.readResp.datas(1) := Mux( port_1_read_0_reg, dataArrays(0).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))) , dataArrays(1).io.r.resp.asTypeOf(Vec(nWays, UInt(blockBits.W))))
+  //Parity Encode
+  val write = io.write.bits
+  val write_data = write.data.asTypeOf(Vec(dataUnitNum, UInt(dataCodeUnit.W)))
+  val write_data_encoded = VecInit(write_data.map( unit_bits => cacheParams.dataCode.encode(unit_bits) ))
+  write_data_bits := write_data_encoded.asUInt
+
+  io.readResp.datas(0) := Mux( port_0_read_1_reg, read_datas(1) , read_datas(0))
+  io.readResp.datas(1) := Mux( port_1_read_0_reg, read_datas(0) , read_datas(1))
   
   io.write.ready := true.B
 }
