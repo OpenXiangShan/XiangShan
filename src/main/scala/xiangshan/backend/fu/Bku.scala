@@ -43,7 +43,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
       Cat(left(msb) && right(msb), !right(msb), if(msb==1)right(0) else right(msb-1, 0)),
       left)
   }
-  
+
   val c0 = Wire(Vec(32, UInt(2.W)))
   val c1 = Wire(Vec(16, UInt(3.W)))
   val c2 = Reg(Vec(8, UInt(4.W)))
@@ -65,7 +65,7 @@ class CountModule(implicit p: Parameters) extends XSModule {
   for(i <- 0 until 4){
     cpopTmp(i) := PopCount(io.src(i*16+15, i*16))
   }
-  
+
   val cpopLo32 = cpopTmp(0) +& cpopTmp(1)
   val cpopHi32 = cpopTmp(2) +& cpopTmp(3)
 
@@ -98,13 +98,13 @@ class ClmulModule(implicit p: Parameters) extends XSModule {
   (0 until 32) map { i => mul1(i) := mul0(i*2) ^ mul0(i*2+1)}
   (0 until 16) map { i => mul2(i) := mul1(i*2) ^ mul1(i*2+1)}
   (0 until 8) map { i => mul3(i) := mul2(i*2) ^ mul2(i*2+1)}
- 
+
   val res = ParallelXOR(mul3)
- 
+
   val clmul  = res(63,0)
   val clmulh = res(127,64)
   val clmulr = res(126,63)
- 
+
   io.out := LookupTreeDefault(funcReg, clmul, List(
     BKUOpType.clmul  -> clmul,
     BKUOpType.clmulh -> clmulh,
@@ -143,7 +143,7 @@ class HashModule(implicit p: Parameters) extends XSModule {
     val func = Input(UInt())
     val out = Output(UInt(XLEN.W))
   })
-  
+
   val src1 = io.src
 
   val sha256sum0 = ROR32(src1, 2)  ^ ROR32(src1, 13) ^ ROR32(src1, 22)
@@ -184,8 +184,8 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
 
   val src1Bytes = VecInit((0 until 8).map(i => src1(i*8+7, i*8)))
   val src2Bytes = VecInit((0 until 8).map(i => src2(i*8+7, i*8)))
-  
-  // AES 
+
+  // AES
   val aesSboxIn  = ForwardShiftRows(src1Bytes, src2Bytes)
   val aesSboxMid  = Reg(Vec(8, Vec(18, Bool())))
   val aesSboxOut  = Wire(Vec(8, UInt(8.W)))
@@ -193,13 +193,13 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   val iaesSboxIn = InverseShiftRows(src1Bytes, src2Bytes)
   val iaesSboxMid  = Reg(Vec(8, Vec(18, Bool())))
   val iaesSboxOut = Wire(Vec(8, UInt(8.W)))
-  
-  aesSboxOut.zip(aesSboxMid).zip(aesSboxIn)foreach { case ((out, mid), in) => 
+
+  aesSboxOut.zip(aesSboxMid).zip(aesSboxIn)foreach { case ((out, mid), in) =>
     mid := SboxInv(SboxAesTop(in))
     out := SboxAesOut(mid)
   }
 
-  iaesSboxOut.zip(iaesSboxMid).zip(iaesSboxIn)foreach { case ((out, mid), in) => 
+  iaesSboxOut.zip(iaesSboxMid).zip(iaesSboxIn)foreach { case ((out, mid), in) =>
     mid := SboxInv(SboxIaesTop(in))
     out := SboxIaesOut(mid)
   }
@@ -217,11 +217,10 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
                      MixInv(Seq(imMinIn(0), imMinIn(1), imMinIn(2), imMinIn(3))))
 
 
-  val rcon = WireInit(VecInit(Seq("h01".U, "h02".U, "h04".U, "h08".U, 
-                                  "h10".U, "h20".U, "h40".U, "h80".U, 
+  val rcon = WireInit(VecInit(Seq("h01".U, "h02".U, "h04".U, "h08".U,
+                                  "h10".U, "h20".U, "h40".U, "h80".U,
                                   "h1b".U, "h36".U, "h00".U)))
-  
-  
+
   val ksSboxIn  = Wire(Vec(4, UInt(8.W)))
   val ksSboxTop = Reg(Vec(4, Vec(21, Bool())))
   val ksSboxOut = Wire(Vec(4, UInt(8.W)))
@@ -229,7 +228,7 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   ksSboxIn(1) := Mux(src2(3,0) === "ha".U, src1Bytes(5), src1Bytes(6))
   ksSboxIn(2) := Mux(src2(3,0) === "ha".U, src1Bytes(6), src1Bytes(7))
   ksSboxIn(3) := Mux(src2(3,0) === "ha".U, src1Bytes(7), src1Bytes(4))
-  ksSboxOut.zip(ksSboxTop).zip(ksSboxIn).foreach{ case ((out, top), in) => 
+  ksSboxOut.zip(ksSboxTop).zip(ksSboxIn).foreach{ case ((out, top), in) =>
     top := SboxAesTop(in)
     out := SboxAesOut(SboxInv(top))
     }
@@ -279,7 +278,7 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
     val func = Input(UInt())
     val out = Output(UInt(XLEN.W))
   })
-  
+
   val (src1, src2, func) = (io.src(0), io.src(1), io.func)
   val funcReg = RegNext(func)
 
@@ -326,8 +325,8 @@ class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
   cryptoModule.io.func := func
 
 
-  val result = Mux(funcReg(5), cryptoModule.io.out, 
-                  Mux(funcReg(3), countModule.io.out, 
+  val result = Mux(funcReg(5), cryptoModule.io.out,
+                  Mux(funcReg(3), countModule.io.out,
                       Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
 
   io.out.bits.data := result

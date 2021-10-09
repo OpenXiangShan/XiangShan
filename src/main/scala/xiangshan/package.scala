@@ -411,7 +411,6 @@ package object xiangshan {
     def cpopw       = "b001101".U
 
     // 01xxxx is reserve
-
     def aes64es     = "b100000".U
     def aes64esm    = "b100001".U
     def aes64ds     = "b100010".U
@@ -419,7 +418,7 @@ package object xiangshan {
     def aes64im     = "b100100".U
     def aes64ks1i   = "b100101".U
     def aes64ks2    = "b100110".U
-    
+
     // merge to two instruction sm4ks & sm4ed
     def sm4ks0      = "b101000".U
     def sm4ks1      = "b101001".U
@@ -438,7 +437,7 @@ package object xiangshan {
     def sha512sum1  = "b110101".U
     def sha512sig0  = "b110110".U
     def sha512sig1  = "b110111".U
-    
+
     def sm3p0       = "b111000".U
     def sm3p1       = "b111001".U
   }
