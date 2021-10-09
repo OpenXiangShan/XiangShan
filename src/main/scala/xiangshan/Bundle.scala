@@ -189,6 +189,7 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
+  val runahead_checkpoint_id = UInt(64.W)
 }
 
 // Separate LSQ
@@ -247,6 +248,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
+
+  val debug_runahead_checkpoint_id = UInt(64.W)
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
