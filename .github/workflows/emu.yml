@@ -18,7 +18,10 @@ jobs:
           submodules: 'recursive'
       - name: set env
         run: |
+          export HEAD_SHA=${{ github.run_number }}
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
+          echo "WAVE_HOME=/bigdata/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /bigdata/xs-wave/${HEAD_SHA}
       - name: Check Wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
@@ -36,6 +39,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --threads 4 --numa --ci linux-hello 2> perf.log
           cat perf.log | sort
+          find $GITHUB_WORKSPACE/build -name "*.vcd" | xargs -I {} mv {} $WAVE_HOME/minimal-linux-hello.vcd
   emu-basics:
     runs-on: self-hosted
     continue-on-error: false
