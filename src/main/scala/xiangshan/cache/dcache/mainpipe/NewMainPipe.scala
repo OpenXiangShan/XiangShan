@@ -51,6 +51,7 @@ class NewMainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.valid := store.valid
     req.bits := DontCare
     req.bits.miss := false.B
+    req.bits.miss_dirty := false.B
     req.bits.probe := false.B
     req.bits.probe_need_data := false.B
     req.bits.source := STORE_SOURCE.U
@@ -108,9 +109,6 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
         val way_en = UInt(nWays.W)
       })
     }
-
-    // load fast wakeup should be disabled when data read is not ready
-    val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
 
     // lrsc locked block should block probe
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
@@ -176,7 +174,6 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_can_go = s2_ready && (io.data_read.ready || !s1_need_data)
   val s1_fire = s1_valid && s1_can_go
   val s1_idx = get_idx(s1_req.vaddr)
-  val s1_tag = get_tag(s1_req.addr)
   when (s0_fire) {
     s1_valid := true.B
   }.elsewhen (s1_fire) {
@@ -197,7 +194,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val meta_resp = ecc_meta_resp.map(getMeta(_))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === s1_tag).asUInt
+  val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
 
@@ -522,13 +519,13 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.meta_write.valid := s3_fire && update_meta
   io.meta_write.bits.idx := s3_idx
   io.meta_write.bits.way_en := s3_way_en
-  io.meta_write.bits.tag := s3_tag
+  io.meta_write.bits.tag := get_tag(s3_req.addr)
   io.meta_write.bits.meta.coh := new_coh
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx
   io.tag_write.bits.way_en := s3_way_en
-  io.tag_write.bits.tag := s3_tag
+  io.tag_write.bits.tag := get_tag(s3_req.addr)
 
   io.data_write.valid := s3_fire && update_data
   io.data_write.bits.way_en := s3_way_en

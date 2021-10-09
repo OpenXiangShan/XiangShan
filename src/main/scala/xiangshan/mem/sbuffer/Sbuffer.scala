@@ -407,15 +407,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   io.dcache.req.valid := prepareValidReg
   io.dcache.req.bits := DontCare
-  io.dcache.req.bits.miss := false.B
-  io.dcache.req.bits.probe := false.B
-  io.dcache.req.bits.probe_need_data := false.B
-  io.dcache.req.bits.source := STORE_SOURCE.U
   io.dcache.req.bits.cmd    := MemoryOpConstants.M_XWR
   io.dcache.req.bits.addr   := getAddr(evictionPTag)
   io.dcache.req.bits.vaddr   := getAddr(evictionVTag)
-  io.dcache.req.bits.store_data  := data(evictionIdxReg).asUInt
-  io.dcache.req.bits.store_mask  := mask(evictionIdxReg).asUInt
+  io.dcache.req.bits.data  := data(evictionIdxReg).asUInt
+  io.dcache.req.bits.mask  := mask(evictionIdxReg).asUInt
   io.dcache.req.bits.id := evictionIdxReg
 
   when (io.dcache.req.fire()) {

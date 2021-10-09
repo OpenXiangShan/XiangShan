@@ -438,7 +438,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.nack := false.B
 
     ldu(w).io.disable_ld_fast_wakeup :=
-      mainPipe.io.disable_ld_fast_wakeup(w) ||
       bankedDataArray.io.bank_conflict_fast(w) // load pipe fast wake up should be disabled when bank conflict
   }
 
@@ -535,7 +534,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.replay_resp := mainPipe.io.store_replay_resp
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
-  val mainPipeAtomicReqArb = Module(new Arbiter(new NewMainPipeReq))
+  val mainPipeAtomicReqArb = Module(new Arbiter(new NewMainPipeReq, 2))
   mainPipeAtomicReqArb.io.in(0) <> missQueue.io.main_pipe_req
   mainPipeAtomicReqArb.io.in(1) <> atomicsReplayUnit.io.pipe_req
   mainPipe.io.atomic_req <> mainPipeAtomicReqArb.io.out

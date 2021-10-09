@@ -142,9 +142,9 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     io.lsu.resp.bits.dump()
   }
 
-  when (io.pipe_req.fire()) {
-    io.pipe_req.bits.dump()
-  }
+//  when (io.pipe_req.fire()) {
+//    io.pipe_req.bits.dump()
+//  }
 
   when (io.pipe_resp.fire()) {
     io.pipe_resp.bits.dump()

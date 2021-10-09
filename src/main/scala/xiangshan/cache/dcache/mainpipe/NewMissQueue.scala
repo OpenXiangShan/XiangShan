@@ -118,7 +118,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       s_refill := false.B
     }
 
-    when (!io.req.bits.hit && io.req.bits.replace_coh.isValid && !io.req.bits.isAMO) {
+    when (!io.req.bits.hit && io.req.bits.replace_coh.isValid() && !io.req.bits.isAMO) {
       s_replace_req := false.B
       w_replace_resp := false.B
     }
@@ -380,7 +380,7 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   
   // 128KBL1: FIXME: provide vaddr for l2
 
-  val entries = Seq.fill(cfg.nMissEntries)(Module(new NewMissEntry))
+  val entries = Seq.fill(cfg.nMissEntries)(Module(new NewMissEntry(edge)))
 
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val secondary_ready_vec = entries.map(_.io.secondary_ready)
@@ -402,16 +402,11 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   OneHot.checkOneHot(secondary_reject_vec)
   OneHot.checkOneHot(Seq(merge, reject))
 
-  def arbiter[T <: Bundle](
+  def rrArbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
-    roundRobin: Boolean = false,
     name: Option[String] = None): Unit = {
-    val arb = if (roundRobin) {
-      Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
-    } else {
-      Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
-    }
+    val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
     if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
     for ((a, req) <- arb.io.in.zip(in)) {
       a <> req
@@ -442,9 +437,9 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  arbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, true, Some("refill_pipe_req"))
-  arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, true, Some("replace_pipe_req"))
-  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, true, Some("main_pipe_req"))
+  rrArbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
+  rrArbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
+  rrArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
