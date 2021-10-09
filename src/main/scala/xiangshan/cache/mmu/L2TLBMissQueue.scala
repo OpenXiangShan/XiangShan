@@ -116,20 +116,21 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
   // to_cache: the last is back just right now, set to mem_cache
-  val dropLowVpn = entries.map(a => dropL3SectorBits(a.vpn))
-  val dropLowVpnIn = dropL3SectorBits(io.in.bits.vpn)
+  def dup(vpn1: UInt, vpn2: UInt): Bool = {
+    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
+  }
   val dup_vec = state.indices.map(i =>
-    io.in.bits.l3.valid && (dropLowVpnIn === dropLowVpn(i))
+    dup(io.in.bits.vpn, entries(i).vpn)
   )
-  val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m} // already some req are state_mem_req
-  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // already some req are state_mem_wait
-  val dup_vec_wait_id = dup_vec_mem.zip(dup_vec_wait).map{case (a, b) => a || b} // get the wait_id from above reqs
-  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)}
-  val wait_id = ParallelMux(dup_vec_wait_id zip entries.map(_.wait_id))
-  val dup_wait_resp = io.mem.resp.valid && VecInit(dup_vec_wait)(io.mem.resp.bits.id)
-  val to_wait = Cat(dup_vec_mem).orR || Cat(dup_vec_wait).orR
+  val dup_req_fire = mem_arb.io.out.fire() && dup(io.in.bits.vpn, mem_arb.io.out.bits.vpn) // dup with the req fire entry
+  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
+  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
+  val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
+  val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
+  val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp
   val to_cache_low = Cat(dup_vec_having).orR
+  assert(RegNext(!(dup_req_fire && Cat(dup_vec_wait).orR), init = true.B), "mem req but some entries already waiting, should not happed")
 
   val mem_resp_hit = RegInit(VecInit(Seq.fill(MSHRSize)(false.B)))
   val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
@@ -146,8 +147,13 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     mem_resp_hit(enq_ptr) := to_mem_out
   }
   when (mem_arb.io.out.fire()) {
-    state(mem_arb.io.chosen) := state_mem_waiting
-    entries(mem_arb.io.chosen).wait_id := mem_arb.io.chosen
+    for (i <- state.indices) {
+      when (state(i) =/= state_idle && dup(entries(i).vpn, mem_arb.io.out.bits.vpn)) {
+        // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
+        state(i) := state_mem_waiting
+        entries(i).wait_id := mem_arb.io.chosen
+      }
+    }
   }
   when (io.mem.resp.fire()) {
     state.indices.map{i =>
@@ -167,6 +173,20 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   mem_resp_hit.map(a => when (a) { a := false.B } )
 
+  val enq_ptr_reg = RegNext(enq_ptr)
+  val enq_ptr_reg_reg = RegNext(enq_ptr_reg)
+  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === state_addr_check && !io.sfence.valid) && !io.sfence.valid)
+  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
+  io.pmp.req.cmd := TlbCmd.read
+  io.pmp.req.size := 3.U // TODO: fix it
+  when (pmp_resp_valid && (state(enq_ptr_reg_reg) === state_addr_check) &&
+    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg_reg).vpn, mem_arb.io.out.bits.vpn))) {
+    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
+    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
+    entries(enq_ptr_reg_reg).af := io.pmp.resp.ld
+    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
+  }
+
   when (io.sfence.valid) {
     state.map(_ := state_idle)
   }
@@ -181,17 +201,6 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.out.bits.vpn := entries(mem_ptr).vpn
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
-
-  val enq_ptr_reg = RegNext(enq_ptr)
-  val enq_ptr_reg_reg = RegNext(enq_ptr_reg)
-  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === state_addr_check && !io.sfence.valid) && !io.sfence.valid)
-  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
-  io.pmp.req.cmd := TlbCmd.read
-  io.pmp.req.size := 3.U // TODO: fix it
-  when (pmp_resp_valid) {
-    entries(enq_ptr_reg_reg).af := io.pmp.resp.ld
-    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
-  }
 
   io.mem.req.valid := mem_arb.io.out.valid
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
