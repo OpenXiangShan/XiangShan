@@ -122,7 +122,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
     if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
-    else if (i < exuParameters.MduCnt) Seq((0, i), (1, i))
+    else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
   val lsDpPorts = Seq(
@@ -132,7 +132,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     Seq((4, 1))
   ) ++ (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
-    if (i < exuParameters.FmiscCnt) Seq((0, i), (1, i))
+    if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
 
