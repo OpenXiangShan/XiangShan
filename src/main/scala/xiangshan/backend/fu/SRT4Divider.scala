@@ -211,7 +211,6 @@ class SRT4DividerDataModule(len: Int) extends Module {
   val qPrev = Mux(state(s_pre_1), qInit, qIterEnd)
   val qPrevReg = RegEnable(qPrev, state(s_pre_1) | state(s_iter))
   val specialDivisorReg = RegEnable(dNormAbsReg(len - 2, len - 2 - 3 + 1) === 0.U, state(s_pre_1)) // d=0.1000xxx
-
   // rCarry and rSum in Iteration
   val qXd = Mux1H(Seq(
     qPrevReg(quot_neg_2) -> Cat(dNormAbsReg(len - 1, 0), 0.U(4.W)), // 68, 67 1.xxxxx0000
@@ -291,7 +290,6 @@ class SRT4DividerDataModule(len: Int) extends Module {
   rPreShifted := Mux(needCorr, rPd, r)
   val rFinal = RegEnable(rightShifted, state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = Mux(needCorr, quotM1IterReg, quotIterReg)
-
   val res = Mux(isHi, rFinal, qFinal)
   io.out_data := Mux(isW,
     SignExt(res(31, 0), len),
