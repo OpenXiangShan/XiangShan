@@ -575,6 +575,16 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   }
 }
 
+class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
+  val entries = new PtwEntries(num, tagLen, level, hasPerm)
+
+  private val encBits = eccCode.width(entries.getWidth)
+  private val eccBits = encBits - entries.getWidth
+  val ecc = UInt(eccBits.W)
+
+  override def cloneType: this.type = new PTWEntriesWithEcc(eccCode, num, tagLen, level, hasPerm).asInstanceOf[this.type]
+}
+
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
