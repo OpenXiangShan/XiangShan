@@ -393,6 +393,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
   io.uncache.req.bits.id   := DontCare
+  io.uncache.req.bits.instrtype   := DontCare
 
   when(io.uncache.req.fire()){
     // mmio store should not be committed until uncache req is sent
@@ -459,6 +460,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
     io.sbuffer(i).bits.id    := DontCare
+    io.sbuffer(i).bits.instrtype    := DontCare
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
