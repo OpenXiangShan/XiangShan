@@ -440,7 +440,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
-  csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
+  csrio.customCtrl.storeset_wait_store := slvpredctl(2)
+  csrio.customCtrl.storeset_no_fast_wakeup := slvpredctl(3)
+  csrio.customCtrl.lvpred_timeout := slvpredctl(8, 4)
 
   // smblockctl: memory block configurations
   // bits 0-3: store buffer flush threshold (default: 8 entries)

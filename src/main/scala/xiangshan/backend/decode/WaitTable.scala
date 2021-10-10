@@ -49,7 +49,7 @@ class WaitTable(implicit p: Parameters) extends XSModule {
 
 
   // reset period: ResetTimeMax2Pow
-  when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.waittable_timeout))) {
+  when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
     for (j <- 0 until WaitTableSize) {
       data(j) := 0.U
     }

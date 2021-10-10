@@ -281,7 +281,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memScheduler.io.extra.jumpPc <> ctrlBlock.io.jumpPc
   memScheduler.io.extra.jalr_target <> ctrlBlock.io.jalr_target
   memScheduler.io.extra.stIssuePtr <> memBlock.io.stIssuePtr
-  memScheduler.io.extra.memWaitUpdateReq.get.staIssue <> memBlock.io.stIn
+  memScheduler.io.extra.memWaitUpdateReq.get.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
+    sink.bits := src.bits
+    sink.valid := src.valid && !csrioIn.customCtrl.storeset_no_fast_wakeup
+  }}
   memScheduler.io.extra.memWaitUpdateReq.get.stdIssue.zip(stdIssue).foreach{case (sink, src) => {
     sink.valid := src.valid
     sink.bits := src.bits
