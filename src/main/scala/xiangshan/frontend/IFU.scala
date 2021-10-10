@@ -24,7 +24,7 @@ import xiangshan.cache._
 import xiangshan.cache.mmu._
 import chisel3.experimental.verification
 import utils._
-import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -63,7 +63,10 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val icacheInter     = new ICacheInterface
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val iTLBInter       = Vec(2, new BlockTlbRequestIO)
-  val pmp             = Vec(2, Input(new PMPRespBundle()))
+  val pmp             = Vec(2, new Bundle {
+    val req = Valid(new PMPReqBundle())
+    val resp = Input(new PMPRespBundle())
+  })
 }
 
 // record the situation in which fallThruAddr falls into
@@ -97,7 +100,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (toMeta, toData, meta_resp, data_resp) =  (io.icacheInter.toIMeta, io.icacheInter.toIData, io.icacheInter.fromIMeta, io.icacheInter.fromIData)
   val (toMissQueue, fromMissQueue) = (io.icacheInter.toMissQueue, io.icacheInter.fromMissQueue)
   val (toITLB, fromITLB) = (VecInit(io.iTLBInter.map(_.req)), VecInit(io.iTLBInter.map(_.resp)))
-  val fromPMP = io.pmp
+  val fromPMP = io.pmp.map(_.resp)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
@@ -201,7 +204,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
   val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
     fromITLB.map(port => (port.bits.excp.af.instr) && port.valid)) //TODO: Temp treat mmio req as access fault
-  val pmpExcpAF = fromPMP.map(port => port.instr)
+
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 
@@ -267,6 +270,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f1_fire && !f1_flush) {f2_valid := true.B }
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
+  val pmpExcpAF = fromPMP.map(port => port.instr)
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
   val f2_hit      = RegEnable(next = f1_hit   , enable = f1_fire)
@@ -279,6 +283,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_except_af = VecInit(RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(f1_fire)).asBool))
   val f2_except    = VecInit((0 until 2).map{i => f2_except_pf(i) || f2_except_af(i)})
   val f2_has_except = f2_valid && (f2_except_af.reduce(_||_) || f2_except_pf.reduce(_||_))
+  //
+  io.pmp.zipWithIndex.map { case (p, i) =>
+    p.req.valid := f2_fire
+    p.req.bits.addr := f2_pAddrs(i)
+    p.req.bits.size := 3.U // TODO
+    p.req.bits.cmd := TlbCmd.exec
+  }
 
   //instruction
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(8)

@@ -411,7 +411,7 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
-  val pmp = Vec(Width, new PMPReqBundle())
+  val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
   override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }

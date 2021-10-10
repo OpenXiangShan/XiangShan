@@ -205,7 +205,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.env.pmp := pmp.io.pmp
     p.env.mode := tlbcsr.priv.dmode
     p.req := d
-    require(p.req.size.getWidth == d.size.getWidth)
+    require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
 
   // LoadUnit

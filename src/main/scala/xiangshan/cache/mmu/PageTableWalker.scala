@@ -49,7 +49,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val mask = Input(Bool())
   }
   val pmp = new Bundle {
-    val req = new PMPReqBundle()
+    val req = ValidIO(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
   }
 
@@ -82,9 +82,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val finish = WireInit(false.B)
   val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val af_reg = RegEnable(io.pmp.resp.ld, RegNext(sent_to_pmp))
-  val accessFault = Mux(RegNext(!sfence.valid && sent_to_pmp)
-    , io.pmp.resp.ld, af_reg)
+  val accessFault = RegEnable(io.pmp.resp.ld, sent_to_pmp)
   val pageFault = memPte.isPf(level)
   switch (state) {
     is (s_idle) {
@@ -96,7 +94,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
         vpn := io.req.bits.vpn
         l1Hit := req.l1Hit
-        af_reg := false.B
+        accessFault := false.B
       }
     }
 
@@ -127,14 +125,17 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         }
         finish := true.B
       }.otherwise {
-        when (level =/= (Level-2).U) { // when level is 1.U, finish
-          level := levelNext
-          state := s_mem_req
-        }.otherwise {
+        when (io.pmp.resp.ld) {
+          // do nothing
+        }.elsewhen (io.mq.valid) {
           when (io.mq.fire()) {
             state := s_idle
-            finish := true.B
           }
+          finish := true.B
+        }.otherwise { // when level is 1.U, finish
+          assert(level =/= 2.U)
+          level := levelNext
+          state := s_mem_req
         }
       }
     }
@@ -142,7 +143,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (sfence.valid) {
     state := s_idle
-    af_reg := false.B
+    accessFault := false.B
   }
 
   // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
@@ -165,9 +166,10 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
-  io.pmp.req.addr := mem_addr
-  io.pmp.req.size := 3.U // TODO: fix it
-  io.pmp.req.cmd := TlbCmd.read
+  io.pmp.req.valid := DontCare // samecycle, do not use valid
+  io.pmp.req.bits.addr := mem_addr
+  io.pmp.req.bits.size := 3.U // TODO: fix it
+  io.pmp.req.bits.cmd := TlbCmd.read
 
   mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
   mem.req.bits.addr := mem_addr

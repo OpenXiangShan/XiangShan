@@ -137,9 +137,10 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
-    pmp(i).addr := resp(i).bits.paddr
-    pmp(i).size := sizeReg
-    pmp(i).cmd := cmdReg
+    pmp(i).valid := resp(i).valid
+    pmp(i).bits.addr := resp(i).bits.paddr
+    pmp(i).bits.size := sizeReg
+    pmp(i).bits.cmd := cmdReg
 
     val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
@@ -312,8 +313,7 @@ object TLB {
     csr: TlbCsrBundle,
     width: Int,
     shouldBlock: Boolean,
-    q: TLBParameters,
-    pmp: Seq[PMPReqBundle]
+    q: TLBParameters
   )(implicit p: Parameters) = {
     require(in.length == width)
 
@@ -322,10 +322,6 @@ object TLB {
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")
-    for (i <- 0 until width) {
-      pmp(i) := { if (q.sameCycle) RegEnable(tlb.io.pmp(i), tlb.io.requestor(i).resp.fire()) else tlb.io.pmp(i) }
-    }
-    require(pmp(0).size.getWidth == tlb.io.pmp(0).size.getWidth)
 
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

@@ -316,17 +316,17 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
 class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle
 
 @chiselName
-class PMPChecker(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPModule {
+class PMPChecker(lgMaxSize: Int = 3, sameCycle: Boolean = false)(implicit p: Parameters) extends PMPModule {
   val io = IO(new Bundle{
     val env = Input(new Bundle {
       val mode = Input(UInt(2.W))
       val pmp = Input(Vec(NumPMP, new PMPEntry()))
     })
-    val req = Flipped(new PMPReqBundle(lgMaxSize))
+    val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
     val resp = Output(new PMPRespBundle())
   })
 
-  val req = io.req
+  val req = io.req.bits
 
   val passThrough = if (io.env.pmp.isEmpty) true.B else (io.env.mode > ModeS)
   val pmpMinuxOne = WireInit(0.U.asTypeOf(new PMPEntry()))
@@ -348,9 +348,9 @@ class PMPChecker(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPModule {
 
   val res = io.env.pmp.zip(pmpMinuxOne +: io.env.pmp.take(NumPMP-1)).zipWithIndex
     .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pmp, last_pmp), i)) =>
-    val is_match = pmp.is_match(io.req.addr, io.req.size, lgMaxSize, last_pmp)
+    val is_match = pmp.is_match(req.addr, req.size, lgMaxSize, last_pmp)
     val ignore = passThrough && !pmp.cfg.l
-    val aligned = pmp.aligned(io.req.addr, io.req.size, lgMaxSize, last_pmp)
+    val aligned = pmp.aligned(req.addr, req.size, lgMaxSize, last_pmp)
 
     val cur = WireInit(pmp)
     cur.cfg.r := aligned && (pmp.cfg.r || ignore)
@@ -369,7 +369,16 @@ class PMPChecker(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPModule {
   }
 
   // NOTE: if itlb or dtlb may get blocked, this may also need do it
-  io.resp.ld := RegNext(TlbCmd.isRead(req.cmd) && !TlbCmd.isAtom(req.cmd) && !res.cfg.r)
-  io.resp.st := RegNext((TlbCmd.isWrite(req.cmd) || TlbCmd.isAtom(req.cmd)) && !res.cfg.w)
-  io.resp.instr := RegNext(TlbCmd.isExec(req.cmd) && !res.cfg.x)
+  val ld = TlbCmd.isRead(req.cmd) && !TlbCmd.isAtom(req.cmd) && !res.cfg.r
+  val st = (TlbCmd.isWrite(req.cmd) || TlbCmd.isAtom(req.cmd)) && !res.cfg.w
+  val instr = TlbCmd.isExec(req.cmd) && !res.cfg.x
+  if (sameCycle) {
+    io.resp.ld := ld
+    io.resp.st := st
+    io.resp.instr := instr
+  } else {
+    io.resp.ld := RegEnable(ld, io.req.valid)
+    io.resp.st := RegEnable(st, io.req.valid)
+    io.resp.instr := RegEnable(instr, io.req.valid)
+  }
 }

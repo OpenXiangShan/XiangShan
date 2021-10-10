@@ -72,7 +72,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
   val pmp = new Bundle {
-    val req = new PMPReqBundle()
+    val req = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
   }
 }
@@ -174,17 +174,18 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   mem_resp_hit.map(a => when (a) { a := false.B } )
 
   val enq_ptr_reg = RegNext(enq_ptr)
-  val enq_ptr_reg_reg = RegNext(enq_ptr_reg)
-  val pmp_resp_valid = RegNext(RegNext(io.in.fire() && enq_state === state_addr_check && !io.sfence.valid) && !io.sfence.valid)
-  io.pmp.req.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
-  io.pmp.req.cmd := TlbCmd.read
-  io.pmp.req.size := 3.U // TODO: fix it
-  when (pmp_resp_valid && (state(enq_ptr_reg_reg) === state_addr_check) &&
-    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg_reg).vpn, mem_arb.io.out.bits.vpn))) {
+
+  io.pmp.req.valid := RegNext(enq_state === state_addr_check)
+  io.pmp.req.bits.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
+  io.pmp.req.bits.cmd := TlbCmd.read
+  io.pmp.req.bits.size := 3.U // TODO: fix it
+  val pmp_resp_valid = io.pmp.req.valid // same cycle
+  when (pmp_resp_valid && (state(enq_ptr_reg) === state_addr_check) &&
+    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).vpn, mem_arb.io.out.bits.vpn))) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    entries(enq_ptr_reg_reg).af := io.pmp.resp.ld
-    state(enq_ptr_reg_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
+    entries(enq_ptr_reg).af := io.pmp.resp.ld
+    state(enq_ptr_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
   }
 
   when (io.sfence.valid) {

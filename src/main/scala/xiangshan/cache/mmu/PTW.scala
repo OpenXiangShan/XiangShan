@@ -80,7 +80,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val priv   = csr.tlb.priv
 
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker()).io))
+  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := csr.distribute_csr
   for (p <- pmp_check) {
     p.env.mode := ModeS
