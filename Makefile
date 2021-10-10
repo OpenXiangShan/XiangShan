@@ -91,8 +91,8 @@ EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
 EMU_VFILES   = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
 EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
-EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
-EMU_LDFLAGS  += -lpthread -lSDL2 -ldl -lz
+EMU_CXXFLAGS += -DVERILATOR
+EMU_LDFLAGS  += -lpthread -ldl -lz
 
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
@@ -137,6 +137,12 @@ ifeq ($(USE_BIN),1)
 EMU_CXXFLAGS += -DUSE_BIN
 endif
 
+SHOW_SCREEN ?= 0
+ifeq ($(SHOW_SCREEN),1)
+EMU_LDFLAGS  += -lSDL2
+EMU_CXXFLAGS += -DSHOW_SCREEN
+endif
+
 # --trace
 VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1                     \
@@ -150,7 +156,8 @@ VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   --assert                                \
   --stats-vars                            \
   --output-split 30000                    \
-  --output-split-cfuncs 30000
+  --output-split-cfuncs 30000             \
+  --compiler clang
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)

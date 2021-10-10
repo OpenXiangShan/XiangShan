@@ -16,7 +16,9 @@
 
 #include "common.h"
 #include <sys/time.h>
+#ifdef SHOW_SCREEN
 #include <SDL2/SDL.h>
+#endif
 
 void send_key(uint8_t, bool);
 void init_sdl(void);
@@ -36,6 +38,7 @@ void init_device(void) {
 }
 
 void poll_event() {
+#ifdef SHOW_SCREEN
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     switch (event.type) {
@@ -52,6 +55,7 @@ void poll_event() {
       default: break;
     }
   }
+#endif
 }
 
 uint32_t uptime(void) {
