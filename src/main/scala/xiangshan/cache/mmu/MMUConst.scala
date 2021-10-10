@@ -65,7 +65,9 @@ case class L2TLBParameters
   // miss queue
   missQueueSize: Int = 9,
   // way size
-  blockBytes: Int = 64
+  blockBytes: Int = 64,
+  // ecc
+  ecc: Option[String] = Some("secded")
 )
 
 trait HasTlbConst extends HasXSParameter {
