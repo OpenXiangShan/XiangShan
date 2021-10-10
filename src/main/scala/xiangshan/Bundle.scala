@@ -155,6 +155,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
+  val isORI = Bool() //for softprefetch
+  val isSoftPrefetchRead = Bool() //for softprefetch
+  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
@@ -190,6 +193,7 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
+  val runahead_checkpoint_id = UInt(64.W)
 }
 
 // Separate LSQ
@@ -249,6 +253,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 
+  val debug_runahead_checkpoint_id = UInt(64.W)
+
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
   // def isException() = RedirectLevel.isException(level)
@@ -260,7 +266,7 @@ class Dp1ToDp2IO(implicit p: Parameters) extends XSBundle {
   val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
-class ReplayPregReq(implicit p: Parameters) extends XSBundle {
+class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()

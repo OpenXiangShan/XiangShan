@@ -215,11 +215,13 @@ class XiangShan(object):
         base_dir = "/home/ci-runner/xsenv/workloads"
         workloads = [
             "bitmanip/bitMisc.bin",
+            "crypto/crypto-riscv64-noop.bin",
             "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
             "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
             "ext_intr/amtest-riscv64-xs.bin",
-            "cache-alias/aliastest-riscv64-xs.bin"
+            "cache-alias/aliastest-riscv64-xs.bin",
+            "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
@@ -238,7 +240,9 @@ class XiangShan(object):
             "namd": "_434640000000_.gz",
             "milc": "_103620000000_.gz",
             "lbm": "_140840000000_.gz",
-            "gromacs": "_275480000000_.gz"
+            "gromacs": "_275480000000_.gz",
+            "wrf": "_1916220000000_.gz",
+            "astar": "_122060000000_.gz"
         }
         return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
 

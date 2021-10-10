@@ -67,6 +67,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
 
   // For debug usage
   val isFirstIssue = Bool()
+  //softprefetch
+  val isSoftPrefetch = Bool() 
+  //softprefetch except
+  val isSoftPreExcept = Bool()
+  val isSoftPremmio = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {

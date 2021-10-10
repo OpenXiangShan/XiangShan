@@ -16,13 +16,12 @@
 
 import chisel3._
 import chisel3.util._
-
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
-import xiangshan.backend.Std
+import xiangshan.backend.{AmoData, Std}
 
 package object xiangshan {
   object SrcType {
@@ -36,9 +35,9 @@ package object xiangshan {
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isFp(srcType: UInt) = srcType===fp
+    def isFp(srcType: UInt) = srcType(1)
     def isPcOrImm(srcType: UInt) = srcType(0)
-    def isRegOrFp(srcType: UInt) = !srcType(1)
+    def isRegOrFp(srcType: UInt) = !srcType(0)
     def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
@@ -59,7 +58,7 @@ package object xiangshan {
     def mul          = "b0100".U
     def div          = "b0101".U
     def fence        = "b0011".U
-    def bmu          = "b0111".U
+    def bku          = "b0111".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1011".U
@@ -101,7 +100,7 @@ package object xiangshan {
       mul.litValue() -> "mul",
       div.litValue() -> "div",
       fence.litValue() -> "fence",
-      bmu.litValue() -> "bmu",
+      bku.litValue() -> "bku",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
       fDivSqrt.litValue() -> "fdiv/fsqrt",
@@ -219,8 +218,8 @@ package object xiangshan {
     def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
     def sra        = "b000_0111".U // sra:     src1 >> src2 (arithmetic)
 
-    def rol        = "b000_1000".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
-    def ror        = "b000_1001".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
+    def rol        = "b000_1001".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
+    def ror        = "b000_1011".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
 
     // RV64 32bit optype
     def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
@@ -396,22 +395,51 @@ package object xiangshan {
     def amomaxu_d = "b101011".U
   }
 
-  object BMUOpType {
+  object BKUOpType {
 
-    def clmul       = "b00000".U
-    def clmulh      = "b00010".U
-    def clmulr      = "b00100".U
+    def clmul       = "b000000".U
+    def clmulh      = "b000001".U
+    def clmulr      = "b000010".U
+    def xpermn      = "b000100".U
+    def xpermb      = "b000101".U
 
-    def clz         = "b01000".U
-    def clzw        = "b01001".U
-    def ctz         = "b01010".U
-    def ctzw        = "b01011".U
-    def cpop        = "b01100".U
-    def cpopw       = "b01101".U
+    def clz         = "b001000".U
+    def clzw        = "b001001".U
+    def ctz         = "b001010".U
+    def ctzw        = "b001011".U
+    def cpop        = "b001100".U
+    def cpopw       = "b001101".U
 
-    // TODO: move to alu
-    def xpermn      = "b10000".U
-    def xpermb      = "b10001".U
+    // 01xxxx is reserve
+    def aes64es     = "b100000".U
+    def aes64esm    = "b100001".U
+    def aes64ds     = "b100010".U
+    def aes64dsm    = "b100011".U
+    def aes64im     = "b100100".U
+    def aes64ks1i   = "b100101".U
+    def aes64ks2    = "b100110".U
+
+    // merge to two instruction sm4ks & sm4ed
+    def sm4ks0      = "b101000".U
+    def sm4ks1      = "b101001".U
+    def sm4ks2      = "b101010".U
+    def sm4ks3      = "b101011".U
+    def sm4ed0      = "b101100".U
+    def sm4ed1      = "b101101".U
+    def sm4ed2      = "b101110".U
+    def sm4ed3      = "b101111".U
+
+    def sha256sum0  = "b110000".U
+    def sha256sum1  = "b110001".U
+    def sha256sig0  = "b110010".U
+    def sha256sig1  = "b110011".U
+    def sha512sum0  = "b110100".U
+    def sha512sum1  = "b110101".U
+    def sha512sig0  = "b110110".U
+    def sha512sig1  = "b110111".U
+
+    def sm3p0       = "b111000".U
+    def sm3p1       = "b111001".U
   }
 
   object BTBtype {
@@ -440,7 +468,7 @@ package object xiangshan {
   def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
-  def bmuGen(p: Parameters) = new Bmu()(p)
+  def bkuGen(p: Parameters) = new Bku()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
   def fenceGen(p: Parameters) = new Fence()(p)
   def csrGen(p: Parameters) = new CSR()(p)
@@ -450,6 +478,7 @@ package object xiangshan {
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
+  def mouDataGen(p: Parameters) = new AmoData()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -559,11 +588,11 @@ package object xiangshan {
     fastImplemented = true
   )
 
-  val bmuCfg = FuConfig(
-    name = "bmu",
-    fuGen = bmuGen,
-    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bmu,
-    fuType = FuType.bmu,
+  val bkuCfg = FuConfig(
+    name = "bku",
+    fuGen = bkuGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bku,
+    fuType = FuType.bku,
     numIntSrc = 2,
     numFpSrc = 0,
     writeIntRf = true,
@@ -609,7 +638,7 @@ package object xiangshan {
   val lduCfg = FuConfig(
     "ldu",
     null, // DontCare
-    null,
+    (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
@@ -617,21 +646,29 @@ package object xiangshan {
   val staCfg = FuConfig(
     "sta",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val stdCfg = FuConfig(
     "std",
-    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
     writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
     "mou",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    latency = UncertainLatency(), hasExceptionOut = true
+  )
+
+  val mouDataCfg = FuConfig(
+    "mou",
+    mouDataGen,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), hasExceptionOut = true
   )
@@ -639,7 +676,7 @@ package object xiangshan {
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bmuCfg), 1, Int.MaxValue)
+  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
@@ -647,7 +684,7 @@ package object xiangshan {
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
-  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
-  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 }

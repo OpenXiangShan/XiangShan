@@ -42,29 +42,32 @@ import freechips.rocketchip.devices.debug.{DebugIO, ResetCtrlIO}
 class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasSoCParameter {
   private val core = LazyModule(new XSCore)
-  private val busPMU = BusPerfMonitor(enable = true)
-  private val l2cache = if(useFakeL2Cache) null else
+  private val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+  private val l2cacheOpt = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => coreParams.L2CacheParams
+      case HCCacheParamsKey => l2param
     })))
+  )
+  // (icache/ptw/dcache) => l2 or mem
+  private val l1_xbar = TLXbar()
 
   val memory_port = TLIdentityNode()
   val uncache = TLXbar()
 
-  if (!useFakeDCache) {
-    busPMU := TLLogger(s"L2_L1D_$hardId") := TLBuffer() := core.memBlock.dcache.clientNode
+  if (coreParams.dcacheParametersOpt.nonEmpty) {
+    busPMU := TLLogger(s"L2_L1D_$hardId", !debugOpts.FPGAPlatform) := core.memBlock.dcache.clientNode
   }
-  //if (!useFakeL1plusCache) {
-    busPMU := TLBuffer() := core.frontend.icache.clientNode
-  //}
-  if (!useFakePTW) {
-    busPMU := TLBuffer() := core.ptw.node
+  busPMU := core.frontend.icache.clientNode
+  if (!coreParams.softPTW) {
+    busPMU := core.ptw.node
   }
-  if (useFakeL2Cache) {
-    memory_port := TLXbar() :=* busPMU
-  }
-  else {
-    memory_port := l2cache.node := TLBuffer() := TLXbar() :=* busPMU
+  l1_xbar :=* busPMU
+  l2cacheOpt match {
+    case Some(l2) =>
+      val l2_binder = BankBinder(coreParams.L2NBanks, 64)
+      memory_port :=* l2_binder :*= l2.node :*= l1_xbar
+    case None =>
+      memory_port := l1_xbar
   }
 
   uncache := TLBuffer() := core.frontend.instrUncache.clientNode
@@ -88,9 +91,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
     core.module.reset := core_reset_gen.io.out
 
     val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    if (!useFakeL2Cache) {
-      l2cache.module.reset := l2_reset_gen.io.out
-    }
+    l2cacheOpt.foreach( _.module.reset := l2_reset_gen.io.out)
   }
 }
 
@@ -128,6 +129,7 @@ trait HaveSlaveAXI4Port {
   private val error_xbar = TLXbar()
 
   error_xbar :=
+    TLFIFOFixer() :=
     TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
@@ -254,8 +256,8 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   for (i <- 0 until NumCores) {
     peripheralXbar := TLBuffer() := core_with_l2(i).uncache
-    val l2_l3_pmu = BusPerfMonitor(enable = true)
-    l3_xbar := TLBuffer() := TLLogger(s"L3_L2_$i") := l2_l3_pmu := core_with_l2(i).memory_port
+    val l2_l3_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
+    l3_xbar :=* TLBuffer() :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* l2_l3_pmu :=* core_with_l2(i).memory_port
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
@@ -300,19 +302,17 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 
   plic.node := peripheralXbar
 
-  val l3cache = if(useFakeL3Cache) null else LazyModule(new HuanCun()(new Config((_, _, _) => {
-    case HCCacheParamsKey => soc.L3CacheParams
-  })))
+  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
+    LazyModule(new HuanCun()(new Config((_, _, _) => {
+      case HCCacheParamsKey => l3param
+    })))
+  )
+  val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
-  val l3_mem_pmu = BusPerfMonitor(enable = true)
-
-  val l3Ignore = if (useFakeL3Cache) TLIgnoreNode() else null
-
-  if (useFakeL3Cache) {
-    bankedNode :*= l3Ignore :*= l3_xbar
-  }
-  else {
-    bankedNode :*= TLLogger("MEM_L3") :*= l3_mem_pmu :*= l3cache.node :*= TLBuffer() :*= l3_xbar
+  l3cacheOpt match {
+    case Some(l3) =>
+      bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3.node :*= TLBuffer() :*= l3_xbar
+    case None => bankedNode :*= TLAdapterNode() :*= l3_xbar
   }
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
@@ -379,10 +379,10 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
         beu.module.io.errors.dcache(i) := core_with_l2(i).module.io.dcache_error
       }
 
-      if (!useFakeL3Cache) {
+      if (l3cacheOpt.nonEmpty) {
         val l3_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
         l3_reset_gen.suggestName("l3_reset_gen")
-        l3cache.module.reset := l3_reset_gen.io.out
+        l3cacheOpt.get.module.reset := l3_reset_gen.io.out
       }
       // TODO: wrap this in a module
       val freq = 100
@@ -413,9 +413,9 @@ class XSTopWithoutDMA()(implicit p: Parameters) extends BaseXSSoc()
 object TopMain extends App with HasRocketChipStageUtils {
   override def main(args: Array[String]): Unit = {
     val (config, firrtlOpts) = ArgParser.parse(args)
+    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
     XiangShanStage.execute(firrtlOpts, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop()(config))
         soc.module
       })
     ))

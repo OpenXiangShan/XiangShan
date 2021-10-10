@@ -38,6 +38,13 @@ class Std(implicit p: Parameters) extends FunctionUnit {
   io.out.bits.data := io.in.bits.src(0)
 }
 
+class AmoData(implicit p: Parameters) extends FunctionUnit {
+  io.in.ready := true.B
+  io.out.valid := io.in.valid
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.data := io.in.bits.src(0)
+}
+
 class MemBlock()(implicit p: Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCacheWrapper())
@@ -62,11 +69,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
     val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
     val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))
-//    val stData = Vec(exuParameters.StuCnt, Flipped(ValidIO(new StoreDataBundle)))
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
-    val otherFastWakeup = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new MicroOp))
+    val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))
@@ -119,8 +125,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
   // TODO: fast load wakeup
-
-
   val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
@@ -234,7 +238,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stdExeUnits(i).io.redirect <> io.redirect
     stdExeUnits(i).io.flush <> io.flush
-    stdExeUnits(i).io.fromInt <> io.issue(i + 4) // FIXME: hardcoded
+    stdExeUnits(i).io.fromInt <> io.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
