@@ -479,14 +479,29 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 
   if (!env.FPGAPlatform) {
-    // TODO: need to be updated
+    // hit resp
+    io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
+      val difftest = Module(new DifftestSbufferEvent)
+      val dcache_resp_id = resp.bits.id
+      difftest.io.clock := clock
+      difftest.io.coreid := hardId.U
+      difftest.io.index := index.U
+      difftest.io.sbufferResp := resp.fire()
+      difftest.io.sbufferAddr := getAddr(ptag(dcache_resp_id))
+      difftest.io.sbufferData := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+      difftest.io.sbufferMask := mask(dcache_resp_id).asUInt
+    }}
+    
+    // replay resp
+    val replay_resp_id = io.dcache.replay_resp.bits.id
     val difftest = Module(new DifftestSbufferEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
-    difftest.io.sbufferResp := io.dcache.pipe_resp.fire()
-    difftest.io.sbufferAddr := getAddr(ptag(dcache_resp_id))
-    difftest.io.sbufferData := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
-    difftest.io.sbufferMask := mask(dcache_resp_id).asUInt
+    difftest.io.index := io.dcache.hit_resps.size.U // use an extra port
+    difftest.io.sbufferResp := io.dcache.replay_resp.fire()
+    difftest.io.sbufferAddr := getAddr(ptag(replay_resp_id))
+    difftest.io.sbufferData := data(replay_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+    difftest.io.sbufferMask := mask(replay_resp_id).asUInt
   }
 
   // ---------------------- Load Data Forward ---------------------
