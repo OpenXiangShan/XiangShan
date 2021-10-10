@@ -215,6 +215,7 @@ class XiangShan(object):
         base_dir = "/home/ci-runner/xsenv/workloads"
         workloads = [
             "bitmanip/bitMisc.bin",
+            "crypto/crypto-riscv64-noop.bin",
             "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
             "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
