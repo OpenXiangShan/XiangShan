@@ -124,17 +124,25 @@ class AluImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
   }
 }
 
+class MduImmExtractor(implicit p: Parameters) extends ImmExtractor(2, 64) {
+  when (SrcType.isImm(io.uop.ctrl.srcType(1))) {
+    val imm32 = ImmUnion.I.toImm32(io.uop.ctrl.imm)
+    io.data_out(1) := SignExt(imm32, XLEN)
+  }
+}
+
 object ImmExtractor {
   def apply(params: RSParams, uop: MicroOp, data_in: Vec[UInt], pc: Option[UInt], target: Option[UInt])
            (implicit p: Parameters): Vec[UInt] = {
-    val immExt = (params.isJump, params.isAlu) match {
-      case (true, false) => {
+    val immExt = (params.isJump, params.isAlu, params.isMul) match {
+      case (true, false, false) => {
         val ext = Module(new JumpImmExtractor)
         ext.jump_pc := pc.get
         ext.jalr_target := target.get
         ext
       }
-      case (false, true) => Module(new AluImmExtractor)
+      case (false, true, false) => Module(new AluImmExtractor)
+      case (false, false, true) => Module(new MduImmExtractor)
       case _ => Module(new ImmExtractor(params.numSrc, params.dataBits))
     }
     immExt.io.uop := uop

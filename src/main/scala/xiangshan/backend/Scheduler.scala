@@ -28,7 +28,7 @@ import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
-import xiangshan.backend.rename.BusyTable
+import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
 import xiangshan.mem.{SqPtr, StoreDataBundle}
 
 import scala.collection.mutable.ArrayBuffer
@@ -195,10 +195,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val isFirstIssue = Output(Bool())
     })) else None
     // special ports for RS that needs to read from other schedulers
+    // In: read response from other schedulers
+    // Out: read request to other schedulers
     val intRfReadIn = if (!outer.hasIntRf && outer.numIntRfReadPorts > 0) Some(Vec(outer.numIntRfReadPorts, Flipped(new RfReadPort(XLEN)))) else None
     val intRfReadOut = if (outer.outIntRfReadPorts > 0) Some(Vec(outer.outIntRfReadPorts, new RfReadPort(XLEN))) else None
     val fpRfReadIn = if (!outer.hasFpRf && outer.numFpRfReadPorts > 0) Some(Vec(outer.numFpRfReadPorts, Flipped(new RfReadPort(XLEN)))) else None
+    val fpStateReadIn = if (!outer.hasFpRf && outer.numFpRfReadPorts > 0) Some(Vec(outer.numFpRfReadPorts, Flipped(new BusyTableReadIO))) else None
     val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
+    val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
@@ -236,7 +240,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
-  if (readIntState.length > 0) {
+  if (readIntState.nonEmpty) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
     busyTable.io.flush := io.flush
     busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
@@ -249,19 +253,28 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     busyTable.io.read <> readIntState
   }
-  val readFpState = dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
-  if (readFpState.length > 0) {
-    val busyTable = Module(new BusyTable(readFpState.length, fpRfWritePorts))
-    busyTable.io.flush := io.flush
-    busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
-      pregAlloc.valid := allocReq.isFp
-      pregAlloc.bits := allocReq.preg
+  val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
+  if (readFpState.nonEmpty) {
+    // Some fp states are read from outside
+    val numInFpStateRead = io.extra.fpStateReadIn.getOrElse(Seq()).length
+    // The left read requests are serviced by internal busytable
+    val numBusyTableRead = readFpState.length - numInFpStateRead
+    if (numBusyTableRead > 0) {
+      val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
+      busyTable.io.flush := io.flush
+      busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
+        pregAlloc.valid := allocReq.isFp
+        pregAlloc.bits := allocReq.preg
+      }
+      busyTable.io.wbPregs.zip(io.writeback.drop(intRfWritePorts)).foreach { case (pregWb, exuWb) =>
+        pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
+        pregWb.bits := exuWb.bits.uop.pdest
+      }
+      busyTable.io.read <> readFpState.take(numBusyTableRead)
     }
-    busyTable.io.wbPregs.zip(io.writeback.drop(intRfWritePorts)).foreach{ case (pregWb, exuWb) =>
-      pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
-      pregWb.bits := exuWb.bits.uop.pdest
+    if (io.extra.fpStateReadIn.isDefined) {
+      io.extra.fpStateReadIn.get <> readFpState.takeRight(numInFpStateRead)
     }
-    busyTable.io.read <> readFpState
   }
   val allocate = dispatch2.flatMap(_.io.out)
 
