@@ -698,12 +698,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // enqueue logic set 6 writebacked to false
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
-      if (EnableIntMoveElim) {
-        eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
-        writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !io.enq.req(i).bits.cf.exceptionVec.asUInt().orR
-      } else {
-        writebacked(enqPtrVec(i).value) := false.B
-      }
+      eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+      writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !io.enq.req(i).bits.cf.exceptionVec.asUInt.orR
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
     }
@@ -755,11 +751,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     wdata.fpWen := req.ctrl.fpWen
     wdata.wflags := req.ctrl.fpu.wflags
     wdata.commitType := req.ctrl.commitType
-    if (EnableIntMoveElim) {
-      wdata.eliminatedMove := req.eliminatedMove
-    } else {
-      wdata.eliminatedMove := DontCare
-    }
+    wdata.eliminatedMove := req.eliminatedMove
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest
     wdata.ftqIdx := req.cf.ftqPtr
@@ -872,10 +864,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   XSPerfAccumulate("commitInstr", ifCommit(trueCommitCnt))
   val commitIsMove = commitDebugUop.map(_.ctrl.isMove)
   XSPerfAccumulate("commitInstrMove", ifCommit(PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m })))
-  if (EnableIntMoveElim) {
-    val commitMoveElim = commitDebugUop.map(_.debugInfo.eliminatedMove)
-    XSPerfAccumulate("commitInstrMoveElim", ifCommit(PopCount(io.commits.valid zip commitMoveElim map { case (v, e) => v && e })))
-  }
+  val commitMoveElim = commitDebugUop.map(_.debugInfo.eliminatedMove)
+  XSPerfAccumulate("commitInstrMoveElim", ifCommit(PopCount(io.commits.valid zip commitMoveElim map { case (v, e) => v && e })))
   XSPerfAccumulate("commitInstrFused", ifCommit(fuseCommitCnt))
   val commitIsLoad = io.commits.info.map(_.commitType).map(_ === CommitType.LOAD)
   val commitLoadValid = io.commits.valid.zip(commitIsLoad).map{ case (v, t) => v && t }
@@ -969,13 +959,9 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
       difftest.io.instr    := RegNext(uop.cf.instr)
       difftest.io.special  := RegNext(uop.ctrl.isFused =/= 0.U)
-      if (EnableIntMoveElim) {
-        // when committing an eliminated move instruction,
-        // we must make sure that skip is properly set to false (output from EXU is random value)
-        difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
-      } else {
-        difftest.io.skip     := RegNext(exuOut.isMMIO || exuOut.isPerfCnt)
-      }
+      // when committing an eliminated move instruction,
+      // we must make sure that skip is properly set to false (output from EXU is random value)
+      difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
       difftest.io.isRVC    := RegNext(uop.cf.pd.isRVC)
       difftest.io.scFailed := RegNext(!uop.diffTestDebugLrScValid &&
         uop.ctrl.fuType === FuType.mou &&

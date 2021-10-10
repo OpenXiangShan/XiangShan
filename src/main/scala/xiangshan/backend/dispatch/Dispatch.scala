@@ -169,11 +169,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedUop(i).psrc(1) := updatedPsrc2(i)
     updatedUop(i).psrc(2) := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
-    if (EnableIntMoveElim) {
-      updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
-    } else {
-      updatedUop(i).debugInfo.eliminatedMove := DontCare
-    }
+    updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
     // update robIdx, lqIdx, sqIdx
@@ -333,15 +329,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     // We use notBlockedByPrevious here.
-    if (EnableIntMoveElim) {
-      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove
-      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
-                             io.enqLsq.canAccept && io.enqRob.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && !io.fromRename(i).bits.eliminatedMove
-    } else {
-      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
-      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
-                             io.enqLsq.canAccept && io.enqRob.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-    }
+    io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove
+    io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
+                           io.enqLsq.canAccept && io.enqRob.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && !io.fromRename(i).bits.eliminatedMove
     io.toIntDq.req(i).bits  := updatedUop(i)
 
     io.toFpDq.needAlloc(i)  := io.fromRename(i).valid && isFp(i)
@@ -373,11 +363,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
       p"rob ${updatedUop(i).robIdx}, lq ${updatedUop(i).lqIdx}, sq ${updatedUop(i).sqIdx})\n"
     )
 
-    if (EnableIntMoveElim) {
-      io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
-    } else {
-      io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U)
-    }
+    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
     io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpWen
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
