@@ -57,15 +57,20 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
     val errors = Output(Vec(readPorts, new L1CacheErrorInfo))
   })
-  val array = VecInit(Seq.fill(nSets)(
-    VecInit(Seq.fill(nWays)(
-      RegInit(0.U(encMetaBits.W))))
-  ))
+//  val meta_array = VecInit(Seq.fill(nSets)(
+//    VecInit(Seq.fill(nWays)(
+//      RegInit(0.U(encMetaBits.W))))
+//  ))
+
+  val meta_array = Reg(Vec(nSets, Vec(nWays, UInt(encMetaBits.W))))
+  when (reset.asBool()) {
+    meta_array := 0.U.asTypeOf(meta_array.cloneType)
+  }
 
   io.read.zip(io.resp).foreach {
     case (read, resp) =>
       read.ready := true.B
-      resp := RegEnable(array(read.bits.idx), read.valid)
+      resp := RegEnable(meta_array(read.bits.idx), read.valid)
   }
   io.write.foreach {
     case write =>
@@ -76,7 +81,7 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
       write.bits.way_en.asBools.zipWithIndex.foreach {
         case (wen, i) =>
           when (write.valid && wen) {
-            array(write.bits.idx)(i) := encMeta
+            meta_array(write.bits.idx)(i) := encMeta
           }
       }
   }

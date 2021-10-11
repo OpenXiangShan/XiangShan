@@ -118,7 +118,7 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   io.data_read.valid := s1_valid && s1_need_data && s2_ready
   io.data_read.bits.way_en := s1_req.way_en
   io.data_read.bits.addr := s1_req.vaddr
-  io.data_read.bits.rmask := ~0.U
+  io.data_read.bits.rmask := ~0.U(DCacheBanks.W)
 
   io.meta_read.valid := io.req.valid && s1_ready
   io.meta_read.bits.idx := addr_to_dcache_set(io.req.bits.vaddr)

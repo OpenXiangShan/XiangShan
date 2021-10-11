@@ -87,7 +87,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 //  meta_read.tag := DontCare
 
   tag_read.idx := get_idx(io.lsu.req.bits.addr)
-  tag_read.way_en := ~0.U
+  tag_read.way_en := ~0.U(nWays.W)
 
   // Pipeline
   // --------------------------------------------------------------------------------

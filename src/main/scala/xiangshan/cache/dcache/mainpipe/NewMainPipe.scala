@@ -456,11 +456,11 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
 
   io.meta_read.valid := req.valid && s1_ready && !set_conflict
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
-  io.meta_read.bits.way_en := ~0.U
+  io.meta_read.bits.way_en := ~0.U(nWays.W)
 
   io.tag_read.valid := req.valid && s1_ready && !set_conflict
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
-  io.tag_read.bits.way_en := ~0.U
+  io.tag_read.bits.way_en := ~0.U(nWays.W)
 
   io.data_read.valid := s1_valid && s1_need_data && s2_ready
   io.data_read.bits.rmask := s1_banked_rmask

@@ -314,7 +314,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   refill.way_en := req.way_en
   refill.wmask := Mux(
     hasData || req.isLoad,
-    ~0.U,
+    ~0.U(DCacheBanks.W),
     VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req.store_mask).orR)).asUInt
   )
   refill.data := refill_data.asTypeOf((new RefillPipeReq).data)
