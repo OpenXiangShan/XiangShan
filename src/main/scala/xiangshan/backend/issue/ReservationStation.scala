@@ -222,11 +222,9 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }) else None
-  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, new Bundle {
-    val memfeedback = Flipped(ValidIO(new RSFeedback()))
-    val rsIdx = Output(UInt(params.indexWidth.W))
-    val isFirstIssue = Output(Bool()) // NOTE: just use for tlb perf cnt
-  })) else None
+  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, 
+    Flipped(new MemRSFeedbackIO) 
+  )) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr())
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
@@ -364,19 +362,27 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect, io.flush)
     statusArray.io.issueGranted(i).valid := issueVec(i).valid && s1_out(i).ready
     statusArray.io.issueGranted(i).bits := issueVec(i).bits
-    // For FMAs that can be scheduled multiple times, only when
-    // all source operands are ready we dequeue the instruction.
-    statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
-    statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
-    statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
-    statusArray.io.deqResp(i).bits.resptype := DontCare
-    statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
     if (io.feedback.isDefined) {
-      statusArray.io.deqResp(i).valid := io.feedback.get(i).memfeedback.valid
-      statusArray.io.deqResp(i).bits.rsMask := UIntToOH(io.feedback.get(i).memfeedback.bits.rsIdx)
-      statusArray.io.deqResp(i).bits.success := io.feedback.get(i).memfeedback.bits.hit
-      statusArray.io.deqResp(i).bits.resptype := io.feedback.get(i).memfeedback.bits.sourceType
-      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := io.feedback.get(i).memfeedback.bits.dataInvalidSqIdx
+      // feedbackSlow
+      statusArray.io.deqResp(2*i).valid := io.feedback.get(i).feedbackSlow.valid
+      statusArray.io.deqResp(2*i).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackSlow.bits.rsIdx)
+      statusArray.io.deqResp(2*i).bits.success := io.feedback.get(i).feedbackSlow.bits.hit
+      statusArray.io.deqResp(2*i).bits.resptype := io.feedback.get(i).feedbackSlow.bits.sourceType
+      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := io.feedback.get(i).feedbackSlow.bits.dataInvalidSqIdx
+      // feedbackFast, for load pipeline only
+      statusArray.io.deqResp(2*i+1).valid := io.feedback.get(i).feedbackFast.valid
+      statusArray.io.deqResp(2*i+1).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackFast.bits.rsIdx)
+      statusArray.io.deqResp(2*i+1).bits.success := io.feedback.get(i).feedbackFast.bits.hit
+      statusArray.io.deqResp(2*i+1).bits.resptype := io.feedback.get(i).feedbackFast.bits.sourceType
+      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
+    } else {
+      // For FMAs that can be scheduled multiple times, only when
+      // all source operands are ready we dequeue the instruction.
+      statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
+      statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
+      statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(i).bits.resptype := DontCare
+      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
     }
 
     if (io.fastWakeup.isDefined) {

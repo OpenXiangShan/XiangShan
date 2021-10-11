@@ -156,9 +156,11 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
+    val dcacheBankConflict = Input(Bool())
     val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
+    val rsFeedback = ValidIO(new RSFeedback)
   })
 
   val isSoftPrefetch = io.in.bits.isSoftPrefetch
@@ -175,6 +177,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   //val s1_mmio = !s1_tlb_miss && io.dtlbResp.bits.mmio
   val s1_mmio = !isSoftPrefetch && actually_mmio
   val s1_mask = io.in.bits.mask
+  val s1_bank_conflict = io.dcacheBankConflict
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
 
@@ -207,7 +210,15 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
   io.fullForwardFast := (~forwardMaskFast & s1_mask) === 0.U
 
-  io.out.valid := io.in.valid// && !s1_tlb_miss
+  // Generate feedback signal caused by dcache bank conflict
+  io.rsFeedback.valid := io.in.valid && s1_bank_conflict
+  io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.sourceType := RSFeedbackType.bankConflict
+  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
+
+  io.out.valid := io.in.valid && !s1_bank_conflict // if bank conflict, load inst will be canceled immediately 
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio && !s1_exception
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -401,7 +412,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val rsFeedback = ValidIO(new RSFeedback)
+    val feedbackSlow = ValidIO(new RSFeedback)
+    val feedbackFast = ValidIO(new RSFeedback)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val dcache = new DCacheLoadIO
@@ -434,6 +446,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
+  load_s1.io.dcacheBankConflict <> io.dcache.s1_bank_conflict
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
@@ -451,9 +464,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   load_s2.io.fastpath <> io.fastpathOut
   load_s2.io.dataInvalidSqIdx := io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
-  io.rsFeedback.bits := RegNext(load_s2.io.rsFeedback.bits)
-  io.rsFeedback.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
+
+  // feedback tlb miss / dcache miss queue full
+  io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
+  io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+
+  // feedback bank conflict to rs
+  io.feedbackFast.bits := load_s1.io.rsFeedback.bits
+  io.feedbackFast.valid := load_s1.io.rsFeedback.valid
+  assert(!(RegNext(RegNext(io.feedbackFast.valid)) && io.feedbackSlow.valid))
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
