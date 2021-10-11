@@ -46,22 +46,20 @@ class NewMainPipeReq(implicit p: Parameters) extends DCacheBundle {
   def isStore: Bool = source === STORE_SOURCE.U
   def isAMO: Bool = source === AMO_SOURCE.U
 
-  def convertStoreReq(store: DecoupledIO[DCacheLineReq]): DecoupledIO[NewMainPipeReq] = {
-    val req = Wire(DecoupledIO(new NewMainPipeReq))
-    req.valid := store.valid
-    req.bits := DontCare
-    req.bits.miss := false.B
-    req.bits.miss_dirty := false.B
-    req.bits.probe := false.B
-    req.bits.probe_need_data := false.B
-    req.bits.source := STORE_SOURCE.U
-    req.bits.cmd := store.bits.cmd
-    req.bits.addr := store.bits.addr
-    req.bits.vaddr := store.bits.vaddr
-    req.bits.store_data := store.bits.data
-    req.bits.store_mask := store.bits.mask
-    req.bits.id := store.bits.id
-    store.ready := req.ready
+  def convertStoreReq(store: DCacheLineReq): NewMainPipeReq = {
+    val req = Wire(new NewMainPipeReq)
+    req := DontCare
+    req.miss := false.B
+    req.miss_dirty := false.B
+    req.probe := false.B
+    req.probe_need_data := false.B
+    req.source := STORE_SOURCE.U
+    req.cmd := store.cmd
+    req.addr := store.addr
+    req.vaddr := store.vaddr
+    req.store_data := store.data
+    req.store_mask := store.mask
+    req.id := store.id
     req
   }
 }
@@ -125,7 +123,9 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
 
   // convert store req to main pipe req, and select a req from store and probe
   val store_req = Wire(DecoupledIO(new NewMainPipeReq))
-  store_req <> (new NewMainPipeReq).convertStoreReq(io.store_req)
+  store_req.bits := (new NewMainPipeReq).convertStoreReq(io.store_req.bits)
+  store_req.valid := io.store_req.valid
+  io.store_req.ready := store_req.ready
   val req_arb = Module(new Arbiter(new NewMainPipeReq, 3))
   req_arb.io.in(0) <> io.atomic_req
   req_arb.io.in(1) <> store_req
@@ -533,7 +533,15 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   io.data_write.bits.wmask := banked_wmask
   io.data_write.bits.data := s3_amo_data_merged
 
-  io.wb.valid := s3_fire && need_wb
+  io.wb.valid := s3_valid && (
+    // probe can go to wbq
+    s3_req.probe && (io.meta_write.ready || !probe_update_meta) ||
+      // amo miss can go to wbq
+      s3_req.miss &&
+        (io.meta_write.ready || !amo_update_meta) &&
+        (io.data_write.ready || !update_data) &&
+        io.tag_write.ready
+    ) && need_wb
   io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
   io.wb.bits.param := writeback_param
   io.wb.bits.voluntary := s3_req.miss

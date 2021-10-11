@@ -453,7 +453,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMissReqPort = 0
 
   // Request
-  val missReqArb = Module(new RRArbiter(new MissReq, MissReqPortCount))
+  val missReqArb = Module(new RRArbiter(new NewMissReq, MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }

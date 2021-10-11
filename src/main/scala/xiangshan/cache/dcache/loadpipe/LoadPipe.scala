@@ -76,13 +76,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // ready can wait for valid
   io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
   io.meta_read.valid := io.lsu.req.fire() && !io.nack
+  io.tag_read.valid := io.lsu.req.fire() && !io.nack
 
   val meta_read = io.meta_read.bits
+  val tag_read = io.tag_read.bits
 
   // Tag read for new requests
   meta_read.idx := get_idx(io.lsu.req.bits.addr)
   meta_read.way_en := ~0.U(nWays.W)
 //  meta_read.tag := DontCare
+
+  tag_read.idx := get_idx(io.lsu.req.bits.addr)
+  tag_read.way_en := ~0.U
 
   // Pipeline
   // --------------------------------------------------------------------------------

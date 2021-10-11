@@ -232,7 +232,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   def should_merge(new_req: NewMissReq): Bool = {
     val block_match = req.addr === get_block_addr(new_req.addr)
-    val beat_match = new_req.addr(blockBytes - 1, beatOffBits) >= grant_beats
+    val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
     block_match &&
     (before_read_sent_can_merge(new_req) ||
       beat_match && before_data_refill_can_merge(new_req))
@@ -240,7 +240,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   def should_reject(new_req: NewMissReq): Bool = {
     val block_match = req.addr === get_block_addr(new_req.addr)
-    val beat_match = new_req.addr(blockBytes - 1, beatOffBits) >= grant_beats
+    val beat_match = new_req.addr(blockOffBits - 1, beatOffBits) >= grant_beats
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
 
     req_valid &&
@@ -336,6 +336,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   refill.alias := req.vaddr(13, 12) // TODO
 
   io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
+  io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
   io.main_pipe_req.bits.miss_param := grant_param
@@ -413,6 +414,8 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     }
     out <> arb.io.out
   }
+
+  io.mem_grant.ready := false.B
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
