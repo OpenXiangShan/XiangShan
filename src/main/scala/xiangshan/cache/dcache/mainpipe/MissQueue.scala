@@ -474,7 +474,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   val pendingVec = entries.map(entry => (entry.tma_io.req.source =/= STORE_SOURCE.U) && (entry.tma_io.state =/= 0.U))
-  ExcitingUtils.addSource(pendingVec.reduce(_||_), "TMA_l1miss")
 
   io.refill.valid := refill_arb.io.out.valid
   io.refill.bits  := refill_arb.io.out.bits
