@@ -19,10 +19,13 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.ClientStates._
+import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-
+import xiangshan.cache.MemoryOpConstants
+import huancun.AliasKey
 import xiangshan.cache._
 import utils._
 
@@ -44,12 +47,11 @@ case class ICacheParameters(
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
+trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst{
   val cacheParams = icacheParameters
   val dataCodeUnit = 8
   val dataUnitNum  = blockBits/dataCodeUnit
 
-  def metaEntryBits = cacheParams.tagCode.width(tagBits)
   def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
   def dataEntryBits = dataCodeBits * dataUnitNum
 
@@ -70,6 +72,21 @@ abstract class ICacheModule(implicit p: Parameters) extends XSModule
 abstract class ICacheArray(implicit p: Parameters) extends XSModule
   with HasICacheParameters
 
+class ICacheMetadata(implicit p: Parameters) extends ICacheBundle {
+  val coh = new ClientMetadata
+  val tag = UInt(tagBits.W)
+}
+
+object ICacheMetadata {
+  def apply(tag: Bits, coh: ClientMetadata)(implicit p: Parameters) = {
+    val meta = Wire(new L1Metadata)
+    meta.tag := tag
+    meta.coh := coh
+    meta
+  }
+}
+
+
 class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 {
   val isDoubleLine  = Bool()
@@ -78,21 +95,23 @@ class ICacheReadBundle(implicit p: Parameters) extends ICacheBundle
 
 class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
 {
-  val tags   = Vec(2,Vec(nWays ,UInt(tagBits.W)))
-  val valid  = Vec(2,Vec(nWays ,Bool()))
-  val errors = Vec(2,Vec(nWays ,Bool()))
+  val metaData   = Vec(2, Vec(nWays, new ICacheMetadata))
+  val valid      = Vec(2, Vec(nWays ,Bool()))
+  val errors     = Vec(2, Vec(nWays ,Bool()))
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
 {
   val virIdx  = UInt(idxBits.W)
   val phyTag  = UInt(tagBits.W)
+  val coh     = new ClientMetadata
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def generate(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(tag:UInt, coh: ClientMetadata, idx:UInt, waymask:UInt, bankIdx: Bool){
     this.virIdx  := idx
     this.phyTag  := tag
+    this.coh     := coh
     this.waymask := waymask
     this.bankIdx   := bankIdx
   }
@@ -134,8 +153,12 @@ class ICacheCommonReadBundle(isMeta: Boolean)(implicit p: Parameters) extends IC
 }
 
 
-class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
+class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 {
+  def onReset = ICacheMetadata(0.U, ClientMetadata.onReset)
+  val metaBits = onReset.getWidth
+  val metaEntryBits = cacheParams.tagCode.width(metaBits)
+
   val io=IO{new Bundle{
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read     = Flipped(DecoupledIO(new ICacheReadBundle))
@@ -190,19 +213,19 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
   }
 
   //Parity Decode
-  val read_tags = Wire(Vec(2,Vec(nWays,UInt(tagBits.W))))
+  val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
   for((tagArray,i) <- tagArrays.zipWithIndex){
-    val read_tag_bits = tagArray.io.r.resp.asTypeOf(Vec(nWays,UInt(metaEntryBits.W)))
-    val read_tag_decoded = read_tag_bits.map{ way_bits => cacheParams.tagCode.decode(way_bits)}
-    val read_tag_wrong = read_tag_decoded.map{ way_bits_decoded => way_bits_decoded.error}
-    val read_tag_corrected = VecInit(read_tag_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
-    read_tags(i) := read_tag_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_tag_wrong(w)}
+    val read_meta_bits = tagArray.io.r.resp.asTypeOf(Vec(nWays,UInt(metaEntryBits.W)))
+    val read_meta_decoded = read_meta_bits.map{ way_bits => cacheParams.tagCode.decode(way_bits)}
+    val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
+    val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
+    read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,UInt(tagBits.W)))
+    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(io.read.fire()) && read_meta_wrong(w)}
   }
 
   //Parity Encode
-  val write = io.write.bits
-  write_meta_bits := cacheParams.tagCode.encode(write.phyTag.asUInt)
+  //val write = io.write.bits
+  //write_meta_bits := cacheParams.tagCode.encode(write.phyTag.asUInt)
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -219,17 +242,17 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
 
   when(io.fencei){ validArray := 0.U }
 
-  io.readResp.tags <> DontCare
+  io.readResp.metaData <> DontCare
   when(port_0_read_0_reg){
-    io.readResp.tags(0) := read_tags(0)
+    io.readResp.metaData(0) := read_metas(0)
   }.elsewhen(port_0_read_1_reg){
-    io.readResp.tags(0) := read_tags(1)
+    io.readResp.metaData(0) := read_metas(1)
   }
 
   when(port_1_read_0_reg){
-    io.readResp.tags(1) := read_tags(0)
+    io.readResp.metaData(1) := read_metas(0)
   }.elsewhen(port_1_read_1_reg){
-    io.readResp.tags(1) := read_tags(1)
+    io.readResp.metaData(1) := read_metas(1)
   }
 
   (io.readResp.valid zip validMetas).map  {case (io, reg)   => io := reg.asTypeOf(Vec(nWays,Bool()))}
@@ -322,18 +345,18 @@ abstract class ICacheMissQueueBundle(implicit p: Parameters) extends XSBundle
 
 class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 {
-    val addr      = UInt(PAddrBits.W)
-    val vSetIdx   = UInt(idxBits.W)
+    val paddr      = UInt(PAddrBits.W)
+    val vaddr      = UInt(VAddrBits.W)
     val waymask   = UInt(nWays.W)
+    //coh
+    val cmd       = UInt(M_SZ.W)
+    val coh       = new ClientMetadata
 
-    def generate(missAddr:UInt, missIdx:UInt, missWaymask:UInt) = {
-      this.addr := missAddr
-      this.vSetIdx  := missIdx
-      this.waymask := missWaymask
-    }
-    override def toPrintable: Printable = {
-      p"addr=0x${Hexadecimal(addr)} vSetIdx=0x${Hexadecimal(vSetIdx)} waymask=${Binary(waymask)}"
-    }
+    def getVirSetIdx = get_idx(vaddr)
+    def getPhyTag    = get_phy_tag(paddr)
+//    override def toPrintable: Printable = {
+//      p"addr=0x${Hexadecimal(addr)} vSetIdx=0x${Hexadecimal(vSetIdx)} waymask=${Binary(waymask)}"
+//    }
 }
 
 class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
@@ -352,11 +375,13 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val io = IO(new Bundle{
         val id          = Input(UInt(log2Ceil(nMissEntries).W))
 
-        val req         = Flipped(ValidIO(new ICacheMissReq))
+        val req         = Flipped(DecoupledIO(new ICacheMissReq))
         val resp        = ValidIO(new ICacheMissResp)
       
+        //tilelink channel
         val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
         val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+        val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
 
         val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
         val data_write  = DecoupledIO(new ICacheDataWriteBundle)
@@ -377,22 +402,21 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     io.mem_grant.ready  := true.B
     io.meta_write.bits  := DontCare
     io.data_write.bits  := DontCare
-    val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_resp :: Nil = Enum(5)
+
+    val s_idle :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack ::s_wait_resp :: Nil = Enum(6)
     val state = RegInit(s_idle)
 
     /** control logic transformation*/
     //request register
     val req = Reg(new ICacheMissReq)
-    val req_idx = req.vSetIdx         //virtual index
-    val req_tag = get_phy_tag(req.addr)           //physical tag
+    val req_idx = req.getVirSetIdx         //virtual index
+    val req_tag = req.getPhyTag           //physical tag
     val req_waymask = req.waymask
 
     val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
     //flush register
     val has_flushed = generateStateReg(enable = io.flush && (state =/= s_idle) && (state =/= s_wait_resp), release = (state=== s_wait_resp))
-    //    when(io.flush && (state =/= s_idle) && (state =/= s_wait_resp)){ has_flushed := true.B }
-    //    .elsewhen((state=== s_wait_resp) && has_flushed){ has_flushed := false.B }
 
     //cacheline register
     //refullCycles: 8 for 64-bit bus bus and 2 for 256-bit
@@ -406,12 +430,12 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     io.meta_write.bits := DontCare
     io.data_write.bits := DontCare
     def shoud_direct_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
-       req_valid && (req.addr === get_block_addr(new_req.addr).asUInt) && state === s_wait_resp && has_flushed
+       req_valid && (req_idx === new_req.getVirSetIdx) && (req_tag === new_req.getPhyTag) && state === s_wait_resp && has_flushed
     }
 
      //WARNING: directly response may be timing critical
      def should_merge_before_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
-       req_valid &&  (req.addr === get_block_addr(new_req.addr).asUInt) && state =/= s_idle && state =/= s_wait_resp && has_flushed
+       req_valid &&  (req_idx === new_req.getVirSetIdx) && (req_tag === new_req.getPhyTag) && state =/= s_idle && state =/= s_wait_resp && has_flushed
      }
 
      val req_should_merge = should_merge_before_resp(new_req = io.req.bits, req_valid = io.req.valid)
@@ -423,36 +447,47 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
      }
 
     io.req.ready := (state === s_idle)
-    io.mem_acquire.valid := (state === s_memReadReq) && !io.flush
+    io.mem_acquire.valid := (state === s_send_mem_aquire) && !io.flush
 
+    val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
+    val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+    val is_grant_reg = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
+    val is_grant_wire =  edge.isRequest(io.mem_grant.bits) && io.mem_grant.fire()
 
     //state change
     switch(state){
       is(s_idle){
         when(io.req.valid && !io.flush){
           readBeatCnt := 0.U
-          state := s_memReadReq
+          state := s_send_mem_aquire
           req := io.req.bits
         }
       }
 
       // memory request
-      is(s_memReadReq){ 
+      is(s_send_mem_aquire){ 
         when(io.mem_acquire.fire() && !io.flush){
-          state := s_memReadResp
+          state := s_wait_mem_grant
         }
       }
 
-      is(s_memReadResp){
+      is(s_wait_mem_grant){
         when (edge.hasData(io.mem_grant.bits)) {
           when (io.mem_grant.fire()) {
             readBeatCnt := readBeatCnt + 1.U
             respDataReg(readBeatCnt) := io.mem_grant.bits.data
+            grant_param := io.mem_grant.bits.param
             when (readBeatCnt === (refillCycles - 1).U) {
               assert(refill_done, "refill not done!")
-              state :=s_write_back
+              state := Mux(is_grant_wire, s_send_grant_ack ,s_write_back)
             }
           }
+        }
+      }
+
+      is(s_send_grant_ack){
+        when(io.mem_finish.fire()){
+          state := s_write_back
         }
       }
 
@@ -467,17 +502,37 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     }
 
     /** refill write and meta write */
+    /** update coh meta*/
+    def missCohGen(param:UInt):UInt = {
+      MuxLookup(param, Nothing, Seq(
+        toB    ->   Branch,
+        toT    ->   Trunk))
+    }
+    val miss_new_coh = ClientMetadata(missCohGen(grant_param))
+
     io.meta_write.valid := (state === s_write_back)
-    io.meta_write.bits.generate(tag=req_tag, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
+    io.meta_write.bits.generate(tag=req_tag, coh = miss_new_coh,  idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
    
     io.data_write.valid := (state === s_write_back)
     io.data_write.bits.generate(data=respDataReg.asUInt, idx=req_idx, waymask=req_waymask, bankIdx=req_idx(0))
 
     /** Tilelink request for next level cache/memory */
-    io.mem_acquire.bits  := edge.Get(
-      fromSource      = io.id,
-      toAddress       = Cat(req.addr(PAddrBits - 1, log2Ceil(blockBytes)), 0.U(log2Ceil(blockBytes).W)),
-      lgSize          = (log2Up(cacheParams.blockBytes)).U)._2
+    val grow_param = req.coh.onAccess(req.cmd)._2
+    val acquireBlock = edge.AcquireBlock(
+      fromSource = io.id,
+      toAddress  = addrAlign(req.paddr, blockBytes, PAddrBits),
+      lgSize     = (log2Up(cacheParams.blockBytes)).U,
+      growPermissions = grow_param
+    )._2
+    io.mem_acquire.bits  :=  acquireBlock
+    // resolve cache alias by L2
+    io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+    require(nSets <= 256) // icache size should not be more than 128KB
+
+    /** Grant ACK */
+    io.mem_finish.valid := (state === s_send_grant_ack) && is_grant_reg
+    io.mem_finish.bits  := grantack
+
 
     //resp to ifu
     io.resp.valid := (state === s_wait_resp && !has_flushed) || req_should_direct_resp || (has_merged && state === s_wait_resp)

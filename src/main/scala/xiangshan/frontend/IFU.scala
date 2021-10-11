@@ -34,9 +34,7 @@ trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
 }
 
 trait HasIFUConst extends HasXSParameter {
-  def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
-  // def groupAligned(pc: UInt)  = align(pc, groupBytes)
-  // def packetAligned(pc: UInt) = align(pc, packetBytes)
+  def addrAlign(addr: UInt, bytes: Int, highest: Int): UInt = Cat(addr(highest-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
 }
 
 class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
@@ -54,7 +52,7 @@ class ICacheInterface(implicit p: Parameters) extends XSBundle {
   val toMissQueue   = Vec(2,Decoupled(new ICacheMissReq))
   val fromIMeta     = Input(new ICacheMetaRespBundle)
   val fromIData     = Input(new ICacheDataRespBundle)
-  val fromMissQueue = Vec(2,Flipped(Decoupled(new ICacheMissResp)))
+  val fromMissQueue = Vec(2,Flipped(ValidIO(new ICacheMissResp)))
 }
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
@@ -283,8 +281,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(8)
   val wait_state = RegInit(wait_idle)
 
-  fromMissQueue.map{port => port.ready := true.B}
-
   val (miss0_resp, miss1_resp) = (fromMissQueue(0).fire(), fromMissQueue(1).fire())
   val (bank0_fix, bank1_fix)   = (miss0_resp  && !f2_bank_hit(0), miss1_resp && f2_doubleLine && !f2_bank_hit(1))
 
@@ -375,7 +371,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     toMissQueue(i).bits.addr    := f2_pAddrs(i)
     toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
     toMissQueue(i).bits.waymask := f2_waymask(i)
-    toMissQueue(i).bits.clientID :=0.U
   }
 
   val miss_all_fix       = (wait_state === wait_finish)
