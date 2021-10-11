@@ -134,11 +134,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
   }
 
-  def addr_to_dcache_tag(addr: UInt) = {
-    require(addr.getWidth == (DCacheTagOffset + tagBits))
-    addr.tail(DCacheTagOffset)
-  }
-
   def get_data_of_bank(bank: Int, data: UInt) = {
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBits)
     data(DCacheSRAMRowBits * (bank + 1) - 1, DCacheSRAMRowBits * bank)

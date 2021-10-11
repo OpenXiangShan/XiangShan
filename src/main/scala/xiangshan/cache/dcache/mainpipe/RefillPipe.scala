@@ -39,7 +39,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.req.ready := io.data_write.ready && io.meta_write.ready && io.tag_write.ready
 
   val idx = io.req.bits.idx
-  val tag = addr_to_dcache_tag(io.req.bits.addr)
+  val tag = get_tag(io.req.bits.addr)
 
   io.data_write.valid := io.req.valid
   io.data_write.bits.addr := io.req.bits.paddrWithVirtualAlias
