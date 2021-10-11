@@ -436,11 +436,11 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       stateVec(dcache_resp_id).w_pipe_resp := false.B
+      assert(!resp.bits.replay)
+      assert(!resp.bits.miss) // not need to resp if miss, to be opted
+      assert(stateVec(dcache_resp_id).w_pipe_resp === true.B)
+      assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
-    assert(!resp.bits.replay)
-    assert(!resp.bits.miss) // not need to resp if miss, to be opted
-    assert(stateVec(dcache_resp_id).w_pipe_resp === true.B)
-    assert(stateVec(dcache_resp_id).state_inflight === true.B)
   })
 
   // replay resp
