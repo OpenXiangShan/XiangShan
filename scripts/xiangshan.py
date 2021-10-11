@@ -32,6 +32,8 @@ class XSArgs(object):
     am_home = os.path.join(noop_home, "../nexus-am")
     dramsim3_home = os.path.join(noop_home, "../DRAMsim3")
     rvtest_home = os.path.join(noop_home, "../riscv-tests")
+    default_wave_home = os.path.join(noop_home, "build")
+    wave_home   = default_wave_home
 
     def __init__(self, args):
         # all path environment variables that should be set
@@ -58,11 +60,17 @@ class XSArgs(object):
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
         self.fork = not args.disable_fork
+        # wave dump path
+        if args.wave_dump is not None:   
+            self.set_wave_home(args.wave_dump)
+        else:
+            self.set_wave_home(self.default_wave_home)
 
     def get_env_variables(self):
         all_env = {
             "NOOP_HOME"    : self.noop_home,
             "NEMU_HOME"    : self.nemu_home,
+            "WAVE_HOME"    : self.wave_home,
             "AM_HOME"      : self.am_home,
             "DRAMSIM3_HOME": self.dramsim3_home
         }
@@ -136,6 +144,10 @@ class XSArgs(object):
 
     def set_rvtest_home(self, path):
         self.rvtest_home = path
+
+    def set_wave_home(self, path):
+        print(f"set wave home to {path}")
+        self.wave_home = path    
 
 # XiangShan environment
 class XiangShan(object):
@@ -260,6 +272,9 @@ class XiangShan(object):
             print(target)
             ret = self.run_emu(target)
             if ret:
+                if self.args.default_wave_home != self.args.wave_home:
+                    print("copy wave file to " + self.args.wave_home)
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
                 return ret
         return 0
 
@@ -276,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
     parser.add_argument('--dramsim3', nargs='?', type=str, help='path to dramsim3')
     parser.add_argument('--rvtest', nargs='?', type=str, help='path to riscv-tests')
+    parser.add_argument('--wave-dump', nargs='?', type=str , help='path to dump wave')
     # chisel arguments
     parser.add_argument('--disable-log', action='store_true', help='disable log')
     parser.add_argument('--num-cores', type=int, help='number of cores')
@@ -288,6 +304,7 @@ if __name__ == "__main__":
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
+    # ci action head sha
 
     args = parser.parse_args()
 
