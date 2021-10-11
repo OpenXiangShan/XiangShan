@@ -22,8 +22,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbPtwIO, TlbReq, TlbResp, TlbCmd, TlbRequestIO, TLB}
+import xiangshan.cache.mmu.{TLB, TlbCmd, TlbPtwIO, TlbReq, TlbRequestIO, TlbResp}
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -87,6 +88,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.vaddr := s0_vaddr
   io.dtlbReq.bits.cmd := TlbCmd.read
+  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.robIdx := s0_uop.robIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
@@ -253,19 +255,24 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val out = Decoupled(new LsPipelineBundle)
     val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
+    val pmpResp = Input(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
+    val dcache_kill = Output(Bool())
   })
+
+  val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
+  excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
+  val s2_exception = selectLoad(excep, false).asUInt.orR
 
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_data_invalid = io.lsq.dataInvalid
-  val s2_exception = selectLoad(io.in.bits.uop.cf.exceptionVec, false).asUInt.orR
   val s2_mmio = io.in.bits.mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
@@ -280,7 +287,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
 
   // assert(!s2_forward_fail)
-
+  io.dcache_kill := io.in.valid && io.pmpResp.ld
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid) && (!isSoftPreExcept) && (!isSoftPremmio)), "DCache response got lost")
@@ -345,6 +352,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // if forward fail, replay this inst
   io.out.bits.uop.ctrl.replayInst := s2_forward_fail && !s2_mmio
   io.out.bits.mmio := s2_mmio
+  io.out.bits.uop.cf.exceptionVec := excep
 
   // For timing reasons, sometimes we can not let
   // io.out.bits.miss := s2_cache_miss && !s2_exception && !fullForward
@@ -418,6 +426,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
 
     val tlb = new TlbRequestIO
+    val pmp = Input(new PMPRespBundle()) // arrive same to tlb now
+
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
@@ -446,7 +456,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
+  io.dcache.s2_kill <> load_s2.io.dcache_kill
   load_s2.io.dcacheResp <> io.dcache.resp
+  load_s2.io.pmpResp <> io.pmp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
   load_s2.io.lsq.forwardMaskFast <> io.lsq.forward.forwardMaskFast // should not be used in load_s2

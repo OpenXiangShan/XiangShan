@@ -36,6 +36,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -427,4 +428,13 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val sbuffer_threshold = Output(UInt(4.W))
   // Rename
   val move_elim_enable = Output(Bool())
+  // distribute csr write signal
+  val distribute_csr = new DistributedCSRIO()
+}
+
+class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
 }
