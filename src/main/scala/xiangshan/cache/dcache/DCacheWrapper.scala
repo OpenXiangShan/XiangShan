@@ -262,6 +262,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s1_paddr = Output(UInt(PAddrBits.W))
   val s1_hit_way = Input(UInt(nWays.W))
   val s1_disable_fast_wakeup = Input(Bool())
+  val s1_bank_conflict = Input(Bool())
 }
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle
