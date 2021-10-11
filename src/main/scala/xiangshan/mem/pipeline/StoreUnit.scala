@@ -22,8 +22,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TlbPtwIO, TlbRequestIO, TlbReq, TlbResp, TlbCmd, TLB}
+import xiangshan.cache.mmu.{TLB, TlbCmd, TlbPtwIO, TlbReq, TlbRequestIO, TlbResp}
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
@@ -49,6 +50,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
   io.dtlbReq.bits.cmd := TlbCmd.write
+  io.dtlbReq.bits.size := LSUOpType.size(io.in.bits.uop.ctrl.fuOpType)
   io.dtlbReq.bits.robIdx := io.in.bits.uop.robIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlbReq.bits.debug.isFirstIssue := io.isFirstIssue
@@ -117,7 +119,6 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     io.rsFeedback.bits.rsIdx
   )
 
-
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
   io.lsq.valid := io.in.valid && !s1_tlb_miss
@@ -142,11 +143,13 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
+    val pmpResp = Input(new PMPRespBundle)
     val out = Decoupled(new LsPipelineBundle)
   })
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.st
   io.out.valid := io.in.valid
 
 }
@@ -176,8 +179,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val rsFeedback = ValidIO(new RSFeedback)
+    val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
+    val pmp = Input(new PMPRespBundle())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -198,10 +202,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
-  store_s1.io.rsFeedback <> io.rsFeedback
+  store_s1.io.rsFeedback <> io.feedbackSlow
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
+  store_s2.io.pmpResp <> io.pmp
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
   store_s3.io.stout <> io.stout
@@ -218,5 +223,4 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   printPipeLine(store_s0.io.out.bits, store_s0.io.out.valid, "S0")
   printPipeLine(store_s1.io.out.bits, store_s1.io.out.valid, "S1")
-
 }

@@ -98,10 +98,7 @@ trait HasCSRConst {
 
   // Machine Memory Protection
   // TBD
-  val Pmpcfg0       = 0x3A0
-  val Pmpcfg1       = 0x3A1
-  val Pmpcfg2       = 0x3A2
-  val Pmpcfg3       = 0x3A3
+  val PmpcfgBase    = 0x3A0
   val PmpaddrBase   = 0x3B0
 
   // Machine Counter/Timers

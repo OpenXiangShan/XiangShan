@@ -36,6 +36,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -55,6 +56,7 @@ object RSFeedbackType {
   val tlbMiss = 0.U(2.W)
   val mshrFull = 1.U(2.W)
   val dataInvalid = 2.U(2.W)
+  val bankConflict = 3.U(2.W)
 
   def apply() = UInt(2.W)
 }
@@ -347,6 +349,15 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val sourceType = RSFeedbackType()
 }
 
+class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
+  // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
+  // for instance: MemRSFeedbackIO()(updateP)
+  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
+  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+  val isFirstIssue = Input(Bool())
+}
+
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
@@ -417,4 +428,13 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val sbuffer_threshold = Output(UInt(4.W))
   // Rename
   val move_elim_enable = Output(Bool())
+  // distribute csr write signal
+  val distribute_csr = new DistributedCSRIO()
+}
+
+class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
 }
