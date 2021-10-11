@@ -195,19 +195,27 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // read LFST in rename stage
   for (i <- 0 until DecodeWidth) {
     // If store-load pair is in the same dispatch bundle, loadWaitBit should also be set for load
-    val hitInDispatchBundle = if(i > 0){
-      (0 until i).map(j =>
+    val hitInDispatchBundleVec = if(i > 0){
+      WireInit(VecInit((0 until i).map(j =>
         io.dispatch(j).valid && io.dispatch(j).bits.ssid === io.lookup.raddr(i)
-      ).reduce(_||_)
+      )))
     } else {
-      false.B
+      WireInit(VecInit(Seq(false.B))) // DontCare
     }
+    val hitInDispatchBundle = hitInDispatchBundleVec.asUInt.orR
     // Check if store set is valid in LFST
     io.lookup.rdata(i) := (
         (valid(io.lookup.raddr(i)) || hitInDispatchBundle) && io.lookup.ren(i) ||
         io.csrCtrl.no_spec_load // set loadWaitBit for all loads
       ) && !io.csrCtrl.lvpred_disable
     io.lookup.sqIdx(i) := lastSqIdx(io.lookup.raddr(i))
+    if(i > 0){
+      (0 until i).map(j =>
+        when(hitInDispatchBundleVec(j)){
+          io.lookup.sqIdx(i) := io.dispatch(j).bits.sqIdx
+        }
+      )
+    }
   }
 
   // when store is issued, mark it as invalid
