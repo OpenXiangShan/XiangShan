@@ -131,7 +131,7 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   io.meta_write.bits.tag := s2_req.tag // only used to calculate ecc
 
   io.wb.valid := s2_valid && io.meta_write.ready
-  io.wb.bits.addr := Cat(s2_req.tag, get_untag(s2_req.vaddr))
+  io.wb.bits.addr := get_block_addr(Cat(s2_req.tag, get_untag(s2_req.vaddr)))
   val (_, release_param, _) = s2_coh.onCacheControl(M_FLUSH)
   io.wb.bits.param := release_param
   io.wb.bits.voluntary := true.B
