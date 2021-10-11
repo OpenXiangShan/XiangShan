@@ -66,9 +66,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // in
     val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-    val replay = Vec(exuParameters.LsExuCnt, ValidIO(new RSFeedback))
-    val rsIdx = Vec(exuParameters.LsExuCnt, Input(UInt(log2Up(IssQueSize).W)))
-    val isFirstIssue = Vec(exuParameters.LsExuCnt, Input(Bool()))
+    val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO) 
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
@@ -200,9 +198,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.redirect
     loadUnits(i).io.flush         <> io.flush
-    loadUnits(i).io.rsFeedback    <> io.replay(i)
-    loadUnits(i).io.rsIdx         := io.rsIdx(i) // TODO: beautify it
-    loadUnits(i).io.isFirstIssue  := io.isFirstIssue(i) // NOTE: just for dtlb's perf cnt
+    loadUnits(i).io.feedbackSlow  <> io.rsfeedback(i).feedbackSlow
+    loadUnits(i).io.feedbackFast  <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.rsIdx         := io.rsfeedback(i).rsIdx
+    loadUnits(i).io.isFirstIssue  := io.rsfeedback(i).isFirstIssue // NOTE: just for dtlb's perf cnt
     loadUnits(i).io.loadFastMatch <> io.loadFastMatch(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> io.issue(i)
@@ -242,16 +241,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
-    stu.io.redirect    <> io.redirect
-    stu.io.flush       <> io.flush
-    stu.io.rsFeedback <> io.replay(exuParameters.LduCnt + i)
-    stu.io.rsIdx       <> io.rsIdx(exuParameters.LduCnt + i)
+    stu.io.redirect     <> io.redirect
+    stu.io.flush        <> io.flush
+    stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
+    stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
-    stu.io.isFirstIssue <> io.isFirstIssue(exuParameters.LduCnt + i)
-    stu.io.stin        <> io.issue(exuParameters.LduCnt + i)
-    stu.io.lsq         <> lsq.io.storeIn(i)
+    stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
+    stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
+    stu.io.lsq          <> lsq.io.storeIn(i)
     // l0tlb
     stu.io.tlb          <> dtlb_st(i).requestor(0)
+
+    // store unit does not need fast feedback
+    io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
     // Lsq to load unit's rs
     lsq.io.storeDataIn(i) := stData(i)
@@ -341,7 +343,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.in.bits  := Mux(st0_atomics, io.issue(atomic_rs0).bits, io.issue(atomic_rs1).bits)
   atomicsUnit.io.storeDataIn.valid := st0_data_atomics || st1_data_atomics
   atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, stData(0).bits, stData(1).bits)
-  atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsIdx(atomic_rs0), io.rsIdx(atomic_rs1))
+  atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsfeedback(atomic_rs0).rsIdx, io.rsfeedback(atomic_rs1).rsIdx)
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
 
@@ -364,14 +366,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   when (state === s_atomics_0) {
-    atomicsUnit.io.rsFeedback <> io.replay(atomic_rs0)
+    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs0).feedbackSlow
 
-    assert(!storeUnits(0).io.rsFeedback.valid)
+    assert(!storeUnits(0).io.feedbackSlow.valid)
   }
   when (state === s_atomics_1) {
-    atomicsUnit.io.rsFeedback <> io.replay(atomic_rs1)
+    atomicsUnit.io.feedbackSlow <> io.rsfeedback(atomic_rs1).feedbackSlow
 
-    assert(!storeUnits(1).io.rsFeedback.valid)
+    assert(!storeUnits(1).io.feedbackSlow.valid)
   }
 
   lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx

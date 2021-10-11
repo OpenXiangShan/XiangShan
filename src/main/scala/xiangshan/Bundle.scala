@@ -55,6 +55,7 @@ object RSFeedbackType {
   val tlbMiss = 0.U(2.W)
   val mshrFull = 1.U(2.W)
   val dataInvalid = 2.U(2.W)
+  val bankConflict = 3.U(2.W)
 
   def apply() = UInt(2.W)
 }
@@ -345,6 +346,15 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
+}
+
+class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
+  // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
+  // for instance: MemRSFeedbackIO()(updateP)
+  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
+  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+  val isFirstIssue = Input(Bool())
 }
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {

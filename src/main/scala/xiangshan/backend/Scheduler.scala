@@ -189,11 +189,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   class SchedulerExtraIO extends XSBundle {
     // feedback ports
-    val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, new Bundle {
-      val replay = Flipped(ValidIO(new RSFeedback()(updatedP)))
-      val rsIdx = Output(UInt(log2Up(memRsEntries).W))
-      val isFirstIssue = Output(Bool())
-    })) else None
+    val feedback = if (outer.numReplayPorts > 0) Some(Vec(outer.numReplayPorts, Flipped(new MemRSFeedbackIO()(updatedP)))) else None
     // special ports for RS that needs to read from other schedulers
     // In: read response from other schedulers
     // Out: read request to other schedulers
@@ -358,7 +354,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val feedback = io.extra.feedback.get.slice(feedbackIdx, feedbackIdx + width)
       require(feedback(0).rsIdx.getWidth == rs.io.feedback.get(0).rsIdx.getWidth)
       rs.io.feedback.get.zip(feedback).foreach{ case (r, f) =>
-        r.memfeedback <> f.replay
+        r.feedbackFast <> f.feedbackFast
+        r.feedbackSlow <> f.feedbackSlow
         r.rsIdx <> f.rsIdx
         r.isFirstIssue <> f.isFirstIssue
       }

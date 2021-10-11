@@ -176,7 +176,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
-    val rsFeedback = ValidIO(new RSFeedback)
+    val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
@@ -198,7 +198,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
-  store_s1.io.rsFeedback <> io.rsFeedback
+  store_s1.io.rsFeedback <> io.feedbackSlow
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
