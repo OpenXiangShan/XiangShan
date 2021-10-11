@@ -40,21 +40,22 @@ REMOTE ?= localhost
 .DEFAULT_GOAL = verilog
 
 help:
-	mill XiangShan.test.runMain $(SIMTOP) --help
+##	mill XiangShan.test.runMain $(SIMTOP) --help
+	sbt "test:runMain $(SIMTOP) --help"
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(FPGATOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	sbt "runMain $(FPGATOP) -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --remove-assert --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)"
 	$(MEM_GEN) $(@D)/$(@F).conf --tsmc28 --output_file $(@D)/tsmc28_sram.v > $(@D)/tsmc28_sram.v.conf
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/sim_sram.v
-	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+#	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+#	@git log -n 1 >> .__head__
+#	@git diff >> .__diff__
+#	@sed -i 's/^/\/\// ' .__head__
+#	@sed -i 's/^/\/\//' .__diff__
+#	@cat .__head__ .__diff__ $@ > .__out__
+#	@mv .__out__ $@
+#	@rm .__head__ .__diff__
 
 deploy: build/top.zip
 
@@ -71,18 +72,19 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+#	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)
+	sbt "test:runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf $(SIM_ARGS)"
 	$(MEM_GEN) $(@D)/$(@F).conf --output_file $(@D)/$(@F).sram.v
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
-	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
-	date -R
+#	@git log -n 1 >> .__head__
+#	@git diff >> .__diff__
+#	@sed -i 's/^/\/\// ' .__head__
+#	@sed -i 's/^/\/\//' .__diff__
+#	@cat .__head__ .__diff__ $@ $(@D)/$(@F).sram.v > .__out__
+#	@mv .__out__ $@
+#	@rm .__head__ .__diff__
+#	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
+#	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+#	date -R
 
 EMU_TOP      = XSSimSoC
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -196,12 +198,12 @@ $(EMU_VCS): $(VCS_SRC_FILE) $(VCS_TB_FILE)
 	rm -rf csrc
 	vcs $(VCS_OPTS) $(VCS_SRC_FILE) $(VCS_TB_FILE)
 
-ifndef NEMU_HOME
-$(error NEMU_HOME is not set)
-endif
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-$(REF_SO):
-	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
+#ifndef NEMU_HOME
+#$(error NEMU_HOME is not set)
+#endif
+#REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
+#$(REF_SO):
+#	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 LOCK = /var/emu/emu.lock
 LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
@@ -244,9 +246,9 @@ else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
 
-ifndef NOOP_HOME
-$(error NOOP_HOME is not set)
-endif
+#ifndef NOOP_HOME
+#$(error NOOP_HOME is not set)
+#endif
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM) $(EMU_ARGS)
 
 emu: $(EMU)
