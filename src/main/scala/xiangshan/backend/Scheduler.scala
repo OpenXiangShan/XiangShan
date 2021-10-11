@@ -230,12 +230,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // feedback ports
     val extra = new SchedulerExtraIO
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
+    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   val dispatch2 = outer.dispatch2.map(_.module)
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
+  val intbtperfEvents = Wire(new PerfEventsBundle(numPCntCtrl))
+  val fpbtperfEvents = Wire(new PerfEventsBundle(numPCntCtrl))
   if (readIntState.length > 0) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
     busyTable.io.flush := io.flush
@@ -247,6 +250,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
       pregWb.bits := exuWb.bits.uop.pdest
     }
+    intbtperfEvents <> busyTable.io.perfEvents
     busyTable.io.read <> readIntState
   }
   val readFpState = dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
@@ -261,6 +265,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.fpWen
       pregWb.bits := exuWb.bits.uop.pdest
     }
+    fpbtperfEvents <> busyTable.io.perfEvents
     busyTable.io.read <> readFpState
   }
   val allocate = dispatch2.flatMap(_.io.out)
@@ -439,4 +444,32 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
+  for(i <- 0 until numPCntCtrl ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+    intbtperfEvents.PerfEvents(i ).incr_valid := DontCare
+    intbtperfEvents.PerfEvents(i ).incr_step  := DontCare
+    fpbtperfEvents.PerfEvents(i ).incr_valid := DontCare
+    fpbtperfEvents.PerfEvents(i ).incr_step  := DontCare
+  }
+  io.perfEvents.PerfEvents(20 ).incr_valid  := PopCount(allocate.map(_.fire())).asUInt.orR  
+  io.perfEvents.PerfEvents(20 ).incr_step   := PopCount(allocate.map(_.fire()))   
+  io.perfEvents.PerfEvents(21 ).incr_valid  := PopCount(io.issue.map(_.fire)).asUInt.orR  
+  io.perfEvents.PerfEvents(21 ).incr_step   := PopCount(io.issue.map(_.fire))   
+  io.perfEvents.PerfEvents(22 ).incr_valid  := intbtperfEvents.PerfEvents(0 ).incr_valid  
+  io.perfEvents.PerfEvents(22 ).incr_step   := intbtperfEvents.PerfEvents(0 ).incr_step   
+  io.perfEvents.PerfEvents(23 ).incr_valid  := intbtperfEvents.PerfEvents(1 ).incr_valid  
+  io.perfEvents.PerfEvents(23 ).incr_step   := intbtperfEvents.PerfEvents(1 ).incr_step   
+  io.perfEvents.PerfEvents(24 ).incr_valid  := intbtperfEvents.PerfEvents(2 ).incr_valid  
+  io.perfEvents.PerfEvents(24 ).incr_step   := intbtperfEvents.PerfEvents(2 ).incr_step   
+  io.perfEvents.PerfEvents(25 ).incr_valid  := intbtperfEvents.PerfEvents(3 ).incr_valid  
+  io.perfEvents.PerfEvents(25 ).incr_step   := intbtperfEvents.PerfEvents(3 ).incr_step   
+  io.perfEvents.PerfEvents(26 ).incr_valid  :=  fpbtperfEvents.PerfEvents(0 ).incr_valid  
+  io.perfEvents.PerfEvents(26 ).incr_step   :=  fpbtperfEvents.PerfEvents(0 ).incr_step   
+  io.perfEvents.PerfEvents(27 ).incr_valid  :=  fpbtperfEvents.PerfEvents(1 ).incr_valid  
+  io.perfEvents.PerfEvents(27 ).incr_step   :=  fpbtperfEvents.PerfEvents(1 ).incr_step   
+  io.perfEvents.PerfEvents(28 ).incr_valid  :=  fpbtperfEvents.PerfEvents(2 ).incr_valid  
+  io.perfEvents.PerfEvents(28 ).incr_step   :=  fpbtperfEvents.PerfEvents(2 ).incr_step   
+  io.perfEvents.PerfEvents(29 ).incr_valid  :=  fpbtperfEvents.PerfEvents(3 ).incr_valid  
+  io.perfEvents.PerfEvents(29 ).incr_step   :=  fpbtperfEvents.PerfEvents(3 ).incr_step   
 }

@@ -357,7 +357,7 @@ trait HasXSParameter {
 
   val numPCntCSR      = 32
   val numPCntFrontend = 64
-  val numPCntctrl     = 64
+  val numPCntCtrl     = 64
   val numPCntIntBlock = 64
   val numPCntFpBlock  = 64
   val numPCntLsuBlock = 64

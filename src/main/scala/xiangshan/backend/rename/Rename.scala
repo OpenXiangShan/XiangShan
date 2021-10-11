@@ -45,6 +45,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     // for debug printing
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   // create free list and rat
@@ -394,7 +395,7 @@ class Rename(implicit p: Parameters) extends XSModule {
   }
 
   if (EnableIntMoveElim) {
-    XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
+    XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove))) 
     XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
     XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
     XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
@@ -414,4 +415,39 @@ class Rename(implicit p: Parameters) extends XSModule {
       p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
     XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
   }
+  for(i <- 0 until numPCntCtrl ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(6).incr_valid := io.in(0).ready 
+  io.perfEvents.PerfEvents(6).incr_step  := PopCount(io.in.map(_.valid))
+
+  io.perfEvents.PerfEvents(7).incr_valid := PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)).asUInt.orR 
+  io.perfEvents.PerfEvents(7).incr_step  := PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))
+
+  io.perfEvents.PerfEvents(8 ).incr_valid := hasValid && !io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk 
+  io.perfEvents.PerfEvents(8 ).incr_step  := hasValid && !io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk
+  io.perfEvents.PerfEvents(9 ).incr_valid := hasValid &&  io.out(0).ready && !fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk  
+  io.perfEvents.PerfEvents(9 ).incr_step  := hasValid &&  io.out(0).ready && !fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk
+  io.perfEvents.PerfEvents(10).incr_valid := hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate && !intFreeList.canAllocate && !io.robCommits.isWalk  
+  io.perfEvents.PerfEvents(10).incr_step  := hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate && !intFreeList.canAllocate && !io.robCommits.isWalk
+  io.perfEvents.PerfEvents(11).incr_valid := hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate &&  io.robCommits.isWalk  
+  io.perfEvents.PerfEvents(11).incr_step  := hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate &&  io.robCommits.isWalk
+  io.perfEvents.PerfEvents(12).incr_valid := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(0 ).incr_valid
+  io.perfEvents.PerfEvents(12).incr_step  := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(0 ).incr_step 
+  io.perfEvents.PerfEvents(13).incr_valid := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(1 ).incr_valid 
+  io.perfEvents.PerfEvents(13).incr_step  := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(1 ).incr_step 
+  io.perfEvents.PerfEvents(14).incr_valid := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(2 ).incr_valid 
+  io.perfEvents.PerfEvents(14).incr_step  := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(2 ).incr_step 
+  io.perfEvents.PerfEvents(15).incr_valid := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(3 ).incr_valid 
+  io.perfEvents.PerfEvents(15).incr_step  := intFreeList.asInstanceOf[freelist.MEFreeList].perfEvents.PerfEvents(3 ).incr_step 
+  io.perfEvents.PerfEvents(16).incr_valid :=  fpFreeList.perfEvents.PerfEvents(0 ).incr_valid
+  io.perfEvents.PerfEvents(16).incr_step  :=  fpFreeList.perfEvents.PerfEvents(0 ).incr_step 
+  io.perfEvents.PerfEvents(17).incr_valid :=  fpFreeList.perfEvents.PerfEvents(1 ).incr_valid 
+  io.perfEvents.PerfEvents(17).incr_step  :=  fpFreeList.perfEvents.PerfEvents(1 ).incr_step 
+  io.perfEvents.PerfEvents(18).incr_valid :=  fpFreeList.perfEvents.PerfEvents(2 ).incr_valid 
+  io.perfEvents.PerfEvents(18).incr_step  :=  fpFreeList.perfEvents.PerfEvents(2 ).incr_step 
+  io.perfEvents.PerfEvents(19).incr_valid :=  fpFreeList.perfEvents.PerfEvents(3 ).incr_valid 
+  io.perfEvents.PerfEvents(19).incr_step  :=  fpFreeList.perfEvents.PerfEvents(3 ).incr_step 
+
 }

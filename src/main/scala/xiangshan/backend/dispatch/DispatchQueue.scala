@@ -36,6 +36,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val redirect = Flipped(ValidIO(new Redirect))
   val flush = Input(Bool())
   val dqFull = Output(Bool())
+  val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
@@ -231,4 +232,29 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
   val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
   XSPerfAccumulate("fake_block", fake_block)
-}
+
+  for(i <- 0 until numPCntCtrl ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := numEnq.orR
+  io.perfEvents.PerfEvents(0).incr_step  := numEnq
+  io.perfEvents.PerfEvents(0).incr_valid := PopCount(io.deq.map(_.fire())).asUInt.orR
+  io.perfEvents.PerfEvents(0).incr_step  := PopCount(io.deq.map(_.fire()))
+  io.perfEvents.PerfEvents(0).incr_valid := PopCount(io.deq.map(_.valid)).asUInt.orR
+  io.perfEvents.PerfEvents(0).incr_step  := PopCount(io.deq.map(_.valid))
+  io.perfEvents.PerfEvents(0).incr_valid := numEnq.orR
+  io.perfEvents.PerfEvents(0).incr_step  := numEnq
+  io.perfEvents.PerfEvents(0).incr_valid := fake_block.orR
+  io.perfEvents.PerfEvents(0).incr_step  := fake_block
+
+  io.perfEvents.PerfEvents(0).incr_valid := (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U)) 
+  io.perfEvents.PerfEvents(0).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U))
+  io.perfEvents.PerfEvents(1).incr_valid := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U)) 
+  io.perfEvents.PerfEvents(1).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U))
+  io.perfEvents.PerfEvents(2).incr_valid := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(2).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U))
+  io.perfEvents.PerfEvents(3).incr_valid := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(3).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U)) 
+
+}                                                                                                                  

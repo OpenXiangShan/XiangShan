@@ -40,4 +40,7 @@ trait FreeListBaseIO {
 
   // walk recovery
   def stepBack: UInt
+
+  //performance counters
+  def perfEvents: PerfEventsBundle
 }

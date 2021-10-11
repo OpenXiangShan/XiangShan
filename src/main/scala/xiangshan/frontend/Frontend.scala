@@ -48,6 +48,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val error  = new L1CacheErrorInfo
+    val perfEvents      = Output(new PerfEventsBundle(numPCntFrontend))
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
       val bpuInfo = new Bundle {
@@ -261,4 +262,12 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
 
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
+  for(i <- 0 until numPCntFrontend ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0) := eventSeled_0
+  io.perfEvents.PerfEvents(1) := eventSeled_1
+  io.perfEvents.PerfEvents(2) := eventSeled_2
+  io.perfEvents.PerfEvents(3) := eventSeled_3
 }
