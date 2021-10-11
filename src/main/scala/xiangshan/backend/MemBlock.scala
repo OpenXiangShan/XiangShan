@@ -72,7 +72,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
-    val otherFastWakeup = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new MicroOp))
+    val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
     // misc
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput))

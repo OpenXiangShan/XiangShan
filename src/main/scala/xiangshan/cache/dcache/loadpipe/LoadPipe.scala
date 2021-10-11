@@ -96,8 +96,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
 
-  assert(RegNext(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD)), "LoadPipe only accepts load req")
-
+  assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
   // --------------------------------------------------------------------------------
@@ -202,6 +201,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
   dontTouch(s2_bank_addr)
 
+  val s2_instrtype = s2_req.instrtype
+
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
@@ -211,7 +212,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // send load miss to miss queue
   io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
   io.miss_req.bits := DontCare
-  io.miss_req.bits.source := LOAD_SOURCE.U
+  io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_addr)
   io.miss_req.bits.vaddr := s2_vaddr
@@ -242,6 +243,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
     XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   }
+  
+  resp.bits.miss_enter := io.miss_req.fire()
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

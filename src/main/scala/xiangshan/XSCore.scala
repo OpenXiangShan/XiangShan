@@ -236,7 +236,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
   ctrlBlock.io.writeback <> rfWriteback
 
-  val allFastUop = exuBlocks.flatMap(_.io.fastUopOut) ++ memBlock.io.otherFastWakeup
+  val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup
+  require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
   val intFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
   val intFastUop1 = outer.intArbiter.allConnections.map(c => intFastUop(c.head))
@@ -246,6 +247,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
 
   exuBlocks(0).io.scheExtra.fpRfReadIn.get <> exuBlocks(1).io.scheExtra.fpRfReadOut.get
+  exuBlocks(0).io.scheExtra.fpStateReadIn.get <> exuBlocks(1).io.scheExtra.fpStateReadOut.get
 
   memBlock.io.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
