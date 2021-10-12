@@ -22,7 +22,7 @@ import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
 import chisel3.experimental.chiselName
-import scala.tools.nsc.doc.base.comment.Bold
+//import scala.tools.nsc.doc.base.comment.Bold
 
 class RASEntry() extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
