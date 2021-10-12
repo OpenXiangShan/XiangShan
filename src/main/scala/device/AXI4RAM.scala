@@ -49,7 +49,7 @@ class AXI4RAM
   burstLen: Int = 16,
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable, beatBytes, burstLen)
-{ 
+{
   override lazy val module = new AXI4SlaveModuleImp(this){
 
     val split = beatBytes / 8
@@ -101,7 +101,7 @@ class AXI4RAMWrapper
   extends LazyModule {
 
   val mnode = AXI4MasterNode(List(snode.in.head._2.master))
- 
+
   val portParam = snode.portParams.head
   val slaveParam = portParam.slaves.head
   val burstLen = portParam.maxTransfer / portParam.beatBytes
@@ -110,7 +110,7 @@ class AXI4RAMWrapper
     slaveParam.executable, portParam.beatBytes, burstLen
   ))
   ram.node := mnode
-  
+
   val io_axi4 = InModuleBody{ mnode.makeIOs() }
   def connectToSoC(soc: HaveAXI4MemPort) = {
     io_axi4 <> soc.memory

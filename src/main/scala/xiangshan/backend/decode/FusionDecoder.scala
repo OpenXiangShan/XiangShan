@@ -85,8 +85,9 @@ class FusedZexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.PACKW)
     cs.lsrc(0) := instr1Rs1
+    cs.lsrc(1) := 0.U
     cs
   }
 
@@ -183,7 +184,7 @@ class FusedSzewl1(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl1
     cs.fuOpType := ALUOpType.szewl1
     cs.lsrc(0) := instr1Rs1
@@ -202,7 +203,7 @@ class FusedSzewl2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl2
     cs.fuOpType := ALUOpType.szewl2
     cs.lsrc(0) := instr1Rs1
@@ -221,7 +222,7 @@ class FusedSzewl3(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with szewl3
     cs.fuOpType := ALUOpType.szewl3
     cs.lsrc(0) := instr1Rs1
@@ -240,7 +241,7 @@ class FusedByte2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
-    val cs = getBaseCS(Instructions.ZEXT_H)
+    val cs = getBaseCS(Instructions.SEXT_H)
     // replace the fuOpType with byte2
     cs.fuOpType := ALUOpType.byte2
     cs.lsrc(0) := instr1Rs1
@@ -407,12 +408,13 @@ class FusedAddwbyte(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(im
     cs
   }
 
-  def fusionName: String = "andw_andi255"
+  def fusionName: String = "addw_andi255"
 }
 
 // Case: addw and extract its lower 1 bit (fused into addwbit)
 class FusedAddwbit(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
   extends FusedAddwbyte(pair, csPair) {
+
   override def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 0x1.U
   override def target: CtrlSignals = {
     val cs = WireInit(csPair.get(0))
@@ -420,7 +422,38 @@ class FusedAddwbit(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(imp
     cs.fuOpType := ALUOpType.addwbit
     cs
   }
-  override def fusionName: String = "andw_andi1"
+
+  override def fusionName: String = "addw_andi1"
+}
+
+// Case: addw and zext.h (fused into addwzexth)
+class FusedAddwzexth(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends FusedAddwbyte(pair, csPair) {
+
+  override def inst2Cond = instr(1) === Instructions.ZEXT_H
+  override def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // replace the fuOpType with addwzexth
+    cs.fuOpType := ALUOpType.addwzexth
+    cs
+  }
+
+  override def fusionName: String = "addw_zexth"
+}
+
+// Case: addw and sext.h (fused into addwsexth)
+class FusedAddwsexth(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends FusedAddwbyte(pair, csPair) {
+
+  override def inst2Cond = instr(1) === Instructions.SEXT_H
+  override def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // replace the fuOpType with addwsexth
+    cs.fuOpType := ALUOpType.addwsexth
+    cs
+  }
+
+  override def fusionName: String = "addw_sexth"
 }
 
 // Case: logic operation and extract its LSB
@@ -429,18 +462,32 @@ class FusedLogiclsb(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(im
   require(csPair.isDefined)
 
   // the first instruction is a logic
-  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isLogic(csPair.get(0).fuOpType)
+  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isSimpleLogic(csPair.get(0).fuOpType)
   def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 1.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
   def target: CtrlSignals = {
     val cs = WireInit(csPair.get(0))
     // change the opType to lsb format
-    cs.fuOpType := ALUOpType.logicToLSB(csPair.get(0).fuOpType)
+    cs.fuOpType := ALUOpType.logicToLsb(csPair.get(0).fuOpType)
     cs
   }
 
   def fusionName: String = "logic_andi1"
+}
+
+class FusedLogicZexth(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
+  extends FusedLogiclsb(pair, csPair) {
+
+  override def inst2Cond = instr(1) === Instructions.ZEXT_H
+  override def target: CtrlSignals = {
+    val cs = WireInit(csPair.get(0))
+    // change the opType to lzext format
+    cs.fuOpType := ALUOpType.logicToZexth(csPair.get(0).fuOpType)
+    cs
+  }
+
+  override def fusionName: String = "logic_zexth"
 }
 
 // Case: OR(Cat(src1(63, 8), 0.U(8.W)), src2)
@@ -523,7 +570,10 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedOddaddw(pair),
       new FusedAddwbyte(pair, Some(cs)),
       new FusedAddwbit(pair, Some(cs)),
+      new FusedAddwzexth(pair, Some(cs)),
+      new FusedAddwsexth(pair, Some(cs)),
       new FusedLogiclsb(pair, Some(cs)),
+      new FusedLogicZexth(pair, Some(cs)),
       new FusedOrh48(pair),
       new FusedMulw7(pair, Some(cs))
     )

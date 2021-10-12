@@ -48,7 +48,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
     val mmio_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mmio_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    
+
     val flush = Input(Bool())
   })
 
@@ -76,8 +76,8 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
   XSDebug("[ICache MMIO]entry: %d state: %d needFlush%d  flush:%d\n", io.id, state, needFlush,io.flush)
   XSDebug("[ICache MMIO]req.addr: %x req.id \n", req.addr)
-  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
-  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready) 
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready)
+  XSDebug("[ICache MMIO]mmio_acquire:(v:%d  r:%d)  mmio_grant:(v:%d r:%d)\n", io.mmio_acquire.valid, io.mmio_acquire.ready, io.mmio_grant.valid, io.mmio_grant.ready)
 
   XSDebug("[ICache MMIO]respReg:  %x\n",respDataReg.asUInt)
 
@@ -138,15 +138,11 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 }
 
-class icacheUncacheIO(implicit p: Parameters) extends DCacheBundle {
-    val req = Flipped(DecoupledIO(new InsUncacheReq ))
+class icacheUncacheIO(implicit p: Parameters) extends XSBundle {
+    val req = Flipped(DecoupledIO(new InsUncacheReq))
     val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())
-
 }
-
-// convert DCacheIO to TileLink
-// for Now, we only deal with TL-UL
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
 
@@ -170,7 +166,6 @@ class icacheUncacheImp(outer: InstrUncache)
   val io = IO(new icacheUncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
-  //require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
   val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 

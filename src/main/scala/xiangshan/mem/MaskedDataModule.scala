@@ -60,7 +60,7 @@ class MaskedSyncDataModuleTemplate[T <: Data](
     }
   }
 
-  // masked write 
+  // masked write
   for (j <- 0 until numEntries) {
     val wen = VecInit((0 until numMWrite).map(i => io.mwmask(i)(j))).asUInt.orR
     when (wen) {

@@ -25,6 +25,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 /* Miss Queue dont care about duplicate req, which is done by PtwFilter
  * PtwMissQueue is just a Queue inside Chisel with flush
@@ -35,6 +36,7 @@ class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val source = UInt(bSourceWidth.W)
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(MSHRSize).W)
+  val af = Bool()
 }
 
 class L2TlbMQInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
@@ -57,18 +59,24 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val source = Output(UInt(bSourceWidth.W))
     val id = Output(UInt(bMemID.W))
     val vpn = Output(UInt(vpnLen.W))
+    val af = Output(Bool())
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(MSHRSize).W))
     }))
-
+    val enq_ptr = Output(UInt(log2Ceil(MSHRSize).W))
+    val buffer_it = Output(Vec(MSHRSize, Bool()))
     val refill = Output(new Bundle {
       val vpn = UInt(vpnLen.W)
       val source = UInt(bSourceWidth.W)
     })
     val req_mask = Input(Vec(MSHRSize, Bool()))
+  }
+  val pmp = new Bundle {
+    val req = Valid(new PMPReqBundle())
+    val resp = Flipped(new PMPRespBundle())
   }
 }
 
@@ -77,7 +85,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
-  val state_idle :: state_cache_high :: state_cache_low :: state_cache_next :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
+  val state_idle :: state_cache_high :: state_cache_low :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
   val state = RegInit(VecInit(Seq.fill(MSHRSize)(state_idle)))
   val is_emptys = state.map(_ === state_idle)
   val is_caches_high = state.map(_ === state_cache_high)
@@ -85,7 +93,6 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
-  val is_cache_next = state.map(_ === state_cache_next)
 
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
@@ -112,48 +119,52 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   // duplicate req
   // to_wait: wait for the last to access mem, set to mem_resp
   // to_cache: the last is back just right now, set to mem_cache
-  val dropLowVpn = entries.map(a => dropL3SectorBits(a.vpn))
-  val dropLowVpnIn = dropL3SectorBits(io.in.bits.vpn)
-  val dup_vec = state.indices.map(i =>
-    io.in.bits.l3.valid && (dropLowVpnIn === dropLowVpn(i))
-  )
-  val dup_vec_mem = dup_vec.zip(is_mems).map{case (d, m) => d && m} // already some req are state_mem_req
-  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // already some req are state_mem_wait
-  val dup_vec_wait_id = dup_vec_mem.zip(dup_vec_wait).map{case (a, b) => a || b} // get the wait_id from above reqs
-  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && (is_having(i) || is_caches_low(i) || is_cache_next(i))}
-  val wait_id = ParallelMux(dup_vec_wait_id zip entries.map(_.wait_id))
-  val dup_wait_resp = io.mem.resp.valid && VecInit(dup_vec_wait)(io.mem.resp.bits.id)
-  val to_wait = Cat(dup_vec_mem).orR || (Cat(dup_vec_wait).orR && !dup_wait_resp)
-  val to_cache = Cat(dup_vec_having).orR || dup_wait_resp
-
-  for (i <- 0 until MSHRSize) {
-    when (state(i) === state_cache_next) {
-      state(i) := state_cache_low
-    }
+  def dup(vpn1: UInt, vpn2: UInt): Bool = {
+    dropL3SectorBits(vpn1) === dropL3SectorBits(vpn2)
   }
-  val enq_state = Mux(to_cache, Mux(from_pre(io.in.bits.source), state_idle, state_cache_next), // relay one cycle to wait for refill
-    Mux(to_wait, Mux(from_pre(io.in.bits.source), state_idle, state_mem_waiting),
-    Mux(io.in.bits.l3.valid, state_mem_req, state_cache_high)))
+  val dup_vec = state.indices.map(i =>
+    dup(io.in.bits.vpn, entries(i).vpn)
+  )
+  val dup_req_fire = mem_arb.io.out.fire() && dup(io.in.bits.vpn, mem_arb.io.out.bits.vpn) // dup with the req fire entry
+  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
+  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
+  val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
+  val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
+  val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
+  val to_mem_out = dup_wait_resp
+  val to_cache_low = Cat(dup_vec_having).orR
+  assert(RegNext(!(dup_req_fire && Cat(dup_vec_wait).orR), init = true.B), "mem req but some entries already waiting, should not happed")
+
+  val mem_resp_hit = RegInit(VecInit(Seq.fill(MSHRSize)(false.B)))
+  val enq_state = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
+    Mux(to_cache_low, state_cache_low, // same to the below, but the mem resp last cycle
+    Mux(to_wait, state_mem_waiting, // wait for the prev mem resp
+    Mux(io.in.bits.l3.valid, state_addr_check, state_cache_high))))
   when (io.in.fire()) {
     state(enq_ptr) := enq_state
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
+    entries(enq_ptr).af := false.B
+    mem_resp_hit(enq_ptr) := to_mem_out
   }
   when (mem_arb.io.out.fire()) {
-    state(mem_arb.io.chosen) := state_mem_waiting
-    entries(mem_arb.io.chosen).wait_id := mem_arb.io.chosen
+    for (i <- state.indices) {
+      when (state(i) =/= state_idle && dup(entries(i).vpn, mem_arb.io.out.bits.vpn)) {
+        // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
+        state(i) := state_mem_waiting
+        entries(i).wait_id := mem_arb.io.chosen
+      }
+    }
   }
   when (io.mem.resp.fire()) {
     state.indices.map{i =>
-      when (state(i) === state_mem_waiting &&
-        io.mem.resp.bits.id === entries(i).wait_id &&
-        i.U =/= entries(i).wait_id) {
-        state(i) := state_cache_low
+      when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
+        state(i) := state_mem_out
+        mem_resp_hit(i) := true.B
       }
     }
-    state(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0)) := state_mem_out
   }
   when (io.out.fire()) {
     assert(state(mem_ptr) === state_mem_out)
@@ -161,6 +172,23 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   when (io.cache.fire()) {
     state(cache_ptr) := state_idle
+  }
+
+  mem_resp_hit.map(a => when (a) { a := false.B } )
+
+  val enq_ptr_reg = RegNext(enq_ptr)
+
+  io.pmp.req.valid := RegNext(enq_state === state_addr_check)
+  io.pmp.req.bits.addr := MakeAddr(entries(enq_ptr_reg).ppn, getVpnn(entries(enq_ptr_reg).vpn, 0))
+  io.pmp.req.bits.cmd := TlbCmd.read
+  io.pmp.req.bits.size := 3.U // TODO: fix it
+  val pmp_resp_valid = io.pmp.req.valid // same cycle
+  when (pmp_resp_valid && (state(enq_ptr_reg) === state_addr_check) &&
+    !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).vpn, mem_arb.io.out.bits.vpn))) {
+    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
+    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
+    entries(enq_ptr_reg).af := io.pmp.resp.ld
+    state(enq_ptr_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
   }
 
   when (io.sfence.valid) {
@@ -171,16 +199,21 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.cache.valid := cache_arb.io.out.valid
   io.cache.bits.vpn := cache_arb.io.out.bits.vpn
   io.cache.bits.source := cache_arb.io.out.bits.source
+
   io.out.valid := ParallelOR(is_having).asBool()
   io.out.bits.source := entries(mem_ptr).source
   io.out.bits.vpn := entries(mem_ptr).vpn
   io.out.bits.id := mem_ptr
+  io.out.bits.af := entries(mem_ptr).af
+
   io.mem.req.valid := mem_arb.io.out.valid
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
   io.mem.refill.vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
   io.mem.refill.source := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).source
+  io.mem.buffer_it := mem_resp_hit
+  io.mem.enq_ptr := enq_ptr
 
   XSPerfAccumulate("mq_in_count", io.in.fire())
   XSPerfAccumulate("mq_in_block", io.in.valid && !io.in.ready)

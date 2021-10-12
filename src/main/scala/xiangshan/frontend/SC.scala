@@ -74,7 +74,7 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
-  
+
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2, shouldReset=true, holdRead=true, singlePort=false))
 
@@ -96,7 +96,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val update_wdata = Wire(SInt(ctrBits.W))
   val updateWayMask =
       VecInit((0 to 1).map(io.update.mask && _.U === io.update.tagePred.asUInt)).asUInt
-  
+
   val update_idx = getIdx(io.update.hist, io.update.pc)
 
   table.io.w.apply(
@@ -362,7 +362,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
     }
   }
 
-  
+
   for (b <- 0 until TageBanks) {
     for (i <- 0 until BankSCNTables(b)) {
       bank_scTables(b)(i).io.update.mask := RegNext(scUpdateMask(b)(i))
@@ -373,7 +373,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist << b)
     }
   }
-  
+
   tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
   tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
   tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
