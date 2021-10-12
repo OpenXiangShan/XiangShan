@@ -292,9 +292,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
   memBlock.io.flush <> ctrlBlock.io.flush
-  memBlock.io.replay <> exuBlocks(0).io.scheExtra.feedback.get.map(_.replay)
-  memBlock.io.rsIdx <> exuBlocks(0).io.scheExtra.feedback.get.map(_.rsIdx)
-  memBlock.io.isFirstIssue <> exuBlocks(0).io.scheExtra.feedback.get.map(_.isFirstIssue)
+  memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
   memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
@@ -311,7 +309,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.tlb(0) <> itlbRepeater.io.ptw
   ptw.io.tlb(1) <> dtlbRepeater.io.ptw
   ptw.io.sfence <> fenceio.sfence
-  ptw.io.csr <> csrioIn.tlb
+  ptw.io.csr.tlb <> csrioIn.tlb
+  ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
