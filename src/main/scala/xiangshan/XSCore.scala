@@ -278,6 +278,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
 
+  // TODO: connect rsPerf
+  val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
+  dontTouch(rsPerf)
+
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
   csrioIn.perf.retiredInstr <> ctrlBlock.io.robio.toCSR.perfinfo.retiredInstr

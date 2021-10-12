@@ -153,6 +153,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       )
     })
     val io = IO(new ReservationStationIO(params)(updatedP))
+    val perf = IO(Vec(rs.length, Output(new RsPerfCounter)))
 
     rs.foreach(_.io.redirect <> io.redirect)
     rs.foreach(_.io.flush <> io.flush)
@@ -187,6 +188,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
     }
+    perf <> rs.map(_.perf)
   }
 
   var fastWakeupIdx = 0
@@ -242,8 +244,13 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
+class RsPerfCounter(implicit p: Parameters) extends XSBundle {
+  val full = Bool()
+}
+
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new ReservationStationIO(params))
+  val perf = IO(Output(new RsPerfCounter))
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -253,6 +260,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s2_deq = Wire(io.deq.cloneType)
 
   io.numExist := PopCount(statusArray.io.isValid)
+  perf.full := RegNext(statusArray.io.isValid.andR)
   statusArray.io.redirect := io.redirect
   statusArray.io.flush := io.flush
 
