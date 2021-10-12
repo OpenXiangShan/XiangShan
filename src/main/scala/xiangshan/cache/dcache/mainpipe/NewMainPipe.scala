@@ -480,7 +480,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   miss.word_idx := s2_req.word_idx
   miss.amo_data := s2_req.amo_data
   miss.amo_mask := s2_req.amo_mask
-  miss.req_coh := s2_coh
+  miss.req_coh := s2_hit_coh
   miss.replace_coh := s2_repl_coh
   miss.replace_tag := s2_repl_tag
   miss.id := s2_req.id
