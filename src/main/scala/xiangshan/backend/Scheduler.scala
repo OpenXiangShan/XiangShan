@@ -29,7 +29,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{SqPtr, StoreDataBundle}
+import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -204,6 +204,8 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
     val stIssuePtr = Input(new SqPtr())
+    // special ports for load / store rs
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
@@ -227,7 +229,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // wakeup-related ports
     val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
-    // feedback ports
+    // misc ports
     val extra = new SchedulerExtraIO
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
@@ -348,6 +350,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
+      rs.io.checkwait.get.memWaitUpdateReq <> io.extra.memWaitUpdateReq
     }
     if (rs.io.feedback.isDefined) {
       val width = rs.io.feedback.get.length

@@ -254,6 +254,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
 
+  val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
     exu.flush <> ctrlBlock.io.flush
@@ -265,6 +266,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
+    exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
+      sink.bits := src.bits
+      sink.valid := src.valid && !csrioIn.customCtrl.storeset_no_fast_wakeup
+    }}
+    exu.scheExtra.memWaitUpdateReq.stdIssue.zip(stdIssue).foreach{case (sink, src) => {
+      sink.valid := src.valid
+      sink.bits := src.bits
+    }}
   }
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)

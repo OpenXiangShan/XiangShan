@@ -109,6 +109,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
+  val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
@@ -347,6 +348,7 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
+  val dataInvalidSqIdx = new SqPtr
 }
 
 class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
@@ -421,7 +423,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
-  val waittable_timeout = Output(UInt(5.W))
+  val storeset_wait_store = Output(Bool())
+  val storeset_no_fast_wakeup = Output(Bool())
+  val lvpred_timeout = Output(UInt(5.W))
   // Branch predictor
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
