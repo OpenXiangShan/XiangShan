@@ -346,6 +346,8 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.main_pipe_req.bits.cmd := req.cmd
   io.main_pipe_req.bits.vaddr := req.vaddr
   io.main_pipe_req.bits.addr := req.addr
+  io.main_pipe_req.bits.store_data := refill_data.asUInt
+  io.main_pipe_req.bits.store_mask := ~0.U(blockBytes.W)
   io.main_pipe_req.bits.word_idx := req.word_idx
   io.main_pipe_req.bits.amo_data := req.amo_data
   io.main_pipe_req.bits.amo_mask := req.amo_mask
