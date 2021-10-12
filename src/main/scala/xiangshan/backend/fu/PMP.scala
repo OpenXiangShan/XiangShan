@@ -56,6 +56,20 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def addr_locked: Bool = locked
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
 
+  def reset() = {
+    l := false.B
+    a := 0.U
+  }
+}
+
+/** PMPBase for CSR unit
+  * with only read and write logic
+  */
+@chiselName
+class PMPBase(implicit p: Parameters) extends PMPBundle {
+  val cfg = new PMPConfig
+  val addr = UInt((PAddrBits - PMPOffBits).W)
+
   def write_cfg_vec(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
@@ -80,20 +94,6 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
     }
     cfgVec.asUInt
   }
-
-  def reset() = {
-    l := false.B
-    a := 0.U
-  }
-}
-
-/** PMPBase for CSR unit
-  * with only read and write logic
-  */
-@chiselName
-class PMPBase(implicit p: Parameters) extends PMPBundle {
-  val cfg = new PMPConfig
-  val addr = UInt((PAddrBits - PMPOffBits).W)
 
   /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
     * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
@@ -283,7 +283,7 @@ class PMP(implicit p: Parameters) extends PMPModule {
       addr = PmpcfgBase + pmpCfgIndex(i),
       reg = cfgMerged(i/pmpCfgPerCSR),
       wmask = WritableMask,
-      wfn = new PMPConfig().write_cfg_vec(mask, addr, i)
+      wfn = new PMPBase().write_cfg_vec(mask, addr, i)
     ))
   }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
 

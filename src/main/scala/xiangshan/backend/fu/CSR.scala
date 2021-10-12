@@ -402,7 +402,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         addr = PmpcfgBase + pmpCfgIndex(i),
         reg = cfgMerged(i/pmpCfgPerCSR),
         wmask = WritableMask,
-        wfn = new PMPConfig().write_cfg_vec
+        wfn = new PMPBase().write_cfg_vec
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
     val addr_mapping = (0 until NumPMP).map(i => {Map(
