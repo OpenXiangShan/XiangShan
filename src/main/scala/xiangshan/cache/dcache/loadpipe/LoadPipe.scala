@@ -179,7 +179,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   // send load miss to miss queue
-  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
+  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit && !io.lsu.s2_kill
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd
@@ -222,6 +222,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
   io.lsu.s1_hit_way := s1_tag_match_way
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
+  io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------

@@ -393,6 +393,8 @@ package object xiangshan {
     def amomax_d  = "b100011".U
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
+
+    def size(op: UInt) = op(1,0)
   }
 
   object BKUOpType {
