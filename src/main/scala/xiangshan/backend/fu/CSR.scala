@@ -24,6 +24,7 @@ import utils.MaskedRegMap.WritableMask
 import utils._
 import xiangshan._
 import xiangshan.backend._
+import xiangshan.cache._
 import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
 import difftest._
@@ -634,6 +635,28 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
+
+    val scmap = CacheInstrucion.generateRegMap
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_LEVEL")._1, scmap("CACHE_LEVEL")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_WAY")._1, scmap("CACHE_WAY")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_IDX")._1, scmap("CACHE_IDX")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_TAG_ECC")._1, scmap("CACHE_TAG_ECC")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_TAG_BITS")._1, scmap("CACHE_TAG_BITS")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_TAG_LOW")._1, scmap("CACHE_TAG_LOW")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_TAG_HIGH")._1, scmap("CACHE_TAG_HIGH")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_ECC_WIDTH")._1, scmap("CACHE_ECC_WIDTH")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_ECC_NUM")._1, scmap("CACHE_ECC_NUM")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_ECC")._1, scmap("CACHE_DATA_ECC")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_0")._1, scmap("CACHE_DATA_0")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_1")._1, scmap("CACHE_DATA_1")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_2")._1, scmap("CACHE_DATA_2")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_3")._1, scmap("CACHE_DATA_3")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_4")._1, scmap("CACHE_DATA_4")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_5")._1, scmap("CACHE_DATA_5")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_6")._1, scmap("CACHE_DATA_6")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_DATA_7")._1, scmap("CACHE_DATA_7")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("OP_FINISH")._1, scmap("OP_FINISH")),
+    MaskedRegMap(Scachebase + CacheInstrucion.getRegInfo("CACHE_OP")._1, scmap("CACHE_OP")),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
