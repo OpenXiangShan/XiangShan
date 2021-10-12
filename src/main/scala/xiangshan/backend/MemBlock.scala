@@ -27,7 +27,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
-import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO}
+import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule}
 import utils._
 import xiangshan.backend.exu.StdExeUnit
 
@@ -66,7 +66,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // in
     val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
-    val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO) 
+    val rsfeedback = Vec(exuParameters.LsExuCnt, new MemRSFeedbackIO)
     val stIssuePtr = Output(new SqPtr())
     // out
     val writeback = Vec(exuParameters.LsExuCnt + 2, DecoupledIO(new ExuOutput))
@@ -160,7 +160,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       replace_st.io.apply_sep(dtlb_st.map(_.replace), io.ptw.resp.bits.data.entry.tag)
     }
   }
-
+  val dtlb = dtlb_ld ++ dtlb_st
 
   if (!useBTlb) {
     (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
@@ -194,6 +194,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   io.ptw.resp.ready := true.B
 
+  // pmp
+  val pmp = Module(new PMP())
+  pmp.io.distribute_csr <> io.csrCtrl.distribute_csr
+
+  val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
+  for ((p,d) <- pmp_check zip dtlb.map(_.pmp(0))) {
+    p.env.pmp := pmp.io.pmp
+    p.env.mode := tlbcsr.priv.dmode
+    p.req := d
+    require(p.req.bits.size.getWidth == d.bits.size.getWidth)
+  }
+
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.redirect
@@ -210,8 +222,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
-    // l0tlb
+    // dtlb
     loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
+    // pmp
+    loadUnits(i).io.pmp           <> pmp_check(i).resp
 
     // laod to load fast forward
     for (j <- 0 until exuParameters.LduCnt) {
@@ -249,8 +263,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
-    // l0tlb
+    // dtlb
     stu.io.tlb          <> dtlb_st(i).requestor(0)
+    stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
 
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
@@ -348,6 +363,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.redirect <> io.redirect
   atomicsUnit.io.flush <> io.flush
 
+  // TODO: complete amo's pmp support
   val amoTlb = dtlb_ld(0).requestor(0)
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare

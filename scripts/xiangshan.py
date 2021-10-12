@@ -221,6 +221,7 @@ class XiangShan(object):
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
             "ext_intr/amtest-riscv64-xs.bin",
             "cache-alias/aliastest-riscv64-xs.bin",
+            "pmp/pmp.riscv.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
