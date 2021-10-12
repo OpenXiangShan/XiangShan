@@ -87,7 +87,6 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     p.env.pmp := pmp.io.pmp
   }
 
-
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)
   val fsm = Module(new PtwFsm)
@@ -113,8 +112,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
-    prefetch.io.in.valid := arb1.io.out.fire() && arb1.io.chosen===1.U
-    prefetch.io.in.bits.vpn := arb1.io.out.bits.vpn
+    val recv = cache.io.resp
+    prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.source) && (!recv.bits.hit  ||
+      recv.bits.hit && recv.bits.prefetch)
+    prefetch.io.in.bits.vpn := recv.bits.vpn
     prefetch.io.sfence := sfence
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
   }

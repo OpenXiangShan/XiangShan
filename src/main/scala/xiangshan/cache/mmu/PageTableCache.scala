@@ -41,6 +41,7 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val source = UInt(bSourceWidth.W)
     val vpn = UInt(vpnLen.W)
     val hit = Bool()
+    val prefetch = Bool() // is the entry fetched by prefetch
     val toFsm = new Bundle {
       val l1Hit = Bool()
       val l2Hit = Bool()
@@ -52,7 +53,7 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val ptes = UInt(blockBits.W)
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
-    val prefetch = Bool() // is the pte from prefetch
+    val prefetch = Bool() // is the req a prefetch req
     val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
   }))
   val sfence = Input(new SfenceBundle)
@@ -271,6 +272,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   resp.source   := second_req.source
   resp.vpn      := second_req.vpn
   resp.hit      := l3Hit || spHit
+  resp.prefetch := l3Pre && l3Hit || spPre && spHit
   resp.toFsm.l1Hit := l1Hit
   resp.toFsm.l2Hit := l2Hit
   resp.toFsm.ppn   := Mux(l2Hit, l2HitPPN, l1HitPPN)
