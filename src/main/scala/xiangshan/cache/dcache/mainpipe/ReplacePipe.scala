@@ -136,7 +136,7 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   io.wb.bits.param := release_param
   io.wb.bits.voluntary := true.B
   io.wb.bits.hasData := s2_need_data
-  io.wb.bits.dirty := s1_coh.state === ClientStates.Dirty
+  io.wb.bits.dirty := s2_coh.state === ClientStates.Dirty
   io.wb.bits.data := s2_data.asUInt
 
   s1_resp.valid := s1_fire_to_mq
