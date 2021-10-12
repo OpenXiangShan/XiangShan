@@ -397,8 +397,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   val tag_write_arb = Module(new Arbiter(new TagWriteReq, 2))
-  tag_write_arb.io.in(0) <> mainPipe.io.tag_write
-  tag_write_arb.io.in(1) <> refillPipe.io.tag_write
+  tag_write_arb.io.in(0) <> refillPipe.io.tag_write
+  tag_write_arb.io.in(1) <> mainPipe.io.tag_write
   tagArray.io.write <> tag_write_arb.io.out
 
   //----------------------------------------
