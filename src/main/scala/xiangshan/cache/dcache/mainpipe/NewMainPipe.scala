@@ -207,7 +207,7 @@ class NewMainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
-  val s1_need_replacement = s1_req.isStore && !s1_req.probe && !s1_tag_match
+  val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
   val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
   val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
   val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)

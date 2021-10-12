@@ -33,7 +33,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = false))
+    shouldReset = false, holdRead = false, singlePort = true))
 
   // tag write
   val wen = rst || io.write.valid
