@@ -37,18 +37,15 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
 
   // Different mode of dispatch
   // (1) isDistinct: no overlap
-  val isDistinct = exuConfigCases.flatMap(_._1).distinct.length == exuConfigCases.flatMap(_._1).length
+  val isDistinct = exuConfigCases.flatMap(_._1).distinct.length == exuConfigCases.flatMap(_._1).length && exuConfigCases.length > 1
   // (2) isLessExu: exu becomes less and less
-  val isSubset = configs.dropRight(1).zip(configs.tail).forall(x => x._2.toSet.subsetOf(x._1.toSet))
-  val isLessExu = configs.length > 1 && isSubset
+  val isLessExu = configs.dropRight(1).zip(configs.tail).forall(x => x._2.toSet.subsetOf(x._1.toSet))
   val supportedDpMode = Seq(isDistinct, isLessExu)
-  println(exuConfigTypes)
   require(supportedDpMode.count(x => x) == 1, s"dispatch mode valid iff one mode is found in $supportedDpMode")
 
   val numIntStateRead = if (isLessExu) numIntSrc.max * numIn else numIntSrc.sum
   val numFpStateRead = if (isLessExu) numFpSrc.max * numIn else numFpSrc.sum
 
-  println(numIntStateRead, numFpStateRead)
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 

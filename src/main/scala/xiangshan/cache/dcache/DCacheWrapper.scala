@@ -99,6 +99,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def LOAD_SOURCE = 0
   def STORE_SOURCE = 1
   def AMO_SOURCE = 2
+  def SOFT_PREFETCH = 3
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
@@ -168,6 +169,7 @@ class DCacheWordReq(implicit p: Parameters)  extends DCacheBundle
   val data   = UInt(DataBits.W)
   val mask   = UInt((DataBits/8).W)
   val id     = UInt(reqIdWidth.W)
+  val instrtype   = UInt(sourceTypeWidth.W)
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -199,6 +201,8 @@ class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
+  val miss_enter = Bool()
+  // cache miss, and enter the missqueue successfully. just for softprefetch
   val replay = Bool()
   val id     = UInt(reqIdWidth.W)
   def dump() = {
@@ -251,11 +255,13 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
 {
   // kill previous cycle's req
   val s1_kill  = Output(Bool())
+  val s2_kill  = Output(Bool())
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
   val s1_paddr = Output(UInt(PAddrBits.W))
   val s1_hit_way = Input(UInt(nWays.W))
   val s1_disable_fast_wakeup = Input(Bool())
+  val s1_bank_conflict = Input(Bool())
 }
 
 class DCacheLineIO(implicit p: Parameters) extends DCacheBundle

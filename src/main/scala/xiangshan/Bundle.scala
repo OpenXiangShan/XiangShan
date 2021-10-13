@@ -36,6 +36,7 @@ import scala.math.max
 import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
+import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -55,6 +56,7 @@ object RSFeedbackType {
   val tlbMiss = 0.U(2.W)
   val mshrFull = 1.U(2.W)
   val dataInvalid = 2.U(2.W)
+  val bankConflict = 3.U(2.W)
 
   def apply() = UInt(2.W)
 }
@@ -107,6 +109,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
+  val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
   val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
@@ -154,6 +157,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val singleStep = Bool()
   val isFused = UInt(3.W)
+  val isORI = Bool() //for softprefetch
+  val isSoftPrefetchRead = Bool() //for softprefetch
+  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
@@ -189,6 +195,7 @@ class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
   // val commitTime = UInt(64.W)
+  val runahead_checkpoint_id = UInt(64.W)
 }
 
 // Separate LSQ
@@ -247,6 +254,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
+
+  val debug_runahead_checkpoint_id = UInt(64.W)
 
   // def isUnconditional() = RedirectLevel.isUnconditional(level)
   def flushItself() = RedirectLevel.flushItself(level)
@@ -339,6 +348,16 @@ class RSFeedback(implicit p: Parameters) extends XSBundle {
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
+  val dataInvalidSqIdx = new SqPtr
+}
+
+class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
+  // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
+  // for instance: MemRSFeedbackIO()(updateP)
+  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
+  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val rsIdx = Input(UInt(log2Up(IssQueSize).W))
+  val isFirstIssue = Input(Bool())
 }
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
@@ -404,11 +423,22 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
-  val waittable_timeout = Output(UInt(5.W))
+  val storeset_wait_store = Output(Bool())
+  val storeset_no_fast_wakeup = Output(Bool())
+  val lvpred_timeout = Output(UInt(5.W))
   // Branch predictor
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
   // Rename
   val move_elim_enable = Output(Bool())
+  // distribute csr write signal
+  val distribute_csr = new DistributedCSRIO()
+}
+
+class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
 }
