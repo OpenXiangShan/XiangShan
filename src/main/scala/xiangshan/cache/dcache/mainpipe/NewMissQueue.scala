@@ -398,12 +398,16 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val alloc_idx = PriorityEncoder(primary_ready_vec)
 
-  val accept = (merge || alloc) && !reject
+  val accept = alloc || merge
   val entry_idx = Mux(alloc, alloc_idx, merge_idx)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
   assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
-  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
+  // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
+  // That is, a coming req has the same paddr as that of mshr_0 (merge),
+  // while it has the same set and the same way as mshr_1 (reject).
+  // In this situation, the coming req should be merged by mshr_0
+//  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
 
   def rrArbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
