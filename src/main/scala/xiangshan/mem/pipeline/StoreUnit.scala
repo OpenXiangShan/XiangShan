@@ -118,6 +118,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     io.rsFeedback.bits.hit,
     io.rsFeedback.bits.rsIdx
   )
+  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
