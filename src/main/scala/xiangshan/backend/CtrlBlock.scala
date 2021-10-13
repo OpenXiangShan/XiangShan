@@ -344,7 +344,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   io.dispatch <> intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
 
-  val jumpInst = io.dispatch(0).bits
+  val pingpong = RegInit(false.B)
+  pingpong := !pingpong
+  val jumpInst = Mux(pingpong && (exuParameters.AluCnt > 2).B, io.dispatch(2).bits, io.dispatch(0).bits)
   val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
   io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
   val jumpTargetRead = io.frontend.fromFtq.target_read
