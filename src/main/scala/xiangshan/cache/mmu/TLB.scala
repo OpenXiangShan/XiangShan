@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
+import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
@@ -39,6 +40,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
+  val pmp = io.pmp
 
   val sfence = io.sfence
   val csr = io.csr
@@ -113,9 +115,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
     val pf = perm.pf && hit
+    val af = perm.af && hit
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
+    val sizeReg = if (!q.sameCycle) RegNext(req(i).bits.size) else req(i).bits.size
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
@@ -133,20 +137,28 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
+    pmp(i).valid := resp(i).valid
+    pmp(i).bits.addr := resp(i).bits.paddr
+    pmp(i).bits.size := sizeReg
+    pmp(i).bits.cmd := cmdReg
+
     val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
     val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
     val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
+    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit && !af
+    // NOTE: pf need && with !af, page fault has higher priority than access fault
+    // but ptw may also have access fault, then af happens, the translation is wrong.
+    // In this case, pf has lower priority than af
 
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
+    resp(i).bits.excp.af.ld := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.st := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.instr := (af || Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)

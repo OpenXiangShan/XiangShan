@@ -129,7 +129,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
 
   // reset period: ResetTimeMax2Pow
-  when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.waittable_timeout))) {
+  when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
     for (j <- 0 until SSITSize) {
       valid(j) := 0.U
     }
@@ -163,6 +163,7 @@ class LookupLFST(implicit p: Parameters) extends XSBundle  {
   val raddr = Vec(DecodeWidth, Input(UInt(SSIDWidth.W))) // use ssid to llokup LFST
   val ren = Vec(DecodeWidth, Input(Bool())) // ren iff uop.cf.storeSetHit
   val rdata = Vec(DecodeWidth, Output(Bool()))
+  val sqIdx = Vec(DecodeWidth, Output(new SqPtr))
 }
 
 // Last Fetched Store Table
@@ -183,6 +184,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // TODO: use MemTemplate
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
   val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
+  val lastSqIdx = Reg(Vec(LFSTSize, new SqPtr))
   val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
@@ -193,25 +195,34 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // read LFST in rename stage
   for (i <- 0 until DecodeWidth) {
     // If store-load pair is in the same dispatch bundle, loadWaitBit should also be set for load
-    val hitInDispatchBundle = if(i > 0){
-      (0 until i).map(j =>
+    val hitInDispatchBundleVec = if(i > 0){
+      WireInit(VecInit((0 until i).map(j =>
         io.dispatch(j).valid && io.dispatch(j).bits.ssid === io.lookup.raddr(i)
-      ).reduce(_||_)
+      )))
     } else {
-      false.B
+      WireInit(VecInit(Seq(false.B))) // DontCare
     }
+    val hitInDispatchBundle = hitInDispatchBundleVec.asUInt.orR
     // Check if store set is valid in LFST
     io.lookup.rdata(i) := (
         (valid(io.lookup.raddr(i)) || hitInDispatchBundle) && io.lookup.ren(i) ||
         io.csrCtrl.no_spec_load // set loadWaitBit for all loads
       ) && !io.csrCtrl.lvpred_disable
+    io.lookup.sqIdx(i) := lastSqIdx(io.lookup.raddr(i))
+    if(i > 0){
+      (0 until i).map(j =>
+        when(hitInDispatchBundleVec(j)){
+          io.lookup.sqIdx(i) := io.dispatch(j).bits.sqIdx
+        }
+      )
+    }
   }
 
   // when store is issued, mark it as invalid
   (0 until exuParameters.StuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.asUInt === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).asUInt){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.value === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
         validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
       }
     })
@@ -226,6 +237,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
       validVec(waddr)(wptr) := true.B
       sqIdxVec(waddr)(wptr) := io.dispatch(i).bits.sqIdx
       robIdxVec(waddr)(wptr) := io.dispatch(i).bits.robIdx
+      lastSqIdx(waddr) := io.dispatch(i).bits.sqIdx
     }
   })
 

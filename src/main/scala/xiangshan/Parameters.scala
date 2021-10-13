@@ -111,7 +111,6 @@ case class XSCoreParameters
   LoadQueueSize: Int = 80,
   StoreQueueSize: Int = 64,
   RobSize: Int = 256,
-  EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -178,6 +177,7 @@ case class XSCoreParameters
   ),
   useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
+  NumPMP: Int = 16, // 0 or 16 or 64
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -291,7 +291,6 @@ trait HasXSParameter {
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
-  val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32
   // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
@@ -319,6 +318,8 @@ trait HasXSParameter {
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
+  val NumPMP = coreParams.NumPMP
+  val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4

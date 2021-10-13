@@ -51,7 +51,7 @@ class MissReq(implicit p: Parameters) extends DCacheBundle
       source, cmd, addr, store_data, store_mask, word_idx, amo_data, amo_mask, coh.state, id)
   }
 
-  def isLoad = source === LOAD_SOURCE.U
+  def isLoad = (source === LOAD_SOURCE.U) || (source === SOFT_PREFETCH.U) //tjz
   def isStore = source === STORE_SOURCE.U
 }
 
@@ -247,11 +247,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 //  }
 
   def before_read_sent_can_merge(new_req: MissReq): Bool = {
-    acquire_not_sent && req.source === LOAD_SOURCE.U && (new_req.source === LOAD_SOURCE.U || new_req.source === STORE_SOURCE.U)
+    acquire_not_sent && (req.source === LOAD_SOURCE.U || req.source === SOFT_PREFETCH.U) && (new_req.source === LOAD_SOURCE.U || new_req.source === STORE_SOURCE.U || req.source === SOFT_PREFETCH.U) //tjz
   }
 
   def before_data_refill_can_merge(new_req: MissReq): Bool = {
-    data_not_refilled && (req.source === LOAD_SOURCE.U || req.source === STORE_SOURCE.U) && new_req.source === LOAD_SOURCE.U
+    data_not_refilled && (req.source === LOAD_SOURCE.U || req.source === STORE_SOURCE.U || req.source === SOFT_PREFETCH.U) && (new_req.source === LOAD_SOURCE.U || req.source === SOFT_PREFETCH.U)
   }
 
   def should_merge(new_req: MissReq): Bool = {
@@ -356,6 +356,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_blocked_by_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerfAccumulate("penalty_blocked_by_pipeline", io.pipe_req.valid && !io.pipe_req.ready)
+  XSPerfAccumulate("soft_prefetch_number", io.req.valid && io.primary_ready && io.req.bits.source === SOFT_PREFETCH.U)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(io.req.valid && io.primary_ready), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
@@ -474,7 +475,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   val pendingVec = entries.map(entry => (entry.tma_io.req.source =/= STORE_SOURCE.U) && (entry.tma_io.state =/= 0.U))
-  ExcitingUtils.addSource(pendingVec.reduce(_||_), "TMA_l1miss")
 
   io.refill.valid := refill_arb.io.out.valid
   io.refill.bits  := refill_arb.io.out.bits
@@ -506,8 +506,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     // sanity check
     val source = io.req.bits.source
     val cmd = io.req.bits.cmd
-    when (source === LOAD_SOURCE.U) {
-      assert (cmd === M_XRD)
+    when (source === LOAD_SOURCE.U || source === SOFT_PREFETCH.U) {
+      assert (cmd === M_XRD || cmd === M_PFR || cmd === M_PFW)
     }
     when (source === STORE_SOURCE.U) {
       assert (cmd === M_XWR)

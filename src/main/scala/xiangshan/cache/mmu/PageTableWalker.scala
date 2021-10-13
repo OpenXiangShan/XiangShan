@@ -25,6 +25,7 @@ import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 /* ptw finite state machine, the actual page table walker
  */
@@ -47,6 +48,10 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
     val mask = Input(Bool())
   }
+  val pmp = new Bundle {
+    val req = ValidIO(new PMPReqBundle())
+    val resp = Flipped(new PMPRespBundle())
+  }
 
   val csr = Input(new TlbCsrBundle)
   val sfence = Input(new SfenceBundle)
@@ -65,9 +70,10 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem = io.mem
   val satp = io.csr.satp
 
-  val s_idle :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(4)
+  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
+  val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
   val ppn = Reg(UInt(ppnLen.W))
   val vpn = Reg(UInt(vpnLen.W))
   val levelNext = level + 1.U
@@ -75,45 +81,62 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   io.req.ready := state === s_idle
 
-  val pageFault = WireInit(false.B)
+  val finish = WireInit(false.B)
+  val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
+  val accessFault = RegEnable(io.pmp.resp.ld, sent_to_pmp)
+  val pageFault = memPte.isPf(level)
   switch (state) {
     is (s_idle) {
       when (io.req.fire()) {
         val req = io.req.bits
-        state := s_mem_req
+        state := s_addr_check
         level := Mux(req.l1Hit, 1.U, 0.U)
+        af_level := Mux(req.l1Hit, 1.U, 0.U)
         ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
         vpn := io.req.bits.vpn
         l1Hit := req.l1Hit
+        accessFault := false.B
       }
+    }
+
+    is (s_addr_check) {
+      state := s_mem_req
     }
 
     is (s_mem_req) {
       when (mem.req.fire()) {
         state := s_mem_resp
       }
+      when (accessFault) {
+        state := s_check_pte
+      }
     }
 
     is (s_mem_resp) {
       when(mem.resp.fire()) {
         state := s_check_pte
+        af_level := af_level + 1.U
       }
     }
 
     is (s_check_pte) {
-      when (memPte.isLeaf() || memPte.isPf(level)) {
+      when (io.resp.valid) {
         when (io.resp.fire()) {
           state := s_idle
         }
-        pageFault := memPte.isPf(level)
+        finish := true.B
       }.otherwise {
-        when (level =/= (Level-2).U) { // when level is 1.U, finish
-          level := levelNext
-          state := s_mem_req
-        }.otherwise {
+        when (io.pmp.resp.ld) {
+          // do nothing
+        }.elsewhen (io.mq.valid) {
           when (io.mq.fire()) {
             state := s_idle
           }
+          finish := true.B
+        }.otherwise { // when level is 1.U, finish
+          assert(level =/= 2.U)
+          level := levelNext
+          state := s_mem_req
         }
       }
     }
@@ -121,17 +144,19 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (sfence.valid) {
     state := s_idle
+    accessFault := false.B
   }
 
+  // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
   val find_pte = is_pte
   val to_find_pte = level === 1.U && !is_pte
   val source = RegEnable(io.req.bits.source, io.req.fire())
-  io.resp.valid := state === s_check_pte && find_pte
+  io.resp.valid := state === s_check_pte && (find_pte || accessFault)
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault, level, memPte, vpn)
+  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn)
 
-  io.mq.valid := state === s_check_pte && to_find_pte
+  io.mq.valid := state === s_check_pte && to_find_pte && !accessFault
   io.mq.bits.source := source
   io.mq.bits.vpn := vpn
   io.mq.bits.l3.valid := true.B
@@ -141,8 +166,14 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
-  mem.req.valid := state === s_mem_req && !io.mem.mask
-  mem.req.bits.addr := Mux(level === 0.U, l1addr, l2addr)
+  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
+  io.pmp.req.valid := DontCare // samecycle, do not use valid
+  io.pmp.req.bits.addr := mem_addr
+  io.pmp.req.bits.size := 3.U // TODO: fix it
+  io.pmp.req.bits.cmd := TlbCmd.read
+
+  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
+  mem.req.bits.addr := mem_addr
   mem.req.bits.id := MSHRSize.U(bMemID.W)
 
   io.refill.vpn := vpn
