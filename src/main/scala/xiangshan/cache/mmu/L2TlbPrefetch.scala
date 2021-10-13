@@ -35,8 +35,9 @@ class L2TlbPrefetchIO(implicit p: Parameters) extends PtwBundle {
 class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbPrefetchIO())
 
-  val next_line = RegEnable(get_next_line(io.in.bits.vpn), io.in.valid)
-  val v = ValidHold(io.in.valid && !io.sfence.valid, io.out.fire(), io.sfence.valid)
+  val next_vpn = get_next_line(io.in.bits.vpn)
+  val next_line = RegEnable(next_vpn, io.in.valid)
+  val v = ValidHold(io.in.valid && !io.sfence.valid && same_l2entry(next_vpn, io.in.bits.vpn), io.out.fire(), io.sfence.valid)
 
   io.out.valid := v
   io.out.bits.vpn := next_line

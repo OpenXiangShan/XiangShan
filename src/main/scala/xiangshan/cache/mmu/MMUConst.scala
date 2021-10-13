@@ -198,6 +198,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     Cat(dropL3SectorBits(vpn) + 1.U, 0.U(PtwL3SectorIdxLen.W))
   }
 
+  def same_l2entry(vpn1: UInt, vpn2: UInt) = {
+    vpn1(vpnLen-1, vpnnLen) === vpn2(vpnLen-1, vpnnLen)
+  }
+
   def from_pre(source: UInt) = {
     (source === prefetchID.U)
   }
