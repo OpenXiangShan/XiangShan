@@ -21,7 +21,6 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
