@@ -22,6 +22,7 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.frontend.icache._
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
 import xiangshan.backend.fu.HasExceptionNO
 import system.L1CacheErrorInfo
@@ -86,10 +87,11 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   bpu.io.ftq_to_bpu       <> ftq.io.toBpu
   ftq.io.fromBpu          <> bpu.io.bpu_to_ftq
   //IFU-ICache
-  ifu.io.icacheInter.toIMeta    <>      icache.io.metaRead.req
-  ifu.io.icacheInter.fromIMeta  <>      icache.io.metaRead.resp
-  ifu.io.icacheInter.toIData    <>      icache.io.dataRead.req
-  ifu.io.icacheInter.fromIData  <>      icache.io.dataRead.resp
+  ifu.io.icacheInter.toIMeta       <>      icache.io.metaRead.req
+  ifu.io.icacheInter.fromIMeta     <>      icache.io.metaRead.resp
+  ifu.io.icacheInter.toIData       <>      icache.io.dataRead.req
+  ifu.io.icacheInter.fromIData     <>      icache.io.dataRead.resp
+  ifu.io.icacheInter.toReleaseUnit <>      icache.io.releaseUnit.req
 
   for(i <- 0 until 2){
     ifu.io.icacheInter.toMissQueue(i)         <> icache.io.missQueue.req(i)
