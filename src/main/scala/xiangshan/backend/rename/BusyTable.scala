@@ -69,15 +69,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
 
   XSPerfAccumulate("busy_count", PopCount(table))
   for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(0).incr_valid := (PopCount(table) < (NRPhyRegs.U/4.U)) 
   io.perfEvents.PerfEvents(0).incr_step  := (PopCount(table) < (NRPhyRegs.U/4.U))
-  io.perfEvents.PerfEvents(1).incr_valid := (PopCount(table) > (NRPhyRegs.U/4.U)) & (PopCount(table) <= (NRPhyRegs.U/2.U)) 
   io.perfEvents.PerfEvents(1).incr_step  := (PopCount(table) > (NRPhyRegs.U/4.U)) & (PopCount(table) <= (NRPhyRegs.U/2.U))
-  io.perfEvents.PerfEvents(2).incr_valid := (PopCount(table) > (NRPhyRegs.U/2.U)) & (PopCount(table) <= (NRPhyRegs.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(2).incr_step  := (PopCount(table) > (NRPhyRegs.U/2.U)) & (PopCount(table) <= (NRPhyRegs.U*3.U/4.U))
-  io.perfEvents.PerfEvents(3).incr_valid := (PopCount(table) > (NRPhyRegs.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(3).incr_step  := (PopCount(table) > (NRPhyRegs.U*3.U/4.U))
 }

@@ -554,24 +554,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(22).incr_valid := uncacheState =/= s_idle 
   io.perfEvents.PerfEvents(22).incr_step  := uncacheState =/= s_idle
-  io.perfEvents.PerfEvents(23).incr_valid := io.uncache.req.fire()
   io.perfEvents.PerfEvents(23).incr_step  := io.uncache.req.fire()
-  io.perfEvents.PerfEvents(24).incr_valid := io.mmioStout.fire()
   io.perfEvents.PerfEvents(24).incr_step  := io.mmioStout.fire()
-  io.perfEvents.PerfEvents(25).incr_valid := io.mmioStout.valid && !io.mmioStout.ready
   io.perfEvents.PerfEvents(25).incr_step  := io.mmioStout.valid && !io.mmioStout.ready
-  io.perfEvents.PerfEvents(26).incr_valid := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U)) 
   io.perfEvents.PerfEvents(26).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U))
-  io.perfEvents.PerfEvents(27).incr_valid := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U)) 
   io.perfEvents.PerfEvents(27).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U))
-  io.perfEvents.PerfEvents(28).incr_valid := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(28).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U))
-  io.perfEvents.PerfEvents(29).incr_valid := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(29).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U))
 
   // debug info

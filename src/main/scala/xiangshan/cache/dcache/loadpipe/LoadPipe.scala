@@ -255,18 +255,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(0).incr_valid := io.lsu.req.fire()
   io.perfEvents.PerfEvents(0).incr_step  := io.lsu.req.fire()
-  io.perfEvents.PerfEvents(1).incr_valid := io.lsu.resp.fire() && resp.bits.replay
   io.perfEvents.PerfEvents(1).incr_step  := io.lsu.resp.fire() && resp.bits.replay
-  io.perfEvents.PerfEvents(2).incr_valid := io.lsu.resp.fire() && resp.bits.replay && s2_nack_data
   io.perfEvents.PerfEvents(2).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_data
-  io.perfEvents.PerfEvents(3).incr_valid := io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr
   io.perfEvents.PerfEvents(3).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr
-  io.perfEvents.PerfEvents(4).incr_valid := io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow
   io.perfEvents.PerfEvents(4).incr_step  := io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow
 
 }

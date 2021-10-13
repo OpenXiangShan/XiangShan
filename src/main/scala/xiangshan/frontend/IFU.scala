@@ -553,39 +553,23 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
   for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
 
-  io.perfEvents.PerfEvents(1).incr_valid  := f3_redirect
   io.perfEvents.PerfEvents(1).incr_step   := f3_redirect
-  io.perfEvents.PerfEvents(2).incr_valid  := io.toIbuffer.fire()
   io.perfEvents.PerfEvents(2).incr_step   := io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(3).incr_valid  := io.toIbuffer.fire() && !f3_hit
   io.perfEvents.PerfEvents(3).incr_step   := io.toIbuffer.fire() && !f3_hit
-  io.perfEvents.PerfEvents(4).incr_valid  := f3_req_0
   io.perfEvents.PerfEvents(4).incr_step   := f3_req_0
-  io.perfEvents.PerfEvents(5).incr_valid  := f3_req_1
   io.perfEvents.PerfEvents(5).incr_step   := f3_req_1
-  io.perfEvents.PerfEvents(6).incr_valid  := f3_hit_1
   io.perfEvents.PerfEvents(6).incr_step   := f3_hit_1
-  io.perfEvents.PerfEvents(7).incr_valid  := f3_hit_1
   io.perfEvents.PerfEvents(7).incr_step   := f3_hit_1
-  io.perfEvents.PerfEvents(8).incr_valid  := f3_only_0_hit       && io.toIbuffer.fire() 
   io.perfEvents.PerfEvents(8).incr_step   := f3_only_0_hit       && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(9).incr_valid  := f3_only_0_miss      && io.toIbuffer.fire() 
   io.perfEvents.PerfEvents(9).incr_step   := f3_only_0_miss      && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(10).incr_valid := f3_hit_0_hit_1      && io.toIbuffer.fire() 
   io.perfEvents.PerfEvents(10).incr_step  := f3_hit_0_hit_1      && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(11).incr_valid := f3_hit_0_miss_1     && io.toIbuffer.fire() 
   io.perfEvents.PerfEvents(11).incr_step  := f3_hit_0_miss_1     && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(12).incr_valid := f3_miss_0_hit_1     && io.toIbuffer.fire()
   io.perfEvents.PerfEvents(12).incr_step  := f3_miss_0_hit_1     && io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(13).incr_valid := f3_miss_0_miss_1    && io.toIbuffer.fire()
   io.perfEvents.PerfEvents(13).incr_step  := f3_miss_0_miss_1    && io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(14).incr_valid := io.toIbuffer.fire() && f3_situation(0)
   io.perfEvents.PerfEvents(14).incr_step  := io.toIbuffer.fire() && f3_situation(0)
-  io.perfEvents.PerfEvents(15).incr_valid := io.toIbuffer.fire() && f3_situation(1)
   io.perfEvents.PerfEvents(15).incr_step  := io.toIbuffer.fire() && f3_situation(1)
 
   f3_redirect := !predecodeFlushReg && predecodeFlush

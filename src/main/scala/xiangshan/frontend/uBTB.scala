@@ -135,9 +135,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
   XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
 
-  io.perfEvents.PerfEvents(52).incr_valid :=  u_valid &&  u_meta.hit
   io.perfEvents.PerfEvents(52).incr_step  :=  u_valid &&  u_meta.hit
-  io.perfEvents.PerfEvents(53).incr_valid :=  u_valid && !u_meta.hit
   io.perfEvents.PerfEvents(53).incr_step  :=  u_valid && !u_meta.hit
 
 }

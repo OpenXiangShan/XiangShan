@@ -822,13 +822,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
-  //for (b <- 0 until TageBanks) {
-  io.perfEvents.PerfEvents(49).incr_valid :=  (updateValids(1) & updateMetas(1).provider.valid) || (updateValids(0) & updateMetas(0).provider.valid)
   io.perfEvents.PerfEvents(49).incr_step  :=  updateMetas(1).provider.valid + updateMetas(0).provider.valid
 
-  //}
-  //  io.perfEvents.PerfEvents(49).incr_valid :=  incr_valid
-  //  io.perfEvents.PerfEvents(49).incr_step  :=  incr_step
 }
 
 

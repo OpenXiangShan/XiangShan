@@ -201,15 +201,10 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   assert(!io.in.valid || io.in.ready, "when io.in.valid, should always ready")
 
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(0).incr_valid := io.in.fire() 
   io.perfEvents.PerfEvents(0).incr_step  := io.in.fire()
-  io.perfEvents.PerfEvents(1).incr_valid := io.in.valid && !io.in.ready 
   io.perfEvents.PerfEvents(1).incr_step  := io.in.valid && !io.in.ready
-  io.perfEvents.PerfEvents(2).incr_valid := io.mem.req.fire() 
   io.perfEvents.PerfEvents(2).incr_step  := io.mem.req.fire()
-  io.perfEvents.PerfEvents(3).incr_valid := 1.U
   io.perfEvents.PerfEvents(3).incr_step  := PopCount(is_waiting)
 }

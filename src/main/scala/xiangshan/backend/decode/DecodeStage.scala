@@ -108,19 +108,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
   for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
   io.perfEvents.PerfEvents(0)            := fusionDecoder.io.perfEvents.PerfEvents(0)            
 
-  io.perfEvents.PerfEvents(1).incr_valid := PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)).asUInt.orR 
   io.perfEvents.PerfEvents(1).incr_step  := PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready))
-  io.perfEvents.PerfEvents(2).incr_valid := hasValid && !io.out(0).ready 
   io.perfEvents.PerfEvents(2).incr_step  := hasValid && !io.out(0).ready
-  io.perfEvents.PerfEvents(3).incr_valid := PopCount(io.in.map(_.valid)).asUInt.orR 
   io.perfEvents.PerfEvents(3).incr_step  := PopCount(io.in.map(_.valid))
-  io.perfEvents.PerfEvents(4).incr_valid := PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit)).asUInt.orR 
   io.perfEvents.PerfEvents(4).incr_step  := loadWaitBitSet
-  io.perfEvents.PerfEvents(5).incr_valid := PopCount(io.out.map(o => o.fire() && o.bits.cf.storeSetHit)).asUInt.orR 
   io.perfEvents.PerfEvents(5).incr_step  := storeSetHit
 }

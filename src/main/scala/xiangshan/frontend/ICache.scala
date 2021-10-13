@@ -433,14 +433,10 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
   for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
 
-  io.perfEvents.PerfEvents(24).incr_valid :=  entries(0).io.req.fire() | entries(1).io.req.fire()
   io.perfEvents.PerfEvents(24).incr_step  :=  entries(0).io.req.fire() | entries(1).io.req.fire()
-  io.perfEvents.PerfEvents(25).incr_valid :=  BoolStopWatch(start = entries(0).io.req.fire(), stop = entries(0).io.resp.fire() || entries(0).io.flush, startHighPriority = true) | 
-                                              BoolStopWatch(start = entries(1).io.req.fire(), stop = entries(1).io.resp.fire() || entries(1).io.flush, startHighPriority = true)  
   io.perfEvents.PerfEvents(25).incr_step  :=  BoolStopWatch(start = entries(0).io.req.fire(), stop = entries(0).io.resp.fire() || entries(0).io.flush, startHighPriority = true) + 
                                               BoolStopWatch(start = entries(1).io.req.fire(), stop = entries(1).io.resp.fire() || entries(1).io.flush, startHighPriority = true)  
 

@@ -392,11 +392,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(22).incr_valid := 1.U 
   io.perfEvents.PerfEvents(22).incr_step  := ldDeqCount
-  io.perfEvents.PerfEvents(23).incr_valid := 1.U 
   io.perfEvents.PerfEvents(23).incr_step  := stDeqCount
 }

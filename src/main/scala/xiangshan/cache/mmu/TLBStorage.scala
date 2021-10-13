@@ -111,12 +111,9 @@ class TLBFA(
   XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _))
   XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(21).incr_valid := 1.U 
   io.perfEvents.PerfEvents(21).incr_step  := io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _)
-  io.perfEvents.PerfEvents(22).incr_valid := 1.U 
   io.perfEvents.PerfEvents(22).incr_step  := io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt())
 
   for (i <- 0 until nWays) {
@@ -252,7 +249,6 @@ class TLBSA(
     )
   }
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
 

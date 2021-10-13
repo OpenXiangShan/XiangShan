@@ -445,31 +445,18 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
   for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
-    intbtperfEvents.PerfEvents(i ).incr_valid := DontCare
     intbtperfEvents.PerfEvents(i ).incr_step  := DontCare
-    fpbtperfEvents.PerfEvents(i ).incr_valid := DontCare
     fpbtperfEvents.PerfEvents(i ).incr_step  := DontCare
   }
-  io.perfEvents.PerfEvents(20 ).incr_valid  := PopCount(allocate.map(_.fire())).asUInt.orR  
   io.perfEvents.PerfEvents(20 ).incr_step   := PopCount(allocate.map(_.fire()))   
-  io.perfEvents.PerfEvents(21 ).incr_valid  := PopCount(io.issue.map(_.fire)).asUInt.orR  
   io.perfEvents.PerfEvents(21 ).incr_step   := PopCount(io.issue.map(_.fire))   
-  io.perfEvents.PerfEvents(22 ).incr_valid  := intbtperfEvents.PerfEvents(0 ).incr_valid  
   io.perfEvents.PerfEvents(22 ).incr_step   := intbtperfEvents.PerfEvents(0 ).incr_step   
-  io.perfEvents.PerfEvents(23 ).incr_valid  := intbtperfEvents.PerfEvents(1 ).incr_valid  
   io.perfEvents.PerfEvents(23 ).incr_step   := intbtperfEvents.PerfEvents(1 ).incr_step   
-  io.perfEvents.PerfEvents(24 ).incr_valid  := intbtperfEvents.PerfEvents(2 ).incr_valid  
   io.perfEvents.PerfEvents(24 ).incr_step   := intbtperfEvents.PerfEvents(2 ).incr_step   
-  io.perfEvents.PerfEvents(25 ).incr_valid  := intbtperfEvents.PerfEvents(3 ).incr_valid  
   io.perfEvents.PerfEvents(25 ).incr_step   := intbtperfEvents.PerfEvents(3 ).incr_step   
-  io.perfEvents.PerfEvents(26 ).incr_valid  :=  fpbtperfEvents.PerfEvents(0 ).incr_valid  
   io.perfEvents.PerfEvents(26 ).incr_step   :=  fpbtperfEvents.PerfEvents(0 ).incr_step   
-  io.perfEvents.PerfEvents(27 ).incr_valid  :=  fpbtperfEvents.PerfEvents(1 ).incr_valid  
   io.perfEvents.PerfEvents(27 ).incr_step   :=  fpbtperfEvents.PerfEvents(1 ).incr_step   
-  io.perfEvents.PerfEvents(28 ).incr_valid  :=  fpbtperfEvents.PerfEvents(2 ).incr_valid  
   io.perfEvents.PerfEvents(28 ).incr_step   :=  fpbtperfEvents.PerfEvents(2 ).incr_step   
-  io.perfEvents.PerfEvents(29 ).incr_valid  :=  fpbtperfEvents.PerfEvents(3 ).incr_valid  
   io.perfEvents.PerfEvents(29 ).incr_step   :=  fpbtperfEvents.PerfEvents(3 ).incr_step   
 }

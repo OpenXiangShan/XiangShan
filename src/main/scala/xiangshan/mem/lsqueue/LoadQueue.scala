@@ -694,28 +694,17 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(30).incr_valid := io.rollback.valid
   io.perfEvents.PerfEvents(30).incr_step  := io.rollback.valid
-  io.perfEvents.PerfEvents(31).incr_valid := uncacheState =/= s_idle 
   io.perfEvents.PerfEvents(31).incr_step  := uncacheState =/= s_idle
-  io.perfEvents.PerfEvents(32).incr_valid := io.uncache.req.fire()
   io.perfEvents.PerfEvents(32).incr_step  := io.uncache.req.fire()
-  io.perfEvents.PerfEvents(33).incr_valid := io.dcache.valid
   io.perfEvents.PerfEvents(33).incr_step  := io.dcache.valid
-  io.perfEvents.PerfEvents(34).incr_valid := 1.U
   io.perfEvents.PerfEvents(34).incr_step  := PopCount(VecInit(io.ldout.map(i => i.fire())))
-  io.perfEvents.PerfEvents(35).incr_valid := 1.U
   io.perfEvents.PerfEvents(35).incr_step  := PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))
-  io.perfEvents.PerfEvents(36).incr_valid := (validCount < (LoadQueueSize.U/4.U)) 
   io.perfEvents.PerfEvents(36).incr_step  := (validCount < (LoadQueueSize.U/4.U))
-  io.perfEvents.PerfEvents(37).incr_valid := (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U)) 
   io.perfEvents.PerfEvents(37).incr_step  := (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))
-  io.perfEvents.PerfEvents(38).incr_valid := (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(38).incr_step  := (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))
-  io.perfEvents.PerfEvents(39).incr_valid := (validCount > (LoadQueueSize.U*3.U/4.U)) 
   io.perfEvents.PerfEvents(39).incr_step  := (validCount > (LoadQueueSize.U*3.U/4.U))
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)

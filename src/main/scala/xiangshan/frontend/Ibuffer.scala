@@ -180,23 +180,14 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
   for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(16).incr_valid := io.flush
   io.perfEvents.PerfEvents(16).incr_step  := io.flush
-  io.perfEvents.PerfEvents(17).incr_valid := instrHungry
   io.perfEvents.PerfEvents(17).incr_step  := instrHungry
-  io.perfEvents.PerfEvents(18).incr_valid := instrHungry
   io.perfEvents.PerfEvents(18).incr_step  := instrHungry
-  io.perfEvents.PerfEvents(19).incr_valid := (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)
   io.perfEvents.PerfEvents(19).incr_step  := (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(20).incr_valid := (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)
   io.perfEvents.PerfEvents(20).incr_step  := (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(21).incr_valid := (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)
   io.perfEvents.PerfEvents(21).incr_step  := (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(22).incr_valid := (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)
   io.perfEvents.PerfEvents(22).incr_step  := (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(23).incr_valid :=  validEntries.andR
   io.perfEvents.PerfEvents(23).incr_step  :=  validEntries.andR
 }

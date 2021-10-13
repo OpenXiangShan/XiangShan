@@ -268,14 +268,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
   for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_valid := DontCare
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
-  io.perfEvents.PerfEvents(19).incr_valid := vmEnable 
-  io.perfEvents.PerfEvents(20).incr_valid := vmEnable 
   if (!q.shouldBlock) {
-    io.perfEvents.PerfEvents(19).incr_step  := PopCount((0 until Width).map(i => validRegVec(i)))
-    io.perfEvents.PerfEvents(20).incr_step  := PopCount((0 until Width).map(i => validRegVec(i) && missVec(i)))
+    io.perfEvents.PerfEvents(19).incr_step  := PopCount((0 until Width).map(i => vmEnable && validRegVec(i)))
+    io.perfEvents.PerfEvents(20).incr_step  := PopCount((0 until Width).map(i => vmEnable && validRegVec(i) && missVec(i)))
   } else {
   io.perfEvents.PerfEvents(19).incr_step  := PopCount((0 until Width).map(i => io.requestor(i).req.fire()))
   io.perfEvents.PerfEvents(20).incr_step  := PopCount((0 until Width).map(i => ptw.req(i).fire()))

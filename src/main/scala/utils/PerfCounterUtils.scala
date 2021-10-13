@@ -144,7 +144,6 @@ object XSPerfPrint {
 }
 
 class PerfBundle(implicit p: Parameters) extends XSBundle {
-  val incr_valid =  Bool()
   val incr_step  = UInt(6.W)
 }
 
@@ -170,16 +169,12 @@ class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
     val event_op_1 = io.HPMEvent(49,45)
     val event_op_2 = io.HPMEvent(54,50)
 
-    val event_incr_0 = Mux(event_op_0(0),(events_incr_3.incr_valid && events_incr_2.incr_valid),Mux(event_op_0(1),(events_incr_3.incr_valid ^ events_incr_2.incr_valid), (events_incr_3.incr_valid || events_incr_2.incr_valid))) 
-    val event_incr_1 = Mux(event_op_1(0),(events_incr_1.incr_valid && events_incr_0.incr_valid),Mux(event_op_1(1),(events_incr_1.incr_valid ^ events_incr_0.incr_valid), (events_incr_1.incr_valid || events_incr_0.incr_valid))) 
-
 
     val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
                                        Mux(event_op_0(2),(events_incr_3.incr_step + events_incr_2.incr_step),  (events_incr_3.incr_step | events_incr_2.incr_step))))
     val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
                                        Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  (events_incr_1.incr_step | events_incr_0.incr_step))))
 
-    io.Event_selected.incr_valid := Mux(event_op_1(0),(event_incr_0 && event_incr_1),Mux(event_op_1(1),(event_incr_0 ^ event_incr_1),(event_incr_0 || event_incr_1)))
     io.Event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),Mux(event_op_1(1),(event_step_0 ^ event_step_1),Mux(event_op_1(2),(event_step_0 + event_step_1),(event_step_0 | event_step_1))))
 }
 
