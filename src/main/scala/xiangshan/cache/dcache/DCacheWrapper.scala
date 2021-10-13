@@ -343,7 +343,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
   val metaArray = Module(new AsynchronousMetaArray(readPorts = 4, writePorts = 3))
-  val tagArray = Module(new DuplicatedTagArray(readPorts = 2))
+  val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
   val errors = bankedDataArray.io.errors ++ metaArray.io.errors
@@ -380,20 +380,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // tag array
-  require(tagArray.io.read.size == ldu.size)
-  val tag_read_arb = Module(new Arbiter(new TagReadReq, 2))
-  tag_read_arb.io.in(0) <> ldu.last.io.tag_read
-  tag_read_arb.io.in(1) <> mainPipe.io.tag_read
-  tagArray.io.read.last <> tag_read_arb.io.out
-
-  ldu.last.io.tag_resp := tagArray.io.resp.last
-  mainPipe.io.tag_resp := tagArray.io.resp.last
-
-  ldu.init.zipWithIndex.foreach {
+  require(tagArray.io.read.size == (ldu.size + 1))
+  ldu.zipWithIndex.foreach {
     case (ld, i) =>
       tagArray.io.read(i) <> ld.io.tag_read
       ld.io.tag_resp := tagArray.io.resp(i)
   }
+  tagArray.io.read.last <> mainPipe.io.tag_read
+  mainPipe.io.tag_resp := tagArray.io.resp.last
 
   val tag_write_arb = Module(new Arbiter(new TagWriteReq, 2))
   tag_write_arb.io.in(0) <> refillPipe.io.tag_write
