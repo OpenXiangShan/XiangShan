@@ -62,7 +62,9 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   // meta array is made of regs, so meta write or read should always be ready
   assert(RegNext(io.meta_write.ready))
   assert(RegNext(io.meta_read.ready))
-  when (s0_fire) { OneHot.checkOneHot(io.req.bits.way_en) }
+  when (s0_fire) {
+    assert(PopCount(io.req.bits.way_en) <= 1.U)
+  }
 
   // s0: read meta to be replaced
   val s0_can_go = s1_ready && io.meta_read.ready

@@ -257,7 +257,7 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.secondary_reject := should_reject(io.req.bits)
 
   // should not allocate, merge or reject at the same time
-  OneHot.checkOneHot(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject))
+  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
 
   val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
     val data = refill_data.asUInt
@@ -401,9 +401,9 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val accept = (merge || alloc) && !reject
   val entry_idx = Mux(alloc, alloc_idx, merge_idx)
 
-  OneHot.checkOneHot(secondary_ready_vec)
-  OneHot.checkOneHot(secondary_reject_vec)
-  OneHot.checkOneHot(Seq(merge, reject))
+  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
+  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
+  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
 
   def rrArbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],

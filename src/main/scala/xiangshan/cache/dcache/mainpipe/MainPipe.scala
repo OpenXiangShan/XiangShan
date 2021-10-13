@@ -165,7 +165,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // sanity check
   when (s0_fire) {
-    OneHot.checkOneHot(Seq(s0_req.miss, s0_req.probe))
+    assert(PopCount(Seq(s0_req.miss, s0_req.probe)) <= 1.U)
   }
   assert(!RegNext(s0_fire && s0_req.miss && !banks_full_overwrite), "miss req should full overwrite")
 
