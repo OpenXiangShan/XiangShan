@@ -22,7 +22,10 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
+import xiangshan.frontend.icache._
 import chisel3.experimental.verification
+import freechips.rocketchip.tilelink.MemoryOpCategories.M_FLUSH
+import freechips.rocketchip.tilelink.TLPermissions.toN
 import utils._
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
@@ -30,7 +33,6 @@ trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusBytes = mmioBusWidth /8
   def mmioBeats = FetchWidth * 4 * 8 / mmioBusWidth
   def mmioMask  = VecInit(List.fill(PredictWidth)(true.B)).asUInt
-  def mmioBusAligned(pc :UInt): UInt = align(pc, mmioBusBytes)
 }
 
 trait HasIFUConst extends HasXSParameter {
@@ -49,7 +51,8 @@ class FtqInterface(implicit p: Parameters) extends XSBundle {
 class ICacheInterface(implicit p: Parameters) extends XSBundle {
   val toIMeta       = Decoupled(new ICacheReadBundle)
   val toIData       = Decoupled(new ICacheReadBundle)
-  val toMissQueue   = Vec(2,Decoupled(new ICacheMissReq))
+  val toMissQueue   = Vec(2, Decoupled(new ICacheMissReq))
+  val toReleaseUnit = Vec(2, Decoupled(new RealeaseReq))
   val fromIMeta     = Input(new ICacheMetaRespBundle)
   val fromIData     = Input(new ICacheDataRespBundle)
   val fromMissQueue = Vec(2,Flipped(ValidIO(new ICacheMissResp)))
@@ -92,6 +95,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
   val (toMeta, toData, meta_resp, data_resp) =  (io.icacheInter.toIMeta, io.icacheInter.toIData, io.icacheInter.fromIMeta, io.icacheInter.fromIData)
   val (toMissQueue, fromMissQueue) = (io.icacheInter.toMissQueue, io.icacheInter.fromMissQueue)
+  val toRealseUnit   = io.icacheInter.toReleaseUnit
   val (toITLB, fromITLB) = (VecInit(io.iTLBInter.map(_.req)), VecInit(io.iTLBInter.map(_.resp)))
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
@@ -175,12 +179,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   toITLB(0).valid         := f1_valid
-  toITLB(0).bits.vaddr    := align(f1_ftq_req.startAddr, blockBytes)
-  toITLB(0).bits.debug.pc := align(f1_ftq_req.startAddr, blockBytes)
+  toITLB(0).bits.vaddr    := addrAlign(f1_ftq_req.startAddr, blockBytes, VAddrBits)
+  toITLB(0).bits.debug.pc := addrAlign(f1_ftq_req.startAddr, blockBytes, VAddrBits)
 
   toITLB(1).valid         := f1_valid && f1_doubleLine
-  toITLB(1).bits.vaddr    := align(f1_ftq_req.fallThruAddr, blockBytes)
-  toITLB(1).bits.debug.pc := align(f1_ftq_req.fallThruAddr, blockBytes)
+  toITLB(1).bits.vaddr    := addrAlign(f1_ftq_req.fallThruAddr, blockBytes, VAddrBits)
+  toITLB(1).bits.debug.pc := addrAlign(f1_ftq_req.fallThruAddr, blockBytes, VAddrBits)
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
@@ -198,16 +202,28 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val f1_pAddrs             = tlbRespPAddr
   val f1_pTags              = VecInit(f1_pAddrs.map(get_phy_tag(_)))
-  val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
-  val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
-  val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
-  val (bank0_hit,bank1_hit) = (ParallelOR(bank0_hit_vec) && !tlbExcpPF(0) && !tlbExcpAF(0), ParallelOR(bank1_hit_vec) && !tlbExcpPF(1) && !tlbExcpAF(1))
-  val f1_hit                = (bank0_hit && bank1_hit && f1_valid && f1_doubleLine) || (f1_valid && !f1_doubleLine && bank0_hit)
-  val f1_bank_hit_vec       = VecInit(Seq(bank0_hit_vec, bank1_hit_vec))
-  val f1_bank_hit           = VecInit(Seq(bank0_hit, bank1_hit))
+  val (f1_tags, f1_cohs)    = (meta_resp.tags,  meta_resp.cohs)
+  val (f1_cacheline_valid, f1_datas)   = (meta_resp.valid, data_resp.datas)
 
-  val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(Some("random"),nWays,nSets/2))
-  val f1_victim_masks = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(f1_vSetIdx(i)))})
+  //hit and replaecement check
+  //TODO: valid bit in metaData may be useless
+  val release_confic_vec = Wire(Vec(4, Bool()))
+
+  val f1_tag_eq_vec        = VecInit((0 until 2).map( k => VecInit(f1_tags(k).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(k)(i) && way_tag ===  f1_pTags(k) })))
+  val f1_tag_match_vec     = VecInit((0 until 2).map( k => VecInit(f1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => f1_tag_eq_vec(k)(w) && f1_cohs(k)(w).isValid() && f1_cacheline_valid(k)(w)})))
+  val f1_tag_match         = VecInit(f1_tag_match_vec.map(vector => ParallelOR(vector)))
+
+  val f1_bank_hit          = VecInit(Seq(f1_tag_match(0) && f1_valid  && !tlbExcpPF(0) && !tlbExcpAF(0) && !(release_confic_vec(0) || release_confic_vec(2)),
+                                                  f1_tag_match(1) && f1_valid && f1_doubleLine && !tlbExcpPF(1) && !tlbExcpAF(1) && !(release_confic_vec(1) || release_confic_vec(3))    ))
+  val f1_bank_miss         = VecInit(Seq(!f1_tag_match(0) && f1_valid && !tlbExcpPF(0) && !tlbExcpAF(0), !f1_tag_match(1) && f1_valid && f1_doubleLine && !tlbExcpPF(1) && !tlbExcpAF(1)))
+  val f1_hit               = (f1_bank_hit(0) && f1_bank_hit(1)) || (!f1_doubleLine && f1_bank_hit(0))
+
+  val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/2))
+  val f1_victim_oh    = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(f1_vSetIdx(i)))})
+  val f1_victim_coh   = VecInit(f1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, f1_cohs(port))})
+  val f1_victim_tag   = VecInit(f1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, f1_tags(port))})
+  val f1_victim_data  = VecInit(f1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, f1_datas(port))})
+  val f1_need_replace = VecInit(f1_victim_coh.zipWithIndex.map{case(coh, port) => coh.isValid() && f1_bank_miss(port)})
 
   val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
   val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
@@ -215,24 +231,24 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
   val f1_hit_data      =  VecInit(f1_datas.zipWithIndex.map { case(bank, i) =>
-    val bank_hit_data = Mux1H(f1_bank_hit_vec(i).asUInt, bank)
+    val bank_hit_data = Mux1H(f1_tag_match_vec(i).asUInt, bank)
     bank_hit_data
   })
 
   (0 until nWays).map{ w =>
-    XSPerfAccumulate("line_0_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_bank_hit(0) && OHToUInt(f1_bank_hit_vec(0))  === w.U)
+    XSPerfAccumulate("line_0_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_bank_hit(0) && OHToUInt(f1_tag_match_vec(0))  === w.U)
   }
 
   (0 until nWays).map{ w =>
-    XSPerfAccumulate("line_0_victim_way_" + Integer.toString(w, 10),  f1_fire && !f1_bank_hit(0) && OHToUInt(f1_victim_masks(0))  === w.U)
+    XSPerfAccumulate("line_0_victim_way_" + Integer.toString(w, 10),  f1_fire && !f1_bank_hit(0) && OHToUInt(f1_victim_oh(0))  === w.U)
   }
 
   (0 until nWays).map{ w =>
-    XSPerfAccumulate("line_1_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && f1_bank_hit(1) && OHToUInt(f1_bank_hit_vec(1))  === w.U)
+    XSPerfAccumulate("line_1_hit_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && f1_bank_hit(1) && OHToUInt(f1_tag_match_vec(1))  === w.U)
   }
 
   (0 until nWays).map{ w =>
-    XSPerfAccumulate("line_1_victim_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && !f1_bank_hit(1) && OHToUInt(f1_victim_masks(1))  === w.U)
+    XSPerfAccumulate("line_1_victim_way_" + Integer.toString(w, 10),  f1_fire && f1_doubleLine && !f1_bank_hit(1) && OHToUInt(f1_victim_oh(1))  === w.U)
   }
 
   XSPerfAccumulate("ifu_bubble_f1_tlb_miss",    f1_valid && !tlbRespAllValid )
@@ -263,14 +279,65 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val has_fixed_1_miss = sec_miss_reg(1) || sec_miss_reg(3)
   val has_fixed_vec = VecInit(Seq(has_fixed_0_miss,has_fixed_1_miss ))
 
-  val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
+  val (f2_pAddrs , f2_vaddr)   = (RegEnable(next = f1_pAddrs, enable = f1_fire), VecInit(Seq(f2_ftq_req.startAddr, f2_ftq_req.fallThruAddr)))
+  val f2_cohs      = RegEnable(next = f1_cohs, enable = f1_fire)
   val f2_hit      = RegEnable(next = f1_hit   , enable = f1_fire)
-  val f2_bank_hit = RegEnable(next = f1_bank_hit, enable = f1_fire)  
+  val f2_bank_hit = RegEnable(next = f1_bank_hit, enable = f1_fire)
   val f2_fixed_hit_vec = VecInit((0 until 2).map(i => f2_bank_hit(i) || has_fixed_vec(i)))
   val f2_fixed_hit = (f2_valid && f2_fixed_hit_vec(0) && f2_fixed_hit_vec(1) && f2_doubleLine) || (f2_valid && f2_fixed_hit_vec(0) && !f2_doubleLine)
   val f2_miss     = f2_valid && !f2_fixed_hit 
   val (f2_vSetIdx, f2_pTags) = (RegEnable(next = f1_vSetIdx, enable = f1_fire), RegEnable(next = f1_pTags, enable = f1_fire))
-  val f2_waymask  = RegEnable(next = f1_victim_masks, enable = f1_fire)
+
+  //replacement
+  val f2_waymask      = RegEnable(next = f1_victim_oh, enable = f1_fire)
+  val f2_victim_coh   = RegEnable(next = f1_victim_coh, enable = f1_fire)
+  val f2_victim_tag   = RegEnable(next = f1_victim_tag, enable = f1_fire)
+  val f2_victim_data  = RegEnable(next = f1_victim_data,  enable = f1_fire)
+  val f2_need_replace = RegEnable(next = f1_need_replace,  enable = f1_fire)
+  val f2_has_replace  = f2_need_replace.asUInt.orR
+
+  val release_idle :: release_ready :: release_send_req :: Nil = Enum(3)
+  val release_state = RegInit(release_idle)
+
+  switch(release_state){
+    is(release_idle){
+      when(f2_need_replace(0) && !f2_need_replace(1)){
+        release_state := Mux(toRealseUnit(0).ready, release_ready ,release_idle )
+      }.elsewhen(!f2_need_replace(0) && f2_need_replace(1)){
+        release_state := Mux(toRealseUnit(1).ready, release_ready ,release_idle )
+      }.elsewhen(f2_need_replace(0) && f2_need_replace(1)){
+        release_state := Mux(toRealseUnit(0).ready && toRealseUnit(1).ready, release_ready ,release_idle )
+      }
+    }
+
+    is(release_ready){
+      release_state := release_send_req
+    }
+
+    is(release_send_req){
+      when(f2_fire){ release_state := release_idle}
+    }
+  }
+
+  (0 until 2).map{ i =>
+    toRealseUnit(i).valid          := f2_valid && f2_need_replace(i) && (release_state === release_ready) && !f2_flush
+
+
+    toRealseUnit(i).bits.addr      := get_block_addr(Cat(f2_victim_tag(i), get_untag(f2_vaddr(i))) )
+    toRealseUnit(i).bits.param     := f2_victim_coh(i).onCacheControl(M_FLUSH)._2
+    toRealseUnit(i).bits.voluntary := true.B  //TODO: deal witch Probe
+    toRealseUnit(i).bits.hasData   := false.B //TODO: Probe has Data
+    toRealseUnit(i).bits.data      := f2_victim_data(i)
+  }
+
+  //deal wich realse confilict
+  val release_0_req_0  =  f2_valid && f1_valid && (f2_vSetIdx(0) === f1_vSetIdx(0)) && (f2_victim_tag(0) === get_phy_tag(f1_pAddrs(0))) && f2_need_replace(0)
+  val release_0_req_1  =  f2_valid && f1_valid && (f2_vSetIdx(0) === f1_vSetIdx(1)) && (f2_victim_tag(0) === get_phy_tag(f1_pAddrs(1))) && f2_need_replace(0)
+  val release_1_req_0  =  f2_valid && f1_valid && (f2_vSetIdx(1) === f1_vSetIdx(0)) && (f2_victim_tag(1) === get_phy_tag(f1_pAddrs(0))) && f2_need_replace(1)
+  val release_1_req_1  =  f2_valid && f1_valid && (f2_vSetIdx(1) === f1_vSetIdx(1)) && (f2_victim_tag(1) === get_phy_tag(f1_pAddrs(1))) && f2_need_replace(1)
+
+  release_confic_vec := VecInit(Seq(release_0_req_0,release_0_req_1,release_1_req_0,release_1_req_1))
+
   //exception information
   val f2_except_pf = RegEnable(next = VecInit(tlbExcpPF), enable = f1_fire)
   val f2_except_af = RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire)
@@ -363,17 +430,21 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     }
   }
 
-  when(f2_flush) { wait_state := wait_idle }
+  when(f2_flush) {
+    wait_state := wait_idle
+    release_state := release_idle
+  }
 
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
       else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_queue_ready
-    toMissQueue(i).bits.addr    := f2_pAddrs(i)
-    toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
-    toMissQueue(i).bits.waymask := f2_waymask(i)
+    toMissQueue(i).bits.paddr    := f2_pAddrs(i)
+    toMissQueue(i).bits.vaddr    := f2_vaddr(i)
+    toMissQueue(i).bits.waymask  := f2_waymask(i)
+    toMissQueue(i).bits.coh      := f2_victim_coh(i)
   }
 
-  val miss_all_fix       = (wait_state === wait_finish)
+  val miss_all_fix       = (wait_state === wait_finish) && (!f2_has_replace || (release_state === release_send_req))
   f2_fetchFinish         := ((f2_valid && f2_fixed_hit) || miss_all_fix || hit_0_except_1 || except_0)
 
   XSPerfAccumulate("ifu_bubble_f2_miss",    f2_valid && !f2_fetchFinish )
@@ -381,7 +452,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := f1_vSetIdx(i)
     t_w(0).valid   := f1_bank_hit(i)
-    t_w(0).bits    := OHToUInt(f1_bank_hit_vec(i))
+    t_w(0).bits    := OHToUInt(f1_tag_match_vec(i))
 
     t_s(1)         := f2_vSetIdx(i)
     t_w(1).valid   := f2_valid && !f2_bank_hit(i)
