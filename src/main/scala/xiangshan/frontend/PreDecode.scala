@@ -22,8 +22,8 @@ import chisel3.{util, _}
 import chisel3.util._
 import utils._
 import xiangshan._
+import xiangshan.frontend.icache._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
-import xiangshan.cache._
 
 trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst{
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
@@ -136,7 +136,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
                        else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val nextLinePC =  align(pcStart, 64) + 64.U
+  val nextLinePC =  addrAlign(pcStart, 64, VAddrBits) + 64.U
 
   for (i <- 0 until PredictWidth) {
     //TODO: Terrible timing for pc comparing
@@ -171,7 +171,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pc(i)               := currentPC
     io.out.pageFault(i)        := hasPageFault
     io.out.accessFault(i)      := hasAccessFault
-    io.out.crossPageIPF(i)     := (io.out.pc(i) === align(realEndPC, 64) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
+    io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
 
     expander.io.in             := inst
     io.out.instrs(i)           := expander.io.out.bits

@@ -24,7 +24,8 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import huancun.{CacheParameters, HCCacheParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
@@ -183,7 +184,8 @@ case class XSCoreParameters
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2
+    nMissEntries = 2,
+    nReleaseEntries = 2
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
