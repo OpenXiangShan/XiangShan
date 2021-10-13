@@ -20,7 +20,7 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import system.L1CacheErrorInfo
+import xiangshan.L1CacheErrorInfo
 
 class Meta(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
