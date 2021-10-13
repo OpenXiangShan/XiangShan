@@ -332,8 +332,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   (0 until 2).map{ i =>
     toRealseUnit(i).valid          := f2_valid && f2_need_replace(i) && (release_state === release_ready) && !f2_flush
-
-
     toRealseUnit(i).bits.addr      := get_block_addr(Cat(f2_victim_tag(i), get_untag(f2_vaddr(i))) )
     toRealseUnit(i).bits.param     := f2_victim_coh(i).onCacheControl(M_FLUSH)._2
     toRealseUnit(i).bits.voluntary := true.B  //TODO: deal witch Probe
