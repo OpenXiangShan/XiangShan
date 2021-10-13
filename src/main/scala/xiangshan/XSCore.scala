@@ -26,8 +26,9 @@ import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.{HasSoCParameter, L1CacheErrorInfo, SoCParamsKey}
+import system.HasSoCParameter
 import utils._
 
 abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
@@ -62,6 +63,10 @@ case class EnviromentParameters
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbMappingHelper
 {
+  // interrupt sinks
+  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val plic_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
@@ -122,7 +127,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
     if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
-    else if (i < exuParameters.MduCnt) Seq((0, i), (1, i))
+    else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
   val lsDpPorts = Seq(
@@ -132,7 +137,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     Seq((4, 1))
   ) ++ (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
-    if (i < exuParameters.FmiscCnt) Seq((0, i), (1, i))
+    if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
 
@@ -166,9 +171,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasExeBlockHelper {
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
-    val externalInterrupt = new ExternalInterruptIO
     val l2_pf_enable = Output(Bool())
-    val l1plus_error, icache_error, dcache_error = Output(new L1CacheErrorInfo)
+    val beu_errors = Output(new XSL1BusErrors())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -212,9 +216,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   val rfWriteback = VecInit(intArbiter.io.out ++ fpArbiter.io.out)
 
-  io.l1plus_error <> DontCare
-  io.icache_error <> frontend.io.error
-  io.dcache_error <> memBlock.io.error
+  io.beu_errors.icache <> frontend.io.error
+  io.beu_errors.dcache <> memBlock.io.error
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
@@ -254,6 +257,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.loadFastMatch
 
+  val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
     exu.flush <> ctrlBlock.io.flush
@@ -265,9 +269,21 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.stIssuePtr <> memBlock.io.stIssuePtr
     exu.scheExtra.debug_fp_rat <> ctrlBlock.io.debug_fp_rat
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
+    exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
+      sink.bits := src.bits
+      sink.valid := src.valid && !csrioIn.customCtrl.storeset_no_fast_wakeup
+    }}
+    exu.scheExtra.memWaitUpdateReq.stdIssue.zip(stdIssue).foreach{case (sink, src) => {
+      sink.valid := src.valid
+      sink.bits := src.bits
+    }}
   }
   XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
   XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
+
+  // TODO: connect rsPerf
+  val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
+  dontTouch(rsPerf)
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -285,7 +301,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.trapTarget <> ctrlBlock.io.robio.toCSR.trapTarget
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
-  csrioIn.externalInterrupt <> io.externalInterrupt
+
+  csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
   fenceio.sfence <> memBlock.io.sfence
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer

@@ -335,14 +335,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
     // If addr match, data not ready, mark it as dataInvalid
-    // load_s1: generate dataInvalid in load_s1 to set fastUop to
+    // load_s1: generate dataInvalid in load_s1 to set fastUop
     io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & needForward).orR
+    val dataInvalidSqIdxReg = RegNext(OHToUInt(addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & needForward))
     // load_s2
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
 
     // load_s2
     // check if vaddr forward mismatched
     io.forward(i).matchInvalid := vaddrMatchFailed
+    io.forward(i).dataInvalidSqIdx := dataInvalidSqIdxReg
   }
 
   /**

@@ -218,6 +218,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
   io.rsFeedback.bits.sourceType := RSFeedbackType.bankConflict
+  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
   io.out.valid := io.in.valid && !s1_bank_conflict // if bank conflict, load inst will be canceled immediately 
   io.out.bits.paddr := s1_paddr
@@ -257,6 +258,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val pmpResp = Input(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
+    val dataInvalidSqIdx = Input(UInt())
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
@@ -383,6 +385,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
       RSFeedbackType.mshrFull
     )
   )
+  io.rsFeedback.bits.dataInvalidSqIdx.value := io.dataInvalidSqIdx
+  io.rsFeedback.bits.dataInvalidSqIdx.flag := DontCare
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
   io.needReplayFromRS := s2_cache_replay && !fullForward
@@ -471,6 +475,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s2.io.sbuffer.matchInvalid <> io.sbuffer.matchInvalid
   load_s2.io.dataForwarded <> io.lsq.loadDataForwarded
   load_s2.io.fastpath <> io.fastpathOut
+  load_s2.io.dataInvalidSqIdx := io.lsq.forward.dataInvalidSqIdx // provide dataInvalidSqIdx to make wakeup faster
   io.lsq.needReplayFromRS := load_s2.io.needReplayFromRS
 
   // feedback tlb miss / dcache miss queue full

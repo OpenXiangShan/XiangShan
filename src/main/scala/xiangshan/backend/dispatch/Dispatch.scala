@@ -184,15 +184,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
-      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) // classic store set
-      updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && !isStore(i) // store set lite
-      // updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // 2-bit store set
+      updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && 
+        (!isStore(i) || io.csrCtrl.storeset_wait_store)
+      updatedUop(i).cf.waitForSqIdx := lfst.io.lookup.sqIdx(i)
     } else {
       updatedUop(i).cf.loadWaitBit := io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // wait table does not require store to be delayed
+      updatedUop(i).cf.waitForSqIdx := DontCare
     }
-
     // update store set LFST
-    io.lfst(i).valid := io.fromRename(i).valid && updatedUop(i).cf.storeSetHit && isStore(i)
+    io.lfst(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit && isStore(i)
     // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
     io.lfst(i).bits.robIdx := updatedUop(i).robIdx
     io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx

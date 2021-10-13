@@ -26,10 +26,10 @@ import utils._
 import xiangshan.backend.dispatch.Dispatch2Rs
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.fpu.FMAMidResultIO
-import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper}
+import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper, RsPerfCounter}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{SqPtr, StoreDataBundle}
+import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -163,6 +163,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val fpRfConfig = (outer.numFpRfReadPorts > 0 && outer.hasFpRf, outer.numFpRfReadPorts, fpRfWritePorts)
 
   val rs_all = outer.reservationStations
+  val numPerfPorts = outer.reservationStations.map(_.module.perf.length).sum
 
   // print rs info
   println("Scheduler: ")
@@ -172,6 +173,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   println(s"  number of std ports: ${outer.numSTDPorts}")
   val numLoadPorts = outer.reservationStations.map(_.module.io.load).filter(_.isDefined).map(_.get.fastMatch.length).sum
   println(s"  number of load ports: ${numLoadPorts}")
+  println(s"  number of perf ports: ${numPerfPorts}")
   if (intRfConfig._1) {
     println(s"INT Regfile: ${intRfConfig._2}R${intRfConfig._3}W")
   }
@@ -204,9 +206,12 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
     val stIssuePtr = Input(new SqPtr())
+    // special ports for load / store rs
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val perf = Vec(numPerfPorts, Output(new RsPerfCounter))
 
     override def cloneType: SchedulerExtraIO.this.type =
       new SchedulerExtraIO().asInstanceOf[this.type]
@@ -227,7 +232,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // wakeup-related ports
     val writeback = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new ExuOutput)))
     val fastUopIn = Vec(intRfWritePorts + fpRfWritePorts, Flipped(ValidIO(new MicroOp)))
-    // feedback ports
+    // misc ports
     val extra = new SchedulerExtraIO
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
   })
@@ -348,6 +353,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
     if (rs.io.checkwait.isDefined) {
       rs.io.checkwait.get.stIssuePtr <> io.extra.stIssuePtr
+      rs.io.checkwait.get.memWaitUpdateReq <> io.extra.memWaitUpdateReq
     }
     if (rs.io.feedback.isDefined) {
       val width = rs.io.feedback.get.length
@@ -386,6 +392,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val allLoadRS = outer.reservationStations.map(_.module.io.load).filter(_.isDefined)
     io.extra.loadFastMatch.get := allLoadRS.map(_.get.fastMatch).fold(Seq())(_ ++ _)
   }
+  io.extra.perf <> rs_all.flatMap(_.module.perf)
 
   var intReadPort = 0
   var fpReadPort = 0

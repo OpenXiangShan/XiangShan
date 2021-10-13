@@ -21,7 +21,6 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -251,7 +250,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stdExeUnits(i).io.redirect <> io.redirect
     stdExeUnits(i).io.flush <> io.flush
-    stdExeUnits(i).io.fromInt <> io.issue(i + 4)
+    stdExeUnits(i).io.fromInt <> io.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
@@ -273,7 +272,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // Lsq to load unit's rs
     lsq.io.storeDataIn(i) := stData(i)
 
-    // sync issue info to store set LFST
+    // 1. sync issue info to store set LFST
+    // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.stIn(i).valid := io.issue(exuParameters.LduCnt + i).valid
     io.stIn(i).bits := io.issue(exuParameters.LduCnt + i).bits
 

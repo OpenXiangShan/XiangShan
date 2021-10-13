@@ -25,7 +25,6 @@ import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import system.L1CacheErrorInfo
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
 
