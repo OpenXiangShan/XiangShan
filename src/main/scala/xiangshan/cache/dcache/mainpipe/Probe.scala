@@ -22,7 +22,7 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
 
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -111,6 +111,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nProbeEntries))
@@ -181,4 +182,18 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
   }
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := io.pipe_req.fire()
+  io.perfEvents.PerfEvents(0).incr_step  := io.pipe_req.fire()
+  io.perfEvents.PerfEvents(1).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nProbeEntries.U/4.U)) 
+  io.perfEvents.PerfEvents(1).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nProbeEntries.U/4.U))
+  io.perfEvents.PerfEvents(2).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U/2.U)) 
+  io.perfEvents.PerfEvents(2).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U/2.U))
+  io.perfEvents.PerfEvents(3).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(3).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U*3.U/4.U))
+  io.perfEvents.PerfEvents(4).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(4).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U*3.U/4.U)) 
 }

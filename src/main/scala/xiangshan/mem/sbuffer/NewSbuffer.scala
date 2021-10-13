@@ -95,6 +95,7 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val dataModule = Module(new SbufferData)
@@ -502,4 +503,29 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step  := DontCare
+  }
+  io.perfEvents.PerfEvents(40).incr_valid := 1.U
+  io.perfEvents.PerfEvents(40).incr_step  := PopCount(VecInit(io.in.map(_.valid)).asUInt)
+  io.perfEvents.PerfEvents(41).incr_valid := 1.U
+  io.perfEvents.PerfEvents(41).incr_step  := PopCount(VecInit(io.in.map(_.fire())).asUInt)
+  io.perfEvents.PerfEvents(42).incr_valid := 1.U
+  io.perfEvents.PerfEvents(42).incr_step  := PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt)
+  io.perfEvents.PerfEvents(43).incr_valid := 1.U
+  io.perfEvents.PerfEvents(43).incr_step  := PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt)
+  io.perfEvents.PerfEvents(44).incr_valid := 1.U
+  io.perfEvents.PerfEvents(44).incr_step  := io.dcache.req.valid
+  io.perfEvents.PerfEvents(45).incr_valid := 1.U
+  io.perfEvents.PerfEvents(45).incr_step  := io.dcache.req.fire()
+  io.perfEvents.PerfEvents(46).incr_valid := 1.U
+  io.perfEvents.PerfEvents(46).incr_step  := (perf_valid_entry_count < (StoreBufferSize.U/4.U))
+  io.perfEvents.PerfEvents(47).incr_valid := 1.U
+  io.perfEvents.PerfEvents(47).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))
+  io.perfEvents.PerfEvents(48).incr_valid := 1.U
+  io.perfEvents.PerfEvents(48).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))
+  io.perfEvents.PerfEvents(49).incr_valid := 1.U
+  io.perfEvents.PerfEvents(49).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U))
+
 }

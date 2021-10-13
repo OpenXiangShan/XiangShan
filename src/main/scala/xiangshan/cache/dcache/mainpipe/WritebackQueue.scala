@@ -19,7 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import huancun.{DirtyField, DirtyKey}
 
@@ -171,6 +171,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
+
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   // allocate a free entry for incoming request
@@ -237,4 +239,19 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
+
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := io.req.fire()
+  io.perfEvents.PerfEvents(0).incr_step  := io.req.fire()
+  io.perfEvents.PerfEvents(1).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U)) 
+  io.perfEvents.PerfEvents(1).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))
+  io.perfEvents.PerfEvents(2).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U)) 
+  io.perfEvents.PerfEvents(2).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))
+  io.perfEvents.PerfEvents(3).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(3).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U))
+  io.perfEvents.PerfEvents(4).incr_valid := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U*3.U/4.U)) 
+  io.perfEvents.PerfEvents(4).incr_step  := (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U*3.U/4.U)) 
 }

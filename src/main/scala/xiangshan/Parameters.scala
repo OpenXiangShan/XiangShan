@@ -360,6 +360,6 @@ trait HasXSParameter {
   val numPCntCtrl     = 64
   val numPCntIntBlock = 64
   val numPCntFpBlock  = 64
-  val numPCntLsuBlock = 64
+  val numPCntLsu      = 64
 
 }

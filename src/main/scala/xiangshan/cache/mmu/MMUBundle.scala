@@ -289,6 +289,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
     val in = Flipped(ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false))))
   }
   val sfence = Input(new SfenceBundle())
+  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
 
   def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
@@ -408,6 +409,7 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
+  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
 
   override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }

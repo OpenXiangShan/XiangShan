@@ -59,8 +59,8 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
-  val lcommit = Output(UInt(3.W))
-  val scommit = Output(UInt(3.W))
+  val lcommit = Output(UInt(log2Up(CommitWidth + 1).W))
+  val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())

@@ -54,6 +54,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
   })
+  val perfEvents      = Output(new PerfEventsBundle(numPCntLsu))
 }
 
 @chiselName
@@ -162,4 +163,24 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
   TimeOutAssert(state =/= s_idle, timeOutThreshold, "page table walker time out")
+
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+
+  io.perfEvents.PerfEvents(12).incr_valid  := io.req.fire()
+  io.perfEvents.PerfEvents(12).incr_step   := io.req.fire()
+  io.perfEvents.PerfEvents(13).incr_valid  := state === s_idle
+  io.perfEvents.PerfEvents(13).incr_step   := state === s_idle
+  io.perfEvents.PerfEvents(14).incr_valid  := state =/= s_idle
+  io.perfEvents.PerfEvents(14).incr_step   := state =/= s_idle
+  io.perfEvents.PerfEvents(15).incr_valid  := io.resp.valid && !io.resp.ready
+  io.perfEvents.PerfEvents(15).incr_step   := io.resp.valid && !io.resp.ready
+  io.perfEvents.PerfEvents(16).incr_valid  := mem.req.fire()
+  io.perfEvents.PerfEvents(16).incr_step   := mem.req.fire()
+  io.perfEvents.PerfEvents(17).incr_valid  := BoolStopWatch(mem.req.fire, mem.resp.fire(), true)
+  io.perfEvents.PerfEvents(17).incr_step   := BoolStopWatch(mem.req.fire, mem.resp.fire(), true)
+  io.perfEvents.PerfEvents(18).incr_valid  := mem.req.valid && !mem.req.ready
+  io.perfEvents.PerfEvents(18).incr_step   := mem.req.valid && !mem.req.ready
 }

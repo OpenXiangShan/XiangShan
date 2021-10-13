@@ -87,6 +87,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val exceptionAddr = new ExceptionAddrIO // to csr
       val rob = Flipped(new RobLsqIO) // rob to lsq
     }
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
@@ -390,4 +391,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSPerfAccumulate("store_rs_deq_count", stDeqCount)
   XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(22).incr_valid := 1.U 
+  io.perfEvents.PerfEvents(22).incr_step  := ldDeqCount
+  io.perfEvents.PerfEvents(23).incr_valid := 1.U 
+  io.perfEvents.PerfEvents(23).incr_step  := stDeqCount
 }

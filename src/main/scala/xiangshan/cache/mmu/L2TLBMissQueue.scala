@@ -53,6 +53,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val sfence = Input(new SfenceBundle)
   val cache = Decoupled(new L2TlbMQCacheBundle())
   val fsm_done = Input(Bool())
+  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   val out = DecoupledIO(new Bundle {
     val source = Output(UInt(bPtwWidth.W))
     val id = Output(UInt(bMemID.W))
@@ -198,4 +199,17 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
   }
   assert(!io.in.valid || io.in.ready, "when io.in.valid, should always ready")
+
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := io.in.fire() 
+  io.perfEvents.PerfEvents(0).incr_step  := io.in.fire()
+  io.perfEvents.PerfEvents(1).incr_valid := io.in.valid && !io.in.ready 
+  io.perfEvents.PerfEvents(1).incr_step  := io.in.valid && !io.in.ready
+  io.perfEvents.PerfEvents(2).incr_valid := io.mem.req.fire() 
+  io.perfEvents.PerfEvents(2).incr_step  := io.mem.req.fire()
+  io.perfEvents.PerfEvents(3).incr_valid := 1.U
+  io.perfEvents.PerfEvents(3).incr_step  := PopCount(is_waiting)
 }

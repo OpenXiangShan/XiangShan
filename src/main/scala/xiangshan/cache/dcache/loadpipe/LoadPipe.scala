@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
-import utils.{XSDebug, XSPerfAccumulate}
+import utils.{XSDebug, XSPerfAccumulate, PerfEventsBundle}
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   def metaBits = (new L1Metadata).getWidth
@@ -54,6 +54,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
+    //for preformance monitor
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val s1_ready = Wire(Bool())
@@ -251,4 +253,20 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire() && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
+
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := io.lsu.req.fire()
+  io.perfEvents.PerfEvents(0).incr_step  := io.lsu.req.fire()
+  io.perfEvents.PerfEvents(1).incr_valid := io.lsu.resp.fire() && resp.bits.replay
+  io.perfEvents.PerfEvents(1).incr_step  := io.lsu.resp.fire() && resp.bits.replay
+  io.perfEvents.PerfEvents(2).incr_valid := io.lsu.resp.fire() && resp.bits.replay && s2_nack_data
+  io.perfEvents.PerfEvents(2).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_data
+  io.perfEvents.PerfEvents(3).incr_valid := io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr
+  io.perfEvents.PerfEvents(3).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr
+  io.perfEvents.PerfEvents(4).incr_valid := io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow
+  io.perfEvents.PerfEvents(4).incr_step  := io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow
+
 }

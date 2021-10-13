@@ -211,6 +211,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
+    val fullForward = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
   })
 
@@ -244,6 +245,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
   io.lsq := DontCare
   io.sbuffer := DontCare
+  io.fullForward := fullForward
 
   // generate XLEN/8 Muxs
   for (i <- 0 until XLEN / 8) {
@@ -339,6 +341,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_tlb_miss", io.rsFeedback.valid && !io.rsFeedback.bits.hit && s2_tlb_miss)
   XSPerfAccumulate("replay_cache", io.rsFeedback.valid && !io.rsFeedback.bits.hit && !s2_tlb_miss && s2_cache_replay)
   XSPerfAccumulate("stall_out", io.out.valid && !io.out.ready)
+
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
@@ -359,6 +362,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))
     val loadFastMatch = Input(UInt(exuParameters.LduCnt.W))
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val load_s0 = Module(new LoadUnit_S0)
@@ -450,6 +454,34 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   io.lsq.ldout.ready := !hitLoadOut.valid
 
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_valid := DontCare
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0).incr_valid := load_s0.io.in.fire()
+  io.perfEvents.PerfEvents(0).incr_step  := load_s0.io.in.fire()
+  io.perfEvents.PerfEvents(1).incr_valid := load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()
+  io.perfEvents.PerfEvents(1).incr_step  := load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()
+  io.perfEvents.PerfEvents(2).incr_valid := load_s0.io.out.valid && load_s0.io.out.ready && !load_s0.io.dcacheReq.ready
+  io.perfEvents.PerfEvents(2).incr_step  := load_s0.io.out.valid && load_s0.io.out.ready && !load_s0.io.dcacheReq.ready
+  io.perfEvents.PerfEvents(3).incr_valid := 1.U
+  io.perfEvents.PerfEvents(3).incr_step  := load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) === load_s0.io.in.bits.src(0)(VAddrBits-1, 12)
+  io.perfEvents.PerfEvents(4).incr_valid := 1.U
+  io.perfEvents.PerfEvents(4).incr_step  := load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) =/= load_s0.io.in.bits.src(0)(VAddrBits-1, 12)
+  io.perfEvents.PerfEvents(5).incr_valid := load_s1.io.in.fire
+  io.perfEvents.PerfEvents(5).incr_step  := load_s1.io.in.fire
+  io.perfEvents.PerfEvents(6).incr_valid := load_s1.io.in.fire && load_s1.io.dtlbResp.bits.miss
+  io.perfEvents.PerfEvents(6).incr_step  := load_s1.io.in.fire && load_s1.io.dtlbResp.bits.miss
+  io.perfEvents.PerfEvents(7).incr_valid := load_s2.io.in.fire
+  io.perfEvents.PerfEvents(7).incr_step  := load_s2.io.in.fire
+  io.perfEvents.PerfEvents(8).incr_valid := load_s2.io.in.fire && load_s2.io.dcacheResp.bits.miss
+  io.perfEvents.PerfEvents(8).incr_step  := load_s2.io.in.fire && load_s2.io.dcacheResp.bits.miss
+  io.perfEvents.PerfEvents(9).incr_valid := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit
+  io.perfEvents.PerfEvents(9).incr_step  := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit
+  io.perfEvents.PerfEvents(10).incr_valid := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && load_s2.io.in.bits.tlbMiss
+  io.perfEvents.PerfEvents(10).incr_step  := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && load_s2.io.in.bits.tlbMiss
+  io.perfEvents.PerfEvents(11).incr_valid := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss
+  io.perfEvents.PerfEvents(11).incr_step  := load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
   }
