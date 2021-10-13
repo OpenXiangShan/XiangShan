@@ -20,8 +20,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import system.L1CacheErrorInfo
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import xiangshan.L1CacheErrorInfo
 
 import scala.math.max
 
