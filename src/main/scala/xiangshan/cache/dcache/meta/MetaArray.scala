@@ -20,8 +20,8 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import system.L1CacheErrorInfo
 import utils.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
+import xiangshan.L1CacheErrorInfo
 
 // basic building blocks for L1 DCache
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {

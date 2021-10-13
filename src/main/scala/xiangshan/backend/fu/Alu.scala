@@ -291,7 +291,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val and     = src1 & logicSrc2
   val or      = src1 | logicSrc2
   val xor     = src1 ^ logicSrc2
-  val orcb    = Cat((7 to 0).map(i => Fill(8, src1(i * 8 + 7, i * 8).orR)))
+  val orcb    = Cat((0 until 8).map(i => Fill(8, src1(i * 8 + 7, i * 8).orR)).reverse)
   val orh48   = Cat(src1(63, 8), 0.U(8.W)) | src2
 
   val sextb = SignExt(src1(7, 0), XLEN)
@@ -299,7 +299,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sexth = SignExt(src1(15, 0), XLEN)
   val packw = SignExt(Cat(src2(15, 0), src1(15, 0)), XLEN)
 
-  val revb = Cat((7 to 0).map(i => Reverse(src1(8 * i + 7, 8 * i))))
+  val revb = Cat((0 until 8).map(i => Reverse(src1(8 * i + 7, 8 * i))).reverse)
   val pack = Cat(src2(31, 0), src1(31, 0))
   val rev8 = Cat((0 until 8).map(i => src1(8 * i + 7, 8 * i)))
 
