@@ -53,7 +53,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     val bank_conflict_fast = Input(Bool())
 
     // send miss request to miss queue
-    val miss_req    = DecoupledIO(new NewMissReq)
+    val miss_req    = DecoupledIO(new MissReq)
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)

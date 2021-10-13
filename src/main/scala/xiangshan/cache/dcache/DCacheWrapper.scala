@@ -355,10 +355,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core modules
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
-  val mainPipe   = Module(new NewMainPipe)
+  val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
   val replacePipe = Module(new ReplacePipe)
-  val missQueue  = Module(new NewMissQueue(edge))
+  val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
 
@@ -454,7 +454,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMissReqPort = 0
 
   // Request
-  val missReqArb = Module(new RRArbiter(new NewMissReq, MissReqPortCount))
+  val missReqArb = Module(new RRArbiter(new MissReq, MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
@@ -535,7 +535,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.replay_resp := mainPipe.io.store_replay_resp
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
-  val mainPipeAtomicReqArb = Module(new Arbiter(new NewMainPipeReq, 2))
+  val mainPipeAtomicReqArb = Module(new Arbiter(new MainPipeReq, 2))
   mainPipeAtomicReqArb.io.in(0) <> missQueue.io.main_pipe_req
   mainPipeAtomicReqArb.io.in(1) <> atomicsReplayUnit.io.pipe_req
   mainPipe.io.atomic_req <> mainPipeAtomicReqArb.io.out
