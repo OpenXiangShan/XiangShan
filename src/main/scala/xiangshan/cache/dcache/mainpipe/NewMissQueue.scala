@@ -355,6 +355,30 @@ class NewMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   io.block_addr.valid := req_valid && w_grantlast && !s_refill
   io.block_addr.bits := req.addr
+
+  XSPerfAccumulate("miss_req_primary", io.req.valid && io.primary_ready)
+  XSPerfAccumulate("miss_req_merged", io.req.valid && io.secondary_ready)
+  XSPerfAccumulate("load_miss_penalty_to_use",
+    should_refill_data &&
+      BoolStopWatch(io.req.valid && io.primary_ready, io.refill_to_ldq.valid, true)
+  )
+  XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire(), io.main_pipe_resp))
+  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
+  XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  XSPerfAccumulate("penalty_from_grant_to_refill", !s_refill && w_grantlast)
+  XSPerfAccumulate("soft_prefetch_number", io.req.valid && io.primary_ready && io.req.bits.source === SOFT_PREFETCH.U)
+
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(io.req.valid && io.primary_ready), release_entry)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 100, 10)
+
+  val load_miss_begin = io.req.valid && io.primary_ready && io.req.bits.isLoad
+  val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 100, 10)
+
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 100, 10)
 }
 
 class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
@@ -453,4 +477,29 @@ class NewMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.probe_block := Cat(probe_block_vec).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
+
+  if (!env.FPGAPlatform) {
+    val difftest = Module(new DifftestRefillEvent)
+    difftest.io.clock := clock
+    difftest.io.coreid := hardId.U
+    difftest.io.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
+    difftest.io.addr := io.refill_to_ldq.bits.addr
+    difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
+  }
+
+  XSPerfAccumulate("miss_req", io.req.fire())
+  XSPerfAccumulate("miss_req_allocate", io.req.fire() && alloc)
+  XSPerfAccumulate("miss_req_merge_load", io.req.fire() && merge && io.req.bits.isLoad)
+  XSPerfAccumulate("miss_req_reject_load", io.req.valid && reject && io.req.bits.isLoad)
+  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
+  val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
+  val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
+  when (num_valids > max_inflight) {
+    max_inflight := num_valids
+  }
+  // max inflight (average) = max_inflight_total / cycle cnt
+  XSPerfAccumulate("max_inflight", max_inflight)
+  QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
+  io.full := num_valids === cfg.nMissEntries.U
+  XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 }
