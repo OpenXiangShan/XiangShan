@@ -187,19 +187,21 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
 
+  require(isPow2(cfg.nMissEntries))
+  val grant_source = io.mem_grant.bits.source(log2Up(cfg.nReleaseEntries) - 1, 0)
   val entries = (0 until cfg.nReleaseEntries) map { i =>
     val entry = Module(new WritebackEntry(edge))
 
-    entry.io.id := i.U
+    entry.io.id := (i + cfg.nMissEntries).U
 
     // entry req
     entry.io.req.valid := (i.U === alloc_idx) && allocate && req.valid && !block_conflict
     primary_ready(i)   := entry.io.req.ready
     entry.io.req.bits  := req.bits
 
-    entry.io.mem_grant.valid := (i.U === io.mem_grant.bits.source) && io.mem_grant.valid
+    entry.io.mem_grant.valid := (i.U === grant_source) && io.mem_grant.valid
     entry.io.mem_grant.bits  := io.mem_grant.bits
-    when (i.U === io.mem_grant.bits.source) {
+    when (i.U === grant_source) {
       io.mem_grant.ready := entry.io.mem_grant.ready
     }
 
