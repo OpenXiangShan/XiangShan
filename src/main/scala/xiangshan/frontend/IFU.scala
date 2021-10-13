@@ -27,6 +27,7 @@ import chisel3.experimental.verification
 import freechips.rocketchip.tilelink.MemoryOpCategories.M_FLUSH
 import freechips.rocketchip.tilelink.TLPermissions.toN
 import utils._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -63,6 +64,10 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val icacheInter     = new ICacheInterface
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val iTLBInter       = Vec(2, new BlockTlbRequestIO)
+  val pmp             = Vec(2, new Bundle {
+    val req = Valid(new PMPReqBundle())
+    val resp = Input(new PMPRespBundle())
+  })
 }
 
 // record the situation in which fallThruAddr falls into
@@ -97,6 +102,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val (toMissQueue, fromMissQueue) = (io.icacheInter.toMissQueue, io.icacheInter.fromMissQueue)
   val toRealseUnit   = io.icacheInter.toReleaseUnit
   val (toITLB, fromITLB) = (VecInit(io.iTLBInter.map(_.req)), VecInit(io.iTLBInter.map(_.resp)))
+  val fromPMP = io.pmp.map(_.resp)
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
@@ -179,10 +185,12 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   toITLB(0).valid         := f1_valid
+  toITLB(0).bits.size     := 3.U // TODO: fix the size
   toITLB(0).bits.vaddr    := addrAlign(f1_ftq_req.startAddr, blockBytes, VAddrBits)
   toITLB(0).bits.debug.pc := addrAlign(f1_ftq_req.startAddr, blockBytes, VAddrBits)
 
   toITLB(1).valid         := f1_valid && f1_doubleLine
+  toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := addrAlign(f1_ftq_req.fallThruAddr, blockBytes, VAddrBits)
   toITLB(1).bits.debug.pc := addrAlign(f1_ftq_req.fallThruAddr, blockBytes, VAddrBits)
 
@@ -196,7 +204,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
   val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
-  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid), fromITLB.map(port => (port.bits.excp.af.instr || port.bits.mmio) && port.valid)) //TODO: Temp treat mmio req as access fault
+  val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
+    fromITLB.map(port => (port.bits.excp.af.instr) && port.valid)) //TODO: Temp treat mmio req as access fault
+
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 
@@ -278,6 +288,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val has_fixed_0_miss = sec_miss_reg(0) || sec_miss_reg(2)
   val has_fixed_1_miss = sec_miss_reg(1) || sec_miss_reg(3)
   val has_fixed_vec = VecInit(Seq(has_fixed_0_miss,has_fixed_1_miss ))
+  val pmpExcpAF = fromPMP.map(port => port.instr)
 
   val (f2_pAddrs , f2_vaddr)   = (RegEnable(next = f1_pAddrs, enable = f1_fire), VecInit(Seq(f2_ftq_req.startAddr, f2_ftq_req.fallThruAddr)))
   val f2_cohs      = RegEnable(next = f1_cohs, enable = f1_fire)
@@ -340,9 +351,16 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   //exception information
   val f2_except_pf = RegEnable(next = VecInit(tlbExcpPF), enable = f1_fire)
-  val f2_except_af = RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire)
+  val f2_except_af = VecInit(RegEnable(next = VecInit(tlbExcpAF), enable = f1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(f1_fire)).asBool))
   val f2_except    = VecInit((0 until 2).map{i => f2_except_pf(i) || f2_except_af(i)})
   val f2_has_except = f2_valid && (f2_except_af.reduce(_||_) || f2_except_pf.reduce(_||_))
+  //
+  io.pmp.zipWithIndex.map { case (p, i) =>
+    p.req.valid := f2_fire
+    p.req.bits.addr := f2_pAddrs(i)
+    p.req.bits.size := 3.U // TODO
+    p.req.bits.cmd := TlbCmd.exec
+  }
 
   //instruction
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: Nil = Enum(8)
@@ -366,8 +384,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val f2_mq_datas     = Reg(Vec(2, UInt(blockBits.W)))
 
-  when(fromMissQueue(0).fire) {f2_mq_datas(0) :=  fromMissQueue(0).bits.data}
-  when(fromMissQueue(1).fire) {f2_mq_datas(1) :=  fromMissQueue(1).bits.data}
+  when(fromMissQueue(0).fire()) {f2_mq_datas(0) :=  fromMissQueue(0).bits.data}
+  when(fromMissQueue(1).fire()) {f2_mq_datas(1) :=  fromMissQueue(1).bits.data}
 
   switch(wait_state){
     is(wait_idle){
