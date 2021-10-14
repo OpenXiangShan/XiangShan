@@ -293,8 +293,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   init_entry.brValids(0) := cfi_is_br
   init_entry.brOffset(0) := io.cfiIndex.bits
   init_entry.setByBrTarget(0, io.start_addr, io.target)
+  init_entry.always_taken := WireInit(0.U.asTypeOf(Vec(numBr, Bool())))
   init_entry.always_taken(0) := cfi_is_br // set to always taken on init
-  init_entry.always_taken(1) := false.B
   init_entry.jmpOffset := pd.jmpOffset
   init_entry.jmpValid := new_jmp_is_jal || new_jmp_is_jalr
   init_entry.setByJmpTarget(io.start_addr, Mux(cfi_is_jalr, io.target, pd.jalTarget))
@@ -778,7 +778,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   class RedirectInfo extends Bundle {
     val valid = Bool()
     val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(4.W)
+    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
     val flushItSelf = Bool()
     def apply(redirect: Valid[Redirect]) = {
       this.valid := redirect.valid

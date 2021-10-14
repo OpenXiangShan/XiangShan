@@ -237,7 +237,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   io.bpu_to_ftq.resp.bits := 0.U.asTypeOf(new BranchPredictionBundle)
   io.bpu_to_ftq.resp.bits.s1.pc := s0_pc
-  io.bpu_to_ftq.resp.bits.s1.ftb_entry.pftAddr := s0_pc + 32.U
+  io.bpu_to_ftq.resp.bits.s1.ftb_entry.pftAddr := s0_pc + (FetchWidth*4).U
 }
 
 @chiselName

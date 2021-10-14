@@ -45,7 +45,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val pd = new PreDecodeInfo
     val pred_taken = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Ceil(16).W) // TODO: fix it
+    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
