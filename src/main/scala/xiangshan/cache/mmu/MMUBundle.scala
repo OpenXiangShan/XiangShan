@@ -491,6 +491,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
+  val prefetch = Bool()
 
   def hit(vpn: UInt, allType: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
@@ -509,16 +510,17 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
+    this.prefetch := prefetch
     this.level.map(_ := level)
   }
 
-  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
+  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, pte, level)
+    e.refill(vpn, pte, level, prefetch)
     e
   }
 
@@ -528,7 +530,8 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
     p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} " +
       (if (hasPerm) p"perm:${perm.getOrElse(0.U.asTypeOf(new PtePermBundle))} " else p"") +
-      (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"")
+      (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"") +
+      p"prefetch:${prefetch}"
   }
 }
 
@@ -539,6 +542,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
+  val prefetch = Bool()
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
   def tagClip(vpn: UInt) = {
@@ -554,12 +558,13 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
   }
 
-  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) = {
+  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
+    ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.ppns(i) := pte.ppn
@@ -607,6 +612,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
+    this.entry.prefetch := DontCare
     this.pf := pf
     this.af := af
   }
