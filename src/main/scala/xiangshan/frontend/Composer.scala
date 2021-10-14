@@ -19,11 +19,13 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.chiselName
 import xiangshan._
 import utils._
 
+@chiselName
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, EnableSC)
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out.resp := resp
 
   var metas = 0.U(1.W)

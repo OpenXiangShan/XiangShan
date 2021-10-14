@@ -63,8 +63,8 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
-  branchPredictor: Function3[BranchPredictionResp, Parameters, Boolean, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) => {
+  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters) => {
       // val loop = Module(new LoopPredictor)
       // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
       //                             else          Module(new Tage) }
@@ -72,7 +72,7 @@ case class XSCoreParameters
       val ftb = Module(new FTB()(p))
       val ubtb = Module(new MicroBTB()(p))
       val bim = Module(new BIM()(p))
-      val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
+      val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
       // val tage = Module(new Tage()(p))
@@ -285,8 +285,8 @@ trait HasXSParameter {
   val JbtacBanks = coreParams.JbtacBanks
   val RasSize = coreParams.RasSize
 
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) = {
-    coreParams.branchPredictor(resp_in, p, enableSC)
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
+    coreParams.branchPredictor(resp_in, p)
   }
 
   val CacheLineSize = coreParams.CacheLineSize

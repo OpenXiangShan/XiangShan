@@ -38,8 +38,8 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   def TAR_OVF = 1.U(TAR_STAT_SZ.W)
   def TAR_UDF = 2.U(TAR_STAT_SZ.W)
 
-  def BR_OFFSET_LEN = 13
-  def JMP_OFFSET_LEN = 21
+  def BR_OFFSET_LEN = 12
+  def JMP_OFFSET_LEN = 20
 }
 
 class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
@@ -70,11 +70,11 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   val always_taken = Vec(numBr, Bool())
 
   def getTarget(offsetLen: Int)(pc: UInt, lower: UInt, stat: UInt) = {
-    val higher = pc(VAddrBits-1, offsetLen)
+    val higher = pc(VAddrBits-1, offsetLen+1)
     Cat(
       Mux(stat === TAR_OVF, higher+1.U,
         Mux(stat === TAR_UDF, higher-1.U, higher)),
-      lower
+      lower, 0.U(1.W)
     )
   }
   val getBrTarget = getTarget(BR_OFFSET_LEN)(_, _, _)
@@ -88,11 +88,11 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   def getJmpTarget(pc: UInt) = getTarget(JMP_OFFSET_LEN)(pc, jmpLower, jmpTarStat)
 
   def getLowerStatByTarget(offsetLen: Int)(pc: UInt, target: UInt) = {
-    val pc_higher = pc(VAddrBits-1, offsetLen)
-    val target_higher = target(VAddrBits-1, offsetLen)
+    val pc_higher = pc(VAddrBits-1, offsetLen+1)
+    val target_higher = target(VAddrBits-1, offsetLen+1)
     val stat = WireInit(Mux(target_higher > pc_higher, TAR_OVF,
       Mux(target_higher < pc_higher, TAR_UDF, TAR_FIT)))
-    val lower = WireInit(target(offsetLen-1, 0))
+    val lower = WireInit(target(offsetLen, 1))
     (lower, stat)
   }
   def getBrLowerStatByTarget(pc: UInt, target: UInt) = getLowerStatByTarget(BR_OFFSET_LEN)(pc, target)
@@ -108,6 +108,9 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
     this.jmpTarStat := stat
   }
 
+  def getTargetVec(pc: UInt) = {
+    VecInit(getBrTargets(pc) :+ getJmpTarget(pc))
+  }
 
   def getOffsetVec = VecInit(brOffset :+ jmpOffset)
   def isJal = !isJalr
@@ -262,13 +265,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.resp := io.in.bits.resp_in(0)
 
   val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
-
-  io.out.resp.s2.preds.taken_mask    := io.in.bits.resp_in(0).s2.preds.taken_mask
-  for (i <- 0 until numBr) {
-    when (ftb_entry.always_taken(i)) {
-      io.out.resp.s2.preds.taken_mask(i) := true.B
-    }
-  }
 
   io.out.resp.s2.preds.hit           := s2_hit
   io.out.resp.s2.pc                  := s2_pc

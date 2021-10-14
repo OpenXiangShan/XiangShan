@@ -18,9 +18,11 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.chiselName
 import xiangshan._
 import utils._
 
+@chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle {
   val startAddr       = UInt(VAddrBits.W)
   val fallThruAddr    = UInt(VAddrBits.W)
@@ -181,6 +183,7 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
   }
 }
 
+@chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils{
   val pc = UInt(VAddrBits.W)
   
@@ -200,31 +203,25 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
 
   val ftb_entry = new FTBEntry() // TODO: Send this entry to ftq
 
-  def real_taken_mask(): Vec[Bool] = {
-    Mux(preds.hit,
-      VecInit(preds.taken_mask.zip(preds.br_valids).map{ case(m, b) => m && b } :+ preds.jmp_valid),
-      VecInit(Seq.fill(numBr+1)(false.B)))
+  def real_br_taken_mask(): Vec[Bool] = {
+    VecInit(preds.taken_mask.zip(preds.br_valids).map{ case(m, b) => m && b && preds.hit})
   }
 
-  def real_br_taken_mask(): Vec[Bool] = {
-    Mux(preds.hit,
-      VecInit(preds.taken_mask.zip(preds.br_valids).map{ case(m, b) => m && b }),
-      VecInit(Seq.fill(numBr)(false.B)))
+  def real_taken_mask(): Vec[Bool] = {
+    VecInit(real_br_taken_mask() :+ (preds.jmp_valid && preds.hit))
   }
-  def hit_taken_on_call = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_call && preds.jmp_valid
-  def hit_taken_on_ret  = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_ret && preds.jmp_valid
-  def hit_taken_on_jalr = !VecInit(real_taken_mask.take(numBr)).asUInt.orR && preds.hit && preds.is_jalr && preds.jmp_valid
+
+  def hit_taken_on_jmp = !real_br_taken_mask().asUInt.orR && preds.hit && preds.jmp_valid
+  def hit_taken_on_call = hit_taken_on_jmp && preds.is_call
+  def hit_taken_on_ret  = hit_taken_on_jmp && preds.is_ret
+  def hit_taken_on_jalr = hit_taken_on_jmp && preds.is_jalr
 
   def fallThroughAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
+
   def target(): UInt = {
-    Mux(preds.hit,
-      // when hit
-      Mux((real_taken_mask.asUInt & preds.br_valids.asUInt) =/= 0.U,
-        PriorityMux(real_taken_mask.asUInt & preds.br_valids.asUInt, preds.br_targets),
-        Mux(preds.jmp_valid, preds.jmp_target, fallThroughAddr)),
-      //otherwise
-      pc + (FetchWidth*4).U
-    )
+    val targetVec = ftb_entry.getTargetVec(pc) :+ fallThroughAddr :+ (pc + (FetchWidth*4).U)
+    val selVec = real_taken_mask() :+ (preds.hit && !real_taken_mask().asUInt.orR) :+ true.B
+    PriorityMux(selVec zip targetVec)
   }
   def genCfiIndex = {
     val cfiIndex = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
@@ -253,6 +250,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   }
 }
 
+@chiselName
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
   // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle()
