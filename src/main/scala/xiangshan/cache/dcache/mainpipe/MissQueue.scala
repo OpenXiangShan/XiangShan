@@ -87,6 +87,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val main_pipe_resp = Input(Bool())
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
+
+    val debug_early_replace = ValidIO(new Bundle() {
+      // info about the block that has been replaced
+      val idx = UInt(idxBits.W) // vaddr
+      val tag = UInt(tagBits.W) // paddr
+    })
   })
 
   val req = Reg(new MissReq)
@@ -320,7 +326,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val replace = io.replace_pipe_req.bits
   replace.miss_id := io.id
   replace.way_en := req.way_en
-  replace.vaddr := req.vaddr // TODO: make sure only set in vaddr is used
+  replace.vaddr := req.vaddr
   replace.tag := req.replace_tag
 
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
@@ -372,6 +378,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.block_addr.valid := req_valid && w_grantlast && !s_refill
   io.block_addr.bits := req.addr
 
+  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
+  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
+  io.debug_early_replace.bits.tag := req.replace_tag
+
   XSPerfAccumulate("miss_req_primary", io.req.valid && io.primary_ready)
   XSPerfAccumulate("miss_req_merged", io.req.valid && io.secondary_ready)
   XSPerfAccumulate("load_miss_penalty_to_use",
@@ -419,6 +429,15 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val probe_block = Output(Bool())
 
     val full = Output(Bool())
+
+    // only for performance counter
+    // This is valid when an mshr has finished replacing a block (w_replace_resp),
+    // but hasn't received Grant from L2 (!w_grantlast)
+    val debug_early_replace = Vec(cfg.nMissEntries, ValidIO(new Bundle() {
+      // info about the block that has been replaced
+      val idx = UInt(idxBits.W) // vaddr
+      val tag = UInt(tagBits.W) // paddr
+    }))
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -477,6 +496,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
       e.io.replace_pipe_resp := Cat(io.replace_pipe_resp.map { case r => r.valid && r.bits.miss_id === i.U }).orR
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
+
+      io.debug_early_replace(i) := e.io.debug_early_replace
   }
 
   io.req.ready := accept
