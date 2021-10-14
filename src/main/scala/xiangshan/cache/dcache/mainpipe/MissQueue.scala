@@ -340,6 +340,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req.store_mask).orR)).asUInt
   )
   refill.data := refill_data.asTypeOf((new RefillPipeReq).data)
+  refill.miss_id := io.id
   refill.id := req.id
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)

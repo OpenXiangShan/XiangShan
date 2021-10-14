@@ -563,6 +563,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wbArb.io.in.zip(Seq(mainPipe.io.wb, replacePipe.io.wb)).foreach { case (arb, pipe) => arb <> pipe }
   wb.io.req <> wbArb.io.out
   bus.c     <> wb.io.mem_release
+  wb.io.release_wakeup := refillPipe.io.release_wakeup
+  wb.io.release_update := mainPipe.io.release_update
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B

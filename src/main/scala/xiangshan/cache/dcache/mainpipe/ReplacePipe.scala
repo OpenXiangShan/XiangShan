@@ -118,7 +118,7 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   val s2_idx = addr_to_dcache_set(s2_req.vaddr)
   val s2_coh = RegEnable(s1_coh, s1_fire_to_s2)
   val s2_need_data = RegEnable(s1_need_data, s1_fire_to_s2)
-  val s2_can_go = io.meta_write.ready && io.wb.ready
+  val s2_can_go = /*io.meta_write.ready && */io.wb.ready
   s2_fire := s2_valid && s2_can_go
   s2_ready := !s2_valid || s2_fire
   when (s1_fire_to_s2) {
@@ -142,13 +142,13 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   io.meta_read.bits.idx := addr_to_dcache_set(io.req.bits.vaddr)
   io.meta_read.bits.way_en := io.req.bits.way_en
 
-  io.meta_write.valid := s2_valid && io.wb.ready
+  io.meta_write.valid := false.B // s2_valid && io.wb.ready
   io.meta_write.bits.idx := s2_idx
   io.meta_write.bits.way_en := s2_req.way_en
   io.meta_write.bits.meta.coh := ClientMetadata.onReset
   io.meta_write.bits.tag := s2_req.tag // only used to calculate ecc
 
-  io.wb.valid := s2_valid && io.meta_write.ready
+  io.wb.valid := s2_valid// && io.meta_write.ready
   io.wb.bits.addr := get_block_addr(Cat(s2_req.tag, get_untag(s2_req.vaddr)))
   val (_, release_param, _) = s2_coh.onCacheControl(M_FLUSH)
   io.wb.bits.param := release_param
@@ -156,6 +156,8 @@ class ReplacePipe(implicit p: Parameters) extends  DCacheModule {
   io.wb.bits.hasData := s2_need_data
   io.wb.bits.dirty := s2_coh.state === ClientStates.Dirty
   io.wb.bits.data := s2_data.asUInt
+  io.wb.bits.delay_release := true.B
+  io.wb.bits.miss_id := s2_req.miss_id
 
   s1_resp.valid := s1_fire_to_mq
   s1_resp.bits.miss_id := s1_req.miss_id

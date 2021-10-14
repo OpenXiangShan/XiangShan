@@ -31,10 +31,23 @@ class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val dirty = Bool()
   val data = UInt((cfg.blockBytes * 8).W)
 
+  val delay_release = Bool()
+  val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+
   def dump() = {
     XSDebug("WritebackReq addr: %x param: %d voluntary: %b hasData: %b data: %x\n",
       addr, param, voluntary, hasData, data)
   }
+}
+
+// While a Release sleeps and waits for a refill to wake it up,
+// main pipe might update meta & data during this time.
+// So the meta & data to be released need to be updated too.
+class ReleaseUpdate(implicit p: Parameters) extends DCacheBundle {
+  // only consider store here
+  val addr = UInt(PAddrBits.W)
+  val mask = UInt(DCacheBanks.W)
+  val data = UInt((cfg.blockBytes * 8).W)
 }
 
 class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
@@ -47,9 +60,12 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
     val block_addr  = Output(Valid(UInt()))
+
+    val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
+    val release_update = Flipped(ValidIO(new ReleaseUpdate))
   })
 
-  val s_invalid :: s_release_req :: s_release_resp :: Nil = Enum(3)
+  val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
   val state = RegInit(s_invalid)
 
   // internal regs
@@ -76,15 +92,56 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     XSDebug("WritebackEntry: %d state: %d block_addr: %x\n", io.id, state, io.block_addr.bits)
   }
 
+  def mergeData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
+    val full_wmask = FillInterleaved(64, wmask)
+    (~full_wmask & old_data | full_wmask & new_data)
+  }
+
   // --------------------------------------------------------------------------------
   // s_invalid: receive requests
   // new req entering
-  io.req.ready := state === s_invalid
   when (io.req.fire()) {
     assert (remain === 0.U)
-    remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-    req        := io.req.bits
-    state      := s_release_req
+    req := io.req.bits
+    when (io.req.bits.delay_release) {
+      state := s_sleep
+    }.otherwise {
+      state := s_release_req
+      remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+    }
+  }
+
+  // --------------------------------------------------------------------------------
+  // s_sleep: wait for refill pipe to inform me that I can keep releasing
+  val merge_probe = WireInit(false.B)
+  when (state === s_sleep) {
+    assert (remain === 0.U)
+
+    val update = io.release_update.valid && io.release_update.bits.addr === req.addr
+    when (update) {
+      req.hasData := req.hasData || io.release_update.bits.mask.orR
+      req.dirty := req.dirty || io.release_update.bits.mask.orR
+      req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
+    }
+
+    merge_probe := io.req.valid && !io.req.bits.voluntary && io.req.bits.addr === req.addr
+    when (merge_probe) {
+      state := s_release_req
+      req.voluntary := false.B
+      req.hasData := req.hasData || io.req.bits.hasData
+      req.dirty := req.dirty || io.req.bits.dirty
+      req.data := Mux(
+        io.req.bits.hasData,
+        io.req.bits.data,
+        req.data
+      )
+      req.delay_release := false.B
+      remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+    }.elsewhen (io.release_wakeup.valid && io.release_wakeup.bits === req.miss_id) {
+      state := s_release_req
+      req.delay_release := false.B
+      remain_set := Mux(req.hasData || update && io.release_update.bits.mask.orR, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+    }
   }
 
   // --------------------------------------------------------------------------------
@@ -154,6 +211,14 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     }
   }
 
+  // When does this entry merge a new req?
+  // 1. When this entry is free
+  // 2. When this entry wants to release while still waiting for release_wakeup signal,
+  //    and a probe req with the same addr comes. In this case we merge probe with release,
+  //    handle this probe, so we don't need another release.
+  io.req.ready := state === s_invalid ||
+    state === s_sleep && !io.req.bits.voluntary && io.req.bits.addr === req.addr
+
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
   XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
@@ -168,6 +233,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+
+    val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
+    val release_update = Flipped(ValidIO(new ReleaseUpdate))
 
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
@@ -204,6 +272,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (i.U === grant_source) {
       io.mem_grant.ready := entry.io.mem_grant.ready
     }
+
+    entry.io.release_wakeup := io.release_wakeup
+    entry.io.release_update := io.release_update
 
     entry
   }

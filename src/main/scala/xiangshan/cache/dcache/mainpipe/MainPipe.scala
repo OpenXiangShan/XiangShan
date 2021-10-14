@@ -93,6 +93,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
     val store_hit_resp = ValidIO(new DCacheLineResp)
+    val release_update = ValidIO(new ReleaseUpdate)
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new AtomicsResp)
@@ -513,6 +514,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := s3_req.id
 
+  io.release_update.valid := s3_valid && (s3_store_can_go || s3_amo_can_go) && s3_hit && update_data
+  io.release_update.bits.addr := s3_req.addr
+  io.release_update.bits.mask := Mux(s3_store_hit, s3_banked_store_wmask, banked_amo_wmask)
+  io.release_update.bits.data := s3_amo_data_merged.asUInt
+
   val atomic_hit_resp = Wire(new AtomicsResp)
   atomic_hit_resp.data := Mux(s3_sc, s3_sc_resp, s3_data_word)
   atomic_hit_resp.miss := false.B
@@ -564,6 +570,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.wb.bits.hasData := writeback_data
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
   io.wb.bits.data := s3_data.asUInt()
+  io.wb.bits.delay_release := false.B
+  io.wb.bits.miss_id := DontCare
 
   io.replace_access.valid := RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe && s1_tag_match)
   io.replace_access.bits.set := s2_idx

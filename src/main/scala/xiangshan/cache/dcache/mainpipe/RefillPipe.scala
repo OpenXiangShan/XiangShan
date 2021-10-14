@@ -29,6 +29,8 @@ class RefillPipeReq(implicit p: Parameters) extends DCacheBundle {
   val meta = new Meta
   val alias = UInt(2.W) // TODO: parameterize
 
+  val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+
   val id = UInt(reqIdWidth.W)
 
   def paddrWithVirtualAlias: UInt = {
@@ -44,6 +46,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
     val meta_write = DecoupledIO(new MetaWriteReq)
     val tag_write = DecoupledIO(new TagWriteReq)
     val store_resp = ValidIO(new DCacheLineResp)
+    val release_wakeup = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
     val replace_access = ValidIO(new ReplacementAccessBundle)
   })
 
@@ -79,6 +82,9 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   io.store_resp.bits.miss := false.B
   io.store_resp.bits.replay := false.B
   io.store_resp.bits.id := io.req.bits.id
+
+  io.release_wakeup.valid := io.req.fire()
+  io.release_wakeup.bits := io.req.bits.miss_id
 
   io.replace_access.valid := RegNext(io.req.fire())
   io.replace_access.bits.set := RegNext(idx)
