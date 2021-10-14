@@ -56,6 +56,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val id = Input(UInt())
 
     val req = Flipped(DecoupledIO(new WritebackReq))
+    val merge = Output(Bool())
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
@@ -114,6 +115,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // --------------------------------------------------------------------------------
   // s_sleep: wait for refill pipe to inform me that I can keep releasing
   val merge_probe = WireInit(false.B)
+  io.merge := WireInit(false.B)
   when (state === s_sleep) {
     assert (remain === 0.U)
 
@@ -124,7 +126,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
     }
 
-    merge_probe := io.req.valid && !io.req.bits.voluntary && io.req.bits.addr === req.addr
+    io.merge := !io.req.bits.voluntary && io.req.bits.addr === req.addr
+    merge_probe := io.req.valid && io.merge
     when (merge_probe) {
       state := s_release_req
       req.voluntary := false.B
@@ -243,12 +246,15 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nReleaseEntries, Bool()))
+  val merge_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
   val allocate = primary_ready.asUInt.orR
-  val alloc_idx = PriorityEncoder(primary_ready)
+  val merge = merge_vec.asUInt.orR
+  val alloc_idx = PriorityEncoder(Mux(merge, merge_vec, primary_ready))
 
   val req = io.req
   val block_conflict = Wire(Bool())
-  req.ready := allocate && !block_conflict
+  val accept = merge || allocate && !block_conflict
+  req.ready := accept
 
   // assign default values to output signals
   io.mem_release.valid := false.B
@@ -263,8 +269,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     entry.io.id := (i + cfg.nMissEntries).U
 
     // entry req
-    entry.io.req.valid := (i.U === alloc_idx) && allocate && req.valid && !block_conflict
+    entry.io.req.valid := (i.U === alloc_idx) && req.valid && accept
     primary_ready(i)   := entry.io.req.ready
+    merge_vec(i) := entry.io.merge
     entry.io.req.bits  := req.bits
 
     entry.io.mem_grant.valid := (i.U === grant_source) && io.mem_grant.valid
