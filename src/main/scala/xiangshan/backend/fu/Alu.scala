@@ -147,7 +147,7 @@ class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   ))
   val simple = resultSource(io.func(2, 0))
 
-  io.shiftRes := Mux(io.func(3), Mux(io.func(0), io.ror, io.rol), simple)
+  io.shiftRes := Mux(io.func(3), Mux(io.func(1), io.ror, io.rol), simple)
 }
 
 class WordResultSelect(implicit p: Parameters) extends XSModule {
@@ -280,11 +280,10 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sub  = subModule.io.sub
   subModule.io.src(0) := src1
   subModule.io.src(1) := src2
-  val sgtu    = sub(XLEN)
-  val sltu    = !sgtu
+  val sltu    = !sub(XLEN)
   val slt     = src1(XLEN - 1) ^ src2(XLEN - 1) ^ sltu
   val maxMin  = Mux(slt ^ func(0), src2, src1)
-  val maxMinU = Mux((sgtu && func(0)) || ~(sgtu && func(0)), src2, src1)
+  val maxMinU = Mux(sltu ^ func(0), src2, src1)
   val compareRes = Mux(func(2), Mux(func(1), maxMin, maxMinU), Mux(func(1), slt, Mux(func(0), sltu, sub)))
 
   // logic
@@ -292,7 +291,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val and     = src1 & logicSrc2
   val or      = src1 | logicSrc2
   val xor     = src1 ^ logicSrc2
-  val orcb    = Cat((7 to 0).map(i => Fill(8, src1(i * 8 + 7, i * 8).orR)))
+  val orcb    = Cat((0 until 8).map(i => Fill(8, src1(i * 8 + 7, i * 8).orR)).reverse)
   val orh48   = Cat(src1(63, 8), 0.U(8.W)) | src2
 
   val sextb = SignExt(src1(7, 0), XLEN)
@@ -300,7 +299,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val sexth = SignExt(src1(15, 0), XLEN)
   val packw = SignExt(Cat(src2(15, 0), src1(15, 0)), XLEN)
 
-  val revb = Cat((7 to 0).map(i => Reverse(src1(8 * i + 7, 8 * i))))
+  val revb = Cat((0 until 8).map(i => Reverse(src1(8 * i + 7, 8 * i))).reverse)
   val pack = Cat(src2(31, 0), src1(31, 0))
   val rev8 = Cat((0 until 8).map(i => src1(8 * i + 7, 8 * i)))
 
@@ -389,6 +388,7 @@ class Alu(implicit p: Parameters) extends FUWithRedirect {
   redirectOut.cfiUpdate.isMisPred := dataModule.io.mispredict
   redirectOut.cfiUpdate.taken := dataModule.io.taken
   redirectOut.cfiUpdate.predTaken := uop.cf.pred_taken
+  redirectOut.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid

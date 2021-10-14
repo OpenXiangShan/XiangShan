@@ -39,7 +39,7 @@ trait CommonModule extends ScalaModule {
 }
 
 val chisel = Agg(
-  ivy"edu.berkeley.cs::chisel3:3.5-SNAPSHOT"
+  ivy"edu.berkeley.cs::chisel3:3.5.0-RC1"
 )
 
 object `api-config-chipsalliance` extends CommonModule {

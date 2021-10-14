@@ -335,14 +335,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.forward(i).forwardData := dataModule.io.forwardData(i)
 
     // If addr match, data not ready, mark it as dataInvalid
-    // load_s1: generate dataInvalid in load_s1 to set fastUop to
+    // load_s1: generate dataInvalid in load_s1 to set fastUop
     io.forward(i).dataInvalidFast := (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & needForward).orR
+    val dataInvalidSqIdxReg = RegNext(OHToUInt(addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & needForward))
     // load_s2
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
 
     // load_s2
     // check if vaddr forward mismatched
     io.forward(i).matchInvalid := vaddrMatchFailed
+    io.forward(i).dataInvalidSqIdx := dataInvalidSqIdxReg
   }
 
   /**
@@ -393,6 +395,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
   io.uncache.req.bits.id   := DontCare
+  io.uncache.req.bits.instrtype   := DontCare
 
   when(io.uncache.req.fire()){
     // mmio store should not be committed until uncache req is sent
@@ -459,6 +462,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
     io.sbuffer(i).bits.id    := DontCare
+    io.sbuffer(i).bits.instrtype    := DontCare
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
@@ -468,7 +472,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   when (io.sbuffer(1).fire()) {
     assert(io.sbuffer(0).fire())
   }
-  if (useFakeDCache) {
+  if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until StorePipelineWidth) {
       val ptr = deqPtrExt(i).value
       val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))

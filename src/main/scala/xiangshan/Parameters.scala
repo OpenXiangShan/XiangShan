@@ -96,9 +96,6 @@ case class XSCoreParameters
 
       (preds, ras.io.out.resp)
     }),
-
-
-  EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -111,10 +108,9 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  LoadQueueSize: Int = 64,
-  StoreQueueSize: Int = 48,
+  LoadQueueSize: Int = 80,
+  StoreQueueSize: Int = 64,
   RobSize: Int = 256,
-  EnableIntMoveElim: Boolean = true,
   IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -181,6 +177,7 @@ case class XSCoreParameters
   ),
   useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
+  NumPMP: Int = 16, // 0 or 16 or 64
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -188,7 +185,7 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2
   ),
-  dcacheParameters: DCacheParameters = DCacheParameters(
+  dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     replacer = Some("setplru"),
@@ -196,19 +193,17 @@ case class XSCoreParameters
     nProbeEntries = 16,
     nReleaseEntries = 16,
     nStoreReplayEntries = 16
-  ),
-  L2CacheParams: HCCacheParameters = HCCacheParameters(
+  )),
+  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
     prefetch = Some(huancun.prefetch.BOPParameters())
-  ),
+  )),
+  L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
-  useFakePTW: Boolean = false,
-  useFakeDCache: Boolean = false,
-  useFakeL1plusCache: Boolean = false,
-  useFakeL2Cache: Boolean = false
+  softPTW: Boolean = false // dpi-c debug only
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
@@ -286,7 +281,6 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = coreParams.UBtbWays
   val BtbWays = coreParams.BtbWays
-  val EnableL1plusPrefetcher = coreParams.EnableL1plusPrefetcher
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
@@ -297,7 +291,6 @@ trait HasXSParameter {
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
-  val EnableIntMoveElim = coreParams.EnableIntMoveElim
   val IntRefCounterWidth = coreParams.IntRefCounterWidth
   val StdFreeListSize = NRPhyRegs - 32
   // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
@@ -325,30 +318,20 @@ trait HasXSParameter {
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
+  val NumPMP = coreParams.NumPMP
+  val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
 
   val icacheParameters = coreParams.icacheParameters
-  val dcacheParameters = coreParams.dcacheParameters
+  val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   val LRSCCycles = 100
 
-
   // cache hierarchy configurations
   val l1BusDataWidth = 256
-
-  val useFakeDCache = coreParams.useFakeDCache
-  val useFakePTW = coreParams.useFakePTW
-  val useFakeL1plusCache = coreParams.useFakeL1plusCache
-  // L2 configurations
-  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
-  val L1BusWidth = 256
-  val L2BlockSize = 64
-
-  // L3 configurations
-  val L2BusWidth = 256
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576

@@ -23,8 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.HasExceptionNO
-import system.L1CacheErrorInfo
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
@@ -63,6 +62,17 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new Ibuffer)
   val ftq = Module(new Ftq)
   //icache
+
+  // pmp
+  val pmp = Module(new PMP())
+  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
+  pmp.io.distribute_csr := io.csrCtrl.distribute_csr
+  for (i <- pmp_check.indices) {
+    pmp_check(i).env.pmp  := pmp.io.pmp
+    pmp_check(i).env.mode := io.tlbCsr.priv.imode
+    pmp_check(i).req <> ifu.io.pmp(i).req
+    ifu.io.pmp(i).resp <> pmp_check(i).resp
+  }
 
   io.ptw <> TLB(
     in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),

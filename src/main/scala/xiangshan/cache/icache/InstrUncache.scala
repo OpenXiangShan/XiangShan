@@ -137,7 +137,6 @@ class InstrUncacheIO(implicit p: Parameters) extends DCacheBundle {
     val flush = Input(Bool())
 }
 
-
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
 
   val clientParameters = TLMasterPortParameters.v1(
@@ -160,7 +159,6 @@ class InstrUncacheImp(outer: InstrUncache)
   val io = IO(new InstrUncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
-  //require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
   val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 
