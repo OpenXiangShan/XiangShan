@@ -16,13 +16,12 @@
 
 import chisel3._
 import chisel3.util._
-
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.tile.XLen
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
-import xiangshan.backend.Std
+import xiangshan.backend.{AmoData, Std}
 
 package object xiangshan {
   object SrcType {
@@ -36,9 +35,10 @@ package object xiangshan {
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isFp(srcType: UInt) = srcType===fp
-    def isPcImm(srcType: UInt) = srcType(0)
-    def isRegFp(srcType: UInt) = !srcType(0)
+    def isFp(srcType: UInt) = srcType(1)
+    def isPcOrImm(srcType: UInt) = srcType(0)
+    def isRegOrFp(srcType: UInt) = !srcType(0)
+    def regIsFp(srcType: UInt) = srcType(1)
 
     def apply() = UInt(2.W)
   }
@@ -58,7 +58,7 @@ package object xiangshan {
     def mul          = "b0100".U
     def div          = "b0101".U
     def fence        = "b0011".U
-    def bmu          = "b0111".U
+    def bku          = "b0111".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1011".U
@@ -94,23 +94,24 @@ package object xiangshan {
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",
-      i2f.litValue() -> "int to float",
+      i2f.litValue() -> "int_to_float",
       csr.litValue() -> "csr",
       alu.litValue() -> "alu",
       mul.litValue() -> "mul",
       div.litValue() -> "div",
       fence.litValue() -> "fence",
+      bku.litValue() -> "bku",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
       fDivSqrt.litValue() -> "fdiv/fsqrt",
       ldu.litValue() -> "load",
-      stu.litValue() -> "store"
+      stu.litValue() -> "store",
+      mou.litValue() -> "mou"
     )
-
   }
 
   object FuOpType {
-    def apply() = UInt(8.W)
+    def apply() = UInt(7.W)
   }
 
   object CommitType {
@@ -205,100 +206,114 @@ package object xiangshan {
   }
 
   object ALUOpType {
-    // misc & branch optype
-    def and         = "b0_00_00_000".U
-    def andn        = "b0_00_00_001".U
-    def or          = "b0_00_00_010".U
-    def orn         = "b0_00_00_011".U
-    def xor         = "b0_00_00_100".U
-    def xnor        = "b0_00_00_101".U
-    def orh48       = "b0_00_00_110".U
-
-    def andlsb      = "b0_00_11_000".U
-    def andnlsb     = "b0_00_11_001".U
-    def orlsb       = "b0_00_11_010".U
-    def ornlsb      = "b0_00_11_011".U
-    def xorlsb      = "b0_00_11_100".U
-    def xnorlsb     = "b0_00_11_101".U
-
-    def sext_b      = "b0_00_01_000".U
-    def sext_h      = "b0_00_01_001".U
-    def zext_h      = "b0_00_01_010".U
-    // TOOD: optimize it
-    def szewl1      = "b0_00_01_011".U
-    def orc_b       = "b0_00_01_100".U
-    def rev8        = "b0_00_01_101".U
-    // TOOD: optimize it
-    def szewl2      = "b0_00_01_110".U
-    // TOOD: optimize it
-    def byte2       = "b0_00_01_111".U
-
-    def beq         = "b0_00_10_000".U
-    def bne         = "b0_00_10_001".U
-    def blt         = "b0_00_10_100".U
-    def bge         = "b0_00_10_101".U
-    def bltu        = "b0_00_10_110".U
-    def bgeu        = "b0_00_10_111".U
-
-    // add & sub optype
-    def add_uw       = "b0_01_00_000".U
-    def add          = "b0_01_00_001".U
-    def oddadd       = "b0_01_10_001".U
-    def sh1add_uw    = "b0_01_00_010".U
-    def sh1add       = "b0_01_00_011".U
-    def sh2add_uw    = "b0_01_00_100".U
-    def sh2add       = "b0_01_00_101".U
-    def sh3add_uw    = "b0_01_00_110".U
-    def sh3add       = "b0_01_00_111".U
-    def sh4add       = "b0_01_01_001".U
-    def sr30add      = "b0_01_01_011".U
-    def sr31add      = "b0_01_01_101".U
-    def sr32add      = "b0_01_01_111".U
-
     // shift optype
-    def slli_uw     = "b0_10_00_000".U
-    def sll         = "b0_10_00_001".U
-    def bclr        = "b0_10_00_100".U
-    def bset        = "b0_10_00_101".U
-    def binv        = "b0_10_00_110".U
+    def slliuw     = "b000_0000".U // slliuw: ZEXT(src1[31:0]) << shamt
+    def sll        = "b000_0001".U // sll:     src1 << src2
 
-    def srl         = "b0_10_01_001".U
-    def bext        = "b0_10_01_010".U
-    def sra         = "b0_10_01_100".U
+    def bclr       = "b000_0010".U // bclr:    src1 & ~(1 << src2[5:0])
+    def bset       = "b000_0011".U // bset:    src1 | (1 << src2[5:0])
+    def binv       = "b000_0100".U // binv:    src1 ^ ~(1 << src2[5:0])
 
-    def rol         = "b0_10_10_000".U
+    def srl        = "b000_0101".U // srl:     src1 >> src2
+    def bext       = "b000_0110".U // bext:    (src1 >> src2)[0]
+    def sra        = "b000_0111".U // sra:     src1 >> src2 (arithmetic)
 
-    def ror         = "b0_10_11_000".U
-
-    def sub         = "b0_11_00_000".U
-    def sltu        = "b0_11_00_001".U
-    def slt         = "b0_11_00_010".U
-    def maxu        = "b0_11_00_100".U
-    def minu        = "b0_11_00_101".U
-    def max         = "b0_11_00_110".U
-    def min         = "b0_11_00_111".U
+    def rol        = "b000_1001".U // rol:     (src1 << src2) | (src1 >> (xlen - src2))
+    def ror        = "b000_1011".U // ror:     (src1 >> src2) | (src1 << (xlen - src2))
 
     // RV64 32bit optype
-    def addw        = "b1_01_00_001".U
-    def addwbyte    = "b1_01_00_011".U
-    def addwbit     = "b1_01_00_101".U
-    def oddaddw     = "b1_01_10_001".U
-    def subw        = "b1_11_00_000".U
-    def sllw        = "b1_10_00_000".U
-    def srlw        = "b1_10_01_001".U
-    def sraw        = "b1_10_01_100".U
-    def rolw        = "b1_10_10_000".U
-    def rorw        = "b1_10_11_000".U
+    def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
+    def oddaddw    = "b001_0001".U // oddaddw:   SEXT((src1[0] + src2)[31:0])
+    def subw       = "b001_0010".U // subw:      SEXT((src1 - src2)[31:0])
 
-    def isWordOp(func: UInt) = func(7)
-    def isAddw(func: UInt) = func(7, 5) === "b101".U
-    def isLogic(func: UInt) = func(7, 3) === "b00000".U
-    def logicToLSB(func: UInt) = Cat(func(7, 5), "b11".U(2.W), func(2, 0))
-    def isBranch(func: UInt) = func(6, 3) === "b0010".U
-    def getBranchType(func: UInt) = func(2, 1)
-    def isBranchInvert(func: UInt) = func(0)
+    def addwbit    = "b001_0100".U // addwbit:   (src1 + src2)[0]
+    def addwbyte   = "b001_0101".U // addwbyte:  (src1 + src2)[7:0]
+    def addwzexth  = "b001_0110".U // addwzexth: ZEXT((src1  + src2)[15:0])
+    def addwsexth  = "b001_0111".U // addwsexth: SEXT((src1  + src2)[15:0])
 
-    def apply() = UInt(8.W)
+    def sllw       = "b001_1000".U // sllw:     SEXT((src1 << src2)[31:0])
+    def srlw       = "b001_1001".U // srlw:     SEXT((src1[31:0] >> src2)[31:0])
+    def sraw       = "b001_1010".U // sraw:     SEXT((src1[31:0] >> src2)[31:0])
+    def rolw       = "b001_1100".U
+    def rorw       = "b001_1101".U
+
+    // ADD-op
+    def adduw      = "b010_0000".U // adduw:  src1[31:0]  + src2
+    def add        = "b010_0001".U // add:     src1        + src2
+    def oddadd     = "b010_0010".U // oddadd:  src1[0]     + src2
+
+    def sr29add    = "b010_0100".U // sr29add: src1[63:29] + src2
+    def sr30add    = "b010_0101".U // sr30add: src1[63:30] + src2
+    def sr31add    = "b010_0110".U // sr31add: src1[63:31] + src2
+    def sr32add    = "b010_0111".U // sr32add: src1[63:32] + src2
+
+    def sh1adduw   = "b010_1000".U // sh1adduw: {src1[31:0], 1'b0} + src2
+    def sh1add     = "b010_1001".U // sh1add: {src1[62:0], 1'b0} + src2
+    def sh2adduw   = "b010_1010".U // sh2add_uw: {src1[31:0], 2'b0} + src2
+    def sh2add     = "b010_1011".U // sh2add: {src1[61:0], 2'b0} + src2
+    def sh3adduw   = "b010_1100".U // sh3add_uw: {src1[31:0], 3'b0} + src2
+    def sh3add     = "b010_1101".U // sh3add: {src1[60:0], 3'b0} + src2
+    def sh4add     = "b010_1111".U // sh4add: {src1[59:0], 4'b0} + src2
+
+    // SUB-op: src1 - src2
+    def sub        = "b011_0000".U
+    def sltu       = "b011_0001".U
+    def slt        = "b011_0010".U
+    def maxu       = "b011_0100".U
+    def minu       = "b011_0101".U
+    def max        = "b011_0110".U
+    def min        = "b011_0111".U
+
+    // branch
+    def beq        = "b111_0000".U
+    def bne        = "b111_0010".U
+    def blt        = "b111_1000".U
+    def bge        = "b111_1010".U
+    def bltu       = "b111_1100".U
+    def bgeu       = "b111_1110".U
+
+    // misc optype
+    def and        = "b100_0000".U
+    def andn       = "b100_0001".U
+    def or         = "b100_0010".U
+    def orn        = "b100_0011".U
+    def xor        = "b100_0100".U
+    def xnor       = "b100_0101".U
+    def orcb       = "b100_0110".U
+
+    def sextb      = "b100_1000".U
+    def packh      = "b100_1001".U
+    def sexth      = "b100_1010".U
+    def packw      = "b100_1011".U
+
+    def revb       = "b101_0000".U
+    def rev8       = "b101_0001".U
+    def pack       = "b101_0010".U
+    def orh48      = "b101_0011".U
+
+    def szewl1     = "b101_1000".U
+    def szewl2     = "b101_1001".U
+    def szewl3     = "b101_1010".U
+    def byte2      = "b101_1011".U
+
+    def andlsb     = "b110_0000".U
+    def andzexth   = "b110_0001".U
+    def orlsb      = "b110_0010".U
+    def orzexth    = "b110_0011".U
+    def xorlsb     = "b110_0100".U
+    def xorzexth   = "b110_0101".U
+    def orcblsb    = "b110_0110".U
+    def orcbzexth  = "b110_0111".U
+
+    def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
+    def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
+    def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
+    def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
+    def isBranch(func: UInt) = func(6, 4) === "b111".U
+    def getBranchType(func: UInt) = func(3, 2)
+    def isBranchInvert(func: UInt) = func(1)
+
+    def apply() = UInt(7.W)
   }
 
   object MDUOpType {
@@ -378,20 +393,55 @@ package object xiangshan {
     def amomax_d  = "b100011".U
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
+
+    def size(op: UInt) = op(1,0)
   }
 
-  object BMUOpType {
+  object BKUOpType {
 
-    def clmul       = "b0000".U
-    def clmulh      = "b0010".U
-    def clmulr      = "b0100".U
+    def clmul       = "b000000".U
+    def clmulh      = "b000001".U
+    def clmulr      = "b000010".U
+    def xpermn      = "b000100".U
+    def xpermb      = "b000101".U
 
-    def clz         = "b1000".U
-    def clzw        = "b1001".U
-    def ctz         = "b1010".U
-    def ctzw        = "b1011".U
-    def cpop        = "b1100".U
-    def cpopw       = "b1101".U
+    def clz         = "b001000".U
+    def clzw        = "b001001".U
+    def ctz         = "b001010".U
+    def ctzw        = "b001011".U
+    def cpop        = "b001100".U
+    def cpopw       = "b001101".U
+
+    // 01xxxx is reserve
+    def aes64es     = "b100000".U
+    def aes64esm    = "b100001".U
+    def aes64ds     = "b100010".U
+    def aes64dsm    = "b100011".U
+    def aes64im     = "b100100".U
+    def aes64ks1i   = "b100101".U
+    def aes64ks2    = "b100110".U
+
+    // merge to two instruction sm4ks & sm4ed
+    def sm4ks0      = "b101000".U
+    def sm4ks1      = "b101001".U
+    def sm4ks2      = "b101010".U
+    def sm4ks3      = "b101011".U
+    def sm4ed0      = "b101100".U
+    def sm4ed1      = "b101101".U
+    def sm4ed2      = "b101110".U
+    def sm4ed3      = "b101111".U
+
+    def sha256sum0  = "b110000".U
+    def sha256sum1  = "b110001".U
+    def sha256sig0  = "b110010".U
+    def sha256sig1  = "b110011".U
+    def sha512sum0  = "b110100".U
+    def sha512sum1  = "b110101".U
+    def sha512sig0  = "b110110".U
+    def sha512sig1  = "b110111".U
+
+    def sm3p0       = "b111000".U
+    def sm3p1       = "b111001".U
   }
 
   object BTBtype {
@@ -417,10 +467,10 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
-  def dividerGen(p: Parameters) = new SRT4Divider(p(XLen))(p)
+  def dividerGen(p: Parameters) = new SRT16Divider(p(XLen))(p)
   def multiplierGen(p: Parameters) = new ArrayMultiplier(p(XLen) + 1)(p)
   def aluGen(p: Parameters) = new Alu()(p)
-  def bmuGen(p: Parameters) = new Bmu()(p)
+  def bkuGen(p: Parameters) = new Bku()(p)
   def jmpGen(p: Parameters) = new Jump()(p)
   def fenceGen(p: Parameters) = new Fence()(p)
   def csrGen(p: Parameters) = new CSR()(p)
@@ -430,6 +480,7 @@ package object xiangshan {
   def f2fGen(p: Parameters) = new FPToFP()(p)
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
+  def mouDataGen(p: Parameters) = new AmoData()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -478,7 +529,8 @@ package object xiangshan {
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency() // TODO: need rewrite latency structure, not just this value
+    latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
+    hasExceptionOut = true
   )
 
   val csrCfg = FuConfig(
@@ -490,7 +542,8 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = false
+    hasRedirect = false,
+    hasExceptionOut = true
   )
 
   val i2fCfg = FuConfig(
@@ -510,7 +563,7 @@ package object xiangshan {
   val divCfg = FuConfig(
     name = "div",
     fuGen = dividerGen,
-    fuSel = (uop: MicroOp) => MDUOpType.isDiv(uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.div,
     FuType.div,
     2,
     0,
@@ -525,7 +578,7 @@ package object xiangshan {
   val mulCfg = FuConfig(
     name = "mul",
     fuGen = multiplierGen,
-    fuSel = (uop: MicroOp) => MDUOpType.isMul(uop.ctrl.fuOpType),
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.mul,
     FuType.mul,
     2,
     0,
@@ -537,11 +590,11 @@ package object xiangshan {
     fastImplemented = true
   )
 
-  val bmuCfg = FuConfig(
-    name = "bmu",
-    fuGen = bmuGen,
-    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bmu,
-    fuType = FuType.bmu,
+  val bkuCfg = FuConfig(
+    name = "bku",
+    fuGen = bkuGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.bku,
+    fuType = FuType.bku,
     numIntSrc = 2,
     numFpSrc = 0,
     writeIntRf = true,
@@ -549,7 +602,7 @@ package object xiangshan {
     hasRedirect = false,
     latency = CertainLatency(1),
     fastUopOut = true,
-    fastImplemented = false
+    fastImplemented = true
  )
 
   val fmacCfg = FuConfig(
@@ -587,37 +640,45 @@ package object xiangshan {
   val lduCfg = FuConfig(
     "ldu",
     null, // DontCare
-    null,
+    (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val staCfg = FuConfig(
     "sta",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val stdCfg = FuConfig(
     "std",
-    fuGen = stdGen, fuSel = _ => true.B, FuType.stu, 1, 1,
+    fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
     writeIntRf = false, writeFpRf = false, hasRedirect = false, latency = CertainLatency(1)
   )
 
   val mouCfg = FuConfig(
     "mou",
     null,
-    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
-    UncertainLatency()
+    latency = UncertainLatency(), hasExceptionOut = true
+  )
+
+  val mouDataCfg = FuConfig(
+    "mou",
+    mouDataGen,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
+    FuType.mou, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    latency = UncertainLatency(), hasExceptionOut = true
   )
 
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
-  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bmuCfg), 1, Int.MaxValue)
+  val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
@@ -625,7 +686,7 @@ package object xiangshan {
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
-  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
-  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+  val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
+  val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 }

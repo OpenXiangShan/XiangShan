@@ -29,13 +29,13 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     val allocate = Vec(params.numEnq, ValidIO(UInt(params.numEntries.W)))
     // select for issue
     val request = Input(UInt(params.numEntries.W))
-    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W))) //TODO: optimize it
+    val grant = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
+    val grantBalance = Output(Bool())
   })
 
-  val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
-
+  val enqPolicy = if (params.numEnq > 2) "oddeven" else "circ"
   val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  val allocate = SelectOne(policy, emptyVec, params.numEnq)
+  val allocate = SelectOne(enqPolicy, emptyVec, params.numEnq)
   for (i <- 0 until params.numEnq) {
     val sel = allocate.getNthOH(i + 1)
     io.allocate(i).valid := sel._1
@@ -46,10 +46,11 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
+  val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
   val request = io.request.asBools
-  val select = SelectOne(policy, request, params.numDeq)
+  val select = SelectOne(deqPolicy, request, params.numDeq)
   for (i <- 0 until params.numDeq) {
-    val sel = select.getNthOH(i + 1)
+    val sel = select.getNthOH(i + 1, params.needBalance)
     io.grant(i).valid := sel._1
     io.grant(i).bits := sel._2.asUInt
 
@@ -57,9 +58,42 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
       p"grant vec ${Binary(io.grant(i).bits)} is not onehot")
     XSDebug(io.grant(i).valid, p"select for issue request: ${Binary(io.grant(i).bits)}\n")
   }
+  io.grantBalance := select.getBalance2
+
 }
 
-class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
+class OldestSelection(params: RSParams)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
+    val oldest = Flipped(ValidIO(UInt(params.numEntries.W)))
+    val canOverride = Vec(params.numDeq, Input(Bool()))
+    val out = Vec(params.numDeq, ValidIO(UInt(params.numEntries.W)))
+    val isOverrided = Vec(params.numDeq, Output(Bool()))
+  })
+
+  io.out := io.in
+
+  val oldestMatchVec = VecInit(io.in.map(i => i.valid && OHToUInt(i.bits) === OHToUInt(io.oldest.bits)))
+  io.isOverrided := io.canOverride.zipWithIndex.map{ case (canDo, i) =>
+    // When the oldest is not matched with io.in(i), we always select the oldest.
+    // We don't need to compare in(i) here, because we will select the oldest no matter in(i) matches or not.
+    val oldestMatchIn = if (params.numDeq > 1) {
+      VecInit(oldestMatchVec.zipWithIndex.filterNot(_._2 == i).map(_._1)).asUInt.orR
+    } else false.B
+    canDo && io.oldest.valid && !oldestMatchIn
+  }
+
+  for ((out, i) <- io.out.zipWithIndex) {
+    out.valid := io.in(i).valid || io.isOverrided(i)
+    when (io.isOverrided(i)) {
+      out.bits := io.oldest.bits
+    }
+
+    XSPerfAccumulate(s"oldest_override_$i", io.isOverrided(i))
+  }
+}
+
+class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val enq = Vec(numEnq, Input(UInt(numEntries.W)))
     val deq = Input(UInt(numEntries.W))
@@ -103,13 +137,13 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
     VecInit((0 until numEntries).map(j => get_next_age(i, j))).asUInt.andR
   })).asUInt
 
-  io.out := RegNext(nextBest)
-  XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= io.out, "age error\n")
+  io.out := (if (regOut) RegNext(nextBest) else nextBest)
+  XSError(VecInit(age.map(v => VecInit(v).asUInt.andR)).asUInt =/= RegNext(nextBest), "age error\n")
 }
 
 object AgeDetector {
   def apply(numEntries: Int, enq: Vec[UInt], deq: UInt, canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
-    val age = Module(new AgeDetector(numEntries, enq.length))
+    val age = Module(new AgeDetector(numEntries, enq.length, regOut = false))
     age.io.enq := enq
     age.io.deq := deq
     val out = Wire(Valid(UInt(deq.getWidth.W)))

@@ -21,6 +21,7 @@ import os
 import random
 import subprocess
 import sys
+import time
 
 
 class XSArgs(object):
@@ -31,6 +32,8 @@ class XSArgs(object):
     am_home = os.path.join(noop_home, "../nexus-am")
     dramsim3_home = os.path.join(noop_home, "../DRAMsim3")
     rvtest_home = os.path.join(noop_home, "../riscv-tests")
+    default_wave_home = os.path.join(noop_home, "build")
+    wave_home   = default_wave_home
 
     def __init__(self, args):
         # all path environment variables that should be set
@@ -46,21 +49,28 @@ class XSArgs(object):
             set_func(self.__extract_path(arg_in, env, default))
         # Chisel arguments
         self.disable_log = args.disable_log
-        self.dual_core = args.dual_core
+        self.num_cores = args.num_cores
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
-        self.trace = 1 if args.trace else None
+        self.trace = 1 if args.trace or not args.disable_fork  else None
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
+        self.fork = not args.disable_fork
+        # wave dump path
+        if args.wave_dump is not None:   
+            self.set_wave_home(args.wave_dump)
+        else:
+            self.set_wave_home(self.default_wave_home)
 
     def get_env_variables(self):
         all_env = {
             "NOOP_HOME"    : self.noop_home,
             "NEMU_HOME"    : self.nemu_home,
+            "WAVE_HOME"    : self.wave_home,
             "AM_HOME"      : self.am_home,
             "DRAMSIM3_HOME": self.dramsim3_home
         }
@@ -68,8 +78,7 @@ class XSArgs(object):
 
     def get_chisel_args(self, prefix=None):
         chisel_args = [
-            (self.disable_log, "disable-log"),
-            (self.dual_core,   "dual-core")
+            (self.disable_log, "disable-log")
         ]
         args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
         if prefix is not None:
@@ -78,10 +87,11 @@ class XSArgs(object):
 
     def get_makefile_args(self):
         makefile_args = [
-            (self.threads, "EMU_THREADS"),
+            (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
-            (self.trace, "EMU_TRACE"),
-            (self.config, "CONFIG")
+            (self.trace,         "EMU_TRACE"),
+            (self.config,        "CONFIG"),
+            (self.num_cores,     "NUM_CORES")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -135,6 +145,10 @@ class XSArgs(object):
     def set_rvtest_home(self, path):
         self.rvtest_home = path
 
+    def set_wave_home(self, path):
+        print(f"set wave home to {path}")
+        self.wave_home = path    
+
 # XiangShan environment
 class XiangShan(object):
     def __init__(self, args):
@@ -165,7 +179,8 @@ class XiangShan(object):
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
         numa_args = f"numactl -m 1 -C 64-{64+self.args.threads-1}" if self.args.numa else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args}')
+        fork_args = "--enable-fork" if self.args.fork else ""
+        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args}')
         return return_code
 
     def run(self, args):
@@ -188,7 +203,10 @@ class XiangShan(object):
         env = dict(os.environ)
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
+        start = time.time()
         return_code = subprocess.call(cmd, shell=True, env=env)
+        end = time.time()
+        print(f"Elapsed time: {end - start} seconds")
         return return_code
 
     def __get_ci_cputest(self, name=None):
@@ -207,6 +225,22 @@ class XiangShan(object):
         riscv_tests = map(lambda x: os.path.join(base_dir, x), riscv_tests)
         return riscv_tests
 
+    def __get_ci_misc(self, name=None):
+        base_dir = "/home/ci-runner/xsenv/workloads"
+        workloads = [
+            "bitmanip/bitMisc.bin",
+            "crypto/crypto-riscv64-noop.bin",
+            "coremark_rv64gc_o2/coremark-riscv64-xs.bin",
+            "coremark_rv64gc_o3/coremark-riscv64-xs.bin",
+            "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
+            "ext_intr/amtest-riscv64-xs.bin",
+            "cache-alias/aliastest-riscv64-xs.bin",
+            "pmp/pmp.riscv.bin",
+            "cache-management/softprefetch-riscv64-noop.bin"
+        ]
+        misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return misc_tests
+
     def __am_apps_path(self, bench):
         filename = f"{bench}-riscv64-noop.bin"
         return [os.path.join(self.args.am_home, "apps", bench, "build", filename)]
@@ -214,14 +248,16 @@ class XiangShan(object):
     def __get_ci_workloads(self, name):
         workloads = {
             "linux-hello": "bbl.bin",
-            "povray": "_3400001000_.gz",
-            "mcf": "_2550001000_.gz",
-            "xalancbmk": "_6600001000_.gz",
-            "gcc": "_1250001000_.gz",
-            "namd": "_4850001000_.gz",
-            "milc": "_4150001000_.gz",
-            "lbm": "_7550001000_.gz",
-            "gromacs": "_3150001000_.gz"
+            "povray": "_700480000000_.gz",
+            "mcf": "_17520000000_.gz",
+            "xalancbmk": "_266100000000_.gz",
+            "gcc": "_39720000000_.gz",
+            "namd": "_434640000000_.gz",
+            "milc": "_103620000000_.gz",
+            "lbm": "_140840000000_.gz",
+            "gromacs": "_275480000000_.gz",
+            "wrf": "_1916220000000_.gz",
+            "astar": "_122060000000_.gz"
         }
         return [os.path.join("/home/ci-runner/xsenv/workloads", name, workloads[name])]
 
@@ -229,6 +265,7 @@ class XiangShan(object):
         all_tests = {
             "cputest": self.__get_ci_cputest,
             "riscv-tests": self.__get_ci_rvtest,
+            "misc-tests": self.__get_ci_misc,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path
         }
@@ -236,6 +273,9 @@ class XiangShan(object):
             print(target)
             ret = self.run_emu(target)
             if ret:
+                if self.args.default_wave_home != self.args.wave_home:
+                    print("copy wave file to " + self.args.wave_home)
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
                 return ret
         return 0
 
@@ -252,9 +292,10 @@ if __name__ == "__main__":
     parser.add_argument('--am', nargs='?', type=str, help='path to nexus-am')
     parser.add_argument('--dramsim3', nargs='?', type=str, help='path to dramsim3')
     parser.add_argument('--rvtest', nargs='?', type=str, help='path to riscv-tests')
+    parser.add_argument('--wave-dump', nargs='?', type=str , help='path to dump wave')
     # chisel arguments
     parser.add_argument('--disable-log', action='store_true', help='disable log')
-    parser.add_argument('--dual-core', action='store_true', help='dual core')
+    parser.add_argument('--num-cores', type=int, help='number of cores')
     # makefile arguments
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
@@ -263,6 +304,8 @@ if __name__ == "__main__":
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
+    parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
+    # ci action head sha
 
     args = parser.parse_args()
 

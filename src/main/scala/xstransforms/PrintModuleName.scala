@@ -35,7 +35,7 @@ class PrintModuleName extends Transform with DependencyAPIMigration {
     val c = state.circuit
 
     def onStmt(s: Statement): Statement = s match {
-      case Print(info, StringLit(string), args, clk, en) => 
+      case Print(info, StringLit(string), args, clk, en) =>
         Print(info, StringLit(string.replace(XSLog.MagicStr, "%m")), args, clk, en)
       case other: Statement =>
         other.mapStmt(onStmt)

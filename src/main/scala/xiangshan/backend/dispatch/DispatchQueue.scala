@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
@@ -48,7 +48,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // queue data array
   val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
-  val roqIdxEntries = Reg(Vec(size, new RoqPtr))
+  val robIdxEntries = Reg(Vec(size, new RobPtr))
   val debug_uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
@@ -90,7 +90,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
       dataModule.io.wen(i) := true.B
       val sel = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
       dataModule.io.waddr(i) := tailPtr(sel).value
-      roqIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.roqIdx
+      robIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.robIdx
       debug_uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
       stateEntries(tailPtr(sel).value) := s_valid
     }
@@ -108,15 +108,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && (roqIdxEntries(i).needFlush(io.redirect, io.flush) || io.flush)
+    needCancel(i) := stateEntries(i) =/= s_invalid && (robIdxEntries(i).needFlush(io.redirect, io.flush) || io.flush)
 
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
     XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(debug_uopEntries(i).cf.pc)}) " +
-      p"roqIndex ${roqIdxEntries(i)} " +
-      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx.asUInt)}\n")
+      p"robIndex ${robIdxEntries(i)} " +
+      p"cancelled with redirect robIndex 0x${Hexadecimal(io.redirect.bits.robIdx.asUInt)}\n")
   }
 
   /**
@@ -197,11 +197,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   /**
     * Part 3: set output and input
     */
-  // TODO: remove this when replay moves to roq
+  // TODO: remove this when replay moves to rob
   dataModule.io.raddr := VecInit(nextHeadPtr.map(_.value))
   for (i <- 0 until deqnum) {
     io.deq(i).bits := dataModule.io.rdata(i)
-    io.deq(i).bits.roqIdx := roqIdxEntries(headPtr(i).value)
+    io.deq(i).bits.robIdx := robIdxEntries(headPtr(i).value)
     // io.deq(i).bits := debug_uopEntries(headPtr(i).value)
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := stateEntries(headPtr(i).value) === s_valid && !lastCycleMisprediction

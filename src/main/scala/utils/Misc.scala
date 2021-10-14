@@ -84,3 +84,18 @@ object Transpose
     VecInit((0 until n).map(i => VecInit(in.map(row => row(i)))))
   }
 }
+
+/**
+ * assert when 'signal' is true for more than 'threshold' cycles
+ */
+object TimeOutAssert {
+  def apply(signal: Bool, threshold: Int, message: String): Unit = {
+    val counter = RegInit(0.U(32.W))
+    when (signal) {
+      counter := counter + 1.U
+    }.otherwise {
+      counter := 0.U
+    }
+    assert(counter <= threshold.U, message)
+  }
+}
