@@ -3,7 +3,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.ClientMetadata
+import freechips.rocketchip.tilelink.{ClientMetadata, TLPermissions}
 import xiangshan._
 import utils._
 
@@ -74,4 +74,11 @@ class ICacheCommonReadBundle(isMeta: Boolean)(implicit p: Parameters) extends IC
 {
     val req     = Flipped(DecoupledIO(new ICacheReadBundle))
     val resp    = if(isMeta) Output(new ICacheMetaRespBundle) else Output(new ICacheDataRespBundle)
+}
+
+class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
+  val miss = Bool()
+  val probe_param = UInt(TLPermissions.bdWidth.W)
+  val addr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
