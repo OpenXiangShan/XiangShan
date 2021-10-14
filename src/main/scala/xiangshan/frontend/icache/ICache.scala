@@ -38,6 +38,7 @@ case class ICacheParameters(
     replacer: Option[String] = Some("random"),
     nMissEntries: Int = 2,
     nReleaseEntries: Int = 2,
+    nProbeEntries: Int = 2,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -61,6 +62,18 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
   def dataEntryBits = dataCodeBits * dataUnitNum
 
+  val ICacheSets = cacheParams.nSets
+  val ICacheWays = cacheParams.nWays
+
+  val ICacheSameVPAddrLength = 12
+
+  val ICacheWordOffset = 0
+  val ICacheSetOffset = ICacheWordOffset + log2Up(blockBytes)
+  val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
+  val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
+
+  def ProbeKey = 0
+  def FetchKey = 1
 
   def nMissEntries = cacheParams.nMissEntries
 
@@ -311,15 +324,32 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val dataArray      = Module(new ICacheDataArray)
   val missQueue      = Module(new ICacheMissQueue(edge))
   val releaseUnit    = Module(new ReleaseUnit(edge))
+  val probe          = Module(new ICacheProbe)
+  val probeQueue     = Module(new ICacheProbeQueue(edge))
 
-  metaArray.io.write <> missQueue.io.meta_write
+  val meta_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
+  val data_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
+  val release_arb    = Module(new Arbiter(new RealeaseReq, 2))
+
+  meta_read_arb.io.in(ProbeKey) <> probe.io.meta_read
+  meta_read_arb.io.in(FetchKey) <> io.metaRead.req
+  metaArray.io.read      <> meta_read_arb.io.out
+  metaArray.io.readResp  <> probe.io.meta_response
+
+  data_read_arb.io.in(ProbeKey) <> probe.io.data_read
+  data_read_arb.io.in(FetchKey) <> io.dataRead.req
+  dataArray.io.read      <> data_read_arb.io.out
+  dataArray.io.readResp  <> probe.io.data_response
+
+  meta_write_arb.io.in(FetchKey) <> missQueue.io.meta_write
+  meta_write_arb.io.in(ProbeKey) <> probe.io.meta_write
+
+  metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missQueue.io.data_write
 
-  metaArray.io.read      <> io.metaRead.req
-  metaArray.io.readResp  <> io.metaRead.resp
-
-  dataArray.io.read      <> io.dataRead.req
-  dataArray.io.readResp  <> io.dataRead.resp
+  release_arb.io.in(ProbeKey) <> probe.io.release_req
+  release_arb.io.in(FetchKey) <> io.releaseUnit.req(0)
 
   for(i <- 0 until 2){
     missQueue.io.req(i)           <> io.missQueue.req(i)
@@ -338,7 +368,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
 
-  releaseUnit.io.req  <>  io.releaseUnit.req
+  releaseUnit.io.req(0)  <>  release_arb.io.out
+  releaseUnit.io.req(1)  <>  io.releaseUnit.req(1)
   bus.c <> releaseUnit.io.mem_release
 
   // connect bus d
@@ -347,6 +378,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   releaseUnit.io.mem_grant.valid := false.B
   releaseUnit.io.mem_grant.bits  := DontCare
+
+  //Probe through bus b
+  probeQueue.io.mem_probe    <> bus.b
+  probe.io.req               <> probeQueue.io.pipe_req
 
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B

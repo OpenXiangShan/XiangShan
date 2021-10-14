@@ -252,8 +252,8 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   // assign default values to output signals
   io.mem_grant.ready := false.B
 
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  2))
-  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  2))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  cacheParams.nMissEntries))
+  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  cacheParams.nMissEntries))
 
   io.mem_grant.ready := true.B
 
