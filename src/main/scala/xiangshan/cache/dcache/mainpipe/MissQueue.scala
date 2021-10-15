@@ -462,7 +462,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val entry_idx = Mux(alloc, alloc_idx, merge_idx)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
-  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
+//  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
   // That is, a coming req has the same paddr as that of mshr_0 (merge),
   // while it has the same set and the same way as mshr_1 (reject).
