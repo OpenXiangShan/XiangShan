@@ -438,7 +438,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
    "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
     when (commitCount > i.U) { // MMIO inst is not in progress
-      commited(cmtPtrExt(i).value) := true.B
       if(i == 0){
         // MMIO inst should not update commited flag
         // Note that commit count has been delayed for 1 cycle
