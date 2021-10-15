@@ -71,6 +71,8 @@ trait HasCSRConst {
   val Slvpredctl    = 0x5C2
   val Smblockctl    = 0x5C3
   val Srnctl        = 0x5C4
+  val Scachebase    = 0x5C5
+  /** 0x5C5-0x5E5 for cache instruction register*/
 
   val Sdsid         = 0x9C0
 
@@ -98,10 +100,7 @@ trait HasCSRConst {
 
   // Machine Memory Protection
   // TBD
-  val Pmpcfg0       = 0x3A0
-  val Pmpcfg1       = 0x3A1
-  val Pmpcfg2       = 0x3A2
-  val Pmpcfg3       = 0x3A3
+  val PmpcfgBase    = 0x3A0
   val PmpaddrBase   = 0x3B0
 
   // Machine Counter/Timers
@@ -206,7 +205,7 @@ trait HasCSRConst {
   def IRQ_DEBUG = 12
 
   val IntPriority = Seq(
-    IRQ_DEBUG, 
+    IRQ_DEBUG,
     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
     IRQ_UEIP, IRQ_USIP, IRQ_UTIP

@@ -30,7 +30,7 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
   // TODO: l2 should use vaddr index to probe l1
-  val vaddr  = UInt(VAddrBits.W) 
+  val vaddr  = UInt(VAddrBits.W)
   val param  = UInt(TLPermissions.bdWidth.W)
   val needData = Bool()
 
@@ -174,9 +174,9 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     io.mem_probe.bits.dump
   }
 
-  when (io.pipe_req.fire()) {
-    io.pipe_req.bits.dump()
-  }
+//  when (io.pipe_req.fire()) {
+//    io.pipe_req.bits.dump()
+//  }
 
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)

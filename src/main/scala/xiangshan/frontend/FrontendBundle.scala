@@ -183,9 +183,9 @@ class BranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst
 
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBPUConst with BPUUtils{
   val pc = UInt(VAddrBits.W)
-  
+
   val valid = Bool()
-  
+
   val hasRedirect = Bool()
   val ftq_idx = new FtqPtr
   // val hit = Bool()
@@ -332,7 +332,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   //     p"[predTaken] ${cfiUpdate.predTaken}, [taken] ${cfiUpdate.taken}, [isMisPred] ${cfiUpdate.isMisPred} " +
   //     p"[target] ${Hexadecimal(cfiUpdate.target)} " +
   //     p"------------------------------- " +
-  //     p"[roqPtr] f=${roqIdx.flag} v=${roqIdx.value} " +
+  //     p"[robPtr] f=${robIdx.flag} v=${robIdx.value} " +
   //     p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} " +
   //     p"[ftqOffset] ${ftqOffset} " +
   //     p"[level] ${level}, [interrupt] ${interrupt} " +
@@ -352,7 +352,7 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
     XSDebug(cond, p"[target] ${Hexadecimal(cfiUpdate.target)} \n")
     XSDebug(cond, p"[shift] ${cfiUpdate.shift}\n")
     XSDebug(cond, p"------------------------------- \n")
-    XSDebug(cond, p"[roqPtr] f=${roqIdx.flag} v=${roqIdx.value}\n")
+    XSDebug(cond, p"[robPtr] f=${robIdx.flag} v=${robIdx.value}\n")
     XSDebug(cond, p"[ftqPtr] f=${ftqIdx.flag} v=${ftqIdx.value} \n")
     XSDebug(cond, p"[ftqOffset] ${ftqOffset} \n")
     XSDebug(cond, p"[stFtqIdx] f=${stFtqIdx.flag} v=${stFtqIdx.value}\n")

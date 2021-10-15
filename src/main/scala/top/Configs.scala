@@ -62,8 +62,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         NRPhyRegs = 64,
         LoadQueueSize = 16,
         StoreQueueSize = 12,
-        RoqSize = 32,
-        BrqSize = 8,
+        RobSize = 32,
         FtqSize = 8,
         IBufSize = 16,
         StoreBufferSize = 4,
@@ -94,8 +93,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           replacer = Some("setplru"),
           nMissEntries = 2
         ),
-        dcacheParameters = DCacheParameters(
-          nSets = 64, // 128KB DCache
+        dcacheParametersOpt = Some(DCacheParameters(
+          nSets = 64, // 32KB DCache
           nWays = 8,
           tagECC = Some("secded"),
           dataECC = Some("secded"),
@@ -103,8 +102,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 4,
           nProbeEntries = 4,
           nReleaseEntries = 4,
-          nStoreReplayEntries = 4,
-        ),
+        )),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
         itlbParameters = TLBParameters(
@@ -154,11 +152,11 @@ class MinimalConfig(n: Int = 1) extends Config(
           spSize = 2,
           missQueueSize = 8
         ),
-        useFakeL2Cache = true, // disable L2 Cache
+        L2CacheParamsOpt = None // remove L2 Cache
       )),
-      L3CacheParams = up(SoCParamsKey).L3CacheParams.copy(
+      L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sets = 1024
-      ),
+      )),
       L3NBanks = 1
     )
   })
@@ -169,11 +167,10 @@ class MinimalSimConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(
       cores = up(SoCParamsKey).cores.map(_.copy(
-        useFakeDCache = true,
-        useFakePTW = true,
-        useFakeL1plusCache = true,
+        dcacheParametersOpt = None,
+        softPTW = true
       )),
-      useFakeL3Cache = true
+      L3CacheParamsOpt = None
     )
   })
 )
@@ -183,21 +180,33 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
     val upParams = up(SoCParamsKey)
     val sets = n * 1024 / ways / 64
     upParams.copy(cores = upParams.cores.map(p => p.copy(
-      dcacheParameters = p.dcacheParameters.copy(
+      dcacheParametersOpt = Some(DCacheParameters(
         nSets = sets,
-        nWays = ways
-      )
+        nWays = ways,
+        tagECC = Some("secded"),
+        dataECC = Some("secded"),
+        replacer = Some("setplru"),
+        nMissEntries = 16,
+        nProbeEntries = 16,
+        nReleaseEntries = 16
+      ))
     )))
-}
-)
+})
 
-class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseData: Boolean = false) extends Config((site, here, up) => {
+class WithNKBL2
+(
+  n: Int,
+  ways: Int = 8,
+  inclusive: Boolean = true,
+  banks: Int = 1,
+  alwaysReleaseData: Boolean = false
+) extends Config((site, here, up) => {
   case SoCParamsKey =>
     val upParams = up(SoCParamsKey)
-    val l2sets = n * 1024 / ways / 64
+    val l2sets = n * 1024 / banks / ways / 64
     upParams.copy(
       cores = upParams.cores.map(p => p.copy(
-        L2CacheParams = HCCacheParameters(
+        L2CacheParamsOpt = Some(HCCacheParameters(
           name = "L2",
           level = 2,
           ways = ways,
@@ -206,19 +215,16 @@ class WithNKBL2(n: Int, ways: Int = 8, inclusive: Boolean = true, alwaysReleaseD
           alwaysReleaseData = alwaysReleaseData,
           clientCaches = Seq(CacheParameters(
             "dcache",
-            sets = 2 * p.dcacheParameters.nSets,
-            ways = p.dcacheParameters.nWays + 2,
-            aliasBitsOpt = p.dcacheParameters.aliasBitsOpt
+            sets = 2 * p.dcacheParametersOpt.get.nSets,
+            ways = p.dcacheParametersOpt.get.nWays + 2,
+            aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
           )),
           reqField = Seq(PreferCacheField()),
           echoField = Seq(DirtyField()),
           prefetch = Some(huancun.prefetch.BOPParameters()),
           enablePerf = true
-        ),
-        useFakeL2Cache = false,
-        useFakeDCache = false,
-        useFakePTW = false,
-        useFakeL1plusCache = false
+        )
+      ), L2NBanks = banks
       ))
     )
 })
@@ -229,18 +235,18 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
     val sets = n * 1024 / banks / ways / 64
     upParams.copy(
       L3NBanks = banks,
-      L3CacheParams = HCCacheParameters(
+      L3CacheParamsOpt = Some(HCCacheParameters(
         name = "L3",
         level = 3,
         ways = ways,
         sets = sets,
         inclusive = inclusive,
         clientCaches = upParams.cores.map{ core =>
-          val l2params = core.L2CacheParams.toCacheParams
-          l2params.copy(ways = 2 * l2params.ways)
+          val l2params = core.L2CacheParamsOpt.get.toCacheParams
+          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
         },
         enablePerf = true
-      )
+      ))
     )
 })
 
@@ -266,6 +272,13 @@ class MinimalAliasDebugConfig(n: Int = 1) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
     ++ new WithNKBL2(512, inclusive = false, alwaysReleaseData = true)
+    ++ new WithNKBL1D(128)
+    ++ new BaseConfig(n)
+)
+
+class LargeConfig(n: Int = 1) extends Config(
+  new WithNKBL3(10 * 1024, inclusive = false, banks = 4, ways = 10)
+    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 2, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )

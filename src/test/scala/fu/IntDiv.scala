@@ -97,8 +97,8 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
           m.clock.step()
           timeTaken += 1
           if (timeTaken >= 62) assert(false, s"Timeout for single execution!!!")
-        }        
-        
+        }
+
         m.io.in_valid.poke(false.B)
         m.io.out_ready.poke(true.B)
         m.io.isHi.poke(false.B)
@@ -109,7 +109,7 @@ class IntDividerTest extends AnyFlatSpec with ChiselScalatestTester with Matcher
         m.clock.step()
 
         m.io.result.expect((s"b" + remainder.toBinaryString).asUInt(64.W))
-      } 
+      }
     }
   }
 }

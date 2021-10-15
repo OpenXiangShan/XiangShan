@@ -36,7 +36,7 @@ import freechips.rocketchip.devices.debug._
 
 // this file uses code from rocketchip Periphery.scala
 // to simplify the code we remove options for apb, cjtag and dmi
-// this module creates wrapped dm and dtm 
+// this module creates wrapped dm and dtm
 
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 

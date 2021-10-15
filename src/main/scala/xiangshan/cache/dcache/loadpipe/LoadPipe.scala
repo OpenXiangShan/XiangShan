@@ -23,8 +23,8 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{XSDebug, XSPerfAccumulate}
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
-  def metaBits = (new L1Metadata).getWidth
-  def encMetaBits = cacheParams.tagCode.width(metaBits)
+  def metaBits = (new Meta).getWidth
+  def encMetaBits = cacheParams.tagCode.width((new MetaAndTag).getWidth) - tagBits
   def getMeta(encMeta: UInt): UInt = {
     require(encMeta.getWidth == encMetaBits)
     encMeta(metaBits - 1, 0)
@@ -37,8 +37,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     val nack      = Input(Bool())
 
     // meta and data array read port
-    val meta_read = DecoupledIO(new L1MetaReadReq)
+//    val meta_read = DecoupledIO(new L1MetaReadReq)
+//    val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
+    val meta_read = DecoupledIO(new MetaReadReq)
     val meta_resp = Input(Vec(nWays, UInt(encMetaBits.W)))
+
+    val tag_read = DecoupledIO(new TagReadReq)
+    val tag_resp = Input(Vec(nWays, UInt(tagBits.W)))
+
     val banked_data_read = DecoupledIO(new L1BankedDataReadReq)
     val banked_data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
 
@@ -51,28 +57,37 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
     // update state vec in replacement algo
     val replace_access = ValidIO(new ReplacementAccessBundle)
+    // find the way to be replaced
+    val replace_way = new ReplacementWayReqIO
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
   })
 
+  assert(RegNext(io.meta_read.ready))
+
   val s1_ready = Wire(Bool())
   val s2_ready = Wire(Bool())
   // LSU requests
   // it you got nacked, you can directly passdown
-  val not_nacked_ready = io.meta_read.ready && s1_ready
+  val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
 
   // ready can wait for valid
   io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
   io.meta_read.valid := io.lsu.req.fire() && !io.nack
+  io.tag_read.valid := io.lsu.req.fire() && !io.nack
 
   val meta_read = io.meta_read.bits
+  val tag_read = io.tag_read.bits
 
   // Tag read for new requests
   meta_read.idx := get_idx(io.lsu.req.bits.addr)
   meta_read.way_en := ~0.U(nWays.W)
-  meta_read.tag := DontCare
+//  meta_read.tag := DontCare
+
+  tag_read.idx := get_idx(io.lsu.req.bits.addr)
+  tag_read.way_en := ~0.U(nWays.W)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -81,8 +96,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
 
-  assert(RegNext(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD)), "LoadPipe only accepts load req")
-
+  assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
   // --------------------------------------------------------------------------------
@@ -103,21 +117,33 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
   // tag check
-  val meta_resp = VecInit(io.meta_resp.map(r => getMeta(r).asTypeOf(new L1Metadata)))
+  val meta_resp = VecInit(io.meta_resp.map(r => getMeta(r).asTypeOf(new Meta)))
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
+  val s1_tag_eq_way = wayMap((w: Int) => io.tag_resp(w) === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match = s1_tag_match_way.orR
-  assert(RegNext(PopCount(s1_tag_match_way) <= 1.U), "tag should not match with more than 1 way")
+  assert(RegNext(!s1_valid || PopCount(s1_tag_match_way) <= 1.U), "tag should not match with more than 1 way")
 
-  val s1_fake_meta = Wire(new L1Metadata)
-  s1_fake_meta.tag := get_tag(s1_addr)
+  val s1_fake_meta = Wire(new Meta)
+//  s1_fake_meta.tag := get_tag(s1_addr)
   s1_fake_meta.coh := ClientMetadata.onReset
+  val s1_fake_tag = get_tag(s1_addr)
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
   val s1_hit_meta = Mux(s1_tag_match, Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
   val s1_hit_coh = s1_hit_meta.coh
+
+  io.replace_way.set.valid := RegNext(s0_fire)
+  io.replace_way.set.bits := get_idx(s1_vaddr)
+  val s1_repl_way_en = UIntToOH(io.replace_way.way)
+  val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => io.tag_resp(w)))
+  val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w).coh))
+
+  val s1_need_replacement = !s1_tag_match
+  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
+  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_addr))
 
   // data read
   io.banked_data_read.valid := s1_fire && !s1_nack
@@ -129,7 +155,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
   // tag ecc check
-  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
+//  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -157,6 +183,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
 
+  val s2_way_en = RegEnable(s1_way_en, s1_fire)
+  val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
+  val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
+
   // when req got nacked, upper levels should replay this request
   // nacked or not
   val s2_nack_hit = RegEnable(s1_nack, s1_fire)
@@ -171,6 +201,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val banked_data_resp_word = Mux1H(s2_bank_oh, io.banked_data_resp) // io.banked_data_resp(s2_bank_addr)
   dontTouch(s2_bank_addr)
 
+  val s2_instrtype = s2_req.instrtype
+
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
@@ -178,13 +210,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   // send load miss to miss queue
-  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
+  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit && !io.lsu.s2_kill
   io.miss_req.bits := DontCare
-  io.miss_req.bits.source := LOAD_SOURCE.U
+  io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_addr)
   io.miss_req.bits.vaddr := s2_vaddr
-  io.miss_req.bits.coh := s2_hit_coh
+  io.miss_req.bits.way_en := s2_way_en
+  io.miss_req.bits.req_coh := s2_hit_coh
+  io.miss_req.bits.replace_coh := s2_repl_coh
+  io.miss_req.bits.replace_tag := s2_repl_tag
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
@@ -196,7 +231,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   // but if we successfully sent the request to miss queue
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
-  // 
+  //
   // * report a miss if bank conflict is detected
   val real_miss = !s2_hit || s2_nack
   resp.bits.miss := real_miss || io.bank_conflict_slow
@@ -208,6 +243,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack) || io.bank_conflict_slow
     XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
   }
+  
+  resp.bits.miss_enter := io.miss_req.fire()
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -219,6 +256,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
   io.lsu.s1_hit_way := s1_tag_match_way
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
+  io.lsu.s1_bank_conflict := io.bank_conflict_fast
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // -------

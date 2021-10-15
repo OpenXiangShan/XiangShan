@@ -33,10 +33,9 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     val grantBalance = Output(Bool())
   })
 
-  val policy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
-
+  val enqPolicy = if (params.numEnq > 2) "oddeven" else "circ"
   val emptyVec = VecInit(io.validVec.asBools.map(v => !v))
-  val allocate = SelectOne(policy, emptyVec, params.numEnq)
+  val allocate = SelectOne(enqPolicy, emptyVec, params.numEnq)
   for (i <- 0 until params.numEnq) {
     val sel = allocate.getNthOH(i + 1)
     io.allocate(i).valid := sel._1
@@ -47,8 +46,9 @@ class SelectPolicy(params: RSParams)(implicit p: Parameters) extends XSModule {
     XSDebug(io.allocate(i).fire(), p"select for allocation: ${Binary(io.allocate(i).bits)}\n")
   }
 
+  val deqPolicy = if (params.numDeq > 2 && params.numEntries > 32) "oddeven" else if (params.numDeq >= 2) "circ" else "naive"
   val request = io.request.asBools
-  val select = SelectOne(policy, request, params.numDeq)
+  val select = SelectOne(deqPolicy, request, params.numDeq)
   for (i <- 0 until params.numDeq) {
     val sel = select.getNthOH(i + 1, params.needBalance)
     io.grant(i).valid := sel._1
