@@ -310,7 +310,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
           s2_agree(w) := s2_tageTakens(w) === pred
           s2_disagree(w) := s2_tageTakens(w) =/= pred
           // fit to always-taken condition
-          io.out.resp.s2.preds.taken_mask(w) := pred
+          io.out.resp.s2.preds.br_taken_mask(w) := pred
           XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
@@ -320,7 +320,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       when (updateValids(w) && updateSCMeta.scUsed.asBool) {
         val scPred = updateSCMeta.scPred
         val tagePred = updateSCMeta.tageTaken
-        val taken = update.preds.taken_mask(w)
+        val taken = update.preds.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs
         val pvdrCtr = updateTageMeta.providerCtr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)

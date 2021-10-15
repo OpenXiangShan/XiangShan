@@ -500,7 +500,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // Update logic
   val u_valid = io.update.valid
   val update = io.update.bits
-  val updateValids = VecInit(Seq.fill(ITTageBanks)(update.ftb_entry.isJalr && u_valid && !(update.real_br_taken_mask().reduce((a,b) => a || b))))
+  val updateValids = VecInit(Seq.fill(ITTageBanks)(
+    update.ftb_entry.isJalr && u_valid && update.ftb_entry.jmpValid &&
+    !(update.real_br_taken_mask().reduce(_||_))))
   val updateHist = update.ghist
   val updatePhist = update.phist
 
@@ -558,7 +560,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
     when(io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_jalr && s2_tageTakens(w)) {
       // FIXME: should use s1 globally
-      io.out.resp.s2.preds.jmp_target := s2_tageTargets(w)
+      io.out.resp.s2.preds.targets.last := s2_tageTargets(w)
     }
 
     resp_meta(w).provider.valid := s2_provideds(w)
@@ -689,16 +691,18 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     PopCount(VecInit(updateMetas zip updateValids map {
       case (m, v) => m.provider.valid && v
     })))
+  
+  XSPerfAccumulate("ittage_updated", updateValids.asUInt)
 
   if (debug) {
-    for (b <- 0 until ITTageBanks) {
-      val m = updateMetas(b)
-      // val bri = u.metas(b)
-      XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-        b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
-        0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
-      )
-    }
+    // for (b <- 0 until ITTageBanks) {
+    //   val m = updateMetas(b)
+    //   // val bri = u.metas(b)
+    //   XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+    //     b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
+    //     0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
+    //   )
+    // }
     val s2_resps = RegEnable(s1_resps, io.s1_fire)
     XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s0_fire, s0_pc, io.in.bits.ghist)
     XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
