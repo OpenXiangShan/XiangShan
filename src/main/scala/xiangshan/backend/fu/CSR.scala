@@ -985,7 +985,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
   val retTargetReg = Reg(retTarget.cloneType)
-  when (io.flushIn) {
+  when (io.redirectIn.valid) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B

@@ -36,7 +36,6 @@ class RatWritePort(implicit p: Parameters) extends XSBundle {
 
 class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val flush = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
     val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
     val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
@@ -59,13 +58,12 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
   val t1_wSpec = RegNext(io.specWritePorts)
 
   // WRITE: when instruction commits or walking
-  val t1_flush = RegNext(io.flush)
   val t1_wSpec_addr = t1_wSpec.map(w => Mux(w.wen, UIntToOH(w.addr), 0.U))
   for ((next, i) <- spec_table_next.zipWithIndex) {
     val matchVec = t1_wSpec_addr.map(w => w(i))
     val wMatch = ParallelPriorityMux(matchVec.reverse, t1_wSpec.map(_.data).reverse)
     // When there's a flush, we use arch_table to update spec_table.
-    next := Mux(t1_flush, arch_table(i), Mux(VecInit(matchVec).asUInt.orR, wMatch, spec_table(i)))
+    next := Mux(VecInit(matchVec).asUInt.orR, wMatch, spec_table(i))
   }
   spec_table := spec_table_next
 
@@ -89,7 +87,6 @@ class RenameTable(float: Boolean)(implicit p: Parameters) extends XSModule {
 
 class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val flush = Input(Bool())
     val robCommits = Flipped(new RobCommitIO)
     val intReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
@@ -103,7 +100,6 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val intRat = Module(new RenameTable(float = false))
   val fpRat = Module(new RenameTable(float = true))
 
-  intRat.io.flush := io.flush
   intRat.io.debug_rdata <> io.debug_int_rat
   intRat.io.readPorts <> io.intReadPorts.flatten
   val intDestValid = io.robCommits.info.map(info => info.rfWen && info.ldest =/= 0.U)
@@ -125,7 +121,6 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     }
   }
 
-  fpRat.io.flush := io.flush
   // debug read ports for difftest
   fpRat.io.debug_rdata <> io.debug_fp_rat
   fpRat.io.readPorts <> io.fpReadPorts.flatten

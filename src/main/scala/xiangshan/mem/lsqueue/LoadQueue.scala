@@ -84,7 +84,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
@@ -142,7 +141,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush)) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -485,8 +484,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   val lastCycleRedirect = RegNext(io.brqRedirect)
   val lastlastCycleRedirect = RegNext(lastCycleRedirect)
-  val lastCycleFlush = RegNext(io.flush)
-  val lastlastCycleFlush = RegNext(lastCycleFlush)
 
   // S2: select rollback (part1) and generate rollback request
   // rollback check
@@ -564,7 +561,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
 
-  io.rollback.valid := rollbackValidVecChecked.asUInt.orR && !lastCycleFlush && !lastlastCycleFlush
+  io.rollback.valid := rollbackValidVecChecked.asUInt.orR
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x robidx %d\n", io.rollback.bits.cfi, io.rollback.bits.robIdx.asUInt)
@@ -652,7 +649,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // invalidate lq term using robIdx
   val needCancel = Wire(Vec(LoadQueueSize, Bool()))
   for (i <- 0 until LoadQueueSize) {
-    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect, io.flush) && allocated(i)
+    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i)
     when (needCancel(i)) {
         allocated(i) := false.B
     }
@@ -663,8 +660,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect.valid || lastCycleFlush) {
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
+  when (lastCycleRedirect.valid) {
     // we recover the pointers in the next cycle after redirect
     enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
   }.otherwise {

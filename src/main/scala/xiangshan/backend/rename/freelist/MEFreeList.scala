@@ -23,7 +23,6 @@ import utils._
 import chipsalliance.rocketchip.config
 
 class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with MEFreeListIO with HasXSParameter with HasCircularQueuePtrHelper {
-  val flush = IO(Input(Bool()))
   val redirect = IO(Input(Bool()))
   val walk = IO(Input(Bool()))
 
@@ -199,7 +198,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val zeroCntDecValue = PopCount(freeReq.zip(freePhyReg).map{ case (v, r) => v && r === 0.U })
   // when pdest = 0 && isMove -> cnt[0]++
   val zeroCntIncValue = PopCount(freeReq.zip(eliminatedMove).zip(multiRefPhyReg).map{ case ((v, m), r) => v && m && r === 0.U })
-  archRefCntZero := Mux(!flush && !walk, archRefCntZero + zeroCntIncValue - zeroCntDecValue, archRefCntZero)
+  archRefCntZero := Mux(!walk, archRefCntZero + zeroCntIncValue - zeroCntDecValue, archRefCntZero)
 
 
   /*
@@ -212,7 +211,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val phyRegCandidates = VecInit(allocatePtr.map(ptr => freeList(ptr.value)))
 
   for (i <- 0 until RenameWidth) {
-    val renameEnable = allocateReq(i) && canAllocate && doAllocate && !flush && !redirect && !walk
+    val renameEnable = allocateReq(i) && canAllocate && doAllocate && !redirect && !walk
     // enqueue instr, isn't move elimination
     needAllocatingVec(i) := renameEnable && !psrcOfMove(i).valid
     // enqueue instr, is move elimination
@@ -242,13 +241,13 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
   val dupRegCntPos = RegInit(0.U(5.W))
   val dupCntIncVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i => Mux(updateArchRefCounterVec(i), pdests_times(i) + 1.U, 0.U))))
-  dupRegCntPos := Mux(!flush && !walk, dupRegCntPos + dupCntIncVec.reduceTree(_ + _), dupRegCntPos)
+  dupRegCntPos := Mux(!walk, dupRegCntPos + dupCntIncVec.reduceTree(_ + _), dupRegCntPos)
 
   val dupRegCntNeg = RegInit(0.U(5.W))
   val dupCntDecVec = WireInit(VecInit(Seq.tabulate(CommitWidth)(i =>
     Mux(updateCmtCounterVec(i) && !freeVec(i), old_pdests_times(i) + 1.U,
     Mux(freeVec(i) && specRefCounter(freePhyReg(i)) =/= 0.U, old_pdests_times(i), 0.U)))))
-  dupRegCntNeg := Mux(!flush && !walk, dupRegCntNeg + dupCntDecVec.reduceTree(_ + _), dupRegCntNeg)
+  dupRegCntNeg := Mux(!walk, dupRegCntNeg + dupCntDecVec.reduceTree(_ + _), dupRegCntNeg)
 
   val dupRegCnt = Wire(UInt(5.W))
   dupRegCnt := dupRegCntPos - dupRegCntNeg
@@ -258,9 +257,8 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
   val tailPtrNext = Mux(walk, tailPtr, tailPtr + PopCount(freeVec))
   // update head pointer
   val walkValidVec = WireInit(VecInit(freeReq.zip(eliminatedMove).map{ case (rq, em) => rq && !em }))
-  val headPtrNext = Mux(flush, tailPtr - (NRPhyRegs-32).U - dupRegCnt - archRefCntZero,
-                      Mux(walk, headPtr - PopCount(walkValidVec),
-                      headPtr + PopCount(needAllocatingVec))) // when io.redirect is valid, needAllocatingVec is all-zero
+  val headPtrNext = Mux(walk, headPtr - PopCount(walkValidVec),
+                      headPtr + PopCount(needAllocatingVec)) // when io.redirect is valid, needAllocatingVec is all-zero
 
   freeRegCnt := distanceBetween(tailPtr, headPtrNext)
   canAllocate := RegNext(freeRegCnt >= RenameWidth.U)
@@ -270,8 +268,7 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
   // update reg counter
   for (i <- 1 until NRPhyRegs) {
-    specRefCounter(i) := Mux(flush, archRefCounter(i),
-                           Mux(clearSpecRefCounter(i), 0.U, Mux(updateSpecRefCounter(i), specRefCounterNext(i), specRefCounter(i))))
+    specRefCounter(i) := Mux(clearSpecRefCounter(i), 0.U, Mux(updateSpecRefCounter(i), specRefCounterNext(i), specRefCounter(i)))
     archRefCounter(i) :=   Mux(clearArchRefCounter(i), 0.U, Mux(updateArchRefCounter(i), archRefCounterNext(i), archRefCounter(i) ))
     cmtCounter(i)     :=   Mux(clearCmtCounter(i),     0.U, Mux(updateCmtCounter(i),     cmtCounterNext(i),     cmtCounter(i)     ))
   }

@@ -73,9 +73,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     }
     // to store set LFST
     val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
-    // flush or replay, for LFST
+    // redirect for LFST
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // LFST ctrl
     val csrCtrl = Input(new CustomCSRCtrlIO)
     // LFST state sync
@@ -92,7 +91,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
   val lfst = Module(new LFST)
   lfst.io.redirect <> RegNext(io.redirect)
-  lfst.io.flush <> RegNext(io.flush)
   lfst.io.storeIssue <> RegNext(io.storeIssue)
   lfst.io.csrCtrl <> RegNext(io.csrCtrl)
   lfst.io.dispatch := io.lfst
@@ -120,7 +118,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     */
 
   val singleStepStatus = RegInit(false.B)
-  when (io.flush) {
+  when (io.redirect.valid) {
     singleStepStatus := false.B
   }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
     singleStepStatus := true.B

@@ -24,7 +24,6 @@ import utils._
 trait FreeListBaseIO {
 
   // control signals from CtrlBlock
-  def flush: Bool
   def redirect: Bool
   def walk: Bool
 

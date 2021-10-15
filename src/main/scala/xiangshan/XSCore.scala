@@ -260,7 +260,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
-    exu.flush <> ctrlBlock.io.flush
     exu.allocPregs <> ctrlBlock.io.allocPregs
     exu.rfWriteback <> rfWriteback
     exu.fastUopIn <> allFastUop1
@@ -311,7 +310,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
-  memBlock.io.flush <> ctrlBlock.io.flush
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb

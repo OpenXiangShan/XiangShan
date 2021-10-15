@@ -23,7 +23,6 @@ import utils._
 import chipsalliance.rocketchip.config
 
 class StdFreeList(implicit val p: config.Parameters) extends MultiIOModule with FreeListBaseIO with HasXSParameter with HasCircularQueuePtrHelper {
-  val flush = IO(Input(Bool()))
   val redirect = IO(Input(Bool()))
   val walk = IO(Input(Bool()))
 
@@ -90,12 +89,9 @@ class StdFreeList(implicit val p: config.Parameters) extends MultiIOModule with 
   freeRegCnt := distanceBetween(tailPtr, headPtrNext)
 
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
-  headPtr := Mux(flush,
-    FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
-    Mux(walk,
+  headPtr := Mux(walk,
       headPtr - stepBack,
       Mux(redirect, headPtr, headPtrNext))
-  )
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 

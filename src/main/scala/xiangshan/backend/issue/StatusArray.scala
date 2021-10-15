@@ -80,7 +80,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // current status
     val isValid = Output(UInt(params.numEntries.W))
     val canIssue = Output(UInt(params.numEntries.W))
@@ -171,10 +170,10 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   for (((status, statusNext), i) <- statusArray.zip(statusArrayNext).zipWithIndex) {
     // valid: when the entry holds a valid instruction, mark it true.
     // Set when (1) not (flushed or deq); AND (2) update.
-    val isFlushed = status.valid && status.robIdx.needFlush(io.redirect, io.flush)
+    val isFlushed = status.valid && status.robIdx.needFlush(io.redirect)
     val (deqRespValid, deqRespSucc, deqRespType, deqRespDataInvalidSqIdx) = deqResp(i)
     flushedVec(i) := isFlushed || (deqRespValid && deqRespSucc)
-    val realUpdateValid = updateValid(i) && !io.redirect.valid && !io.flush
+    val realUpdateValid = updateValid(i) && !io.redirect.valid
     statusNext.valid := !flushedVec(i) && (realUpdateValid || status.valid)
     XSError(updateValid(i) && status.valid, p"should not update a valid entry $i\n")
 
