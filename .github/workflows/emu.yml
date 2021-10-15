@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, ftb-lru ]
   pull_request:
     branches: [ master ]
 

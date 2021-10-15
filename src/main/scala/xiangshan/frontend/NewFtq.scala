@@ -848,7 +848,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
-  val canCommit = commPtr =/= ifuWbPtr &&
+  val do_commit = Wire(Bool())
+  val canCommit = commPtr =/= ifuWbPtr && !do_commit &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
@@ -868,9 +869,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_ftb_entry = ftb_entry_mem.io.rdata.last
 
   // need one cycle to read mem and srams
-  val do_commit = RegNext(canCommit, init=false.B)
   val do_commit_ptr = RegNext(commPtr)
-  when (canCommit) { commPtr := commPtr + 1.U }
+  do_commit := RegNext(canCommit, init=false.B)
+  when (do_commit) { commPtr := commPtr + 1.U }
   val commit_state = RegNext(commitStateQueue(commPtr.value))
   val commit_cfi = WireInit(RegNext(cfiIndex_vec(commPtr.value)))
   when (commit_state(commit_cfi.bits) =/= c_commited) {
