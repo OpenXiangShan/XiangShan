@@ -261,7 +261,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       datavalid(stWbIndex) := true.B
 
       dataModule.io.data.waddr(i) := stWbIndex
-      dataModule.io.data.wdata(i) := genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
+      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero,
+        0.U,
+        genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
+      )
       dataModule.io.data.wen(i) := true.B
 
       debug_data(dataModule.io.data.waddr(i)) := dataModule.io.data.wdata(i)

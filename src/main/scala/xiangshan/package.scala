@@ -351,17 +351,18 @@ package object xiangshan {
   object LSUOpType {
     // normal load/store
     // bit(1, 0) are size
-    def lb   = "b000000".U
-    def lh   = "b000001".U
-    def lw   = "b000010".U
-    def ld   = "b000011".U
-    def lbu  = "b000100".U
-    def lhu  = "b000101".U
-    def lwu  = "b000110".U
-    def sb   = "b001000".U
-    def sh   = "b001001".U
-    def sw   = "b001010".U
-    def sd   = "b001011".U
+    def lb       = "b000000".U
+    def lh       = "b000001".U
+    def lw       = "b000010".U
+    def ld       = "b000011".U
+    def lbu      = "b000100".U
+    def lhu      = "b000101".U
+    def lwu      = "b000110".U
+    def sb       = "b001000".U
+    def sh       = "b001001".U
+    def sw       = "b001010".U
+    def sd       = "b001011".U
+    def cbo_zero = "b001111".U
 
     def isLoad(op: UInt): Bool = !op(3)
     def isStore(op: UInt): Bool = op(3)

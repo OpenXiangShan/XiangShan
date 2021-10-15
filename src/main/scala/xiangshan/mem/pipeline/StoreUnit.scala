@@ -66,7 +66,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.wlineflag := false.B // TODO: add inst decode
+  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
