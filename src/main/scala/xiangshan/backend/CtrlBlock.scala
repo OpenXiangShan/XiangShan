@@ -305,7 +305,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   for (i <- 0 until RenameWidth) {
     PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
-  dispatch.io.renameBypass := RegEnable(rename.io.renameBypass, rename.io.out(0).fire)
   dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
 
   dispatch.io.redirect <> stage2Redirect
