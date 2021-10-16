@@ -149,6 +149,9 @@ class Rename(implicit p: Parameters) extends XSModule {
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
+    when (io.out(i).bits.ctrl.fuType === FuType.fence) {
+      io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
+    }
 
     // write speculative rename table
     // we update rat later inside commit code
