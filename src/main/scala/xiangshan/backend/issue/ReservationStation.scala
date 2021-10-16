@@ -291,6 +291,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
     statusArray.io.update(i).data.waitForSqIdx := io.fromDispatch(i).bits.cf.waitForSqIdx
     statusArray.io.update(i).data.waitForStoreData := false.B
+    statusArray.io.update(i).data.strictWait := io.fromDispatch(i).bits.cf.loadWaitStrict
     statusArray.io.update(i).data.isFirstIssue := true.B
     // for better power, we don't write payload array when there's a redirect
     payloadArray.io.write(i).enable := doEnqueue(i)
