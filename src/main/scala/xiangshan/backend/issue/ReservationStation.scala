@@ -316,8 +316,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   // select the issue instructions
   // Option 1: normal selection (do not care about the age)
-  select.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && !x._2)).asUInt.orR
-  select1.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && x._2)).asUInt.orR
+  select.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && !x._2)).asUInt
+  select1.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && x._2)).asUInt
   // Option 2: select the oldest
   val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
   val oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
