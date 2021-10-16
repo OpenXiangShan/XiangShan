@@ -345,13 +345,13 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
-  val vaddr = UInt(VAddrBits.W)
-  val cmd = TlbCmd()
-  val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
-  val robIdx = new RobPtr
+  val vaddr = Output(UInt(VAddrBits.W))
+  val cmd = Output(TlbCmd())
+  val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
+  val robIdx = Output(new RobPtr)
   val debug = new Bundle {
-    val pc = UInt(XLEN.W)
-    val isFirstIssue = Bool()
+    val pc = Output(UInt(XLEN.W))
+    val isFirstIssue = Output(Bool())
   }
 
   override def toPrintable: Printable = {
@@ -366,14 +366,14 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbResp(implicit p: Parameters) extends TlbBundle {
-  val paddr = UInt(PAddrBits.W)
-  val miss = Bool()
-  val mmio = Bool()
+  val paddr = Output(UInt(PAddrBits.W))
+  val miss = Output(Bool())
+  val mmio = Output(Bool())
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
   }
-  val ptwBack = Bool() // when ptw back, wake up replay rs's state
+  val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
 
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"

@@ -65,7 +65,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter       = Vec(2, new BlockTlbRequestIO)
   val pmp             = Vec(2, new Bundle {
     val req = Valid(new PMPReqBundle())
-    val resp = Input(new PMPRespBundle())
+    val resp = Flipped(new PMPRespBundle())
   })
 }
 

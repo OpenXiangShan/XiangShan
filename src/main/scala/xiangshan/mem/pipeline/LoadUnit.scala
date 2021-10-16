@@ -255,7 +255,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val out = Decoupled(new LsPipelineBundle)
     val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
-    val pmpResp = Input(new PMPRespBundle())
+    val pmpResp = Flipped(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
@@ -426,7 +426,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
 
     val tlb = new TlbRequestIO
-    val pmp = Input(new PMPRespBundle()) // arrive same to tlb now
+    val pmp = Flipped(new PMPRespBundle()) // arrive same to tlb now
 
     val fastpathOut = Output(new LoadToLoadIO)
     val fastpathIn = Input(Vec(LoadPipelineWidth, new LoadToLoadIO))

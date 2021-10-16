@@ -143,7 +143,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
-    val pmpResp = Input(new PMPRespBundle)
+    val pmpResp = Flipped(new PMPRespBundle)
     val out = Decoupled(new LsPipelineBundle)
   })
 
@@ -181,7 +181,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val flush = Input(Bool())
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
-    val pmp = Input(new PMPRespBundle())
+    val pmp = Flipped(new PMPRespBundle())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)

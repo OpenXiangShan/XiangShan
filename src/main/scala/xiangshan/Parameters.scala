@@ -178,6 +178,7 @@ case class XSCoreParameters
   useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPMP: Int = 16, // 0 or 16 or 64
+  NumPMA: Int = 16,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -319,6 +320,7 @@ trait HasXSParameter {
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPMP = coreParams.NumPMP
+  val NumPMA = coreParams.NumPMA
   val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
