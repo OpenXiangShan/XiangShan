@@ -34,7 +34,6 @@ class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
 class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val robCommits = Flipped(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
@@ -61,9 +60,8 @@ class Rename(implicit p: Parameters) extends XSModule {
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
 
-  // connect [flush + redirect + walk] ports for __float point__ & __integer__ free list
+  // connect [redirect + walk] ports for __float point__ & __integer__ free list
   Seq((fpFreeList, true), (intFreeList, false)).foreach{ case (fl, isFp) =>
-    fl.flush := io.flush
     fl.redirect := io.redirect.valid
     fl.walk := io.robCommits.isWalk
     // when isWalk, use stepBack to restore head pointer of free list
@@ -83,11 +81,10 @@ class Rename(implicit p: Parameters) extends XSModule {
   val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
-  val robIdxHeadNext = Mux(io.flush, 0.U.asTypeOf(new RobPtr), // flush: clear rob
-              Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index (flush itself)
+  val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
          Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
                          Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
-                      /* default */  robIdxHead)))) // no instructions passed by this cycle: stick to old value
+                      /* default */  robIdxHead))) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
 
   /**
@@ -237,11 +234,11 @@ class Rename(implicit p: Parameters) extends XSModule {
       // walk back write - restore spec state : ldest => old_pdest
       if (fp && i < RenameWidth) {
         // When redirect happens (mis-prediction), don't update the rename table
-        rat(i).wen := fpSpecWen(i) && !io.flush && !io.redirect.valid
+        rat(i).wen := fpSpecWen(i) && !io.redirect.valid
         rat(i).addr := uops(i).ctrl.ldest
         rat(i).data := fpFreeList.allocatePhyReg(i)
       } else if (!fp && i < RenameWidth) {
-        rat(i).wen := intSpecWen(i) && !io.flush && !io.redirect.valid
+        rat(i).wen := intSpecWen(i) && !io.redirect.valid
         rat(i).addr := uops(i).ctrl.ldest
         rat(i).data := Mux(meEnable(i), intPsrc(i), intFreeList.allocatePhyReg(i))
       }

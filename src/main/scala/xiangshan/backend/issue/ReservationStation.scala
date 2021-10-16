@@ -156,7 +156,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     val perf = IO(Vec(rs.length, Output(new RsPerfCounter)))
 
     rs.foreach(_.io.redirect <> io.redirect)
-    rs.foreach(_.io.flush <> io.flush)
     io.numExist <> rs.map(_.io.numExist).reduce(_ +& _)
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
@@ -206,7 +205,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
 class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
-  val flush = Input(Bool())
   val numExist = Output(UInt(log2Up(params.numEntries + 1).W))
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
@@ -262,7 +260,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   io.numExist := PopCount(statusArray.io.isValid)
   perf.full := RegNext(statusArray.io.isValid.andR)
   statusArray.io.redirect := io.redirect
-  statusArray.io.flush := io.flush
 
   /**
     * S0: Update status (from dispatch and wakeup) and schedule possible instructions to issue.
@@ -270,8 +267,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
   // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid && !io.flush))
-  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect, io.flush))
+  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
+  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
   XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(1, 1, false))
   for (i <- 0 until params.numEnq) {
@@ -368,7 +365,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
   for (i <- 0 until params.numDeq) {
-    s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect, io.flush)
+    s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect)
     statusArray.io.issueGranted(i).valid := issueVec(i).valid && s1_out(i).ready
     statusArray.io.issueGranted(i).bits := issueVec(i).bits
     if (io.feedback.isDefined) {
@@ -402,7 +399,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
       wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() + 1.U
       wakeupQueue.io.redirect := io.redirect
-      wakeupQueue.io.flush := io.flush
       io.fastWakeup.get(i) := wakeupQueue.io.out
       XSPerfAccumulate(s"fast_blocked_$i", issueVec(i).valid && fuCheck && !s1_out(i).ready)
     }
@@ -523,7 +519,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     // payload: send to function units
     // TODO: these should be done outside RS
-    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect, io.flush), false.B)
+    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
     if (params.hasFeedback) {
       io.feedback.get(i).rsIdx := s2_issue_index(i)
       io.feedback.get(i).isFirstIssue := s2_first_issue(i)
@@ -733,7 +729,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
 
   XSPerfAccumulate("redirect_num", io.redirect.valid)
-  XSPerfAccumulate("flush_num", io.flush)
   XSPerfHistogram("allocate_num", PopCount(io.fromDispatch.map(_.valid)), true.B, 0, params.numEnq, 1)
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 

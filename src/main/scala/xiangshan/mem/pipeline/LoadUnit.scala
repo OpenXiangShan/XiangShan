@@ -419,7 +419,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val feedbackSlow = ValidIO(new RSFeedback)
     val feedbackFast = ValidIO(new RSFeedback)
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
@@ -449,7 +448,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s0.io.fastpath := io.fastpathIn
   load_s0.io.loadFastMatch := io.loadFastMatch
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   load_s1.io.dtlbResp <> io.tlb.resp
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
@@ -458,7 +457,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   load_s1.io.lsq <> io.lsq.forward
   load_s1.io.dcacheBankConflict <> io.dcache.s1_bank_conflict
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   io.dcache.s2_kill <> load_s2.io.dcache_kill
   load_s2.io.dcacheResp <> io.dcache.resp
@@ -480,7 +479,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   // feedback tlb miss / dcache miss queue full
   io.feedbackSlow.bits := RegNext(load_s2.io.rsFeedback.bits)
-  io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  io.feedbackSlow.valid := RegNext(load_s2.io.rsFeedback.valid && !load_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   // feedback bank conflict to rs
   io.feedbackFast.bits := load_s1.io.rsFeedback.bits

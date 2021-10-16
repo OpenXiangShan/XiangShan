@@ -789,12 +789,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
   val redirectVec = Wire(Vec(3, new RedirectInfo))
-  val robRedirect = Wire(Valid(new Redirect))
-  robRedirect := DontCare
-  robRedirect.valid := robFlush.valid
-  robRedirect.bits.ftqIdx := robFlush.bits.ftqIdx
-  robRedirect.bits.ftqOffset := robFlush.bits.ftqOffset
-  robRedirect.bits.level := RedirectLevel.flush
+  val robRedirect = robFlush
 
   redirectVec.zip(Seq(robRedirect, stage2Redirect, fromIfuRedirect)).map {
     case (ve, r) => ve(r)
