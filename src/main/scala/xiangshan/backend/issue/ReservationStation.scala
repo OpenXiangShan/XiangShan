@@ -252,6 +252,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
+  val select1 = Module(new SelectPolicy(params))
+  select1.io := DontCare
   val dataArray = Module(new DataArray(params))
   val payloadArray = Module(new PayloadArray(new MicroOp, params))
 
@@ -266,6 +268,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     */
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
+  select1.io.validVec := statusArray.io.isValid
   // agreement with dispatch: don't enqueue when io.redirect.valid
   val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
   val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
@@ -290,6 +293,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.waitForStoreData := false.B
     statusArray.io.update(i).data.strictWait := io.fromDispatch(i).bits.cf.loadWaitStrict
     statusArray.io.update(i).data.isFirstIssue := true.B
+    statusArray.io.update(i).data.priority := LFSR64()(0)
     // for better power, we don't write payload array when there's a redirect
     payloadArray.io.write(i).enable := doEnqueue(i)
     payloadArray.io.write(i).addr := select.io.allocate(i).bits
@@ -312,7 +316,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
 
   // select the issue instructions
   // Option 1: normal selection (do not care about the age)
-  select.io.request := statusArray.io.canIssue
+  select.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && !x._2)).asUInt.orR
+  select1.io.request := VecInit(statusArray.io.canIssue.asBools.zip(statusArray.io.priority.asBools).map(x => x._1 && x._2)).asUInt.orR
   // Option 2: select the oldest
   val enqVec = VecInit(doEnqueue.zip(select.io.allocate.map(_.bits)).map{ case (d, b) => Mux(d, b, 0.U) })
   val oldestSel = AgeDetector(params.numEntries, enqVec, statusArray.io.flushed, statusArray.io.canIssue)
@@ -321,7 +326,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // For better timing, we read the payload array before we determine which instruction to issue.
   // In this way, selection and payload read happen simultaneously.
   for (i <- 0 until params.numDeq) {
-    payloadArray.io.read(i).addr := select.io.grant(i).bits
+    payloadArray.io.read(i).addr := Mux(select1.io.grant(i).valid, select1.io.grant(i).bits, select.io.grant(i).bits)
   }
   payloadArray.io.read(params.numDeq).addr := oldestSel.bits
 
@@ -335,7 +340,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     // However, in this case, the select policy always selects at maximum numDeq instructions to issue.
     // Thus, we need an arbitration between the numDeq + 1 possibilities.
     val oldestSelection = Module(new OldestSelection(params))
-    oldestSelection.io.in := RegNext(select.io.grant)
+    for (i <- 0 until params.numDeq) {
+      oldestSelection.io.in(i).valid := RegNext(select.io.grant(i).valid || select1.io.grant(i).valid)
+      oldestSelection.io.in(i).bits := RegNext(Mux(select1.io.grant(i).valid, select1.io.grant(i).bits, select.io.grant(i).bits))
+    }
     oldestSelection.io.oldest := RegNext(oldestSel)
     // By default, we use the default victim index set in parameters.
     oldestSelection.io.canOverride := (0 until params.numDeq).map(_ == params.oldestFirst._3).map(_.B)
@@ -351,7 +359,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     oldestOverride := oldestSelection.io.isOverrided
   }
   else {
-    issueVec := RegNext(select.io.grant)
+    for (i <- 0 until params.numDeq) {
+      issueVec(i).valid := RegNext(select.io.grant(i).valid || select1.io.grant(i).valid)
+      issueVec(i).bits := RegNext(Mux(select1.io.grant(i).valid, select1.io.grant(i).bits, select.io.grant(i).bits))
+    }
     oldestOverride.foreach(_ := false.B)
   }
 
@@ -459,7 +470,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // and select data after the arbiter decides which one to issue.
   // In this way, selection and data read happen simultaneously.
   for (i <- 0 until params.numDeq) {
-    dataArray.io.read(i).addr := select.io.grant(i).bits
+    dataArray.io.read(i).addr := Mux(select1.io.grant(i).valid, select1.io.grant(i).bits, select.io.grant(i).bits)
   }
   dataArray.io.read.last.addr := oldestSel.bits
   // Do the read data arbitration

@@ -46,6 +46,8 @@ class StatusEntry(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val credit = UInt(4.W)
   val srcState = Vec(params.numSrc, Bool())
   val midState = Bool()
+  // true if high priority
+  val priority = Bool()
   // data
   val psrc = Vec(params.numSrc, UInt(params.dataIdBits.W))
   val srcType = Vec(params.numSrc, SrcType())
@@ -85,6 +87,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     val isValid = Output(UInt(params.numEntries.W))
     val canIssue = Output(UInt(params.numEntries.W))
     val flushed = Output(UInt(params.numEntries.W))
+    val priority = Output(UInt(params.numEntries.W))
     // enqueue, dequeue, wakeup, flush
     val update = Vec(params.numEnq, new StatusArrayUpdateIO(params))
     val wakeup = Vec(params.allWakeup, Flipped(ValidIO(new MicroOp)))
@@ -248,6 +251,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
     statusNext.srcType := Mux(updateValid(i), updateVal(i).srcType, status.srcType)
     statusNext.robIdx := Mux(updateValid(i), updateVal(i).robIdx, status.robIdx)
     statusNext.sqIdx := Mux(updateValid(i), updateVal(i).sqIdx, status.sqIdx)
+    statusNext.priority := Mux(updateValid(i), updateVal(i).priority, status.priority)
 
     // isFirstIssue: indicate whether the entry has been issued before
     // When the entry is not granted to issue, set isFirstIssue to false.B
@@ -257,6 +261,7 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   }
 
   io.isValid := VecInit(statusArray.map(_.valid)).asUInt
+  io.priority := VecInit(statusArray.map(_.priority)).asUInt
   io.canIssue := VecInit(statusArrayNext.map(_.valid).zip(readyVecNext).map{ case (v, r) => v && r}).asUInt
   io.isFirstIssue := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.isFirstIssue))))
   io.allSrcReady := VecInit(io.issueGranted.map(iss => Mux1H(iss.bits, statusArray.map(_.allSrcReady))))
