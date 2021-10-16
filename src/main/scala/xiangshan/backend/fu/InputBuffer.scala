@@ -26,7 +26,6 @@ import xiangshan.backend.issue.AgeDetector
 class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
 
     val in = Flipped(DecoupledIO(new FunctionUnitInput(XLEN)))
     val out = DecoupledIO(new FunctionUnitInput(XLEN))
@@ -40,7 +39,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val enqVec = selectEnq._2
 
   // enqueue
-  val doEnqueue = io.in.fire() && !io.in.bits.uop.robIdx.needFlush(io.redirect, io.flush)
+  val doEnqueue = io.in.fire() && !io.in.bits.uop.robIdx.needFlush(io.redirect)
   when (doEnqueue) {
     for (i <- 0 until numEntries) {
       when (enqVec(i)) {
@@ -66,7 +65,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   }
 
   // flush
-  val flushVec = data.map(_.uop.robIdx).zip(emptyVec).map{ case (r, e) => !e && r.needFlush(io.redirect, io.flush) }
+  val flushVec = data.map(_.uop.robIdx).zip(emptyVec).map{ case (r, e) => !e && r.needFlush(io.redirect) }
   for (i <- 0 until numEntries) {
     when (flushVec(i)) {
       emptyVec(i) := true.B

@@ -36,7 +36,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val flush         = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
 
@@ -274,7 +273,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     data_valid := false.B
   }
 
-  when(io.redirect.valid || io.flush){
+  when (io.redirect.valid) {
     atom_override_xtval := false.B
   }
 

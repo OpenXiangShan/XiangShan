@@ -13,30 +13,33 @@
 *
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
-
-package xiangshan.backend.rename.freelist
+package xiangshan.cache.mmu
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
+import chipsalliance.rocketchip.config.Parameters
+import xiangshan.{SfenceBundle, XSModule}
 import utils._
 
-trait FreeListBaseIO {
+class L2TlbPrefetchIO(implicit p: Parameters) extends PtwBundle {
+  val in = Flipped(ValidIO(new Bundle {
+    val vpn = UInt(vpnLen.W)
+  }))
+  val out = DecoupledIO(new Bundle {
+    val vpn = UInt(vpnLen.W)
+    val source = UInt(bSourceWidth.W)
+  })
+  val sfence = Input(new SfenceBundle())
+}
 
-  // control signals from CtrlBlock
-  def redirect: Bool
-  def walk: Bool
+class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new L2TlbPrefetchIO())
 
-  // allocate physical registers (rename)
-  def allocateReq: Vec[Bool] // need allocating phy reg (may be refused due to lacking of free reg)
-  def allocatePhyReg: Vec[UInt] // phy dest response according to allocateReq
-  def canAllocate: Bool // free list can allocate new phy registers
-  def doAllocate: Bool // actually do the allocation (given by rename)
+  val next_vpn = get_next_line(io.in.bits.vpn)
+  val next_line = RegEnable(next_vpn, io.in.valid)
+  val v = ValidHold(io.in.valid && !io.sfence.valid && same_l2entry(next_vpn, io.in.bits.vpn), io.out.fire(), io.sfence.valid)
 
-  // free old physical registers (commit)
-  def freeReq: Vec[Bool] // need to free phy reg
-  def freePhyReg: Vec[UInt] // free old p_dest reg
-
-  // walk recovery
-  def stepBack: UInt
+  io.out.valid := v
+  io.out.bits.vpn := next_line
+  io.out.bits.source := prefetchID.U
 }
