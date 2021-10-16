@@ -165,19 +165,10 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
-  val isSoftPrefetch = io.in.bits.isSoftPrefetch
-  val actually_execpt = io.dtlbResp.bits.excp.pf.ld || io.dtlbResp.bits.excp.af.ld || io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned)
-  val actually_mmio = !io.dtlbResp.bits.miss && io.dtlbResp.bits.mmio
-
-  val softprefecth_mmio = isSoftPrefetch && actually_mmio //TODO, fix it
-  val softprefecth_excep = isSoftPrefetch && actually_execpt //TODO, fix it
-
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_exception = selectLoad(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR // af & pf exception were modified below.
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  //val s1_mmio = !s1_tlb_miss && io.dtlbResp.bits.mmio
-  val s1_mmio = !isSoftPrefetch && actually_mmio
   val s1_mask = io.in.bits.mask
   val s1_bank_conflict = io.dcacheBankConflict
 
@@ -188,7 +179,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   // TOOD: PMA check
   io.dcachePAddr := s1_paddr
   //io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
-  io.dcacheKill := s1_tlb_miss || actually_mmio || actually_execpt
+  io.dcacheKill := s1_tlb_miss || s1_exception
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
@@ -221,21 +212,17 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
   io.out.valid := io.in.valid && !s1_bank_conflict // if bank conflict, load inst will be canceled immediately 
   io.out.bits.paddr := s1_paddr
-  io.out.bits.mmio := s1_mmio && !s1_exception
   io.out.bits.tlbMiss := s1_tlb_miss
 
   // current ori test will cause the case of ldest == 0, below will be modifeid in the future. 
   // af & pf exception were modified
-  io.out.bits.uop.cf.exceptionVec(loadPageFault) := !isSoftPrefetch && io.dtlbResp.bits.excp.pf.ld
-  io.out.bits.uop.cf.exceptionVec(loadAccessFault) := !isSoftPrefetch && io.dtlbResp.bits.excp.af.ld
+  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
+  io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
 
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
 
-  // soft prefetch stuff
-  io.out.bits.isSoftPrefetch := io.in.bits.isSoftPrefetch 
-  io.out.bits.isSoftPreExcept := softprefecth_excep
-  io.out.bits.isSoftPremmio := softprefecth_mmio
+  io.out.bits.isSoftPrefetch := io.in.bits.isSoftPrefetch
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -263,31 +250,34 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val fastpath = Output(new LoadToLoadIO)
     val dcache_kill = Output(Bool())
   })
-
+  val isSoftPrefetch = io.in.bits.isSoftPrefetch
   val excep = WireInit(io.in.bits.uop.cf.exceptionVec)
   excep(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || io.pmpResp.ld
+  when (isSoftPrefetch) {
+    excep := 0.U.asTypeOf(excep.cloneType)
+  }
   val s2_exception = selectLoad(excep, false).asUInt.orR
 
+  val actually_mmio = io.pmpResp.mmio
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_data_invalid = io.lsq.dataInvalid
-  val s2_mmio = io.in.bits.mmio && !s2_exception
+  val s2_mmio = !isSoftPrefetch && actually_mmio && !s2_exception
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
   val s2_cache_miss_enter = io.dcacheResp.bits.miss_enter //missReq enter the mshr successfully
   val isSoftPreExcept = io.in.bits.isSoftPreExcept
-  val isSoftPremmio = io.in.bits.isSoftPremmio
+  val isSoftPremmio = isSoftPrefetch && actually_mmio //TODO, fix it
   // val cnt = RegInit(127.U)
   // cnt := cnt + io.in.valid.asUInt
   // val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid || cnt === 0.U
 
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
-
   // assert(!s2_forward_fail)
-  io.dcache_kill := io.in.valid && io.pmpResp.ld
+  io.dcache_kill := io.in.valid && (io.pmpResp.ld || io.pmpResp.mmio)
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid) && (!isSoftPreExcept) && (!isSoftPremmio)), "DCache response got lost")
@@ -366,7 +356,6 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.out.bits.forwardData := rdataVec
 
   io.in.ready := io.out.ready || !io.in.valid
-
 
   // feedback tlb result to RS
   io.rsFeedback.valid := io.in.valid

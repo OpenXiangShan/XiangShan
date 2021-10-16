@@ -30,12 +30,6 @@ import xiangshan.backend.fu.PMPReqBundle
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
-
-
-// case class ITLBKey
-// case class LDTLBKey
-// case class STTLBKey
-
 class VaBundle(implicit p: Parameters) extends TlbBundle {
   val vpn  = UInt(vpnLen.W)
   val off  = UInt(offLen.W)
@@ -67,13 +61,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  // pma perm (hardwired)
-  val pr = Bool() //readable
-  val pw = Bool() //writeable
-  val pe = Bool() //executable
-  val pa = Bool() //atom op permitted
-  val pi = Bool() //icacheable
-  val pd = Bool() //dcacheable
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
@@ -159,15 +146,6 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
 
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
     this
   }
 
@@ -222,15 +200,6 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.x := ptePerm.x
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
-
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(item.entry.ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
 
     this
   }
@@ -368,7 +337,6 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val miss = Output(Bool())
-  val mmio = Output(Bool())
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
