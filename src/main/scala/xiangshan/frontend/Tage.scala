@@ -178,8 +178,8 @@ class TageBTable
   io.s1_cnt := bt.io.r.resp.data
 
   // Update logic
-  val u_valid = RegNext(io.update.valid)
-  val update = RegNext(io.update.bits)
+  val u_valid = io.update.valid
+  val update = io.update.bits
 
   val u_idx = bimAddr.getIdx(update.pc)
 
@@ -756,9 +756,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
       bank_tables(w)(i).io.update.phist := RegNext(updatePhist)
     }
   }
-  bt.io.update  := io.update
-  bt.io.update.valid := baseupdate.reduce(_||_)
-  bt.io.update_cnt := updatebcnt
+  bt.io.update  := RegNext(io.update)
+  bt.io.update.valid := RegNext(baseupdate.reduce(_||_))
+  bt.io.update_cnt := RegNext(updatebcnt)
 
   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
   def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
