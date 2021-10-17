@@ -24,7 +24,6 @@ import xiangshan._
 import difftest._
 import xiangshan.backend.decode.{DispatchToLFST, LFST}
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.rename.RenameBypassInfo
 import xiangshan.backend.rob.RobEnqIO
 import xiangshan.mem.LsqEnqIO
 
@@ -47,7 +46,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val renameBypass = Input(new RenameBypassInfo)
     val preDpInfo = Input(new PreDispatchInfo)
     val recv = Output(Vec(RenameWidth, Bool()))
     // enq Rob
@@ -125,10 +123,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   }
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
-  val updatedPsrc1 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-  val updatedPsrc2 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-  val updatedPsrc3 = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-  val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i => 
     io.fromRename(i).fire()
@@ -136,37 +130,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
-    val pdestBypassedPsrc1 = io.fromRename.take(i).map(_.bits.pdest)
-      .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc(0)) {
-        (z, next) => Mux(next._2, next._1, z)
-      }
-    val pdestBypassedPsrc2 = io.fromRename.take(i).map(_.bits.pdest)
-      .zip(if (i == 0) Seq() else io.renameBypass.lsrc2_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc(1)) {
-        (z, next) => Mux(next._2, next._1, z)
-      }
-    val pdestBypassedPsrc3 = io.fromRename.take(i).map(_.bits.pdest)
-      .zip(if (i == 0) Seq() else io.renameBypass.lsrc3_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.psrc(2)) {
-        (z, next) => Mux(next._2, next._1, z)
-      }
-    val pdestBypassedOldPdest = io.fromRename.take(i).map(_.bits.pdest)
-      .zip(if (i == 0) Seq() else io.renameBypass.ldest_bypass(i-1).asBools)
-      .foldLeft(io.fromRename(i).bits.old_pdest) {
-        (z, next) => Mux(next._2, next._1, z)
-      }
-    updatedPsrc1(i) := pdestBypassedPsrc1
-    updatedPsrc2(i) := pdestBypassedPsrc2
-    updatedPsrc3(i) := pdestBypassedPsrc3
-    updatedOldPdest(i) := pdestBypassedOldPdest
 
     updatedUop(i) := io.fromRename(i).bits
-    // update bypass psrc(0)/psrc(1)/psrc(2)/old_pdest
-    updatedUop(i).psrc(0) := updatedPsrc1(i)
-    updatedUop(i).psrc(1) := updatedPsrc2(i)
-    updatedUop(i).psrc(2) := updatedPsrc3(i)
-    updatedUop(i).old_pdest := updatedOldPdest(i)
     updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)

@@ -22,15 +22,15 @@ jobs:
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/bigdata/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /bigdata/xs-wave/${HEAD_SHA}
-      - name: Check Wiring
+      - name: check top wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate verilog file
         run:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
-      - name: check pc usages
+      - name: check verilog
         run:
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_pc.py build/XSTop.v
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
       - name: build MinimalConfig emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

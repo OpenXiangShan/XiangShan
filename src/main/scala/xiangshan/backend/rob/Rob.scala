@@ -453,7 +453,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     * Commits (and walk)
     * They share the same width.
     */
-  val walkCounter = Reg(UInt(log2Up(RobSize).W))
+  val walkCounter = Reg(UInt(log2Up(RobSize + 1).W))
   val shouldWalkVec = VecInit((0 until CommitWidth).map(_.U < walkCounter))
   val walkFinished = walkCounter <= CommitWidth.U
 
@@ -626,8 +626,16 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)
   when (io.redirect.valid) {
     walkCounter := Mux(state === s_walk,
-      redirectWalkDistance + io.redirect.bits.flushItself() - commitCnt,
-      redirectWalkDistance + io.redirect.bits.flushItself()
+      // NOTE: +& is used here because:
+      // When rob is full and the head instruction causes an exception,
+      // the redirect robIdx is the deqPtr. In this case, currentWalkPtr is
+      // enqPtr - 1.U and redirectWalkDistance is RobSize - 1.
+      // Since exceptions flush the instruction itself, flushItSelf is true.B.
+      // Previously we use `+` to count the walk distance and it causes overflows
+      // when RobSize is power of 2. We change it to `+&` to allow walkCounter to be RobSize.
+      // The width of walkCounter also needs to be changed.
+      redirectWalkDistance +& io.redirect.bits.flushItself() - commitCnt,
+      redirectWalkDistance +& io.redirect.bits.flushItself()
     )
   }.elsewhen (state === s_walk) {
     walkCounter := walkCounter - commitCnt
