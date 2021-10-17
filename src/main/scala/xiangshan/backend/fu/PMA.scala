@@ -20,11 +20,11 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
-import xiangshan.HasXSParameter
+import xiangshan.{HasXSParameter, XSModule}
 import xiangshan.backend.fu.util.HasCSRConst
 import xiangshan.cache.mmu.TlbCmd
 
-trait PMAMethod extends HasXSParameter with PMPConst {
+trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
   /**
   def SimpleMemMapList = List(
       //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
@@ -47,18 +47,23 @@ trait PMAMethod extends HasXSParameter with PMPConst {
     )
    */
 
-  def pma_init(cfgMerged: Vec[UInt], addr: Vec[UInt], mask: Vec[UInt])(implicit p: Parameters) = {
+  def pma_init() : (Vec[UInt], Vec[UInt], Vec[UInt]) = {
     // the init value is zero
     // from 0 to num(default 16) - 1, lower priority
     // according to simple map, 9 entries is needed, pick 6-14, leave 0-5 & 15 unusedcfgMerged.map(_ := 0.U)
 
-    val num = addr.size
+    val num = NumPMA
     require(num >= 16)
     val cfg = WireInit(0.U.asTypeOf(Vec(num, new PMPConfig())))
-    require(addr(0).getWidth == (PAddrBits-PMPOffBits))
+
+    val addr = Wire(Vec(num, UInt((PAddrBits-PMPOffBits).W)))
+    val mask = Wire(Vec(NumPMP, UInt(PAddrBits.W)))
+    addr := DontCare
+    mask := DontCare
+
     // use tor instead of napot, for napot may be confusing and hard to understand
     addr(14) := shift_addr( 0x2000000000L)
-    cfg(14).a := 1.U; cfg(14).r := true.B; cfg(14).w := true.B; cfg(14).x := true.B; cfg(14).c := true.B; cfg(14).a := true.B
+    cfg(14).a := 1.U; cfg(14).r := true.B; cfg(14).w := true.B; cfg(14).x := true.B; cfg(14).c := true.B; cfg(14).atomic := true.B
 
     addr(13) := shift_addr(0x80000000L)
     cfg(13).a := 1.U; cfg(13).r := true.B; cfg(13).w := true.B
@@ -79,7 +84,7 @@ trait PMAMethod extends HasXSParameter with PMPConst {
     cfg(8).a := 1.U; cfg(8).r := true.B; cfg(8).w := true.B
 
     addr(7) := shift_addr( 0x20000000)
-    cfg(7).a := 1.U; cfg(7).r := true.B; cfg(7).w := true.B; cfg(6).x := true.B
+    cfg(7).a := 1.U; cfg(7).r := true.B; cfg(7).w := true.B; cfg(7).x := true.B
 
     addr(6) := shift_addr( 0x10000000)
     cfg(6).a := 1.U; cfg(6).r := true.B; cfg(6).w := true.B
@@ -87,11 +92,7 @@ trait PMAMethod extends HasXSParameter with PMPConst {
     addr(5) := shift_addr(0)
 
     val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(XLEN.W)))
-    for (i <- cfgInitMerge.indices) {
-      cfgMerged(i) := cfgInitMerge(i)
-    }
-
-    0.U
+    (cfgInitMerge, addr, mask)
   }
 
   def shift_addr(addr: BigInt) = {
@@ -99,7 +100,7 @@ trait PMAMethod extends HasXSParameter with PMPConst {
   }
 }
 
-trait PMACheckMethod extends HasXSParameter with HasCSRConst {
+trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker =>
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAtom(cmd) && !cfg.r

@@ -17,7 +17,6 @@
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.Module.reset
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
@@ -58,21 +57,9 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def locked = l
   def addr_locked: Bool = locked
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
-
-  def reset() = {
-    l := false.B
-    a := 0.U
-  }
 }
 
-/** PMPBase for CSR unit
-  * with only read and write logic
-  */
-@chiselName
-class PMPBase(implicit p: Parameters) extends PMPBundle {
-  val cfg = new PMPConfig
-  val addr = UInt((PAddrBits - PMPOffBits).W)
-
+trait PMPReadWriteMethod extends PMPConst { this: PMPBase =>
   def write_cfg_vec(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
@@ -99,10 +86,10 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
   }
 
   /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
-    * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
-    * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
-    * The low OffBits is dropped
-    */
+   * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
+   * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
+   * The low OffBits is dropped
+   */
   def read_addr(): UInt = {
     read_addr(cfg)(addr)
   }
@@ -119,9 +106,9 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
     }
   }
   /** addr for inside addr, drop OffBits with.
-    * compare_addr for inside addr for comparing.
-    * paddr for outside addr.
-    */
+   * compare_addr for inside addr for comparing.
+   * paddr for outside addr.
+   */
   def write_addr(next: PMPBase)(paddr: UInt) = {
     Mux(!cfg.addr_locked(next.cfg), paddr, addr)
   }
@@ -141,6 +128,15 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
     if (num == 0) { data }
     else { Cat(data(data.getWidth-1, num), 0.U(num.W)) }
   }
+}
+
+/** PMPBase for CSR unit
+  * with only read and write logic
+  */
+@chiselName
+class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod {
+  val cfg = new PMPConfig
+  val addr = UInt((PAddrBits - PMPOffBits).W)
 
   def gen(cfg: PMPConfig, addr: UInt) = {
     require(addr.getWidth == this.addr.getWidth)
@@ -149,32 +145,16 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
   }
 }
 
-/** PMPEntry for outside pmp copies
-  * with one more elements mask to help napot match
-  * TODO: make mask an element, not an method, for timing opt
-  */
-@chiselName
-class PMPEntry(implicit p: Parameters) extends PMPBase {
-  val mask = UInt(PAddrBits.W) // help to match in napot
-
+trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   /** compare_addr is used to compare with input addr */
   def compare_addr: UInt = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PAddrBits.W))).asUInt
 
-  def write_addr(next: PMPBase, mask: UInt)(paddr: UInt) = {
-    mask := Mux(!cfg.addr_locked(next.cfg), match_mask(paddr), mask)
-    Mux(!cfg.addr_locked(next.cfg), paddr, addr)
-  }
-
-  def write_addr(mask: UInt)(paddr: UInt) = {
-    mask := Mux(!cfg.addr_locked, match_mask(paddr), mask)
-    Mux(!cfg.addr_locked, paddr, addr)
-  }
   /** size and maxSize are all log2 Size
-    * for dtlb, the maxSize is bXLEN which is 8
-    * for itlb and ptw, the maxSize is log2(512) ?
-    * but we may only need the 64 bytes? how to prevent the bugs?
-    * TODO: handle the special case that itlb & ptw & dcache access wider size than XLEN
-    */
+   * for dtlb, the maxSize is bXLEN which is 8
+   * for itlb and ptw, the maxSize is log2(512) ?
+   * but we may only need the 64 bytes? how to prevent the bugs?
+   * TODO: handle the special case that itlb & ptw & dcache access wider size than XLEN
+   */
   def is_match(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last_pmp: PMPEntry): Bool = {
     Mux(cfg.na4_napot, napotMatch(paddr, lgSize, lgMaxSize),
       Mux(cfg.tor, torMatch(paddr, lgSize, lgMaxSize, last_pmp), false.B))
@@ -243,6 +223,25 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
       Mux(cfg.na4_napot, napotAligned, torAligned)
     }
   }
+}
+
+/** PMPEntry for outside pmp copies
+  * with one more elements mask to help napot match
+  * TODO: make mask an element, not an method, for timing opt
+  */
+@chiselName
+class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
+  val mask = UInt(PAddrBits.W) // help to match in napot
+
+  def write_addr(next: PMPBase, mask: UInt)(paddr: UInt) = {
+    mask := Mux(!cfg.addr_locked(next.cfg), match_mask(paddr), mask)
+    Mux(!cfg.addr_locked(next.cfg), paddr, addr)
+  }
+
+  def write_addr(mask: UInt)(paddr: UInt) = {
+    mask := Mux(!cfg.addr_locked, match_mask(paddr), mask)
+    Mux(!cfg.addr_locked, paddr, addr)
+  }
 
   def gen(cfg: PMPConfig, addr: UInt, mask: UInt) = {
     require(addr.getWidth == this.addr.getWidth)
@@ -250,18 +249,21 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
     this.addr := addr
     this.mask := mask
   }
-
 }
 
-trait PMPMethod extends HasXSParameter with PMPConst {
-  def pmp_init(cfgMerged: Vec[UInt], addr: Vec[UInt], mask: Vec[UInt]) = {
-    cfgMerged.map(_ := 0.U)
-    0.U
+trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
+  def pmp_init() : (Vec[UInt], Vec[UInt], Vec[UInt])= {
+    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(XLEN.W))))
+    val addr = Wire(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
+    val mask = Wire(Vec(NumPMP, UInt(PAddrBits.W)))
+    addr := DontCare
+    mask := DontCare
+    (cfg, addr, mask)
   }
 
   def pmp_gen_mapping
   (
-    init: (Vec[UInt], Vec[UInt], Vec[UInt]) => UInt,
+    init: () => (Vec[UInt], Vec[UInt], Vec[UInt]),
     num: Int = 16,
     cfgBase: Int,
     addrBase: Int,
@@ -301,7 +303,10 @@ trait PMPMethod extends HasXSParameter with PMPConst {
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
 
     when (reset.asBool()) {
-      init(cfgMerged, addr, mask)
+      val init_value = init()
+      cfgMerged := init_value._1
+      addr := init_value._2
+      mask := init_value._3
     }
 
     cfg_mapping ++ addr_mapping
@@ -330,8 +335,6 @@ class PMP(implicit p: Parameters) extends PMPModule with PMPMethod with PMAMetho
 
   io.pmp := pmp
   io.pma := pma
-
-
 }
 
 class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle {
@@ -355,7 +358,7 @@ class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle {
   }
 }
 
-trait PMPCheckMethod extends HasXSParameter with HasCSRConst {
+trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker =>
   def pmp_check(cmd: UInt, cfg: PMPConfig)(implicit p: Parameters) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAtom(cmd) && !cfg.r
