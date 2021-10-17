@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
+import xiangshan.backend.pubs.BrSliceTable
 import xiangshan.backend.rename.freelist._
 
 class Rename(implicit p: Parameters) extends XSModule {
@@ -258,6 +259,35 @@ class Rename(implicit p: Parameters) extends XSModule {
     }
     intRefCounter.io.deallocate(i).valid := io.robCommits.valid(i) && needDestRegCommit(false, io.robCommits.info(i))
     intRefCounter.io.deallocate(i).bits := Mux(io.robCommits.isWalk, io.robCommits.info(i).pdest, io.robCommits.info(i).old_pdest)
+  }
+
+  val brSliceTab = Module(new BrSliceTable)
+  val defTab = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), 32, 2*RenameWidth, RenameWidth))
+  for (i <- 0 until RenameWidth) {
+    // The index of the def_tab is the logical destination register number of a decoding instruction,
+    // and each entry has the PC of the instruction.
+    defTab.io.raddr(2*i) := io.in(i).bits.ctrl.lsrc(0)
+    defTab.io.raddr(2*i+1) := io.in(i).bits.ctrl.lsrc(1)
+    val intDestValid = io.robCommits.info(i).rfWen && io.robCommits.info(i).ldest =/= 0.U
+    defTab.io.wen(i) := Mux(io.robCommits.isWalk, io.robCommits.valid(i) && intDestValid, intSpecWen(i))
+    defTab.io.waddr(i) := Mux(io.robCommits.isWalk, io.robCommits.info(i).ldest, io.in(i).bits.ctrl.ldest)
+    defTab.io.wdata(i) := Mux(io.robCommits.isWalk, io.robCommits.info(i).pc, io.in(i).bits.cf.pc)
+
+    brSliceTab.io.read(i).address := io.in(i).bits.cf.pc
+    val isBranch = io.in(i).bits.ctrl.fuType === FuType.alu && ALUOpType.isBranch(io.in(i).bits.ctrl.fuOpType)
+    // TODO: read conf table
+    val lowConf = LFSR64()(0)
+    val dataflowLowConf = LFSR64()(0) && brSliceTab.io.read(i).data.valid
+    brSliceTab.io.write(2*i).enable := io.in(i).valid && canOut && Mux(isBranch, lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(0) === SrcType.reg
+    brSliceTab.io.write(2*i).address := defTab.io.rdata(2*i)
+    brSliceTab.io.write(2*i).data.valid := true.B
+    brSliceTab.io.write(2*i).data.pc_br := Mux(isBranch, io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
+    brSliceTab.io.write(2*i+1).enable := io.in(i).valid && canOut && Mux(isBranch, lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(1) === SrcType.reg
+    brSliceTab.io.write(2*i+1).address := defTab.io.rdata(2*i+1)
+    brSliceTab.io.write(2*i+1).data.valid := true.B
+    brSliceTab.io.write(2*i+1).data.pc_br := Mux(isBranch, io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
+
+    io.out(i).bits.priority := Mux(isBranch, lowConf, dataflowLowConf)
   }
 
   /*

@@ -220,6 +220,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
   val eliminatedMove = Bool()
+  val priority = Bool()
   val debugInfo = new PerfDebugInfo
   def needRfRPort(index: Int, rfType: Int, ignoreState: Boolean = true) : Bool = {
     (index, rfType) match {
