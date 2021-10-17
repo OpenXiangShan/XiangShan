@@ -17,6 +17,7 @@
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
+import chisel3.Module.reset
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
@@ -264,8 +265,7 @@ trait PMPMethod extends HasXSParameter with PMPConst {
     num: Int = 16,
     cfgBase: Int,
     addrBase: Int,
-    entries: Vec[PMPEntry],
-    re_set: Bool
+    entries: Vec[PMPEntry]
   ) = {
     val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
     def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
@@ -300,7 +300,7 @@ trait PMPMethod extends HasXSParameter with PMPConst {
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
 
-    when (re_set) {
+    when (reset.asBool()) {
       init(cfgMerged, addr, mask)
     }
 
@@ -321,8 +321,8 @@ class PMP(implicit p: Parameters) extends PMPModule with PMPMethod with PMAMetho
   val pmp = Wire(Vec(NumPMP, new PMPEntry()))
   val pma = Wire(Vec(NumPMA, new PMPEntry()))
 
-  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp, reset.asBool())
-  val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma, reset.asBool())
+  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
+  val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
   val mapping = pmpMapping ++ pmaMapping
 
   val rdata = Wire(UInt(XLEN.W))
