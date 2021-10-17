@@ -485,3 +485,10 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     println("Distributed CSR update req registered for " + src_description)
   }
 }
+class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
+  val enable = Output(Bool())
+  val matchType = Output(UInt(2.W))
+  val timing = Output(Bool())
+  val action = Output(Bool())
+  val chain = Output(Bool())
+}
