@@ -263,7 +263,7 @@ class Rename(implicit p: Parameters) extends XSModule {
   }
 
   val brSliceTab = Module(new BrSliceTable)
-  val defTab = Module(new DataModuleTemplate(UInt(VAddrBits.W), 32, 2*RenameWidth, RenameWidth, false, false))
+  val defTab = Module(new DataModuleTemplate(UInt(VAddrBits.W), 32, 2*RenameWidth, RenameWidth, false, true))
   for (i <- 0 until RenameWidth) {
     // The index of the def_tab is the logical destination register number of a decoding instruction,
     // and each entry has the PC of the instruction.
