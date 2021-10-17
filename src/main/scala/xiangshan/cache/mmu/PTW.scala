@@ -214,11 +214,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     if (i == MSHRSize) {DataHoldBypass(get_part(refill_data, req_addr_low(i)), RegNext(mem_resp_done && !mem_resp_from_mq)) }
     else { DataHoldBypass(get_part(refill_data, req_addr_low(i)), mq_mem.buffer_it(i)) }
   ))
-  // mem -> control signal
-  when (mem_resp_done) {
-    waiting_resp(mem.d.bits.source) := false.B
-    sfence_latch(mem.d.bits.source) := false.B
-  }
+
   // mem -> miss queue
   mq_mem.resp.valid := mem_resp_done && mem_resp_from_mq
   mq_mem.resp.bits.id := mem.d.bits.source
@@ -262,11 +258,16 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   // sfence
   when (sfence.valid) {
     for (i <- 0 until MemReqWidth) {
-      when ((waiting_resp(i) && !(mem_resp_done && mem.d.bits.source =/= i.U)) ||
-        (mem.a.fire() && mem_arb.io.out.bits.id === i.U)) {
+      when (waiting_resp(i) || (mem.a.fire() && mem_arb.io.out.bits.id === i.U)) {
         sfence_latch(i) := true.B
       }
     }
+  }
+  // mem -> control signal
+  // waiting_resp and sfence_latch will be reset when mem_resp_done
+  when (mem_resp_done) {
+    waiting_resp(mem.d.bits.source) := false.B
+    sfence_latch(mem.d.bits.source) := false.B
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
