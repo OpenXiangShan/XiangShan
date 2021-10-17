@@ -98,6 +98,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     uop.debugInfo := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
+    uop.priority := DontCare
   })
 
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
