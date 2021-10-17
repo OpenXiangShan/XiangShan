@@ -34,11 +34,6 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   val toSbuffer = IO(new FenceToSbuffer)
   val disableSfence = IO(Input(Bool()))
 
-  val (valid, src1) = (
-    io.in.valid,
-    io.in.bits.src(0)
-  )
-
   val s_idle :: s_wait :: s_tlb :: s_icache :: s_fence :: Nil = Enum(5)
   val state = RegInit(s_idle)
   /* fsm
@@ -58,11 +53,13 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   sbuffer      := state === s_wait && !(func === FenceOpType.sfence && disableSfence)
   fencei       := state === s_icache
   sfence.valid := state === s_tlb && !disableSfence
-  sfence.bits.rs1  := uop.ctrl.lsrc(0) === 0.U
-  sfence.bits.rs2  := uop.ctrl.lsrc(1) === 0.U
-  sfence.bits.addr := RegEnable(src1, io.in.fire())
+  sfence.bits.rs1  := uop.ctrl.imm(4, 0) === 0.U
+  sfence.bits.rs2  := uop.ctrl.imm(9, 5) === 0.U
+  XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
+  XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
+  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire())
 
-  when (state === s_idle && valid) { state := s_wait }
+  when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
   when (state === s_wait && func === FenceOpType.sfence && (sbEmpty || disableSfence)) { state := s_tlb }
   when (state === s_wait && func === FenceOpType.fence  && sbEmpty) { state := s_fence }
@@ -74,7 +71,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   io.out.bits.uop := uop
   io.out.bits.uop.cf.exceptionVec(illegalInstr) := func === FenceOpType.sfence && disableSfence
 
-  XSDebug(valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InrobIdx:${io.in.bits.uop.robIdx}\n")
+  XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InrobIdx:${io.in.bits.uop.robIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
   XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} OutrobIdx:${io.out.bits.uop.robIdx}\n")
 

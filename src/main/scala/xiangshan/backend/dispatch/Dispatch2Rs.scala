@@ -184,7 +184,6 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
         io.out(idx).valid := selectValid && sta.ready
         sta.valid := selectValid && io.out(idx).ready
         io.out(idx).bits.ctrl.srcType(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.srcType(1)))
-        io.out(idx).bits.ctrl.lsrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.lsrc(1)))
         io.out(idx).bits.psrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.psrc(1)))
         io.in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready && sta.ready }}
         XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !io.out(idx).ready))
