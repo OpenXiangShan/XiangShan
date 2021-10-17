@@ -75,10 +75,10 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
   def write_cfg_vec(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
-      val tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := tmp
-      cfgVec(i).w := tmp.w && tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(tmp.a(1), tmp.a.orR) }
+      val cfg_w_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_w_tmp
+      cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
+      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
     }
     cfgVec.asUInt
   }
@@ -86,10 +86,10 @@ class PMPBase(implicit p: Parameters) extends PMPBundle {
   def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
-      val tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := tmp
-      cfgVec(i).w := tmp.w && tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(tmp.a(1), tmp.a.orR) }
+      val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_w_m_tmp
+      cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
+      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
       when (cfgVec(i).na4_napot) {
         mask(index + i) := new PMPEntry().match_mask(cfgVec(i), addr(index + i))
       }
@@ -181,13 +181,13 @@ class PMPEntry(implicit p: Parameters) extends PMPBase {
 
   /** generate match mask to help match in napot mode */
   def match_mask(paddr: UInt) = {
-    val tmp_addr: UInt = Cat(paddr, cfg.a(0)).asUInt() | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
-    Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+    val match_mask_addr: UInt = Cat(paddr, cfg.a(0)).asUInt() | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    Cat(match_mask_addr & ~(match_mask_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
   def match_mask(cfg: PMPConfig, paddr: UInt) = {
-    val tmp_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
-    Cat(tmp_addr & ~(tmp_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+    val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
   def boundMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int): Bool = {
@@ -366,13 +366,16 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst {
   }
 
   def pmp_match_res(addr: UInt, size: UInt, pmpEntries: Vec[PMPEntry], mode: UInt, lgMaxSize: Int) = {
+    val num = pmpEntries.size
+    require(num == NumPMP)
+
     val passThrough = if (pmpEntries.isEmpty) true.B else (mode > ModeS)
     val pmpMinuxOne = WireInit(0.U.asTypeOf(new PMPEntry()))
     pmpMinuxOne.cfg.r := passThrough
     pmpMinuxOne.cfg.w := passThrough
     pmpMinuxOne.cfg.x := passThrough
 
-    val res = pmpEntries.zip(pmpMinuxOne +: pmpEntries.take(NumPMP-1)).zipWithIndex
+    val res = pmpEntries.zip(pmpMinuxOne +: pmpEntries.take(num-1)).zipWithIndex
       .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pmp, last_pmp), i)) =>
       val is_match = pmp.is_match(addr, size, lgMaxSize, last_pmp)
       val ignore = passThrough && !pmp.cfg.l
@@ -412,7 +415,7 @@ class PMPChecker
   val req = io.req.bits
 
   val res_pmp = pmp_match_res(req.addr, req.size, io.env.pmp, io.env.mode, lgMaxSize)
-  val res_pma = pma_match_res(req.addr, req.size, io.env.pmp, io.env.mode, lgMaxSize)
+  val res_pma = pma_match_res(req.addr, req.size, io.env.pma, io.env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)

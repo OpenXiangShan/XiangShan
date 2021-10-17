@@ -110,6 +110,8 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst {
   }
 
   def pma_match_res(addr: UInt, size: UInt, pmaEntries: Vec[PMPEntry], mode: UInt, lgMaxSize: Int) = {
+    val num = pmaEntries.size
+    require(num == NumPMA)
     // pma should always be checked, could not be ignored
     // like amo and cached, it is the attribute not protection
     // so it must have initialization.
@@ -117,7 +119,7 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst {
     val default = if (pmaEntries.isEmpty) true.B else (mode > ModeS)
     val pmpMinuxOne = WireInit(0.U.asTypeOf(new PMPEntry()))
 
-    val res = pmaEntries.zip(pmpMinuxOne +: pmaEntries.take(-1)).zipWithIndex
+    val res = pmaEntries.zip(pmpMinuxOne +: pmaEntries.take(num-1)).zipWithIndex
       .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pma, last_pma), i)) =>
       val is_match = pma.is_match(addr, size, lgMaxSize, last_pma)
       val aligned = pma.aligned(addr, size, lgMaxSize, last_pma)
