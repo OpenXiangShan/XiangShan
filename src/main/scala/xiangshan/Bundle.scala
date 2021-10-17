@@ -284,6 +284,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundle {

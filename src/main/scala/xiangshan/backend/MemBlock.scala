@@ -118,8 +118,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  io.writeback <> exeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  val ldExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
@@ -224,10 +224,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
 
-    // update waittable
-    // TODO: read pc
+    // update mem dependency predictor
     io.memPredUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
+
+    // TODO: debug trigger
+    when(ldExeWbReqs(i).fire()){
+      // load data, we need to delay cmp for 1 cycle for better timing
+      ldExeWbReqs(i).bits.data
+      // TriggerCmp(ldExeWbReqs(i).bits.data, DontCare, DontCare, DontCare) 
+      // load vaddr 
+      ldExeWbReqs(i).bits.debug.vaddr
+      // TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, DontCare, DontCare, DontCare) 
+    }
   }
 
   // StoreUnit
@@ -264,6 +273,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.stOut(i).valid := stu.io.stout.valid
     io.stOut(i).bits  := stu.io.stout.bits
     stu.io.stout.ready := true.B
+
+    // TODO: debug trigger
+    // store vaddr 
+    when(io.stOut(i).fire()){
+      io.stOut(i).bits.debug.vaddr
+      // TriggerCmp(io.stOut(i).bits.debug.vaddr, DontCare, DontCare, DontCare) 
+    }
+    // store data
+    when(lsq.io.storeDataIn(i).fire()){
+      lsq.io.storeDataIn(i).bits.data(XLEN-1, 0)
+      // TriggerCmp(lsq.io.storeDataIn(i).bits.data(XLEN-1, 0), DontCare, DontCare, DontCare) 
+    }
   }
 
   // mmio store writeback will use store writeback port 0
