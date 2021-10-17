@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import scala.math.max
 
 // DCache specific parameters
 case class DCacheParameters
@@ -102,6 +103,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
+
+  require(isPow2(cfg.nMissEntries))
+  require(isPow2(cfg.nReleaseEntries))
+  val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
+  val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
 
   // banked dcache support
   val DCacheSets = cacheParams.nSets
@@ -308,7 +314,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
-      sourceId = IdRange(0, cfg.nMissEntries + cfg.nReleaseEntries + 1),
+      sourceId = IdRange(0, nEntries + 1),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = cacheParams.reqFields,

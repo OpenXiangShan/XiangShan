@@ -191,7 +191,7 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
-    nReleaseEntries = 16 * 2
+    nReleaseEntries = 32
   )),
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",

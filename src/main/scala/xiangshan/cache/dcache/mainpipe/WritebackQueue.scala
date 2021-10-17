@@ -266,7 +266,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val entries = (0 until cfg.nReleaseEntries) map { i =>
     val entry = Module(new WritebackEntry(edge))
 
-    entry.io.id := (i + cfg.nMissEntries).U
+    entry.io.id := (i + releaseIdBase).U
 
     // entry req
     entry.io.req.valid := (i.U === alloc_idx) && req.valid && accept
