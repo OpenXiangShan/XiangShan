@@ -54,7 +54,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // dispatch ports
     val allocPregs = scheduler.io.allocPregs.cloneType
     val in = scheduler.io.in.cloneType
@@ -71,7 +70,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   // IO for the scheduler
   scheduler.io.redirect <> io.redirect
-  scheduler.io.flush <> io.flush
   scheduler.io.allocPregs <> io.allocPregs
   scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
@@ -87,7 +85,6 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect
-  fuBlock.io.flush <> io.flush
   fuBlock.io.writeback <> io.fuWriteback
   fuBlock.io.extra <> io.fuExtra
 
@@ -120,7 +117,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     scheWb.valid := wb.valid
     scheWb.bits := wb.bits
     if (cfg.hasFastUopOut) {
-      val isFlushed = wb.bits.uop.robIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = wb.bits.uop.robIdx.needFlush(io.redirect)
       scheWb.valid := RegNext(wb.valid && !isFlushed)
       scheWb.bits.uop := RegNext(wb.bits.uop)
     }
@@ -150,7 +147,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
       wbOut.bits.uop := fastWakeup.bits
     }
     else {
-      val isFlushed = fastWakeup.bits.robIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = fastWakeup.bits.robIdx.needFlush(io.redirect)
       wbOut.valid := RegNext(fastWakeup.valid && !isFlushed)
       wbOut.bits.uop := RegNext(fastWakeup.bits)
     }
@@ -174,7 +171,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     require(wakeupIdx.length == wbIdx.length)
     for ((i, j) <- wakeupIdx.zip(wbIdx)) {
       val scheWb = scheduler.io.writeback(j)
-      val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(io.redirect)
       scheWb.valid := RegNext(scheduler.io.fastUopOut(i).valid && !isFlushed)
       scheWb.bits.uop := RegNext(scheduler.io.fastUopOut(i).bits)
     }

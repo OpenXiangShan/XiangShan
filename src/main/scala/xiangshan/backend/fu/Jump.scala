@@ -69,7 +69,7 @@ class Jump(implicit p: Parameters) extends FUWithRedirect {
     io.in.bits.uop
   )
 
-  val redirectHit = uop.robIdx.needFlush(io.redirectIn, io.flushIn)
+  val redirectHit = uop.robIdx.needFlush(io.redirectIn)
   val valid = io.in.valid
   val isRVC = uop.cf.pd.isRVC
 

@@ -23,18 +23,11 @@ import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
-
-class RenameBypassInfo(implicit p: Parameters) extends XSBundle {
-  val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-  val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-  val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-  val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
-}
+import xiangshan.backend.rename.freelist._
 
 class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val robCommits = Flipped(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
@@ -45,49 +38,50 @@ class Rename(implicit p: Parameters) extends XSModule {
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    val renameBypass = Output(new RenameBypassInfo)
     val dispatchInfo = Output(new PreDispatchInfo)
   })
 
   // create free list and rat
-  val intFreeList = Module(new freelist.MEFreeList)
-  val fpFreeList = Module(new freelist.StdFreeList)
+  val intFreeList = Module(new MEFreeList(MEFreeListSize))
+  val intRefCounter = Module(new RefCounter(MEFreeListSize))
+  val fpFreeList = Module(new StdFreeList(StdFreeListSize))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
+  val isIntDest = io.in.map(in => in.bits.ctrl.rfWen && in.bits.ctrl.ldest =/= 0.U)
+  val isFpDest = io.in.map(_.bits.ctrl.fpWen)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
   def needDestRegCommit[T <: RobCommitInfo](fp: Boolean, x: T): Bool = {
+    // TODO: why this ldest?
     {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
   }
 
-  // connect [flush + redirect + walk] ports for __float point__ & __integer__ free list
+  // connect [redirect + walk] ports for __float point__ & __integer__ free list
   Seq((fpFreeList, true), (intFreeList, false)).foreach{ case (fl, isFp) =>
-    fl.flush := io.flush
-    fl.redirect := io.redirect.valid
-    fl.walk := io.robCommits.isWalk
+    fl.io.redirect := io.redirect.valid
+    fl.io.walk := io.robCommits.isWalk
     // when isWalk, use stepBack to restore head pointer of free list
     // (if ME enabled, stepBack of intFreeList should be useless thus optimized out)
-    fl.stepBack := PopCount(io.robCommits.valid.zip(io.robCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
+    fl.io.stepBack := PopCount(io.robCommits.valid.zip(io.robCommits.info).map{case (v, i) => v && needDestRegCommit(isFp, i)})
   }
   // walk has higher priority than allocation and thus we don't use isWalk here
   // only when both fp and int free list and dispatch1 has enough space can we do allocation
-  intFreeList.doAllocate := fpFreeList.canAllocate && io.out(0).ready
-  fpFreeList.doAllocate := intFreeList.canAllocate && io.out(0).ready
+  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && io.out(0).ready
+  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && io.out(0).ready
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
-  val canOut = io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && !io.robCommits.isWalk
+  val canOut = io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk
 
 
   // speculatively assign the instruction with an robIdx
   val validCount = PopCount(io.in.map(_.valid)) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
-  val robIdxHeadNext = Mux(io.flush, 0.U.asTypeOf(new RobPtr), // flush: clear rob
-              Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index (flush itself)
+  val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
          Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
                          Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
-                      /* default */  robIdxHead)))) // no instructions passed by this cycle: stick to old value
+                      /* default */  robIdxHead))) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
 
   /**
@@ -110,9 +104,6 @@ class Rename(implicit p: Parameters) extends XSModule {
   val hasValid = Cat(io.in.map(_.valid)).orR
 
   val isMove = io.in.map(_.bits.ctrl.isMove)
-  val isMax = intFreeList.maxVec
-  val meEnable = WireInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val psrc_cmp = Wire(MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W))))
   val intPsrc = Wire(Vec(RenameWidth, UInt()))
 
   val intSpecWen = Wire(Vec(RenameWidth, Bool()))
@@ -128,17 +119,11 @@ class Rename(implicit p: Parameters) extends XSModule {
     // alloc a new phy reg
     needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
     needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocateReq(i) := needFpDest(i)
-    intFreeList.allocateReq(i) := needIntDest(i)
+    fpFreeList.io.allocateReq(i) := needFpDest(i)
+    intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !hasValid || canOut
-
-    // do checkpoints when a branch inst come
-    // for(fl <- Seq(fpFreeList, intFreeList)){
-    //   fl.cpReqs(i).valid := inValid
-    //   fl.cpReqs(i).bits := io.in(i).bits.brTag
-    // }
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(_.valid))
 
@@ -151,66 +136,80 @@ class Rename(implicit p: Parameters) extends XSModule {
     uops(i).psrc(1) := Mux(uops(i).ctrl.srcType(1) === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
     uops(i).psrc(2) := fpPhySrcVec(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
-
-    if (i == 0) {
-      // calculate meEnable
-      meEnable(i) := isMove(i) && (!isMax(intPsrc(i)) || uops(i).ctrl.lsrc(0) === 0.U)
-    } else {
-      // compare psrc0
-      psrc_cmp(i-1) := Cat((0 until i).map(j => {
-        intPsrc(i) === intPsrc(j) && io.in(i).bits.ctrl.isMove && io.in(j).bits.ctrl.isMove
-      }) /* reverse is not necessary here */)
-
-      // calculate meEnable
-      meEnable(i) := isMove(i) && (!(io.renameBypass.lsrc1_bypass(i-1).orR | psrc_cmp(i-1).orR | isMax(intPsrc(i))) || uops(i).ctrl.lsrc(0) === 0.U)
-    }
-    uops(i).eliminatedMove := meEnable(i) || (uops(i).ctrl.isMove && uops(i).ctrl.ldest === 0.U)
-
-    // send psrc of eliminated move instructions to free list and label them as eliminated
-    intFreeList.psrcOfMove(i).valid := meEnable(i)
-    intFreeList.psrcOfMove(i).bits := intPsrc(i)
+    uops(i).eliminatedMove := isMove(i)
 
     // update pdest
-    uops(i).pdest := Mux(meEnable(i), intPsrc(i), // move eliminated
-                     Mux(needIntDest(i), intFreeList.allocatePhyReg(i), // normal int inst
-                     Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U // int inst with dst=r0
-                     /* default */, fpFreeList.allocatePhyReg(i)))) // normal fp inst
+    uops(i).pdest := Mux(needIntDest(i), intFreeList.io.allocatePhyReg(i), // normal int inst
+      // normal fp inst
+      Mux(needFpDest(i), fpFreeList.io.allocatePhyReg(i),
+        /* default */0.U))
 
     // Assign performance counters
     uops(i).debugInfo.renameTime := GTimer()
 
-    io.out(i).valid := io.in(i).valid && intFreeList.canAllocate && fpFreeList.canAllocate && !io.robCommits.isWalk
+    io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
+    when (io.out(i).bits.ctrl.fuType === FuType.fence) {
+      io.out(i).bits.ctrl.imm := Cat(io.in(i).bits.ctrl.lsrc(1), io.in(i).bits.ctrl.lsrc(0))
+    }
 
     // write speculative rename table
     // we update rat later inside commit code
-    intSpecWen(i) := intFreeList.allocateReq(i) && intFreeList.canAllocate && intFreeList.doAllocate && !io.robCommits.isWalk
-    fpSpecWen(i) := fpFreeList.allocateReq(i) && fpFreeList.canAllocate && fpFreeList.doAllocate && !io.robCommits.isWalk
+    intSpecWen(i) := needIntDest(i) && intFreeList.io.canAllocate && intFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
+    fpSpecWen(i) := needFpDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
+
+    intRefCounter.io.allocate(i).valid := intSpecWen(i)
+    intRefCounter.io.allocate(i).bits := io.out(i).bits.pdest
   }
 
-  // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
-  // Instead, we determine whether there're some dependencies between the valid instructions.
+  /**
+    * How to set psrc:
+    * - bypass the pdest to psrc if previous instructions write to the same ldest as lsrc
+    * - default: psrc from RAT
+    * How to set pdest:
+    * - Mux(isMove, psrc, pdest_from_freelist).
+    *
+    * The critical path of rename lies here:
+    * When move elimination is enabled, we need to update the rat with psrc.
+    * However, psrc maybe comes from previous instructions' pdest, which comes from freelist.
+    *
+    * If we expand these logic for pdest(N):
+    * pdest(N) = Mux(isMove(N), psrc(N), freelist_out(N))
+    *          = Mux(isMove(N), Mux(bypass(N, N - 1), pdest(N - 1),
+    *                           Mux(bypass(N, N - 2), pdest(N - 2),
+    *                           ...
+    *                           Mux(bypass(N, 0),     pdest(0),
+    *                                                 rat_out(N))...)),
+    *                           freelist_out(N))
+    */
+  // a simple functional model for now
+  io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
+  val bypassCond = Wire(Vec(4, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   for (i <- 1 until RenameWidth) {
-    io.renameBypass.lsrc1_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(0) === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(0) === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(0)
-    }).reverse)
-    io.renameBypass.lsrc2_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(1) === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(1) === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(1)
-    }).reverse)
-    io.renameBypass.lsrc3_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.srcType(2) === SrcType.fp
-      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.srcType(2) === SrcType.reg
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc(2)
-    }).reverse)
-    io.renameBypass.ldest_bypass(i-1) := Cat((0 until i).map(j => {
-      val fpMatch  = needFpDest(j) && needFpDest(i)
-      val intMatch = needIntDest(j) && needIntDest(i)
-      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
-    }).reverse)
+    val fpCond = io.in(i).bits.ctrl.srcType.map(_ === SrcType.fp) :+ needFpDest(i)
+    val intCond = io.in(i).bits.ctrl.srcType.map(_ === SrcType.reg) :+ needIntDest(i)
+    val target = io.in(i).bits.ctrl.lsrc :+ io.in(i).bits.ctrl.ldest
+    for ((((cond1, cond2), t), j) <- fpCond.zip(intCond).zip(target).zipWithIndex) {
+      val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
+        val indexMatch = in.bits.ctrl.ldest === t
+        val writeMatch =  cond2 && needIntDest(j) || cond1 && needFpDest(j)
+        indexMatch && writeMatch
+      }
+      bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
+    }
+    io.out(i).bits.psrc(0) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
+      (z, next) => Mux(next._2, next._1, z)
+    }
+    io.out(i).bits.psrc(1) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(1)(i-1).asBools).foldLeft(uops(i).psrc(1)) {
+      (z, next) => Mux(next._2, next._1, z)
+    }
+    io.out(i).bits.psrc(2) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(2)(i-1).asBools).foldLeft(uops(i).psrc(2)) {
+      (z, next) => Mux(next._2, next._1, z)
+    }
+    io.out(i).bits.old_pdest := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).old_pdest) {
+      (z, next) => Mux(next._2, next._1, z)
+    }
+    io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
   }
 
   // calculate lsq space requirement
@@ -237,55 +236,40 @@ class Rename(implicit p: Parameters) extends XSModule {
       // walk back write - restore spec state : ldest => old_pdest
       if (fp && i < RenameWidth) {
         // When redirect happens (mis-prediction), don't update the rename table
-        rat(i).wen := fpSpecWen(i) && !io.flush && !io.redirect.valid
+        rat(i).wen := fpSpecWen(i)
         rat(i).addr := uops(i).ctrl.ldest
-        rat(i).data := fpFreeList.allocatePhyReg(i)
+        rat(i).data := fpFreeList.io.allocatePhyReg(i)
       } else if (!fp && i < RenameWidth) {
-        rat(i).wen := intSpecWen(i) && !io.flush && !io.redirect.valid
+        rat(i).wen := intSpecWen(i)
         rat(i).addr := uops(i).ctrl.ldest
-        rat(i).data := Mux(meEnable(i), intPsrc(i), intFreeList.allocatePhyReg(i))
+        rat(i).data := io.out(i).bits.pdest
       }
 
       /*
       II. Free List Update
        */
       if (fp) { // Float Point free list
-        fpFreeList.freeReq(i)  := commitDestValid && !io.robCommits.isWalk
-        fpFreeList.freePhyReg(i) := io.robCommits.info(i).old_pdest
+        fpFreeList.io.freeReq(i)  := commitDestValid && !io.robCommits.isWalk
+        fpFreeList.io.freePhyReg(i) := io.robCommits.info(i).old_pdest
       } else { // Integer free list
-
-        // during walk process:
-        // 1. for normal inst, free pdest + revert rat from ldest->pdest to ldest->old_pdest
-        // 2. for ME inst, free pdest(commit counter++) + revert rat
-
-        // conclusion:
-        // a. rat recovery has nothing to do with ME or not
-        // b. treat walk as normal commit except replace old_pdests with pdests and set io.walk to true
-        // c. ignore pdests port when walking
-
-        intFreeList.freeReq(i) := commitDestValid // walk or not walk
-        intFreeList.freePhyReg(i)  := Mux(io.robCommits.isWalk, io.robCommits.info(i).pdest, io.robCommits.info(i).old_pdest)
-        intFreeList.eliminatedMove(i) := io.robCommits.info(i).eliminatedMove
-        intFreeList.multiRefPhyReg(i) := io.robCommits.info(i).pdest
+        intFreeList.io.freeReq(i) := intRefCounter.io.freeRegs(i).valid
+        intFreeList.io.freePhyReg(i) := intRefCounter.io.freeRegs(i).bits
       }
     }
+    intRefCounter.io.deallocate(i).valid := io.robCommits.valid(i) && needDestRegCommit(false, io.robCommits.info(i))
+    intRefCounter.io.deallocate(i).bits := Mux(io.robCommits.isWalk, io.robCommits.info(i).pdest, io.robCommits.info(i).old_pdest)
   }
 
-
   /*
-  Debug and performance counter
+  Debug and performance counters
    */
-
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
-    XSInfo(
-      in.valid && in.ready,
-      p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
-        p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
-        p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
-        p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
-        p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-        p"old_pdest:${out.bits.old_pdest} " +
-        p"out v:${out.valid} r:${out.ready}\n"
+    XSInfo(out.fire, p"pc:${Hexadecimal(in.bits.cf.pc)} in(${in.valid},${in.ready}) " +
+      p"lsrc(0):${in.bits.ctrl.lsrc(0)} -> psrc(0):${out.bits.psrc(0)} " +
+      p"lsrc(1):${in.bits.ctrl.lsrc(1)} -> psrc(1):${out.bits.psrc(1)} " +
+      p"lsrc(2):${in.bits.ctrl.lsrc(2)} -> psrc(2):${out.bits.psrc(2)} " +
+      p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
+      p"old_pdest:${out.bits.old_pdest}\n"
     )
   }
 
@@ -303,33 +287,14 @@ class Rename(implicit p: Parameters) extends XSModule {
   }
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
-  XSInfo(!canOut, p"stall at rename, hasValid:${hasValid}, fpCanAlloc:${fpFreeList.canAllocate}, intCanAlloc:${intFreeList.canAllocate} dispatch1ready:${io.out(0).ready}, isWalk:${io.robCommits.isWalk}\n")
 
   XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
-  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.canAllocate && intFreeList.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.canAllocate && !intFreeList.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.canAllocate && intFreeList.canAllocate && io.robCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk)
+  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
-  XSPerfAccumulate("move_instr_count", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove)))
-  XSPerfAccumulate("move_elim_enabled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && meEnable(i))))
-  XSPerfAccumulate("move_elim_cancelled", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))))
-  XSPerfAccumulate("move_elim_cancelled_psrc_bypass", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR })))
-  XSPerfAccumulate("move_elim_cancelled_cnt_limit", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)))))
-  XSPerfAccumulate("move_elim_cancelled_inc_more_than_one", PopCount(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR })))
-
-  // to make sure meEnable functions as expected
-  for (i <- 0 until RenameWidth) {
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && isMax(io.out(i).bits.psrc(0)),
-      p"ME_CANCELLED: ref counter hits max value (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else io.renameBypass.lsrc1_bypass(i-1).orR },
-      p"ME_CANCELLED: RAW dependency (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
-    XSDebug(io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i) && { if (i == 0) false.B else psrc_cmp(i-1).orR },
-      p"ME_CANCELLED: psrc duplicates with former instruction (pc:0x${Hexadecimal(io.in(i).bits.cf.pc)})\n")
-  }
-  XSDebug(VecInit(Seq.tabulate(RenameWidth)(i => io.out(i).fire() && io.in(i).bits.ctrl.isMove && !meEnable(i))).asUInt().orR,
-    p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
-  XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
+  XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
 }

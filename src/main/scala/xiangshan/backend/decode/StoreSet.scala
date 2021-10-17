@@ -188,7 +188,6 @@ class LFST(implicit p: Parameters) extends XSModule  {
     // val update = Input(new MemPredUpdateReq) // RegNext should be added outside
     // when redirect, mark canceled store as invalid
     val redirect = Input(Valid(new Redirect))
-    val flush = Input(Bool())
     // when store is dispatched, mark it as valid
     val dispatch = Vec(RenameWidth, Flipped(Valid(new DispatchToLFST)))
     // when store issued, mark store as invalid
@@ -259,7 +258,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(robIdxVec(i)(j).needFlush(io.redirect, io.flush)){
+      when(robIdxVec(i)(j).needFlush(io.redirect)){
         validVec(i)(j) := false.B
       }
     })

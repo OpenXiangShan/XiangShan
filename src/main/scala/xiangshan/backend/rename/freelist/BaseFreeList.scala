@@ -16,28 +16,37 @@
 
 package xiangshan.backend.rename.freelist
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-trait FreeListBaseIO {
 
-  // control signals from CtrlBlock
-  def flush: Bool
-  def redirect: Bool
-  def walk: Bool
+abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle {
+    val redirect = Input(Bool())
+    val walk = Input(Bool())
 
-  // allocate physical registers (rename)
-  def allocateReq: Vec[Bool] // need allocating phy reg (may be refused due to lacking of free reg)
-  def allocatePhyReg: Vec[UInt] // phy dest response according to allocateReq
-  def canAllocate: Bool // free list can allocate new phy registers
-  def doAllocate: Bool // actually do the allocation (given by rename)
+    val allocateReq = Input(Vec(RenameWidth, Bool()))
+    val allocatePhyReg = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
+    val canAllocate = Output(Bool())
+    val doAllocate = Input(Bool())
 
-  // free old physical registers (commit)
-  def freeReq: Vec[Bool] // need to free phy reg
-  def freePhyReg: Vec[UInt] // free old p_dest reg
+    val freeReq = Input(Vec(CommitWidth, Bool()))
+    val freePhyReg = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
 
-  // walk recovery
-  def stepBack: UInt
+    val stepBack = Input(UInt(log2Up(CommitWidth + 1).W))
+  })
+
+  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
+
+  object FreeListPtr {
+    def apply(f: Bool, v: UInt): FreeListPtr = {
+      val ptr = Wire(new FreeListPtr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
 }
