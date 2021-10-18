@@ -48,18 +48,28 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
   val isload = Reg(Vec(SSITSize, Bool()))
   val ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
-  val strict = Reg(Vec(SSITSize, Bool()))
+  val viocnt = Reg(Vec(SSITSize, UInt(2.W)))
+
+  def should_report_valid(raddr: UInt): Bool = {
+    // violation has happened multiple times
+    viocnt(raddr) > 0.U
+  }
+
+  def should_report_strict(raddr: UInt): Bool = {
+    // violation in the same store set has been reported again
+    // more strict issue policy is needed
+    viocnt(raddr) > 1.U
+  }
 
   val resetCounter = RegInit(0.U(ResetTimeMax2Pow.W))
   resetCounter := resetCounter + 1.U
 
   // read SSIT in decode stage
   for (i <- 0 until DecodeWidth) {
-    // io.rdata(i) := (data(io.raddr(i))(1) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
-    io.rdata(i).valid := valid(io.raddr(i))
+    io.rdata(i).valid := should_report_valid(io.raddr(i)) && valid(io.raddr(i))
     io.rdata(i).isload := isload(io.raddr(i))
     io.rdata(i).ssid := ssid(io.raddr(i))
-    io.rdata(i).strict := strict(io.raddr(i)) && valid(io.raddr(i))
+    io.rdata(i).strict := should_report_strict(io.raddr(i)) && valid(io.raddr(i))
   }
 
   // update SSIT if load violation redirect is detected
@@ -95,11 +105,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.ldpc) := true.B
         isload(memPredUpdateReqReg.ldpc) := true.B
         ssid(memPredUpdateReqReg.ldpc) := ssidAllocate
-        strict(memPredUpdateReqReg.ldpc) := false.B
+        viocnt(memPredUpdateReqReg.ldpc) := 0.U
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := ssidAllocate
-        strict(memPredUpdateReqReg.stpc) := false.B
+        viocnt(memPredUpdateReqReg.stpc) := 0.U
       }
       // 2. "If the load has been assigned a store set, but the store has not,
       // the store is assigned the load’s store set."
@@ -107,7 +117,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := loadOldSSID
-        strict(memPredUpdateReqReg.stpc) := false.B
+        viocnt(memPredUpdateReqReg.stpc) := 0.U
       }
       // 3. "If the store has been assigned a store set, but the load has not,
       // the load is assigned the store’s store set."
@@ -115,7 +125,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.ldpc) := true.B
         isload(memPredUpdateReqReg.ldpc) := true.B
         ssid(memPredUpdateReqReg.ldpc) := storeOldSSID
-        strict(memPredUpdateReqReg.ldpc) := false.B
+        // leave load viocnt unchanged
       }
       // 4. "If both the load and the store have already been assigned store sets,
       // one of the two store sets is declared the "winner".
@@ -128,7 +138,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := winnerSSID
         when(ssidIsSame){
-          strict(memPredUpdateReqReg.ldpc) := true.B
+          when(viocnt(memPredUpdateReqReg.ldpc) < 3.U) {
+            viocnt(memPredUpdateReqReg.ldpc) := viocnt(memPredUpdateReqReg.ldpc) + 1.U
+          }
         }
       }
     }
@@ -140,7 +152,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
   XSPerfAccumulate("ssit_update_should_strict", memPredUpdateReqValid && ssidIsSame && loadAssigned && storeAssigned)
   XSPerfAccumulate("ssit_update_strict_failed", 
-    memPredUpdateReqValid && ssidIsSame && strict(memPredUpdateReqReg.ldpc) && loadAssigned && storeAssigned
+    memPredUpdateReqValid && ssidIsSame && should_report_strict(memPredUpdateReqReg.ldpc) && loadAssigned && storeAssigned
   ) // should be zero
 
   // reset period: ResetTimeMax2Pow
