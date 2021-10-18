@@ -114,7 +114,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     val prefetch = Module(new L2TlbPrefetch())
     val recv = cache.io.resp
     prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.source) && (!recv.bits.hit  ||
-      recv.bits.hit && recv.bits.prefetch) && recv.bits.toFsm.l2Hit
+      recv.bits.prefetch)
     prefetch.io.in.bits.vpn := recv.bits.vpn
     prefetch.io.sfence := sfence
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
