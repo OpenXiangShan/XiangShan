@@ -263,4 +263,15 @@ class LFST(implicit p: Parameters) extends XSModule  {
       }
     })
   })
+
+  // recover lastSqIdx after squash 
+  when(RegNext(io.redirect.fire())) {
+    (0 until LFSTSize).map(i => {
+      (0 until LFSTWidth).map(j => {
+        when(validVec(i)(j)){
+          lastSqIdx(i) := sqIdxVec(i)(j)
+        }
+      })
+    })
+  }
 }
