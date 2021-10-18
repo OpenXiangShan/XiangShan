@@ -218,6 +218,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   //hit and replaecement check
   //TODO: valid bit in metaData may be useless
   val release_confic_vec = Wire(Vec(4, Bool()))
+  dontTouch(release_confic_vec)
 
   val f1_tag_eq_vec        = VecInit((0 until 2).map( k => VecInit(f1_tags(k).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(k)(i) && way_tag ===  f1_pTags(k) })))
   val f1_tag_match_vec     = VecInit((0 until 2).map( k => VecInit(f1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => f1_tag_eq_vec(k)(w) && f1_cohs(k)(w).isValid() && f1_cacheline_valid(k)(w)})))

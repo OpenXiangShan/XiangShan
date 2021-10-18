@@ -158,8 +158,11 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   val req = Reg(new ICacheProbeReq)
   val req_vidx = get_idx(req.vaddr)
 
-  val meta_read = Reg(new ICacheMetadata)
-  val data_read = Reg(UInt((blockBits).W))
+  val meta_read = Wire(new ICacheMetadata)
+  val data_read = Wire(UInt((blockBits).W))
+
+  meta_read := DontCare
+  data_read := DontCare
 
   io.req.ready := state === s_idle
 
@@ -183,7 +186,7 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   io.data_read.bits.vSetIdx(1) := DontCare
 
   val phy_tag = get_phy_tag(req.addr)
-  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && !way.coh.isValid() && io.meta_response.valid(0)(i)})
+  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid() && io.meta_response.valid(0)(i)})
   val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
   val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
 

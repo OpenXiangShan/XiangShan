@@ -336,11 +336,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   meta_read_arb.io.in(FetchKey) <> io.metaRead.req
   metaArray.io.read      <> meta_read_arb.io.out
   metaArray.io.readResp  <> probe.io.meta_response
+  metaArray.io.readResp  <> io.metaRead.resp
 
   data_read_arb.io.in(ProbeKey) <> probe.io.data_read
   data_read_arb.io.in(FetchKey) <> io.dataRead.req
   dataArray.io.read      <> data_read_arb.io.out
   dataArray.io.readResp  <> probe.io.data_response
+  dataArray.io.readResp  <> io.dataRead.resp
 
   meta_write_arb.io.in(FetchKey) <> missQueue.io.meta_write
   meta_write_arb.io.in(ProbeKey) <> probe.io.meta_write
