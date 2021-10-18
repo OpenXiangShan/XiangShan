@@ -387,16 +387,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     io.perfEvents.PerfEvents(i).incr_step := DontCare
   }
 //  io.perfEvents.PerfEvents(30).incr_valid :=  RegNext(io.fromRename(0).ready) 
-  io.perfEvents.PerfEvents(30).incr_step  :=  PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))
+  io.perfEvents.PerfEvents(20).incr_step  :=  PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))
 
-  io.perfEvents.PerfEvents(31).incr_step  :=  !hasValidInstr
+  io.perfEvents.PerfEvents(21).incr_step  :=  !hasValidInstr
 
-  io.perfEvents.PerfEvents(32).incr_step  :=  PopCount(io.fromRename.map(_.valid))
+  io.perfEvents.PerfEvents(22).incr_step  :=  PopCount(io.fromRename.map(_.valid))
 
-  io.perfEvents.PerfEvents(33).incr_step  :=  PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))
-  io.perfEvents.PerfEvents(34).incr_step  :=  hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(35).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(36).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(37).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept 
-  io.perfEvents.PerfEvents(38).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  
+  io.perfEvents.PerfEvents(23).incr_step  :=  PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))
+  io.perfEvents.PerfEvents(24).incr_step  :=  hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  io.perfEvents.PerfEvents(25).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  io.perfEvents.PerfEvents(26).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  io.perfEvents.PerfEvents(27).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept 
+  io.perfEvents.PerfEvents(28).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  
 }

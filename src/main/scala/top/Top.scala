@@ -82,6 +82,7 @@ class XSCoreWithL2()(implicit p: Parameters) extends LazyModule
 
     core.module.io.hartId := io.hartId
     core.module.io.externalInterrupt := io.externalInterrupt
+    core.module.io.perfEvents <> l2cacheOpt.get.module.io.perfEvents
 
     io.l1plus_error <> core.module.io.l1plus_error
     io.icache_error <> core.module.io.icache_error

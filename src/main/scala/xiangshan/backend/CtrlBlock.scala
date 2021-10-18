@@ -25,6 +25,7 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
+import xiangshan.backend.fu.{PFEvent}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
 import difftest._
@@ -209,6 +210,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val flush = Output(Bool())
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
+    val perfEventsEu0      = Input(new PerfEventsBundle(numPCntCtrl))
+    val perfEventsEu1      = Input(new PerfEventsBundle(numPCntCtrl))
+    val perfEvents      = Output(new PerfEventsBundle(numCSRPCntCtrl))
   })
 
   val decode = Module(new DecodeStage)
@@ -375,4 +379,120 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
+
+  val hpmEvents = Wire(new PerfEventsBundle(numPCntCtrl))
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  for(i <- 0 until numPCntCtrl ) {
+    hpmEvents.PerfEvents(i).incr_step := DontCare
+  }
+
+  hpmEvents.PerfEvents( 0).incr_step   := decode.io.perfEvents.PerfEvents( 0).incr_step   
+  hpmEvents.PerfEvents( 1).incr_step   := decode.io.perfEvents.PerfEvents( 1).incr_step   
+  hpmEvents.PerfEvents( 2).incr_step   := decode.io.perfEvents.PerfEvents( 2).incr_step   
+  hpmEvents.PerfEvents( 3).incr_step   := decode.io.perfEvents.PerfEvents( 3).incr_step   
+  hpmEvents.PerfEvents( 4).incr_step   := decode.io.perfEvents.PerfEvents( 4).incr_step   
+  hpmEvents.PerfEvents( 5).incr_step   := decode.io.perfEvents.PerfEvents( 5).incr_step   
+  hpmEvents.PerfEvents( 6).incr_step   := rename.io.perfEvents.PerfEvents( 6).incr_step   
+  hpmEvents.PerfEvents( 7).incr_step   := rename.io.perfEvents.PerfEvents( 7).incr_step   
+  hpmEvents.PerfEvents( 8).incr_step   := rename.io.perfEvents.PerfEvents( 8).incr_step   
+  hpmEvents.PerfEvents( 9).incr_step   := rename.io.perfEvents.PerfEvents( 9).incr_step   
+  hpmEvents.PerfEvents(10).incr_step   := rename.io.perfEvents.PerfEvents(10).incr_step   
+  hpmEvents.PerfEvents(11).incr_step   := rename.io.perfEvents.PerfEvents(11).incr_step   
+  hpmEvents.PerfEvents(12).incr_step   := rename.io.perfEvents.PerfEvents(12).incr_step   
+  hpmEvents.PerfEvents(13).incr_step   := rename.io.perfEvents.PerfEvents(13).incr_step   
+  hpmEvents.PerfEvents(14).incr_step   := rename.io.perfEvents.PerfEvents(14).incr_step   
+  hpmEvents.PerfEvents(15).incr_step   := rename.io.perfEvents.PerfEvents(15).incr_step   
+  hpmEvents.PerfEvents(16).incr_step   := rename.io.perfEvents.PerfEvents(16).incr_step   
+  hpmEvents.PerfEvents(17).incr_step   := rename.io.perfEvents.PerfEvents(17).incr_step   
+  hpmEvents.PerfEvents(18).incr_step   := rename.io.perfEvents.PerfEvents(18).incr_step   
+  hpmEvents.PerfEvents(19).incr_step   := rename.io.perfEvents.PerfEvents(19).incr_step   
+  hpmEvents.PerfEvents(20).incr_step   := dispatch.io.perfEvents.PerfEvents(20).incr_step   
+  hpmEvents.PerfEvents(21).incr_step   := dispatch.io.perfEvents.PerfEvents(21).incr_step   
+  hpmEvents.PerfEvents(22).incr_step   := dispatch.io.perfEvents.PerfEvents(22).incr_step   
+  hpmEvents.PerfEvents(23).incr_step   := dispatch.io.perfEvents.PerfEvents(23).incr_step   
+  hpmEvents.PerfEvents(24).incr_step   := dispatch.io.perfEvents.PerfEvents(24).incr_step   
+  hpmEvents.PerfEvents(25).incr_step   := dispatch.io.perfEvents.PerfEvents(25).incr_step   
+  hpmEvents.PerfEvents(26).incr_step   := dispatch.io.perfEvents.PerfEvents(26).incr_step   
+  hpmEvents.PerfEvents(27).incr_step   := dispatch.io.perfEvents.PerfEvents(27).incr_step   
+  hpmEvents.PerfEvents(28).incr_step   := dispatch.io.perfEvents.PerfEvents(28).incr_step   
+  hpmEvents.PerfEvents(29).incr_step   := intDq.io.perfEvents.PerfEvents(0).incr_step   
+  hpmEvents.PerfEvents(30).incr_step   := intDq.io.perfEvents.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(31).incr_step   := intDq.io.perfEvents.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(32).incr_step   := intDq.io.perfEvents.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(33).incr_step   := intDq.io.perfEvents.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(34).incr_step   := intDq.io.perfEvents.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(35).incr_step   := intDq.io.perfEvents.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(36).incr_step   := intDq.io.perfEvents.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(37).incr_step   := intDq.io.perfEvents.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(38).incr_step   := fpDq.io.perfEvents.PerfEvents(0).incr_step   
+  hpmEvents.PerfEvents(39).incr_step   := fpDq.io.perfEvents.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(40).incr_step   := fpDq.io.perfEvents.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(41).incr_step   := fpDq.io.perfEvents.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(42).incr_step   := fpDq.io.perfEvents.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(43).incr_step   := fpDq.io.perfEvents.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(44).incr_step   := fpDq.io.perfEvents.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(45).incr_step   := fpDq.io.perfEvents.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(46).incr_step   := fpDq.io.perfEvents.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(38).incr_step   := lsDq.io.perfEvents.PerfEvents(0).incr_step   
+  hpmEvents.PerfEvents(39).incr_step   := lsDq.io.perfEvents.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(40).incr_step   := lsDq.io.perfEvents.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(41).incr_step   := lsDq.io.perfEvents.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(42).incr_step   := lsDq.io.perfEvents.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(43).incr_step   := lsDq.io.perfEvents.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(44).incr_step   := lsDq.io.perfEvents.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(45).incr_step   := lsDq.io.perfEvents.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(46).incr_step   := lsDq.io.perfEvents.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(47).incr_step   := rob.io.perfEvents.PerfEvents(39).incr_step   
+  hpmEvents.PerfEvents(48).incr_step   := rob.io.perfEvents.PerfEvents(40).incr_step   
+  hpmEvents.PerfEvents(49).incr_step   := rob.io.perfEvents.PerfEvents(41).incr_step   
+  hpmEvents.PerfEvents(50).incr_step   := rob.io.perfEvents.PerfEvents(42).incr_step   
+  hpmEvents.PerfEvents(51).incr_step   := rob.io.perfEvents.PerfEvents(43).incr_step   
+  hpmEvents.PerfEvents(52).incr_step   := rob.io.perfEvents.PerfEvents(44).incr_step   
+  hpmEvents.PerfEvents(53).incr_step   := rob.io.perfEvents.PerfEvents(45).incr_step   
+  hpmEvents.PerfEvents(54).incr_step   := rob.io.perfEvents.PerfEvents(46).incr_step   
+  hpmEvents.PerfEvents(55).incr_step   := rob.io.perfEvents.PerfEvents(47).incr_step   
+  hpmEvents.PerfEvents(56).incr_step   := rob.io.perfEvents.PerfEvents(48).incr_step   
+  hpmEvents.PerfEvents(57).incr_step   := rob.io.perfEvents.PerfEvents(49).incr_step   
+  hpmEvents.PerfEvents(58).incr_step   := rob.io.perfEvents.PerfEvents(50).incr_step   
+  hpmEvents.PerfEvents(59).incr_step   := rob.io.perfEvents.PerfEvents(51).incr_step   
+  hpmEvents.PerfEvents(60).incr_step   := rob.io.perfEvents.PerfEvents(52).incr_step   
+  hpmEvents.PerfEvents(61).incr_step   := rob.io.perfEvents.PerfEvents(53).incr_step   
+  hpmEvents.PerfEvents(62).incr_step   := rob.io.perfEvents.PerfEvents(54).incr_step   
+  hpmEvents.PerfEvents(63).incr_step   := rob.io.perfEvents.PerfEvents(55).incr_step   
+  hpmEvents.PerfEvents(64).incr_step   := io.perfEventsEu0.PerfEvents(0).incr_step   
+  hpmEvents.PerfEvents(65).incr_step   := io.perfEventsEu0.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(66).incr_step   := io.perfEventsEu0.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(67).incr_step   := io.perfEventsEu0.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(68).incr_step   := io.perfEventsEu0.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(69).incr_step   := io.perfEventsEu0.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(70).incr_step   := io.perfEventsEu0.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(71).incr_step   := io.perfEventsEu0.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(72).incr_step   := io.perfEventsEu0.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(73).incr_step   := io.perfEventsEu0.PerfEvents(9).incr_step   
+  hpmEvents.PerfEvents(74).incr_step   := io.perfEventsEu1.PerfEvents(0).incr_step   
+  hpmEvents.PerfEvents(75).incr_step   := io.perfEventsEu1.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(76).incr_step   := io.perfEventsEu1.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(77).incr_step   := io.perfEventsEu1.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(78).incr_step   := io.perfEventsEu1.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(79).incr_step   := io.perfEventsEu1.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(80).incr_step   := io.perfEventsEu1.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(81).incr_step   := io.perfEventsEu1.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(82).incr_step   := io.perfEventsEu1.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(83).incr_step   := io.perfEventsEu1.PerfEvents(9).incr_step   
+
+  val hpm_ctrl = Module(new HPerfmonitor(numPCntCtrl,numCSRPCntCtrl))
+  hpm_ctrl.io.Events_sets := hpmEvents
+  hpm_ctrl.io.HPMEvent(0) := pfevent.io.HPMEvent(8)
+  hpm_ctrl.io.HPMEvent(1) := pfevent.io.HPMEvent(9)
+  hpm_ctrl.io.HPMEvent(2) := pfevent.io.HPMEvent(10)
+  hpm_ctrl.io.HPMEvent(3) := pfevent.io.HPMEvent(11)
+  hpm_ctrl.io.HPMEvent(4) := pfevent.io.HPMEvent(12)
+  hpm_ctrl.io.HPMEvent(5) := pfevent.io.HPMEvent(13)
+  hpm_ctrl.io.HPMEvent(6) := pfevent.io.HPMEvent(14)
+  hpm_ctrl.io.HPMEvent(7) := pfevent.io.HPMEvent(15)
+  for(i <- 0 until numCSRPCntCtrl ) {                
+   // io.perfEvents.PerfEvents(i).incr_step := DontCare
+    io.perfEvents.PerfEvents(i) := hpm_ctrl.io.Events_selected.PerfEvents(i)
+  }
 }

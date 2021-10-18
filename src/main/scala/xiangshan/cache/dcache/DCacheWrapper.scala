@@ -282,6 +282,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
+  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
 }
 
 
@@ -520,8 +521,42 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("num_loads", num_loads)
 
   io.mshrFull := missQueue.io.full
-}
-
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(0 ).incr_step  := wb.io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(1 ).incr_step  := wb.io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(2 ).incr_step  := wb.io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(3 ).incr_step  := wb.io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(4 ).incr_step  := wb.io.perfEvents.PerfEvents(4).incr_step
+  io.perfEvents.PerfEvents(5 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(6 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(7 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(8 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(9 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(4).incr_step
+  io.perfEvents.PerfEvents(10).incr_step  := mainPipe.io.perfEvents.PerfEvents(5).incr_step
+  io.perfEvents.PerfEvents(11).incr_step  := missQueue.io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(12).incr_step  := missQueue.io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(13).incr_step  := missQueue.io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(14).incr_step  := missQueue.io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(15).incr_step  := missQueue.io.perfEvents.PerfEvents(4).incr_step
+  io.perfEvents.PerfEvents(16).incr_step  := probeQueue.io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(17).incr_step  := probeQueue.io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(18).incr_step  := probeQueue.io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(19).incr_step  := probeQueue.io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(20).incr_step  := probeQueue.io.perfEvents.PerfEvents(4).incr_step
+  io.perfEvents.PerfEvents(21).incr_step  := ldu(0).io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(22).incr_step  := ldu(0).io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(23).incr_step  := ldu(0).io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(24).incr_step  := ldu(0).io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(25).incr_step  := ldu(0).io.perfEvents.PerfEvents(4).incr_step
+  io.perfEvents.PerfEvents(26).incr_step  := ldu(1).io.perfEvents.PerfEvents(0).incr_step
+  io.perfEvents.PerfEvents(27).incr_step  := ldu(1).io.perfEvents.PerfEvents(1).incr_step
+  io.perfEvents.PerfEvents(28).incr_step  := ldu(1).io.perfEvents.PerfEvents(2).incr_step
+  io.perfEvents.PerfEvents(29).incr_step  := ldu(1).io.perfEvents.PerfEvents(3).incr_step
+  io.perfEvents.PerfEvents(30).incr_step  := ldu(1).io.perfEvents.PerfEvents(4).incr_step
+}                          
+                           
 class AMOHelper() extends ExtModule {
   val clock  = IO(Input(Clock()))
   val enable = IO(Input(Bool()))
@@ -530,15 +565,15 @@ class AMOHelper() extends ExtModule {
   val wdata  = IO(Input(UInt(64.W)))
   val mask   = IO(Input(UInt(8.W)))
   val rdata  = IO(Output(UInt(64.W)))
-}
-
-
+}                          
+                           
+                           
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-
+                           
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null
   val dcache = if (useDcache) LazyModule(new DCache()) else null
-  if (useDcache) {
+  if (useDcache) {         
     clientNode := dcache.clientNode
   }
 

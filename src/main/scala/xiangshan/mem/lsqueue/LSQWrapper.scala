@@ -76,6 +76,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val issuePtrExt = Output(new SqPtr)
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
+    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -177,4 +178,25 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull
-}
+  for(i <- 0 until numPCntLsu ) {
+    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  }
+  io.perfEvents.PerfEvents(36).incr_step  := storeQueue.io.perfEvents.PerfEvents(22).incr_step
+  io.perfEvents.PerfEvents(37).incr_step  := storeQueue.io.perfEvents.PerfEvents(23).incr_step
+  io.perfEvents.PerfEvents(38).incr_step  := storeQueue.io.perfEvents.PerfEvents(24).incr_step
+  io.perfEvents.PerfEvents(39).incr_step  := storeQueue.io.perfEvents.PerfEvents(25).incr_step
+  io.perfEvents.PerfEvents(40).incr_step  := storeQueue.io.perfEvents.PerfEvents(26).incr_step
+  io.perfEvents.PerfEvents(41).incr_step  := storeQueue.io.perfEvents.PerfEvents(27).incr_step
+  io.perfEvents.PerfEvents(42).incr_step  := storeQueue.io.perfEvents.PerfEvents(28).incr_step
+  io.perfEvents.PerfEvents(43).incr_step  := storeQueue.io.perfEvents.PerfEvents(29).incr_step
+  io.perfEvents.PerfEvents(44).incr_step  := loadQueue.io.perfEvents.PerfEvents(30).incr_step
+  io.perfEvents.PerfEvents(45).incr_step  := loadQueue.io.perfEvents.PerfEvents(31).incr_step
+  io.perfEvents.PerfEvents(46).incr_step  := loadQueue.io.perfEvents.PerfEvents(32).incr_step
+  io.perfEvents.PerfEvents(47).incr_step  := loadQueue.io.perfEvents.PerfEvents(33).incr_step
+  io.perfEvents.PerfEvents(48).incr_step  := loadQueue.io.perfEvents.PerfEvents(34).incr_step
+  io.perfEvents.PerfEvents(49).incr_step  := loadQueue.io.perfEvents.PerfEvents(35).incr_step
+  io.perfEvents.PerfEvents(50).incr_step  := loadQueue.io.perfEvents.PerfEvents(36).incr_step
+  io.perfEvents.PerfEvents(51).incr_step  := loadQueue.io.perfEvents.PerfEvents(37).incr_step
+  io.perfEvents.PerfEvents(52).incr_step  := loadQueue.io.perfEvents.PerfEvents(38).incr_step
+  io.perfEvents.PerfEvents(53).incr_step  := loadQueue.io.perfEvents.PerfEvents(39).incr_step
+}                          

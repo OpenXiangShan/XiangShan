@@ -212,6 +212,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val perf = Vec(numPerfPorts, Output(new RsPerfCounter))
+    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
 
     override def cloneType: SchedulerExtraIO.this.type =
       new SchedulerExtraIO().asInstanceOf[this.type]
@@ -235,7 +236,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // misc ports
     val extra = new SchedulerExtraIO
     val fmaMid = if (numFma > 0) Some(Vec(numFma, Flipped(new FMAMidResultIO))) else None
-    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   val dispatch2 = outer.dispatch2.map(_.module)
@@ -463,18 +463,18 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
   for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
+    io.extra.perfEvents.PerfEvents(i).incr_step := DontCare
     intbtperfEvents.PerfEvents(i ).incr_step  := DontCare
     fpbtperfEvents.PerfEvents(i ).incr_step  := DontCare
   }
-  io.perfEvents.PerfEvents(20 ).incr_step   := PopCount(allocate.map(_.fire()))   
-  io.perfEvents.PerfEvents(21 ).incr_step   := PopCount(io.issue.map(_.fire))   
-  io.perfEvents.PerfEvents(22 ).incr_step   := intbtperfEvents.PerfEvents(0 ).incr_step   
-  io.perfEvents.PerfEvents(23 ).incr_step   := intbtperfEvents.PerfEvents(1 ).incr_step   
-  io.perfEvents.PerfEvents(24 ).incr_step   := intbtperfEvents.PerfEvents(2 ).incr_step   
-  io.perfEvents.PerfEvents(25 ).incr_step   := intbtperfEvents.PerfEvents(3 ).incr_step   
-  io.perfEvents.PerfEvents(26 ).incr_step   :=  fpbtperfEvents.PerfEvents(0 ).incr_step   
-  io.perfEvents.PerfEvents(27 ).incr_step   :=  fpbtperfEvents.PerfEvents(1 ).incr_step   
-  io.perfEvents.PerfEvents(28 ).incr_step   :=  fpbtperfEvents.PerfEvents(2 ).incr_step   
-  io.perfEvents.PerfEvents(29 ).incr_step   :=  fpbtperfEvents.PerfEvents(3 ).incr_step   
+  io.extra.perfEvents.PerfEvents(0 ).incr_step   := PopCount(allocate.map(_.fire()))   
+  io.extra.perfEvents.PerfEvents(1 ).incr_step   := PopCount(io.issue.map(_.fire))   
+  io.extra.perfEvents.PerfEvents(2 ).incr_step   := intbtperfEvents.PerfEvents(0 ).incr_step   
+  io.extra.perfEvents.PerfEvents(3 ).incr_step   := intbtperfEvents.PerfEvents(1 ).incr_step   
+  io.extra.perfEvents.PerfEvents(4 ).incr_step   := intbtperfEvents.PerfEvents(2 ).incr_step   
+  io.extra.perfEvents.PerfEvents(5 ).incr_step   := intbtperfEvents.PerfEvents(3 ).incr_step   
+  io.extra.perfEvents.PerfEvents(6 ).incr_step   :=  fpbtperfEvents.PerfEvents(0 ).incr_step   
+  io.extra.perfEvents.PerfEvents(7 ).incr_step   :=  fpbtperfEvents.PerfEvents(1 ).incr_step   
+  io.extra.perfEvents.PerfEvents(8 ).incr_step   :=  fpbtperfEvents.PerfEvents(2 ).incr_step   
+  io.extra.perfEvents.PerfEvents(9 ).incr_step   :=  fpbtperfEvents.PerfEvents(3 ).incr_step   
 }

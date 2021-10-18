@@ -23,7 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TLB, TlbPtwIO, TlbRequestIO}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker}
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker,PFEvent}
 import system.L1CacheErrorInfo
 
 
@@ -48,7 +48,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val error  = new L1CacheErrorInfo
-    val perfEvents      = Output(new PerfEventsBundle(numPCntFrontend))
+    val perfEvents      = Output(new PerfEventsBundle(numCSRPCntFrontend))
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
       val bpuInfo = new Bundle {
@@ -65,6 +65,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
   //icache
 
+  //PFEvent
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
@@ -127,45 +130,28 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 //  val numPCntFrontend = 64
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
+  XSPerfAccumulate("FrontendBubble", frontendBubble)
+  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 
-  val hpm_frontend_0 = Module(new HPerfCounter(numPCntFrontend))
-  val eventSeled_0   = Wire(new PerfBundle)
-  val hpm_frontend_1 = Module(new HPerfCounter(numPCntFrontend))
-  val eventSeled_1   = Wire(new PerfBundle)
-  val hpm_frontend_2 = Module(new HPerfCounter(numPCntFrontend))
-  val eventSeled_2   = Wire(new PerfBundle)
-  val hpm_frontend_3 = Module(new HPerfCounter(numPCntFrontend))
-  val eventSeled_3   = Wire(new PerfBundle)
 
   val hpmEvents = Wire(new PerfEventsBundle(numPCntFrontend))
-
-  hpm_frontend_0.io.Events_sets := hpmEvents
-  hpm_frontend_0.io.HPMEvent := 0.U
-  hpm_frontend_1.io.Events_sets := hpmEvents
-  hpm_frontend_1.io.HPMEvent := 1.U
-  hpm_frontend_2.io.Events_sets := hpmEvents
-  hpm_frontend_2.io.HPMEvent := 2.U
-  hpm_frontend_3.io.Events_sets := hpmEvents
-  hpm_frontend_3.io.HPMEvent := 3.U
-
-  eventSeled_0 := hpm_frontend_0.io.Event_selected
-  eventSeled_1 := hpm_frontend_1.io.Event_selected
-  eventSeled_2 := hpm_frontend_2.io.Event_selected
-  eventSeled_3 := hpm_frontend_3.io.Event_selected
-
   for(i <- 0 until numPCntFrontend ) {
     hpmEvents.PerfEvents(i).incr_step := DontCare
   }
-  hpmEvents.PerfEvents(0).incr_step   := frontendBubble
-  hpmEvents.PerfEvents(1).incr_step   := ifu.io.perfEvents.PerfEvents(1).incr_step   
-  hpmEvents.PerfEvents(2).incr_step   := ifu.io.perfEvents.PerfEvents(2).incr_step   
-  hpmEvents.PerfEvents(3).incr_step   := ifu.io.perfEvents.PerfEvents(3).incr_step   
-  hpmEvents.PerfEvents(4).incr_step   := ifu.io.perfEvents.PerfEvents(4).incr_step   
-  hpmEvents.PerfEvents(5).incr_step   := ifu.io.perfEvents.PerfEvents(5).incr_step   
-  hpmEvents.PerfEvents(6).incr_step   := ifu.io.perfEvents.PerfEvents(6).incr_step   
-  hpmEvents.PerfEvents(7).incr_step   := ifu.io.perfEvents.PerfEvents(7).incr_step   
-  hpmEvents.PerfEvents(8).incr_step   := ifu.io.perfEvents.PerfEvents(8).incr_step   
-  hpmEvents.PerfEvents(9).incr_step   := ifu.io.perfEvents.PerfEvents(9).incr_step   
+  //hpmEvents.PerfEvents.map(_.incr_step) := frontendBubble +: ifu.io.perfEvents.PerfEvents.map(_.incr_step) + ibuffer.io.perfEvents.PerfEvents.map(_.incr_step) + 
+
+  //hpmEvents.PerfEvents := ifu.io.perfEvents.PerfEvents + ibuffer.io.perfEvents.PerfEvents + ftq.io.perfEvents.PerfEvents + bpu.io.perfEvents.PerfEvents
+
+  hpmEvents.PerfEvents(0 ).incr_step   := frontendBubble
+  hpmEvents.PerfEvents(1 ).incr_step   := ifu.io.perfEvents.PerfEvents(1).incr_step   
+  hpmEvents.PerfEvents(2 ).incr_step   := ifu.io.perfEvents.PerfEvents(2).incr_step   
+  hpmEvents.PerfEvents(3 ).incr_step   := ifu.io.perfEvents.PerfEvents(3).incr_step   
+  hpmEvents.PerfEvents(4 ).incr_step   := ifu.io.perfEvents.PerfEvents(4).incr_step   
+  hpmEvents.PerfEvents(5 ).incr_step   := ifu.io.perfEvents.PerfEvents(5).incr_step   
+  hpmEvents.PerfEvents(6 ).incr_step   := ifu.io.perfEvents.PerfEvents(6).incr_step   
+  hpmEvents.PerfEvents(7 ).incr_step   := ifu.io.perfEvents.PerfEvents(7).incr_step   
+  hpmEvents.PerfEvents(8 ).incr_step   := ifu.io.perfEvents.PerfEvents(8).incr_step   
+  hpmEvents.PerfEvents(9 ).incr_step   := ifu.io.perfEvents.PerfEvents(9).incr_step   
   hpmEvents.PerfEvents(10).incr_step  := ifu.io.perfEvents.PerfEvents(10).incr_step  
   hpmEvents.PerfEvents(11).incr_step  := ifu.io.perfEvents.PerfEvents(11).incr_step  
   hpmEvents.PerfEvents(12).incr_step  := ifu.io.perfEvents.PerfEvents(12).incr_step  
@@ -212,15 +198,21 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   hpmEvents.PerfEvents(53).incr_step  := bpu.io.perfEvents.PerfEvents(53).incr_step
   hpmEvents.PerfEvents(54).incr_step  := bpu.io.perfEvents.PerfEvents(54).incr_step
   hpmEvents.PerfEvents(55).incr_step  := bpu.io.perfEvents.PerfEvents(55).incr_step
+//
+//  hpmEvents.PerfEvents := (ifu.io.perfEvents.PerfEvents) ++ ibuffer.io.perfEvents.PerfEvents ++ icache.io.perfEvents.PerfEvents ++ ftq.io.perfEvents.PerfEvents ++ bpu.io.perfEvents.PerfEvents
              
-  XSPerfAccumulate("FrontendBubble", frontendBubble)
-
-  io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
-  for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0) := eventSeled_0
-  io.perfEvents.PerfEvents(1) := eventSeled_1
-  io.perfEvents.PerfEvents(2) := eventSeled_2
-  io.perfEvents.PerfEvents(3) := eventSeled_3
+  //for(i <- 0 until numCSRPCntFrontend ) {
+  //  io.perfEvents.PerfEvents(i).incr_step := DontCare
+  //}
+  val hpm_frontend = Module(new HPerfmonitor(numPCntFrontend,numCSRPCntFrontend))
+  hpm_frontend.io.HPMEvent(0) := pfevent.io.HPMEvent(0)
+  hpm_frontend.io.HPMEvent(1) := pfevent.io.HPMEvent(1)
+  hpm_frontend.io.HPMEvent(2) := pfevent.io.HPMEvent(2)
+  hpm_frontend.io.HPMEvent(3) := pfevent.io.HPMEvent(3)
+  hpm_frontend.io.HPMEvent(4) := pfevent.io.HPMEvent(4)
+  hpm_frontend.io.HPMEvent(5) := pfevent.io.HPMEvent(5)
+  hpm_frontend.io.HPMEvent(6) := pfevent.io.HPMEvent(6)
+  hpm_frontend.io.HPMEvent(7) := pfevent.io.HPMEvent(7)
+  hpm_frontend.io.Events_sets := hpmEvents
+  io.perfEvents := hpm_frontend.io.Events_selected
 }

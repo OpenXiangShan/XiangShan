@@ -169,6 +169,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
     val l2_pf_enable = Output(Bool())
     val l1plus_error, icache_error, dcache_error = Output(new L1CacheErrorInfo)
+    val csrCtrl = Output(new CustomCSRCtrlIO)
+    //val perfEvents      = Input(new PerfEventsBundle(numCSRPCntHc))
+    val perfEvents = Vec(numPCntHc,(Input(UInt(6.W))))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -281,6 +284,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // TODO: connect rsPerf
   val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
   dontTouch(rsPerf)
+  exuBlocks(0).io.scheExtra.perfEvents <> ctrlBlock.io.perfEventsEu0
+  exuBlocks(1).io.scheExtra.perfEvents <> ctrlBlock.io.perfEventsEu1
+  memBlock.io.perfEventsPTW <> ptw.io.perfEvents
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -288,6 +294,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
+
+  csrioIn.perf.perfEventsFrontend <> frontend.io.perfEvents
+  csrioIn.perf.perfEventsCtrl     <> ctrlBlock.io.perfEvents
+  csrioIn.perf.perfEventsLsu      <> memBlock.io.perfEvents
+  csrioIn.perf.perfEventsHc       <> io.perfEvents
 
   csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B

@@ -67,6 +67,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     // extra
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
+    //val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   // IO for the scheduler
