@@ -36,10 +36,11 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val numBrSlot = if (shareTailSlot) numBr-1 else numBr
   val totalSlot = numBrSlot + 1
 
-  def BP_S1 = 1.U(2.W)
-  def BP_S2 = 2.U(2.W)
-  def BP_S3 = 3.U(2.W)
-
+  def BP_STAGES = (0 until 3).map(_.U(2.W))
+  def BP_S1 = BP_STAGES(0)
+  def BP_S2 = BP_STAGES(1)
+  def BP_S3 = BP_STAGES(2)
+  val numBpStages = BP_STAGES.length
   
   val debug = true
   val resetVector = 0x80000000L//TODO: set reset vec

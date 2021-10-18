@@ -1048,6 +1048,21 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val mbpCWrongs = mbpWrongs & commit_call_mask
   val mbpRWrongs = mbpWrongs & commit_ret_mask
 
+  val commit_pred_stage = RegNext(pred_stage(commPtr.value))
+
+  def pred_stage_map(src: UInt, name: String) = {
+    (0 until numBpStages).map(i =>
+      f"${name}_stage_${i+1}" -> PopCount(src.asBools.map(_ && commit_pred_stage === BP_STAGES(i)))
+    ).foldLeft(Map[String, UInt]())(_+_)
+  }
+
+  val mispred_stage_map      = pred_stage_map(mbpWrongs,  "mispredict")
+  val br_mispred_stage_map   = pred_stage_map(mbpBWrongs, "br_mispredict")
+  val jalr_mispred_stage_map = pred_stage_map(mbpIWrongs, "jalr_mispredict")
+  val correct_stage_map      = pred_stage_map(mbpRights,  "correct")
+  val br_correct_stage_map   = pred_stage_map(mbpBRights, "br_correct")
+  val jalr_correct_stage_map = pred_stage_map(mbpIRights, "jalr_correct")
+
   val update_valid = io.toBpu.update.valid
   def u(cond: Bool) = update_valid && cond
   val ftb_false_hit = u(update.false_hit)
@@ -1110,7 +1125,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     "ftb_modified_entry_always_taken" -> PopCount(ftb_modified_entry_always_taken)
   ) ++ ftb_init_entry_len_map ++ ftb_modified_entry_len_map ++ s1_entry_len_map ++
   s2_entry_len_map ++ s3_entry_len_map ++
-  to_ifu_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map
+  to_ifu_entry_len_map ++ commit_num_inst_map ++ ftq_occupancy_map ++
+  mispred_stage_map ++ br_mispred_stage_map ++ jalr_mispred_stage_map ++
+  correct_stage_map ++ br_correct_stage_map ++ jalr_correct_stage_map
 
   for((key, value) <- perfCountsMap) {
     XSPerfAccumulate(key, value)
