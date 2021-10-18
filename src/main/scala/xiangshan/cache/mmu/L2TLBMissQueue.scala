@@ -82,6 +82,8 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
 
 @chiselName
 class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
+  require(MSHRSize >= (2 + l2tlbParams.filterSize))
+
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
@@ -141,7 +143,10 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     Mux(to_wait, state_mem_waiting, // wait for the prev mem resp
     Mux(io.in.bits.l3.valid, state_addr_check, state_cache_high))))
   when (io.in.fire()) {
-    state(enq_ptr) := enq_state
+    // if prefetch req does not need mem access, just give it up.
+    // so there will be at most 1 + FilterSize entries that needs re-access page cache
+    // so 2 + FilterSize is enough to avoid dead-lock
+    state(enq_ptr) := Mux(from_pre(io.in.bits.source) && enq_state =/= state_addr_check, state_idle, enq_state)
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
