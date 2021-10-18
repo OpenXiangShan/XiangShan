@@ -21,10 +21,11 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
+import xiangshan.backend.fu.PMPReqBundle
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
@@ -57,6 +58,7 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
 
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
+  val af = Bool() // NOTE: if this is true, just raise af
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -74,7 +76,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pd = Bool() //dcacheable
 
   override def toPrintable: Printable = {
-    p"pf:${pf} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
+    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
   }
 }
 
@@ -142,12 +144,13 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     }
   }
 
-  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool) = {
+  def apply(ppn: UInt, level: UInt, perm: UInt, pf: Bool, af: Bool) = {
     this.level.map(_ := level(0))
     this.ppn := ppn
     // refill pagetable perm
     val ptePerm = perm.asTypeOf(new PtePermBundle)
     this.perm.pf:= pf
+    this.perm.af:= af
     this.perm.d := ptePerm.d
     this.perm.a := ptePerm.a
     this.perm.g := ptePerm.g
@@ -211,6 +214,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
                   else item.entry.ppn }
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.perm.pf := item.pf
+    this.perm.af := item.af
     this.perm.d := ptePerm.d
     this.perm.a := ptePerm.a
     this.perm.g := ptePerm.g
@@ -350,15 +354,22 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
-  val roqIdx = new RoqPtr
+  val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
+  val robIdx = new RobPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
     val isFirstIssue = Bool()
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} robIdx:${robIdx}"
   }
+}
+
+class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
+  val ld = Output(Bool())
+  val st = Output(Bool())
+  val instr = Output(Bool())
 }
 
 class TlbResp(implicit p: Parameters) extends TlbBundle {
@@ -366,16 +377,8 @@ class TlbResp(implicit p: Parameters) extends TlbBundle {
   val miss = Bool()
   val mmio = Bool()
   val excp = new Bundle {
-    val pf = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
-    val af = new Bundle {
-      val ld = Bool()
-      val st = Bool()
-      val instr = Bool()
-    }
+    val pf = new TlbExceptionBundle()
+    val af = new TlbExceptionBundle()
   }
   val ptwBack = Bool() // when ptw back, wake up replay rs's state
 
@@ -415,6 +418,7 @@ class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
+  val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
   override def cloneType: this.type = (new TlbIO(Width, q)).asInstanceOf[this.type]
 }
@@ -494,6 +498,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
+  val prefetch = Bool()
 
   def hit(vpn: UInt, allType: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
@@ -512,16 +517,17 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U) {
+  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
+    this.prefetch := prefetch
     this.level.map(_ := level)
   }
 
-  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U) = {
+  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, pte, level)
+    e.refill(vpn, pte, level, prefetch)
     e
   }
 
@@ -531,7 +537,8 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
     p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} " +
       (if (hasPerm) p"perm:${perm.getOrElse(0.U.asTypeOf(new PtePermBundle))} " else p"") +
-      (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"")
+      (if (hasLevel) p"level:${level.getOrElse(0.U)}" else p"") +
+      p"prefetch:${prefetch}"
   }
 }
 
@@ -542,6 +549,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
+  val prefetch = Bool()
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
 
   def tagClip(vpn: UInt) = {
@@ -557,12 +565,13 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
   }
 
-  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt) : PtwEntries = {
+  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
+    ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.ppns(i) := pte.ppn
@@ -582,6 +591,16 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   }
 }
 
+class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
+  val entries = new PtwEntries(num, tagLen, level, hasPerm)
+
+  private val encBits = eccCode.width(entries.getWidth)
+  private val eccBits = encBits - entries.getWidth
+  val ecc = UInt(eccBits.W)
+
+  override def cloneType: this.type = new PTWEntriesWithEcc(eccCode, num, tagLen, level, hasPerm).asInstanceOf[this.type]
+}
+
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W)
 
@@ -592,27 +611,34 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 
 class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
-  val pf  = Bool()
   val asid = UInt(AsidLength.W)
+  val pf = Bool()
+  val af = Bool()
 
-  def apply(pf: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid_now: UInt) = {
+
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid_now: UInt) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
-    this.pf := pf
+    this.entry.prefetch := DontCare
     this.asid := asid_now
+    this.pf := pf
+    this.af := af
   }
 
   override def toPrintable: Printable = {
-    p"entry:${entry} pf:${pf}"
+    p"entry:${entry} pf:${pf} af:${af}"
   }
 }
 
 class PtwIO(implicit p: Parameters) extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
-  val csr = Input(new TlbCsrBundle)
+  val csr = new Bundle {
+    val tlb = Input(new TlbCsrBundle)
+    val distribute_csr = Flipped(new DistributedCSRIO)
+  }
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

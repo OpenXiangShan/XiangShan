@@ -29,10 +29,9 @@ class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
 
 class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val flush = Input(Bool())
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    // set preg state to ready (write back regfile + roq walk)
+    // set preg state to ready (write back regfile + rob walk)
     val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val read = Vec(numReadPorts, new BusyTableReadIO)
@@ -53,10 +52,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   io.read.map(r => r.resp := !table(r.req))
 
   table := tableAfterAlloc
-
-  when(io.flush){
-    table := 0.U(NRPhyRegs.W)
-  }
 
   XSDebug(p"table    : ${Binary(table)}\n")
   XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")

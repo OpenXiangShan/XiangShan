@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheWordIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIOWithVaddr, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbRequestIO, TlbCmd}
 import difftest._
 
@@ -30,13 +30,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val in            = Flipped(Decoupled(new ExuInput))
     val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
-    val dcache        = new DCacheWordIO
+    val dcache        = new DCacheWordIOWithVaddr
     val dtlb          = new TlbRequestIO
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
-    val rsFeedback   = ValidIO(new RSFeedback)
+    val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val flush      = Input(Bool())
     val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
 
@@ -103,11 +102,12 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.rsFeedback.valid       := RegNext(RegNext(io.in.valid))
-  io.rsFeedback.bits.hit    := true.B
-  io.rsFeedback.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
-  io.rsFeedback.bits.flushState := DontCare
-  io.rsFeedback.bits.sourceType := DontCare
+  io.feedbackSlow.valid       := RegNext(RegNext(io.in.valid))
+  io.feedbackSlow.bits.hit    := true.B
+  io.feedbackSlow.bits.rsIdx  := RegEnable(io.rsIdx, io.in.valid)
+  io.feedbackSlow.bits.flushState := DontCare
+  io.feedbackSlow.bits.sourceType := DontCare
+  io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -115,7 +115,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
-    io.dtlb.req.bits.roqIdx := in.uop.roqIdx
+    io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
@@ -194,6 +194,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     ))
 
     io.dcache.req.bits.addr := paddr
+    io.dcache.req.bits.vaddr := in.src(0) // vaddr
     io.dcache.req.bits.data := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
@@ -272,7 +273,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     data_valid := false.B
   }
 
-  when(io.redirect.valid || io.flush){
+  when (io.redirect.valid) {
     atom_override_xtval := false.B
   }
 

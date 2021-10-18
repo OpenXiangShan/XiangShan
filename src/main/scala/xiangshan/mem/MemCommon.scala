@@ -22,7 +22,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 
@@ -67,6 +67,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
 
   // For debug usage
   val isFirstIssue = Bool()
+  //softprefetch
+  val isSoftPrefetch = Bool() 
+  //softprefetch except
+  val isSoftPreExcept = Bool()
+  val isSoftPremmio = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {
@@ -81,16 +86,16 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
-  
+
   val forwardMaskFast = Input(Vec(8, Bool())) // resp to load_s1
   val forwardMask = Input(Vec(8, Bool())) // resp to load_s2
   val forwardData = Input(Vec(8, UInt(8.W))) // resp to load_s2
-  
+
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
   val sqIdx = Output(new SqPtr)
-  
+
   // dataInvalid suggests store to load forward found forward should happen,
-  // but data is not available for now. If dataInvalid, load inst should 
+  // but data is not available for now. If dataInvalid, load inst should
   // be replayed from RS. Feedback type should be RSFeedbackType.dataInvalid
   val dataInvalid = Input(Bool()) // Addr match, but data is not valid for now
 
@@ -112,4 +117,11 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
+  val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
+}
+
+// // Bundle for load / store wait waking up
+class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
+  val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 }

@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
 /** Bridge TLB is the bridge between L0 TLB(the old, normal TLB) and L2TLB

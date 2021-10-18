@@ -19,6 +19,8 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util._
+import utils.MaskedRegMap.WritableMask
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -140,7 +142,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     }
   }
   val ctrlInfo = new Bundle {
-    val roqFull   = Bool()
+    val robFull   = Bool()
     val intdqFull = Bool()
     val fpdqFull  = Bool()
     val lsdqFull  = Bool()
@@ -150,7 +152,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     val lqFull = Bool()
     val dcacheMSHRFull = Bool()
   }
-  
+
   val cacheInfo = new Bundle {
     val l2MSHRFull = Bool()
     val l3MSHRFull = Bool()
@@ -187,9 +189,10 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
+  // distributed csr w
 }
 
-class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst
 {
   val csrio = IO(new CSRFileIO)
 
@@ -380,15 +383,42 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
-  val pmpcfg0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpcfg3 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr0 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr1 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr2 = RegInit(UInt(XLEN.W), 0.U)
-  val pmpaddr3 = RegInit(UInt(XLEN.W), 0.U)
+  // PMP Mapping
+  val pmp = Wire(Vec(NumPMP, new PMPBase()))
+  val pmpMapping = if (NumPMP > 0) { // TODO: remove duplicate codes
+    val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
+    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
 
+    /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
+    val cfgMerged = RegInit(VecInit(Seq.fill(NumPMP / pmpCfgPerCSR)(0.U(XLEN.W))))
+    val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
+    val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
+    for (i <- pmp.indices) {
+      pmp(i).gen(cfgs(i), addr(i))
+    }
+
+    val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
+      MaskedRegMap(
+        addr = PmpcfgBase + pmpCfgIndex(i),
+        reg = cfgMerged(i/pmpCfgPerCSR),
+        wmask = WritableMask,
+        wfn = new PMPConfig().write_cfg_vec
+      ))
+    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
+    val addr_mapping = (0 until NumPMP).map(i => {Map(
+      MaskedRegMap(
+        addr = PmpaddrBase + i,
+        reg = addr(i),
+        wmask = WritableMask,
+        wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1)) else pmp(i).write_addr },
+        rmask = WritableMask,
+        rfn = new PMPBase().read_addr(pmp(i).cfg)
+      ))
+    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
+    cfg_mapping ++ addr_mapping
+  } else {
+    Map()
+  }
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
@@ -443,7 +473,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   val slvpredctl = RegInit(UInt(XLEN.W), "h70".U) // default reset period: 2^17
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
-  csrio.customCtrl.waittable_timeout := slvpredctl(8, 4)
+  csrio.customCtrl.storeset_wait_store := slvpredctl(2)
+  csrio.customCtrl.storeset_no_fast_wakeup := slvpredctl(3)
+  csrio.customCtrl.lvpred_timeout := slvpredctl(8, 4)
 
   // smblockctl: memory block configurations
   // bits 0-3: store buffer flush threshold (default: 8 entries)
@@ -455,6 +487,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+
   csrio.tlb := tlbBundle
 
   // User-Level CSRs
@@ -542,8 +575,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
   val ibufFull  = RegInit(0.U(XLEN.W))
   ibufFull := ibufFull + RegNext(csrio.perf.frontendInfo.ibufFull)
-  val roqFull   = RegInit(0.U(XLEN.W))
-  roqFull := roqFull + RegNext(csrio.perf.ctrlInfo.roqFull)
+  val robFull   = RegInit(0.U(XLEN.W))
+  robFull := robFull + RegNext(csrio.perf.ctrlInfo.robFull)
   val intdqFull = RegInit(0.U(XLEN.W))
   intdqFull := intdqFull + RegNext(csrio.perf.ctrlInfo.intdqFull)
   val fpdqFull  = RegInit(0.U(XLEN.W))
@@ -636,24 +669,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
     MaskedRegMap(Dscratch1, dscratch1)
   )
 
-  // PMP is unimplemented yet
-  val pmpMapping = Map(
-    MaskedRegMap(Pmpcfg0, pmpcfg0),
-    MaskedRegMap(Pmpcfg1, pmpcfg1),
-    MaskedRegMap(Pmpcfg2, pmpcfg2),
-    MaskedRegMap(Pmpcfg3, pmpcfg3),
-    MaskedRegMap(PmpaddrBase + 0, pmpaddr0),
-    MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
-    MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
-    MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
-  )
-
   var perfCntMapping = Map(
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
     MaskedRegMap(Mhpmevent3, ibufFull),
-    MaskedRegMap(Mhpmevent4, roqFull),
+    MaskedRegMap(Mhpmevent4, robFull),
     MaskedRegMap(Mhpmevent5, intdqFull),
     MaskedRegMap(Mhpmevent6, fpdqFull),
     MaskedRegMap(Mhpmevent7, lsdqFull),
@@ -670,6 +691,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   //   perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
+
+
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
@@ -714,6 +737,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.uop.cf := cfOut
   io.out.bits.uop.ctrl.flushPipe := flushPipe
+
+  // send distribute csr a w signal
+  csrio.customCtrl.distribute_csr.w.valid := wen && permitted
+  csrio.customCtrl.distribute_csr.w.bits.data := wdata
+  csrio.customCtrl.distribute_csr.w.bits.addr := addr
 
   // Fix Mip/Sip write
   val fixMapping = Map(
@@ -876,7 +904,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
   val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
-  // send interrupt information to ROQ
+  // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = Cat(debugIntr, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
@@ -960,7 +988,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
   val retTargetReg = Reg(retTarget.cloneType)
-  when (io.flushIn) {
+  when (io.redirectIn.valid) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B
@@ -981,7 +1009,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst
 
     when (raiseDebugExceptionIntr) {
       when (raiseDebugIntr) {
-        debugModeNew := true.B 
+        debugModeNew := true.B
         mstatusNew.mprv := false.B
         dpc := SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
         dcsrNew.cause := 1.U

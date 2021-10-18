@@ -18,6 +18,7 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.{IsLookupable, instantiable, public}
 import chisel3.util._
 import utils.XSPerfAccumulate
 import xiangshan._
@@ -56,8 +57,9 @@ case class ExuConfig
   blockName: String, // NOTE: for perf counter
   fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
-  wbFpPriority: Int
-) {
+  wbFpPriority: Int,
+  extendsExu: Boolean = true
+) extends IsLookupable {
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
 
   val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
@@ -98,21 +100,22 @@ case class ExuConfig
   }
 }
 
-abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModule {
+@instantiable
+abstract class Exu(cfg: ExuConfig)(implicit p: Parameters) extends XSModule {
+  @public val config = cfg
 
-  val io = IO(new Bundle() {
+  @public val io = IO(new Bundle() {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
     val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val out = DecoupledIO(new ExuOutput)
   })
 
-  val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
-  val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
-  val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
-  val fmaMid = if (config == FmacExeUnitCfg) Some(IO(new FMAMidResultIO)) else None
-  val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
+  @public val csrio = if (config == JumpCSRExeUnitCfg) Some(IO(new CSRFileIO)) else None
+  @public val fenceio = if (config == JumpCSRExeUnitCfg) Some(IO(new FenceIO)) else None
+  @public val frm = if (config == FmacExeUnitCfg || config == FmiscExeUnitCfg) Some(IO(Input(UInt(3.W)))) else None
+  @public val fmaMid = if (config == FmacExeUnitCfg) Some(IO(new FMAMidResultIO)) else None
+  @public val stData = if (config == StdExeUnitCfg) Some(IO(ValidIO(new StoreDataBundle))) else None
 
   val functionUnits = config.fuConfigs.map(cfg => {
     val mod = Module(cfg.fuGen(p))
@@ -133,12 +136,10 @@ abstract class Exu(val config: ExuConfig)(implicit p: Parameters) extends XSModu
 
   val fuInReady = config.fuConfigs.zip(fuIn).zip(functionUnits.zip(fuSel)).map { case ((fuCfg, in), (fu, sel)) =>
     fu.io.redirectIn := io.redirect
-    fu.io.flushIn := io.flush
 
     if (fuCfg.hasInputBuffer) {
       val buffer = Module(new InputBuffer(8))
       buffer.io.redirect <> io.redirect
-      buffer.io.flush <> io.flush
       buffer.io.in.valid := in.valid && sel
       buffer.io.in.bits.uop := in.bits.uop
       buffer.io.in.bits.src := in.bits.src
