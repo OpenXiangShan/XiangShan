@@ -21,7 +21,7 @@ import chipsalliance.rocketchip.config.Parameters
 import xiangshan.{SfenceBundle, XSModule}
 import utils._
 
-class L2TlbPrefetchIO(implicit p: Parameters) extends PtwBundle {
+class L2TlbPrefetchIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val in = Flipped(ValidIO(new Bundle {
     val vpn = UInt(vpnLen.W)
   }))
@@ -29,14 +29,14 @@ class L2TlbPrefetchIO(implicit p: Parameters) extends PtwBundle {
     val vpn = UInt(vpnLen.W)
     val source = UInt(bSourceWidth.W)
   })
-  val sfence = Input(new SfenceBundle())
 }
 
 class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TlbPrefetchIO())
 
+  val flush = io.sfence.valid || io.csr.satp.changed
   val next_line = RegEnable(get_next_line(io.in.bits.vpn), io.in.valid)
-  val v = ValidHold(io.in.valid && !io.sfence.valid, io.out.fire(), io.sfence.valid)
+  val v = ValidHold(io.in.valid && !flush, io.out.fire(), flush)
 
   io.out.valid := v
   io.out.bits.vpn := next_line

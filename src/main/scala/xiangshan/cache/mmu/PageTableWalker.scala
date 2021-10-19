@@ -29,11 +29,10 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 /* ptw finite state machine, the actual page table walker
  */
-class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
+class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
-    val source = UInt(bSourceWidth.W)
+    val req_info = new L2TlbInnerBundle()
     val l1Hit = Bool()
-    val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
   val resp = DecoupledIO(new Bundle {
@@ -53,12 +52,9 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
     val resp = Flipped(new PMPRespBundle())
   }
 
-  val csr = Input(new TlbCsrBundle)
-  val sfence = Input(new SfenceBundle)
   val refill = Output(new Bundle {
-    val vpn = UInt(vpnLen.W)
+    val req_info = new L2TlbInnerBundle()
     val level = UInt(log2Up(Level).W)
-    val source = UInt(bSourceWidth.W)
   })
 }
 
@@ -69,6 +65,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val sfence = io.sfence
   val mem = io.mem
   val satp = io.csr.satp
+  val flush = io.sfence.valid || io.csr.satp.changed
 
   val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(5)
   val state = RegInit(s_idle)
@@ -93,7 +90,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
         level := Mux(req.l1Hit, 1.U, 0.U)
         af_level := Mux(req.l1Hit, 1.U, 0.U)
         ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
-        vpn := io.req.bits.vpn
+        vpn := io.req.bits.req_info.vpn
         l1Hit := req.l1Hit
         accessFault := false.B
       }
@@ -151,14 +148,14 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
   val find_pte = is_pte
   val to_find_pte = level === 1.U && !is_pte
-  val source = RegEnable(io.req.bits.source, io.req.fire())
+  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
   io.resp.valid := state === s_check_pte && (find_pte || accessFault)
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn, satp.asid)
 
   io.mq.valid := state === s_check_pte && to_find_pte && !accessFault
-  io.mq.bits.source := source
-  io.mq.bits.vpn := vpn
+  io.mq.bits.req_info.source := source
+  io.mq.bits.req_info.vpn := vpn
   io.mq.bits.l3.valid := true.B
   io.mq.bits.l3.bits := memPte.ppn
 
@@ -176,16 +173,16 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   mem.req.bits.addr := mem_addr
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
-  io.refill.vpn := vpn
+  io.refill.req_info.vpn := vpn
   io.refill.level := level
-  io.refill.source := source
+  io.refill.req_info.source := source
 
   XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
 
   // perf
   XSPerfAccumulate("fsm_count", io.req.fire())
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.source === i.U)
+    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
   }
   XSPerfAccumulate("fsm_busy", state =/= s_idle)
   XSPerfAccumulate("fsm_idle", state === s_idle)

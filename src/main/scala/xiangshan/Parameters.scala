@@ -137,6 +137,7 @@ case class XSCoreParameters
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
   RefillSize: Int = 512,
+  MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -175,7 +176,6 @@ case class XSCoreParameters
     normalNWays = 64,
     superNWays = 4,
   ),
-  useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPMP: Int = 16, // 0 or 16 or 64
   NumPerfCounters: Int = 16,
@@ -310,9 +310,9 @@ trait HasXSParameter {
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnableFastForward = coreParams.EnableFastForward
   val RefillSize = coreParams.RefillSize
+  val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
-  val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

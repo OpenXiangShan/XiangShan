@@ -260,12 +260,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     assert(this.getWidth == XLEN)
   }
 
-  class SatpStruct extends Bundle {
-    val mode = UInt(4.W)
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
-  }
-
   class Interrupt extends Bundle {
 //  val d = Output(Bool())    // Debug
     val e = new Priv
@@ -486,7 +480,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.move_elim_enable := srnctl(0)
 
   val tlbBundle = Wire(new TlbCsrBundle)
-  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+  tlbBundle.satp.apply(satp)
 
   csrio.tlb := tlbBundle
 
