@@ -64,8 +64,9 @@ case class L2TLBParameters
   spReplacer: Option[String] = Some("plru"),
   // dtlb filter
   filterSize: Int = 8,
-  // miss queue
-  missQueueBaseSize: Int = 1 + 8,
+  // miss queue, add more entries than 'must require'
+  // 0 for easier bug trigger, please set as big as u can, 8 maybe
+  missqueueExtendSize: Int = 0,
   // way size
   blockBytes: Int = 64,
   // prefetch
@@ -144,8 +145,9 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
 
-  val MSHRSize =  { if (l2tlbParams.enablePrefetch) l2tlbParams.missQueueBaseSize + l2tlbParams.filterSize
-    else l2tlbParams.missQueueBaseSize }
+  // miss queue
+  val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
+  val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
   val MemReqWidth = MSHRSize + 1
   val FsmReqID = MSHRSize
   val bMemID = log2Up(MSHRSize + 1)
