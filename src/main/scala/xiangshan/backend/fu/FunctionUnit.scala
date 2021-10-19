@@ -73,7 +73,6 @@ class FunctionUnitIO(val len: Int)(implicit p: Parameters) extends XSBundle {
   val out = DecoupledIO(new FuOutput(len))
 
   val redirectIn = Flipped(ValidIO(new Redirect))
-  val flushIn = Input(Bool())
 }
 
 abstract class FunctionUnit(len: Int = 64)(implicit p: Parameters) extends XSModule {
@@ -102,7 +101,7 @@ trait HasPipelineReg {
 
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
-  val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.robIdx.needFlush(io.redirectIn, io.flushIn))
+  val flushVec = validVec.zip(uopVec).map(x => x._1 && x._2.robIdx.needFlush(io.redirectIn))
 
   for (i <- 0 until latency - 1) {
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)

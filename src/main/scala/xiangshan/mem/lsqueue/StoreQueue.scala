@@ -55,7 +55,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val io = IO(new Bundle() {
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write commited store to sbuffer
@@ -159,7 +158,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !(io.brqRedirect.valid || io.flush)) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -183,7 +182,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val nextIssuePtr = issuePtrExt + PriorityEncoder(VecInit(issueLookup.map(!_) :+ true.B))
   issuePtrExt := nextIssuePtr
 
-  when (io.brqRedirect.valid || io.flush) {
+  when (io.brqRedirect.valid) {
     issuePtrExt := Mux(
       isAfter(cmtPtrExt(0), deqPtrExt(0)),
       cmtPtrExt(0),
@@ -519,7 +518,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // invalidate sq term using robIdx
   val needCancel = Wire(Vec(StoreQueueSize, Bool()))
   for (i <- 0 until StoreQueueSize) {
-    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect, io.flush) && allocated(i) && !commited(i)
+    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when (needCancel(i)) {
         allocated(i) := false.B
     }
@@ -529,11 +528,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * update pointers
     */
   val lastCycleRedirect = RegNext(io.brqRedirect.valid)
-  val lastCycleFlush = RegNext(io.flush)
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect || lastCycleFlush) {
+  val enqNumber = Mux(io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
+  when (lastCycleRedirect) {
     // we recover the pointers in the next cycle after redirect
     enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
   }.otherwise {

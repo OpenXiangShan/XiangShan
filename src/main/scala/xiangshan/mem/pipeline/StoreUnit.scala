@@ -180,7 +180,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Input(new PMPRespBundle())
@@ -200,16 +199,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.feedbackSlow
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
-  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout
 

@@ -107,7 +107,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // in
     val issue = Vec(numIn, Flipped(DecoupledIO(new ExuInput)))
     // out
@@ -137,7 +136,6 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
 
   for ((exu, i) <- exeUnits.zipWithIndex) {
     exu.io.redirect <> io.redirect
-    exu.io.flush <> io.flush
 
     if (exu.csrio.isDefined) {
       exu.csrio.get <> io.extra.csrio.get

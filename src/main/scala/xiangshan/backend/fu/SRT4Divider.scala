@@ -437,8 +437,8 @@ class SRT4Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len)
 
   val divDataModule = Module(new SRT4DividerDataModule(len))
 
-  val kill_w = uop.robIdx.needFlush(io.redirectIn, io.flushIn)
-  val kill_r = !divDataModule.io.in_ready && uopReg.robIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill_w = uop.robIdx.needFlush(io.redirectIn)
+  val kill_r = !divDataModule.io.in_ready && uopReg.robIdx.needFlush(io.redirectIn)
 
   divDataModule.io.src(0) := io.in.bits.src(0)
   divDataModule.io.src(1) := io.in.bits.src(1)

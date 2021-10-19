@@ -222,7 +222,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // dispatch and issue ports
     // val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
@@ -243,7 +242,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
   if (readIntState.nonEmpty) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
-    busyTable.io.flush := io.flush
     busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
       pregAlloc.valid := allocReq.isInt
       pregAlloc.bits := allocReq.preg
@@ -262,7 +260,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val numBusyTableRead = readFpState.length - numInFpStateRead
     if (numBusyTableRead > 0) {
       val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
-      busyTable.io.flush := io.flush
       busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
         pregAlloc.valid := allocReq.isFp
         pregAlloc.bits := allocReq.preg
@@ -338,7 +335,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
     rs.io.redirect <> io.redirect
     rs.io.redirect <> io.redirect
-    rs.io.flush <> io.flush
 
     val issueWidth = rs.io.deq.length
     rs.io.deq <> io.issue.slice(issueIdx, issueIdx + issueWidth)

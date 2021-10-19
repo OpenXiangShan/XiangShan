@@ -33,11 +33,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
   val stage2Redirect = Valid(new Redirect)
   val stage3Redirect = ValidIO(new Redirect)
-  val robFlush = Valid(new Bundle {
-    val ftqIdx = Output(new FtqPtr)
-    val ftqOffset = Output(UInt(log2Up(PredictWidth).W))
-    val replayInst = Output(Bool()) // not used for now
-  })
+  val robFlush = ValidIO(new Redirect)
 }
 
 class RedirectGenerator(implicit p: Parameters) extends XSModule
@@ -100,7 +96,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val jumpOut = io.exuMispredict.head
   val allRedirect = VecInit(io.exuMispredict.map(x => getRedirect(x)) :+ io.loadReplay)
   val oldestOneHot = selectOldestRedirect(allRedirect)
-  val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(io.stage2Redirect, io.flush)))
+  val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(io.stage2Redirect) || io.flush))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map{ case (v, f) => v && !f }).asUInt.orR
   val oldestExuOutput = Mux1H(io.exuMispredict.indices.map(oldestOneHot), io.exuMispredict)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
@@ -206,7 +202,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val writeback = Vec(NRIntWritePorts + NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
     // redirect out
     val redirect = ValidIO(new Redirect)
-    val flush = Output(Bool())
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
@@ -223,14 +218,30 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val robWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
   val rob = Module(new Rob(robWbSize))
 
-  val stage2Redirect = redirectGen.io.stage2Redirect
-  val stage3Redirect = redirectGen.io.stage3Redirect
-  val flush = rob.io.flushOut.valid
-  val flushReg = RegNext(flush)
+  val robPcRead = io.frontend.fromFtq.getRobFlushPcRead
+  val flushPC = robPcRead(rob.io.flushOut.bits.ftqIdx, rob.io.flushOut.bits.ftqOffset)
+
+  val flushRedirect = Wire(Valid(new Redirect))
+  flushRedirect.valid := RegNext(rob.io.flushOut.valid)
+  flushRedirect.bits := RegEnable(rob.io.flushOut.bits, rob.io.flushOut.valid)
+  flushRedirect.bits.cfiUpdate.target := Mux(io.robio.toCSR.isXRet || rob.io.exception.valid,
+    io.robio.toCSR.trapTarget,
+    Mux(flushRedirect.bits.flushItself(),
+      flushPC, // replay inst
+      flushPC + 4.U // flush pipe
+    )
+  )
+
+  val flushRedirectReg = Wire(Valid(new Redirect))
+  flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
+  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
+
+  val stage2Redirect = Mux(flushRedirect.valid, flushRedirect, redirectGen.io.stage2Redirect)
+  val stage3Redirect = Mux(flushRedirectReg.valid, flushRedirectReg, redirectGen.io.stage3Redirect)
 
   val exuRedirect = io.exuRedirect.map(x => {
     val valid = x.valid && x.bits.redirectValid
-    val killedByOlder = x.bits.uop.robIdx.needFlush(stage2Redirect, flushReg)
+    val killedByOlder = x.bits.uop.robIdx.needFlush(stage2Redirect)
     val delayed = Wire(Valid(new ExuOutput))
     delayed.valid := RegNext(valid && !killedByOlder, init = false.B)
     delayed.bits := RegEnable(x.bits, x.valid)
@@ -238,7 +249,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   })
   val loadReplay = Wire(Valid(new Redirect))
   loadReplay.valid := RegNext(io.memoryViolation.valid &&
-    !io.memoryViolation.bits.robIdx.needFlush(stage2Redirect, flushReg),
+    !io.memoryViolation.bits.robIdx.needFlush(stage2Redirect),
     init = false.B
   )
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
@@ -246,7 +257,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
-  redirectGen.io.flush := flushReg
+  redirectGen.io.flush := RegNext(rob.io.flushOut.valid)
 
   for(i <- 0 until CommitWidth){
     io.frontend.toFtq.rob_commits(i).valid := rob.io.commits.valid(i) && !rob.io.commits.isWalk
@@ -254,30 +265,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   }
   io.frontend.toFtq.stage2Redirect <> stage2Redirect
   io.frontend.toFtq.robFlush <> RegNext(rob.io.flushOut)
-
-  val robPcRead = io.frontend.fromFtq.getRobFlushPcRead
-  val flushPC = robPcRead(rob.io.flushOut.bits.ftqIdx, rob.io.flushOut.bits.ftqOffset)
-
-  val flushRedirect = Wire(Valid(new Redirect))
-  flushRedirect.valid := flushReg
-  flushRedirect.bits := DontCare
-  flushRedirect.bits.ftqIdx := RegEnable(rob.io.flushOut.bits.ftqIdx, flush)
-  flushRedirect.bits.interrupt := true.B
-  flushRedirect.bits.cfiUpdate.target := Mux(io.robio.toCSR.isXRet || rob.io.exception.valid,
-    io.robio.toCSR.trapTarget,
-    Mux(RegEnable(rob.io.flushOut.bits.replayInst, flush),
-      flushPC, // replay inst
-      flushPC + 4.U // flush pipe
-    )
-  )
-  when (flushRedirect.valid && RegEnable(rob.io.flushOut.bits.replayInst, flush)) {
-    XSDebug("replay inst (%x) from rob\n", flushPC);
-  }
-  val flushRedirectReg = Wire(Valid(new Redirect))
-  flushRedirectReg.valid := RegNext(flushRedirect.valid, init = false.B)
-  flushRedirectReg.bits := RegEnable(flushRedirect.bits, enable = flushRedirect.valid)
-
-  io.frontend.toFtq.stage3Redirect := Mux(flushRedirectReg.valid, flushRedirectReg, stage3Redirect)
+  io.frontend.toFtq.stage3Redirect := stage3Redirect
 
   decode.io.in <> io.frontend.cfVec
   // currently, we only update wait table when isReplay
@@ -286,7 +274,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   decode.io.memPredUpdate(1).valid := false.B
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
-  rat.io.flush := flushReg
   rat.io.robCommits := rob.io.commits
   for ((r, i) <- rat.io.intReadPorts.zipWithIndex) {
     val raddr = decode.io.out(i).bits.ctrl.lsrc.take(2) :+ decode.io.out(i).bits.ctrl.ldest
@@ -306,24 +293,20 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   rat.io.debug_fp_rat <> io.debug_fp_rat
 
   // pipeline between decode and rename
-  val redirectValid = stage2Redirect.valid || flushReg
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready,
-      flushReg || io.frontend.toFtq.stage3Redirect.valid)
+      stage2Redirect.valid || stage3Redirect.valid)
   }
 
   rename.io.redirect <> stage2Redirect
-  rename.io.flush := flushReg
   rename.io.robCommits <> rob.io.commits
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), redirectValid)
+    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
-  dispatch.io.renameBypass := RegEnable(rename.io.renameBypass, rename.io.out(0).fire)
   dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
 
-  dispatch.io.flush <> flushReg
   dispatch.io.redirect <> stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.enqLsq <> io.enqLsq
@@ -336,15 +319,14 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.singleStep := false.B
 
   intDq.io.redirect <> stage2Redirect
-  intDq.io.flush <> flushReg
   fpDq.io.redirect <> stage2Redirect
-  fpDq.io.flush <> flushReg
   lsDq.io.redirect <> stage2Redirect
-  lsDq.io.flush <> flushReg
 
   io.dispatch <> intDq.io.deq ++ lsDq.io.deq ++ fpDq.io.deq
 
-  val jumpInst = io.dispatch(0).bits
+  val pingpong = RegInit(false.B)
+  pingpong := !pingpong
+  val jumpInst = Mux(pingpong && (exuParameters.AluCnt > 2).B, io.dispatch(2).bits, io.dispatch(0).bits)
   val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
   io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
   val jumpTargetRead = io.frontend.fromFtq.target_read
@@ -354,13 +336,12 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
   val timer = GTimer()
   for((rob_wb, wb) <- rob.io.exeWbResults.zip(exeWbResults)) {
-    rob_wb.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(stage2Redirect, flushReg))
+    rob_wb.valid := RegNext(wb.valid && !wb.bits.uop.robIdx.needFlush(stage2Redirect))
     rob_wb.bits := RegNext(wb.bits)
     rob_wb.bits.uop.debugInfo.writebackTime := timer
   }
 
   io.redirect <> stage2Redirect
-  io.flush <> flushReg
 
   // rob to int block
   io.robio.toCSR <> rob.io.csr

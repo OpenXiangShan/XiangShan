@@ -27,6 +27,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import device.RAMHelper
 import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import scala.math.max
 
 // DCache specific parameters
 case class DCacheParameters
@@ -102,6 +103,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
+
+  require(isPow2(cfg.nMissEntries))
+  require(isPow2(cfg.nReleaseEntries))
+  val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
+  val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
 
   // banked dcache support
   val DCacheSets = cacheParams.nSets
@@ -313,7 +319,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
-      sourceId = IdRange(0, cfg.nMissEntries + cfg.nReleaseEntries + 1),
+      sourceId = IdRange(0, nEntries + 1),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = cacheParams.reqFields,
@@ -554,10 +560,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // refill pipe
-  val mps1 = mpStatus.s1
-  val refillShouldBeBlocked = mps1.valid &&
-    mps1.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
-    mps1.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+  val refillShouldBeBlocked = Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+    s.valid &&
+      s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
+      s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+  )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
   io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
 
