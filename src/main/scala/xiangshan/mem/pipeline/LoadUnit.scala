@@ -77,7 +77,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
   XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
-  val isSoftPrefetch = Wire(Bool()) 
+  val isSoftPrefetch = Wire(Bool())
   isSoftPrefetch := s0_uop.ctrl.isORI //it's a ORI but it exists in ldu, which means it's a softprefecth
   val isSoftPrefetchRead = Wire(Bool())
   val isSoftPrefetchWrite = Wire(Bool())
@@ -100,7 +100,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   }.elsewhen (isSoftPrefetchWrite) {
     io.dcacheReq.bits.cmd  := MemoryOpConstants.M_PFW
   }.otherwise {
-    io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD   
+    io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   }
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
@@ -130,7 +130,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.isFirstIssue := io.isFirstIssue
-  io.out.bits.isSoftPrefetch := isSoftPrefetch 
+  io.out.bits.isSoftPrefetch := isSoftPrefetch
 
   io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
 
@@ -210,11 +210,11 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
   io.rsFeedback.bits.sourceType := RSFeedbackType.bankConflict
 
-  io.out.valid := io.in.valid && !s1_bank_conflict // if bank conflict, load inst will be canceled immediately 
+  io.out.valid := io.in.valid && !s1_bank_conflict // if bank conflict, load inst will be canceled immediately
   io.out.bits.paddr := s1_paddr
   io.out.bits.tlbMiss := s1_tlb_miss
 
-  // current ori test will cause the case of ldest == 0, below will be modifeid in the future. 
+  // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
   // af & pf exception were modified
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp.af.ld
@@ -277,7 +277,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   val s2_forward_fail = io.lsq.matchInvalid || io.sbuffer.matchInvalid
   // assert(!s2_forward_fail)
-  io.dcache_kill := io.in.valid && (io.pmpResp.ld || io.pmpResp.mmio)
+  io.dcache_kill := false.B // move pmp resp kill to outside
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid) && (!isSoftPreExcept) && (!isSoftPremmio)), "DCache response got lost")
@@ -335,7 +335,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     when(io.in.bits.isSoftPrefetch) {
       io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !s2_cache_miss_enter && !isSoftPreExcept && !isSoftPremmio
     }.otherwise {
-      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail 
+      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail
     }
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
@@ -445,7 +445,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 
-  io.dcache.s2_kill <> load_s2.io.dcache_kill
+  io.dcache.s2_kill := load_s2.io.dcache_kill || (io.pmp.ld || io.pmp.mmio) // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
