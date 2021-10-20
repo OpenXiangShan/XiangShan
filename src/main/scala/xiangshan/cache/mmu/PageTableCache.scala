@@ -143,6 +143,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   l3AccessPerf.map(_ := false.B)
   spAccessPerf.map(_ := false.B)
 
+  val cache_read_valid = OneCycleValid(first_fire, sfence.valid)
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
@@ -150,7 +151,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
     val hitPre = ParallelPriorityMux(hitVec zip l1.map(_.prefetch))
-    val hit = ParallelOR(hitVec) && second_valid
+    val hit = ParallelOR(hitVec) && cache_read_valid
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
 
@@ -180,7 +181,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
-    val hit = ParallelOR(hitVec) && second_valid
+    val hit = ParallelOR(hitVec) && cache_read_valid && RegNext(l2.io.r.req.ready, init = false.B)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U))
 
     val eccError = ecc.decode(Cat(hitWayEcc, hitWayData.asUInt())).error
@@ -216,7 +217,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
-    val hit = ParallelOR(hitVec) && second_valid
+    val hit = ParallelOR(hitVec) && cache_read_valid && RegNext(l3.io.r.req.ready, init = false.B)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U))
 
     val eccError = ecc.decode(Cat(hitWayEcc, hitWayData.asUInt())).error
@@ -247,7 +248,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(first_req.vpn) && spv(i) }
     val hitVec = hitVecT.map(RegEnable(_, first_fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
-    val hit = ParallelOR(hitVec) && second_valid
+    val hit = ParallelOR(hitVec) && cache_read_valid
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
 
