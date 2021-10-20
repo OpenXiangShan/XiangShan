@@ -166,6 +166,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val loadViolationQueryReq = Decoupled(new LoadViolationQueryReq)
     val rsFeedback = ValidIO(new RSFeedback)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val needLdVioCheckRedo = Output(Bool())
   })
 
   val isSoftPrefetch = io.in.bits.isSoftPrefetch
@@ -226,6 +227,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   val needLdVioCheckRedo = io.loadViolationQueryReq.valid &&
     !io.loadViolationQueryReq.ready &&
     RegNext(io.csrCtrl.ldld_vio_check)
+  io.needLdVioCheckRedo := needLdVioCheckRedo
   io.rsFeedback.valid := io.in.valid && (s1_bank_conflict || needLdVioCheckRedo)
   io.rsFeedback.bits.hit := false.B // we have found s1_bank_conflict / re do ld-ld violation check
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
@@ -514,7 +516,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // feedback bank conflict to rs
   io.feedbackFast.bits := load_s1.io.rsFeedback.bits
   io.feedbackFast.valid := load_s1.io.rsFeedback.valid
+  // If replay is reported at load_s1, inst will be canceled (will not enter load_s2),
+  // in that case: 
+  // * replay should not be reported twice
   assert(!(RegNext(RegNext(io.feedbackFast.valid)) && io.feedbackSlow.valid))
+  // * io.fastUop.valid should not be reported
+  assert(!RegNext(io.feedbackFast.valid && io.fastUop.valid))
 
   // pre-calcuate sqIdx mask in s0, then send it to lsq in s1 for forwarding
   val sqIdxMaskReg = RegNext(UIntToMask(load_s0.io.in.bits.uop.sqIdx.value, StoreQueueSize))
@@ -528,7 +535,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
     load_s1.io.in.valid && // valid laod request
     !load_s1.io.dcacheKill && // not mmio or tlb miss
-    !io.lsq.forward.dataInvalidFast // forward failed
+    !io.lsq.forward.dataInvalidFast && // forward failed
+    !load_s1.io.needLdVioCheckRedo // load-load violation check: load paddr cam struct hazard
   io.fastUop.bits := load_s1.io.out.bits.uop
 
   XSDebug(load_s0.io.out.valid,
