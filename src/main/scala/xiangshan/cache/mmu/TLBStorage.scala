@@ -50,7 +50,7 @@ class TLBFA(
     val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
 
     val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 })
+    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
 
     hitVec.suggestName("hitVec")
 
@@ -163,7 +163,7 @@ class TLBSA(
 
     val data = entries.io.r.resp.data
     val hitVec = VecInit(data.zip(vidx).map { case (e, vi) => e.hit(vpn_reg, io.csr.satp.asid) && vi })
-    resp.bits.hit := Cat(hitVec).orR
+    resp.bits.hit := Cat(hitVec).orR && RegNext(req.ready, init = false.B)
     resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
     resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
     resp.bits.hitVec := hitVec.asUInt
