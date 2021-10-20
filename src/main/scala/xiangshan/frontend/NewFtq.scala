@@ -888,7 +888,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
-  may_have_stall_from_bpu := can_commit_cfi.valid && !to_bpu_hit && !RegNext(may_have_stall_from_bpu)
+  may_have_stall_from_bpu := can_commit_cfi.valid && !to_bpu_hit && !may_have_stall_from_bpu
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit

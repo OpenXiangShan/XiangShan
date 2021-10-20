@@ -196,50 +196,58 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
-      val req_pc = Flipped(DecoupledIO(UInt(VAddrBits.W)))
-      val read_resp = Output(new FTBEntry)
       val s1_fire = Input(Bool())
 
       // when ftb hit, read_hits.valid is true, and read_hits.bits is OH of hit way
       // when ftb not hit, read_hits.valid is false, and read_hits is OH of allocWay
       // val read_hits = Valid(Vec(numWays, Bool()))
+      val req_pc = Flipped(DecoupledIO(UInt(VAddrBits.W)))
+      val read_resp = Output(new FTBEntry)
       val read_hits = Valid(UInt(log2Ceil(numWays).W))
+
+      val u_req_pc = Flipped(DecoupledIO(UInt(VAddrBits.W)))
+      val update_hits = Valid(UInt(log2Ceil(numWays).W))
+      val update_access = Input(Bool())
 
       val update_pc = Input(UInt(VAddrBits.W))
       val update_write_data = Flipped(Valid(new FTBEntryWithTag))
       val update_write_way = Input(UInt(log2Ceil(numWays).W))
       val update_write_alloc = Input(Bool())
-      val update_access = Input(Bool())
     })
 
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = true, singlePort = true))
+    // Extract holdRead logic to fix bug that update read override predict read result
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
 
-    ftb.io.r.req.valid := io.req_pc.valid // io.s0_fire
-    ftb.io.r.req.bits.setIdx := ftbAddr.getIdx(io.req_pc.bits) // s0_idx
+    val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
+    ftb.io.r.req.valid := io.req_pc.valid || io.u_req_pc.valid // io.s0_fire
+    ftb.io.r.req.bits.setIdx := Mux(io.u_req_pc.valid, ftbAddr.getIdx(io.u_req_pc.bits), ftbAddr.getIdx(io.req_pc.bits)) // s0_idx
+
+    assert(!(io.req_pc.valid && io.u_req_pc.valid))
 
     io.req_pc.ready := ftb.io.r.req.ready
+    io.u_req_pc.ready := ftb.io.r.req.ready
 
     val req_tag = RegEnable(ftbAddr.getTag(io.req_pc.bits)(tagSize-1, 0), io.req_pc.valid)
     val req_idx = RegEnable(ftbAddr.getIdx(io.req_pc.bits), io.req_pc.valid)
 
-    val read_entries = ftb.io.r.resp.data.map(_.entry)
-    val read_tags    = ftb.io.r.resp.data.map(_.tag)
+    val u_req_tag = RegEnable(ftbAddr.getTag(io.u_req_pc.bits)(tagSize-1, 0), io.u_req_pc.valid)
 
-    val total_hits = VecInit((0 until numWays).map(b => read_tags(b) === req_tag && read_entries(b).valid && (io.s1_fire || io.update_access)))
+    val read_entries = pred_rdata.map(_.entry)
+    val read_tags    = pred_rdata.map(_.tag)
+
+    val total_hits = VecInit((0 until numWays).map(b => read_tags(b) === req_tag && read_entries(b).valid && io.s1_fire))
     val hit = total_hits.reduce(_||_)
     // val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
     val hit_way = PriorityEncoder(total_hits)
 
+    val u_total_hits = VecInit((0 until numWays).map(b =>
+        ftb.io.r.resp.data(b).tag === u_req_tag && ftb.io.r.resp.data(b).entry.valid && RegNext(io.update_access)))
+    val u_hit = u_total_hits.reduce(_||_)
+    // val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
+    val u_hit_way = PriorityEncoder(u_total_hits)
+
     assert(PopCount(total_hits) === 1.U || PopCount(total_hits) === 0.U)
-
-    val multiple_hit_recording_vec = (0 to numWays).map(i => PopCount(total_hits) === i.U)
-    val multiple_hit_map = (0 to numWays).map(i =>
-        f"ftb_multiple_hit_$i" -> (multiple_hit_recording_vec(i) && RegNext(io.req_pc.valid))
-    ).foldLeft(Map[String, UInt]())(_+_)
-
-    for ((key, value) <- multiple_hit_map) {
-      XSPerfAccumulate(key, value)
-    }
+    assert(PopCount(u_total_hits) === 1.U || PopCount(u_total_hits) === 0.U)
 
     val replacer = ReplacementPolicy.fromString(Some("setplru"), numWays, numSets)
     // val allocWriteWay = replacer.way(req_idx)
@@ -249,7 +257,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
     touch_set(0) := req_idx
 
-    touch_way(0).valid := hit && !io.update_access
+    touch_way(0).valid := hit
     touch_way(0).bits := hit_way
 
     replacer.access(touch_set, touch_way)
@@ -295,6 +303,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     io.read_hits.valid := hit
     // io.read_hits.bits := Mux(hit, hit_way_1h, VecInit(UIntToOH(allocWriteWay).asBools()))
     io.read_hits.bits := hit_way
+
+    io.update_hits.valid := u_hit
+    io.update_hits.bits := u_hit_way
 
     // XSDebug(!hit, "FTB not hit, alloc a way: %d\n", allocWriteWay)
 
@@ -380,10 +391,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   // val update_now = u_queue.io.deq.fire && u_queue.io.deq.bits.hit
   val update_now = u_valid && u_meta.hit
 
-  when(u_valid && !u_meta.hit) {
-   ftbBank.io.req_pc.valid := true.B
-   ftbBank.io.req_pc.bits := update.pc
-  }
+  ftbBank.io.u_req_pc.valid := u_valid && !u_meta.hit
+  ftbBank.io.u_req_pc.bits := update.pc
 
   // assert(!(u_valid && RegNext(u_valid) && update.pc === RegNext(update.pc)))
   // assert(!(u_valid && RegNext(u_valid)))
@@ -407,10 +416,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.update_write_data.bits := ftb_write
   // ftbBank.io.update_pc := Mux(update_now, u_queue.io.deq.bits.pc, RegNext(u_queue.io.deq.bits.pc))
   ftbBank.io.update_pc := Mux(update_now, update.pc, RegNext(update.pc))
-  ftbBank.io.update_write_way := Mux(update_now, u_meta.writeWay, ftbBank.io.read_hits.bits)
-  // ftbBank.io.update_write_alloc := Mux(update_now, !u_queue.io.deq.bits.hit, !ftbBank.io.read_hits.valid)
-  ftbBank.io.update_write_alloc := Mux(update_now, false.B, !ftbBank.io.read_hits.valid)
-  ftbBank.io.update_access := RegNext(u_valid && !u_meta.hit)
+  ftbBank.io.update_write_way := Mux(update_now, u_meta.writeWay, ftbBank.io.update_hits.bits)
+  // ftbBank.io.update_write_alloc := Mux(update_now, !u_queue.io.deq.bits.hit, !ftbBank.io.update_hits.valid)
+  ftbBank.io.update_write_alloc := Mux(update_now, false.B, !ftbBank.io.update_hits.valid)
+  ftbBank.io.update_access := u_valid && !u_meta.hit
   ftbBank.io.s1_fire := io.s1_fire
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire, s0_pc, ftbBank.io.req_pc.ready)
@@ -426,7 +435,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   //   update.pc, ftbAddr.getTag(update.pc), u_meta.pred_cycle)
   // XSDebug(RegNext(u_valid), "Write into FTB\n")
   // XSDebug(RegNext(u_valid), "hit=%d, update_write_way=%d\n",
-  //   ftbBank.io.read_hits.valid, u_meta.writeWay)
+  //   ftbBank.io.update_hits.valid, u_meta.writeWay)
 
 
 
