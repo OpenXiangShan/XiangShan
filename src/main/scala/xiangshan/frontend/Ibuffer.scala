@@ -49,6 +49,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
+    val triggered = Bool()
   }
 
   for(out <- io.out) {
@@ -97,6 +98,8 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     inWire.ipf := io.in.bits.ipf(i)
     inWire.acf := io.in.bits.acf(i)
     inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
+    inWire.triggered := io.in.bits.triggered(i)
+
 
     ibuf.io.waddr(i) := tail_vec(offset(i)).value
     ibuf.io.wdata(i) := inWire

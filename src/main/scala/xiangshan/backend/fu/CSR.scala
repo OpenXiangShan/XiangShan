@@ -45,7 +45,7 @@ trait HasExceptionNO {
   def loadPageFault       = 13
   def storePageFault      = 15
 
-  def singleStep          = 14
+//  def singleStep          = 14
 
   val ExcPriority = Seq(
     breakPoint, // TODO: different BP has different priority
@@ -127,18 +127,16 @@ trait HasExceptionNO {
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
-  def I_DATA = 0
-  def I_ADDR = 1
-  def S_DATA = 2
-  def S_ADDR = 3
-  def L_DATA = 4
-  def L_ADDR = 5
-  def GenSelect(triggerType: Int) = if(triggerType % 2 == 1) false.B else true.B
-  def GenESL(triggerType: Int) = Cat((triggerType / 2 == 0).B, (triggerType / 2 == 1).B, (triggerType / 2 == 2).B)
+  def I = 0
+  def S = 0
+  def L = 0
+
+  def GenESL(triggerType: Int) = Cat((triggerType == I).B, (triggerType == S).B, (triggerType == L).B)
 }
 
-class TdataBundle(canChain: Boolean = false, triggerType: Int) extends Bundle with HasTriggerConst {
+class TdataBundle extends Bundle {
   val hit = Bool()
+  val select = Bool()
   val timing = Bool()
 //  val size = UInt(4.W) // hardwire to 0
   val action = Bool()
@@ -148,70 +146,6 @@ class TdataBundle(canChain: Boolean = false, triggerType: Int) extends Bundle wi
   val s = Bool()
   val u = Bool()
   val data = UInt(64.W) // tdata2
-  def Type = triggerType
-  def Chain = canChain
-}
-
-class TriggerRegBundle extends Bundle with HasTriggerConst {
-  val tselect = UInt(4.W) // 16 triggers is more than we need
-  val tdata1_list = Seq(
-    new TdataBundle(false, I_DATA),
-    new TdataBundle(true, I_ADDR),
-
-    new TdataBundle(false, S_DATA),
-    new TdataBundle(false, S_ADDR),
-
-    new TdataBundle(false, L_DATA),
-    new TdataBundle(false, L_ADDR),
-
-    new TdataBundle(false, I_ADDR),
-    new TdataBundle(false, L_ADDR),
-
-    new TdataBundle(false, I_ADDR),
-    new TdataBundle(false, L_DATA)
-  )
-  val tdata2_list = Vec(10, UInt(64.W))
-  val i_data_0 = new TdataBundle(false, I_DATA)
-  val i_addr_1 = new TdataBundle(false, I_ADDR)
-  val l_data = new TdataBundle(false, L_DATA)
-  val l_addr = new TdataBundle(false, L_ADDR)
-  val s_data = new TdataBundle(false, S_DATA)
-  val s_addr = new TdataBundle(false, S_ADDR)
-  def ReadTdata1(tdata1: TdataBundle) = Cat(
-    2.U(4.W), // type, hardwired
-    0.U(1.W), // dmode, hardwired
-    0.U(6.W), // maskmax, hardwired to 0 because we don not support
-    0.U(2.W), // sizehi
-    tdata1.hit,
-    GenSelect(tdata1.Type), // select
-    tdata1.timing,
-    0.U(2.W), // sizelo
-    0.U(3.W), tdata1.action, // action, 0 is breakpoint 1 is enter debug
-    tdata1.chain,
-    0.U(2.W), tdata1.matchType,
-    tdata1.m, false.B, tdata1.s, tdata1.u,
-    GenESL(tdata1.Type)
-  )
-
-  def WriteTdata1(wdata: UInt, tdata1: TdataBundle): TdataBundle = {
-    val tdata1_new = WireInit(tdata1)
-    tdata1_new.hit := wdata(20)
-    tdata1_new.timing := wdata(18)
-    tdata1_new.action := wdata(12)
-    tdata1_new.chain := tdata1.Chain && wdata(11)
-    tdata1_new.matchType := if (wdata1(10, 7) === 0.U  || wdata1(10, 7) === 2.U || wdata1(10, 7) === 3.U) wdata1(8, 7)
-    tdata1_new.m := wdata(6)
-    tdata1_new.s := wdata(4)
-    tdata1_new.u := wdata(3)
-    tdata1_new
-  }
-
-  def ReadTselect(tselect: UInt) = Cat(0.U(60.W), tselect)
-  def WriteTselect(wdata: UInt, tselect: UInt) = {
-    val tselect_new = WireInit(tselect)
-    if (wdata <= 10.U) tselect_new := wdata(3, 0)
-    tselect_new
-  }
 }
 
 class FpuCsrIO extends Bundle {
@@ -287,7 +221,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // distributed csr w
 }
 
-class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst with HasTriggerConst
 {
   val csrio = IO(new CSRFileIO)
 
@@ -402,6 +336,70 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     dcsrNew
   }
   csrio.singleStep := dcsrData.step
+
+  // Trigger CSRs
+
+  val tdata1_function = Map(
+   0 -> (true, I), 1 -> (false, I),
+   2 -> (true, S), 3 -> (false, S),
+   4 -> (true, L), 5 -> (false, L),
+   6 -> (true, I), 7 -> (false, S),
+   8 -> (true, I), 9 -> (false, L)
+  )
+  val tdata1Phy = RegInit(VecInit(List.fill(10) {0.U(64.W).asTypeOf(new TdataBundle)}))
+  val tdata2Phy = RegInit(Vec(10, UInt(64.W)))
+  val tselectPhy = RegInit(0.U(4.W))
+  val tDummy = Wire(UInt(64.W))
+  val tControlPhy = RegInit(0.U(64.W))
+  def ReadTdata1(rdata: UInt) = {
+    val tdata1 = tdata1Phy(tselectPhy)
+    Cat(
+      2.U(4.W), // type, hardwired
+      0.U(1.W), // dmode, hardwired
+      0.U(6.W), // maskmax, hardwired to 0 because we don not support
+      1.U(2.W), // sizehi, hardwired
+      tdata1.hit,
+      tdata1.select, // select
+      tdata1.timing,
+      0.U(2.W), // sizelo
+      0.U(3.W), tdata1.action, // action, 0 is breakpoint 1 is enter debug
+      tdata1.chain,
+      0.U(2.W), tdata1.matchType,
+      tdata1.m, false.B, tdata1.s, tdata1.u,
+      GenESL(tdata1_function(tselectPhy.litValue())._2)
+    )
+  }
+  def WriteTdata1(wdata: UInt) = {
+    val tdata1_new = WireInit(tdata1Phy(tselectPhy))it
+    tdata1_new.hit := wdata(20)
+    tdata1_new.select := wdata(19)
+    tdata1_new.timing := wdata(18)
+    tdata1_new.action := wdata(12)
+    tdata1_new.chain := tdata1.Chain.B && wdata(11)
+    tdata1_new.matchType := if (wdata1(10, 7) === 0.U  || wdata1(10, 7) === 2.U || wdata1(10, 7) === 3.U) wdata1(8, 7)
+    tdata1_new.m := wdata(6)
+    tdata1_new.s := wdata(4)
+    tdata1_new.u := wdata(3)
+    tdata1Phy := tdata1_new
+    0.U
+  }
+
+  def ReadTselect(rdata: UInt) = Cat(0.U(60.W), tselectPhy)
+  def WriteTselect(wdata: UInt) = {
+    val tselect_new = WireInit(tselectPhy)
+    if (wdata <= 10.U) tselect_new := wdata(3, 0)
+    tselectPhy := tselect_new
+    0.U
+  }
+
+  def ReadTdata2(tdata: UInt) = tdata2Phy(tSelectPhy)
+  def WriteTdata2(wdata: UInt) = {
+    tdata2Phy(tselectPhy) := wdata
+  }
+
+  def ReadTinfo(tdata: UInt) = 2.U(XLEN.W)
+
+  val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
 
   // Machine-Level CSRs
 
@@ -773,6 +771,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Trigger ---
+    MaskedRegMap(Tselect, tDummy, WritableMask, WriteTselect, WritableMask, ReadTselect),
+    MaskedRegMap(Tdata1, tDummy, WritableMask, WriteTdata1, WritableMask, ReadTdata1),
+    MaskedRegMap(Tdata2, tDummy, WritableMask, WriteTdata2, WritableMask, ReadTdata2),
+    MaskedRegMap(Tinfo, tDummy, 0.U(XLEN.W), MaskedRegMap.Unwritable, WritableMask, ReadTinfo),
+    MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
@@ -895,8 +898,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val dcsrPermitted = dcsrPermissionCheck(addr, TODO, debugMode) // todo
-  val triggerPermitted = triggerPermissionCheck(addr, TODO, debugMode) // todo
+  val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
+  val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) && dcsrPermitted && triggerPermitted
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
@@ -1080,15 +1083,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasLoadAccessFault = csrio.exception.bits.uop.cf.exceptionVec(loadAccessFault) && raiseException
   val hasStoreAccessFault = csrio.exception.bits.uop.cf.exceptionVec(storeAccessFault) && raiseException
   val hasbreakPoint = csrio.exception.bits.uop.cf.exceptionVec(breakPoint) && raiseException
-  val hasSingleStep = csrio.exception.bits.uop.cf.exceptionVec(singleStep) && raiseException
+  val hasSingleStep = csrio.exception.bits.uop.ctrl.singleStep && raiseException
+  val hasTriggerHit = csrio.exception.bits.uop.cf.trigger.triggerHitVec.orR && raiseException
 
   val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
-  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val regularExceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val ExceptionNo = Mux(hasSingleStep || hasTriggerHit, 3.U, regularExceptionNO)
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep
+  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // todo
   val ebreakEnterParkLoop = debugMode && raiseExceptionIntr // exception in debug mode (except ebrk) changes cmderr. how ???
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",

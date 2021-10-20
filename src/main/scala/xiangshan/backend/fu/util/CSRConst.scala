@@ -178,6 +178,7 @@ trait HasCSRConst {
   val Tdata1 = 0x7A1
   val Tdata2 = 0x7A2
   val Tinfo = 0x7A4
+  val Tcontrol = 0x7A5
 
   // Debug Mode Registers
   val Dcsr          = 0x7B0

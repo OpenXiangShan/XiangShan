@@ -105,6 +105,13 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+<<<<<<< HEAD
+  val triggerHitVec = Vec(10, Bool())
+  val triggerTiming = Bool()
+  val triggerChainVec = Vec(5, Bool())
+=======
+  val trigger = new TriggerCf
+>>>>>>> fbe198f5c... Add some more utils
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -124,6 +131,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 }
+
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -457,6 +465,10 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val move_elim_enable = Output(Bool())
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
+
+  val frontend_trigger = new TdataDistributeIO(2)
+  val mem_trigger = new TdataDistributeIO(3)
+  val trigger_enable = Output(Vec(10, Bool()))
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -486,10 +498,25 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     println("Distributed CSR update req registered for " + src_description)
   }
 }
+
+class TriggerCf (implicit p: Parameters) extends XSBundle {
+  val triggerHitVec = Vec(10, Bool())
+  val triggerTiming = Vec(10, Bool())
+  val triggerChainVec = Vec(5, Bool())
+}
+
+class TdataDistributeIO(addrWidth: Int)(implicit p: Parameters)  extends XSBundle {
+    val t = ValidIO(new Bundle {
+      val addr = Output(UInt(addrWidth.W))
+      val tdata = new MatchTriggerIO
+    })
+  }
+
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
-  val enable = Output(Bool())
   val matchType = Output(UInt(2.W))
+  val select = Output(Bool())
   val timing = Output(Bool())
   val action = Output(Bool())
   val chain = Output(Bool())
+  val tdata2 = Output(UInt(64.W))
 }

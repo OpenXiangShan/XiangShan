@@ -24,10 +24,15 @@ object TriggerCmp {
     val equal = actual === tdata
     val greater = actual >= tdata
     val less = actual <= tdata
-    val res = MuxLookup(actual, false.B,
+    val res = MuxLookup(matchType, false.B,
       Seq(0.U -> equal,
           2.U -> greater,
           3.U -> less))
     res && enable
   }
+}
+
+object ChainCheck {
+  def TimingCheck(prevTiming: Bool, thisTiming: Bool, chain: Bool) = !((prevTiming ^ thisTiming) && chain)
+  def HitCheck(prevHit: Bool, chain: Bool) = prevHit || !chain
 }
