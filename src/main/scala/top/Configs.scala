@@ -101,8 +101,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           replacer = Some("setplru"),
           nMissEntries = 4,
           nProbeEntries = 4,
-          nReleaseEntries = 4,
-          nStoreReplayEntries = 4,
+          nReleaseEntries = 8,
         )),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
@@ -188,8 +187,7 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         replacer = Some("setplru"),
         nMissEntries = 16,
         nProbeEntries = 16,
-        nReleaseEntries = 16,
-        nStoreReplayEntries = 16
+        nReleaseEntries = 32
       ))
     )))
 })

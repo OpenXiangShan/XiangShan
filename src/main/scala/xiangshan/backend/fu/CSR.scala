@@ -24,6 +24,7 @@ import utils.MaskedRegMap.WritableMask
 import utils._
 import xiangshan._
 import xiangshan.backend._
+import xiangshan.cache._
 import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
 import difftest._
@@ -285,24 +286,25 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val dpcPrev = RegNext(dpc)
   XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x.", dpc, dpcPrev)
 
-// dcsr value table
-// | debugver | 0100
-// | zero     | 10 bits of 0
-// | ebreakvs | 0
-// | ebreakvu | 0
-// | ebreakm  | 1 if ebreak enters debug
-// | zero     | 0
-// | ebreaks  |
-// | ebreaku  |
-// | stepie   | 0 disable interrupts in singlestep
-// | stopcount| stop counter, 0
-// | stoptime | stop time, 0
-// | cause    | 3 bits read only
-// | v        | 0
-// | mprven   | 1
-// | nmip     | read only
-// | step     |
-// | prv      | 2 bits
+  // dcsr value table
+  // | debugver | 0100
+  // | zero     | 10 bits of 0
+  // | ebreakvs | 0
+  // | ebreakvu | 0
+  // | ebreakm  | 1 if ebreak enters debug
+  // | zero     | 0
+  // | ebreaks  |
+  // | ebreaku  |
+  // | stepie   | 0 disable interrupts in singlestep
+  // | stopcount| stop counter, 0
+  // | stoptime | stop time, 0
+  // | cause    | 3 bits read only
+  // | v        | 0
+  // | mprven   | 1
+  // | nmip     | read only
+  // | step     |
+  // | prv      | 2 bits
+
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
   val dcsrMask = ZeroExt(GenMask(15) | GenMask(13, 11) | GenMask(2, 0), XLEN)// Dcsr write mask
@@ -534,18 +536,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
 
-  // Atom LR/SC Control Bits
-  //  val setLr = WireInit(Bool(), false.B)
-  //  val setLrVal = WireInit(Bool(), false.B)
-  //  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare) //TODO : need check
-  //  val lr = RegInit(Bool(), false.B)
-  //  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
-  //
-  //  when (setLr) {
-  //    lr := setLrVal
-  //    lrAddr := setLrAddr
-  //  }
-
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
@@ -689,14 +679,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
 
-
+  val cacheopMapping = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+    MaskedRegMap(
+      Scachebase + attribute("offset").toInt, 
+      RegInit(0.U(attribute("width").toInt.W))
+    )
+  }}
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
                 pmpMapping ++
                 emuPerfCntsLoMapping ++
                 (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
-                (if (HasFPU) fcsrMapping else Nil)
+                (if (HasFPU) fcsrMapping else Nil) ++
+                (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
   val addr = src2(11, 0)
   val csri = ZeroExt(src2(16, 12), XLEN)
@@ -787,30 +783,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val isIllegalAccess = !permitted
   val isIllegalPrivOp = illegalSModeSret
 
-  // def MMUPermissionCheck(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool)
-  // def MMUPermissionCheckLoad(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool) && (pter || (mstatusStruct.mxr && ptex))
-  // imem
-  // val imemPtev = true.B
-  // val imemPteu = true.B
-  // val imemPtex = true.B
-  // val imemReq = true.B
-  // val imemPermissionCheckPassed = MMUPermissionCheck(imemPtev, imemPteu)
-  // val hasInstrPageFault = imemReq && !(imemPermissionCheckPassed && imemPtex)
-  // assert(!hasInstrPageFault)
-
-  // dmem
-  // val dmemPtev = true.B
-  // val dmemPteu = true.B
-  // val dmemReq = true.B
-  // val dmemPermissionCheckPassed = MMUPermissionCheck(dmemPtev, dmemPteu)
-  // val dmemIsStore = true.B
-
-  // val hasLoadPageFault  = dmemReq && !dmemIsStore && !(dmemPermissionCheckPassed)
-  // val hasStorePageFault = dmemReq &&  dmemIsStore && !(dmemPermissionCheckPassed)
-  // assert(!hasLoadPageFault)
-  // assert(!hasStorePageFault)
-
-  //TODO: Havn't test if io.dmemMMU.priviledgeMode is correct yet
+  // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
   tlbBundle.priv.imode := priviledgeMode
