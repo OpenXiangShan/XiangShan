@@ -362,10 +362,16 @@ package object xiangshan {
     def sh       = "b001001".U
     def sw       = "b001010".U
     def sd       = "b001011".U
-    def cbo_zero = "b001111".U
+
+    def cbo_zero  = "b001111".U // l1 cache op
+
+    def cbo_clean = "b011111".U // llc op 
+    def cbo_flush = "b101111".U // llc op
+    def cbo_inval = "b111111".U // llc op
 
     def isLoad(op: UInt): Bool = !op(3)
     def isStore(op: UInt): Bool = op(3)
+    def isCbo(op: UInt): Bool = op(3, 0) === "b1111".U
 
     // atomics
     // bit(1, 0) are size
