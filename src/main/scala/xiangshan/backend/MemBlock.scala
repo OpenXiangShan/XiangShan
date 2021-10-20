@@ -219,6 +219,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+    // ld-ld violation check
+    loadUnits(i).io.lsq.loadViolationQuery <> lsq.io.loadViolationQuery(i)
+    loadUnits(i).io.csrCtrl <> io.csrCtrl
     // dtlb
     loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
     // pmp
@@ -296,6 +299,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // TODO: remove RegNext after fixing refill paddr timing
   // lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
+  lsq.io.release        := dcache.io.lsu.release
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in

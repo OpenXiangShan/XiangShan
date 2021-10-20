@@ -53,12 +53,13 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(2.W)
-  val mshrFull = 1.U(2.W)
-  val dataInvalid = 2.U(2.W)
-  val bankConflict = 3.U(2.W)
+  val tlbMiss = 0.U(3.W)
+  val mshrFull = 1.U(3.W)
+  val dataInvalid = 2.U(3.W)
+  val bankConflict = 3.U(3.W)
+  val ldVioCheckRedo = 4.U(3.W)
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(3.W)
 }
 
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
@@ -435,6 +436,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // distribute csr write signal
