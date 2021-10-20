@@ -35,7 +35,7 @@ abstract trait DecodeConstants {
   def Y = BitPat("b1")
 
   def decodeDefault: List[BitPat] = // illegal instruction
-    //   srcType(0)     srcType(1)     srcType(2)     fuType      fuOpType    rfWen  
+    //   srcType(0)   srcType(1)   srcType(2)   fuType      fuOpType    rfWen  
     //   |            |            |            |           |           |  fpWen
     //   |            |            |            |           |           |  |  isXSTrap
     //   |            |            |            |           |           |  |  |  noSpecExec
@@ -390,6 +390,18 @@ object FDivSqrtDecode extends DecodeConstants {
 }
 
 /**
+ * CBO decode
+ */
+object CBODecode extends DecodeConstants {
+  val table: Array[(BitPat, List[BitPat])] = Array(
+    CBO_ZERO  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_zero , N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_CLEAN -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_clean, N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_FLUSH -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_flush, N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_INVAL -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_inval, N, N, N, N, N, N, N, SelImm.IMM_S)
+  )
+}
+
+/**
  * XiangShan Trap Decode constants
  */
 object XSTrapDecode extends DecodeConstants {
@@ -522,7 +534,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
-  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
+  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table ++ CBODecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow

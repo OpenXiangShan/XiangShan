@@ -223,10 +223,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
+      paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
       paddrModule.io.wen(i) := true.B
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
+      vaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
       vaddrModule.io.wen(i) := true.B
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
@@ -258,7 +260,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
       datavalid(stWbIndex) := true.B
 
       dataModule.io.data.waddr(i) := stWbIndex
-      dataModule.io.data.wdata(i) := genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
+      dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero,
+        0.U,
+        genWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.ctrl.fuOpType(1,0))
+      )
       dataModule.io.data.wen(i) := true.B
 
       debug_data(dataModule.io.data.waddr(i)) := dataModule.io.data.wdata(i)
@@ -393,6 +398,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.uncache.req.bits.data := dataModule.io.rdata(0).data
   io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
+  // CBO op type check can be delayed for 1 cycle,
+  // as uncache op will not start in s_idle
+  val cbo_mmio_addr = paddrModule.io.rdata(0) >> 2 << 2 // clear lowest 2 bits for op
+  val cbo_mmio_op = 0.U //TODO
+  val cbo_mmio_data = cbo_mmio_addr | cbo_mmio_op
+  when(RegNext(LSUOpType.isCbo(uop(deqPtr).ctrl.fuOpType))){
+    io.uncache.req.bits.addr := DontCare // TODO
+    io.uncache.req.bits.data := paddrModule.io.rdata(0)
+    io.uncache.req.bits.mask := DontCare // TODO
+  }
+
   io.uncache.req.bits.id   := DontCare
   io.uncache.req.bits.instrtype   := DontCare
 
@@ -463,11 +479,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
     // Note that store data/addr should both be valid after store's commit
     assert(!io.sbuffer(i).valid || allvalid(ptr))
+    // Write line request should have all 1 mask
+    assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr  := paddrModule.io.rdata(i)
     io.sbuffer(i).bits.vaddr := vaddrModule.io.rdata(i)
     io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
     io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
+    io.sbuffer(i).bits.wline := paddrModule.io.rlineflag(i)
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
 

@@ -55,6 +55,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
+  val wlineflag = Bool() // store write the whole cache line
 
   val miss = Bool()
   val tlbMiss = Bool()

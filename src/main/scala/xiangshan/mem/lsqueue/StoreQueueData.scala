@@ -33,33 +33,42 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
   val io = IO(new Bundle {
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
     val rdata = Output(Vec(numRead, UInt(dataWidth.W)))
+    val rlineflag = Output(Vec(numRead, Bool()))
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(dataWidth.W)))
+    val wlineflag = Input(Vec(numWrite, Bool()))
     val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W)))
     val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool())))
     val debug_data = Output(Vec(numEntries, UInt(dataWidth.W)))
   })
 
   val data = Reg(Vec(numEntries, UInt(dataWidth.W)))
+  val lineflag = Reg(Vec(numEntries, Bool())) // cache line match flag
+  // if lineflag == true, this address points to a whole cacheline
   io.debug_data := data
 
   // read ports
   for (i <- 0 until numRead) {
     io.rdata(i) := data(RegNext(io.raddr(i)))
+    io.rlineflag(i) := lineflag(RegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
   for (i <- 0 until numWrite) {
     when (io.wen(i)) {
       data(io.waddr(i)) := io.wdata(i)
+      lineflag(io.waddr(i)) := io.wlineflag(i)
     }
   }
 
   // content addressed match
   for (i <- 0 until numForward) {
     for (j <- 0 until numEntries) {
-      io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
+      // io.forwardMmask(i)(j) := io.forwardMdata(i)(dataWidth-1, 3) === data(j)(dataWidth-1, 3)
+      val linehit = io.forwardMdata(i)(dataWidth-1, DCacheLineOffset) === data(j)(dataWidth-1, DCacheLineOffset)
+      val wordhit = io.forwardMdata(i)(DCacheLineOffset-1, DCacheWordOffset) === data(j)(DCacheLineOffset-1, DCacheWordOffset)
+      io.forwardMmask(i)(j) := linehit && (wordhit || lineflag(j))
     }
   }
 
