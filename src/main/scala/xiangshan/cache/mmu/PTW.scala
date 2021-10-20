@@ -114,7 +114,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     val prefetch = Module(new L2TlbPrefetch())
     val recv = cache.io.resp
     prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.source) && (!recv.bits.hit  ||
-      recv.bits.hit && recv.bits.prefetch) && recv.bits.toFsm.l2Hit
+      recv.bits.prefetch)
     prefetch.io.in.bits.vpn := recv.bits.vpn
     prefetch.io.sfence := sfence
     arb2.io.in(InArbPrefetchPort) <> prefetch.io.out
@@ -126,7 +126,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.req.bits.source := arb2.io.out.bits.source
   cache.io.req_isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
-  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || fsm.io.req.ready)
+  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))
 
   val mq_in_arb = Module(new Arbiter(new L2TlbMQInBundle, 2))
   mq_in_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.toFsm.l2Hit || !fsm.io.req.ready)

@@ -560,11 +560,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // refill pipe
-  val refillShouldBeBlocked = Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
-    s.valid &&
-      s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
-      s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
-  )).orR
+  val refillShouldBeBlocked = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req.bits.idx) ||
+	Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+	  s.valid &&
+        s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
+        s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+    )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
   io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
 
