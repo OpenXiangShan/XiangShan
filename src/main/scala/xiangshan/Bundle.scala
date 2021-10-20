@@ -442,8 +442,29 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  // CSR has been writen by csr inst, copies of csr should be updated
   val w = ValidIO(new Bundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))
   })
+}
+
+class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
+  // Request csr to be updated
+  //
+  // Note that this request will ONLY update CSR Module it self,
+  // copies of csr will NOT be updated, use it with care!
+  //
+  // For each cycle, no more than 1 DistributedCSRUpdateReq is valid
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
+  def apply(valid: Bool, addr: UInt, data: UInt, src_description: String) = {
+    when(valid){
+      w.bits.addr := addr
+      w.bits.data := data
+    }
+    println("Distributed CSR update req registered for " + src_description)
+  }
 }

@@ -188,6 +188,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
   // distributed csr w
@@ -679,10 +680,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
 
+  val cacheopRegs = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+    name -> RegInit(0.U(attribute("width").toInt.W))
+  }}
   val cacheopMapping = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
     MaskedRegMap(
       Scachebase + attribute("offset").toInt, 
-      RegInit(0.U(attribute("width").toInt.W))
+      cacheopRegs(name)
     )
   }}
 
@@ -1019,6 +1023,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
+
+  // Distributed CSR update req
+  //
+  // For now we use it to implement customized cache op
+
+  when(csrio.distributedUpdate.w.valid){
+    // cacheopRegs can be distributed updated
+    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+      when((Scachebase + attribute("offset").toInt).U === csrio.distributedUpdate.w.bits.addr){
+        cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
+      }
+    }}
+  }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 

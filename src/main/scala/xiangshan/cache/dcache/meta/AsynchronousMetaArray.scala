@@ -72,6 +72,8 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
     val resp = Output(Vec(readPorts, Vec(nWays, UInt(encMetaBits.W))))
     val write = Vec(writePorts, Flipped(DecoupledIO(new MetaWriteReq)))
     val errors = Output(Vec(readPorts, new L1CacheErrorInfo))
+    // customized cache op port 
+    val cacheOp = Flipped(new DCacheInnerOpIO)
   })
 //  val meta_array = VecInit(Seq.fill(nSets)(
 //    VecInit(Seq.fill(nWays)(
@@ -101,6 +103,10 @@ class AsynchronousMetaArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
           }
       }
   }
+
+  // deal with customized cache op
+  io.cacheOp.resp := DontCare // TODO
+
   // TODO
   io.errors.foreach {
     case error =>
