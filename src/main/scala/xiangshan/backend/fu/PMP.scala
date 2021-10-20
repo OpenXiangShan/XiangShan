@@ -271,16 +271,18 @@ trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
   ) = {
     val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
     def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
-
+    val init_value = init()
     /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
-    val cfgMerged = RegInit(VecInit(Seq.fill(num / pmpCfgPerCSR)(0.U(XLEN.W))))
+    val cfgMerged = RegInit(init_value._1) //(Vec(num / pmpCfgPerCSR, UInt(XLEN.W))) // RegInit(VecInit(Seq.fill(num / pmpCfgPerCSR)(0.U(XLEN.W))))
     val cfgs = WireInit(cfgMerged).asTypeOf(Vec(num, new PMPConfig()))
-    val addr = Reg(Vec(num, UInt((PAddrBits-PMPOffBits).W)))
-    val mask = Reg(Vec(num, UInt(PAddrBits.W)))
+    val addr = RegInit(init_value._2) // (Vec(num, UInt((PAddrBits-PMPOffBits).W)))
+    val mask = RegInit(init_value._3) // (Vec(num, UInt(PAddrBits.W)))
 
     for (i <- entries.indices) {
       entries(i).gen(cfgs(i), addr(i), mask(i))
     }
+
+
 
     val cfg_mapping = (0 until num by pmpCfgPerCSR).map(i => {Map(
       MaskedRegMap(
@@ -302,12 +304,7 @@ trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
 
-    when (reset.asBool()) {
-      val init_value = init()
-      cfgMerged := init_value._1
-      addr := init_value._2
-      mask := init_value._3
-    }
+
 
     cfg_mapping ++ addr_mapping
   }
