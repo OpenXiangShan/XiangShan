@@ -148,7 +148,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
     val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
     val fault_valid = vmEnable && hit
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && !af
+    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && fault_valid && !af
     resp(i).bits.excp.pf.st := (stPf || update || pf) && fault_valid && !af
     resp(i).bits.excp.pf.instr := (instrPf || update || pf) && fault_valid && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
