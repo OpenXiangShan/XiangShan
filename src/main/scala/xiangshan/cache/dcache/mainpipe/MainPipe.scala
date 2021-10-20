@@ -116,8 +116,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
-
-    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   def getMeta(encMeta: UInt): UInt = {
@@ -702,14 +700,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     XSPerfAccumulate("main_pipe_choose_way_" + Integer.toString(w, 10),
       RegNext(s0_fire) && s1_repl_way_en === UIntToOH(w.U))
   }
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0).incr_step  := s0_fire
-  io.perfEvents.PerfEvents(1).incr_step  := (PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
-  io.perfEvents.PerfEvents(2).incr_step  := s3_valid && need_writeback && !io.wb_req.ready  
-  io.perfEvents.PerfEvents(3).incr_step  := s1_valid && s1_need_data && !io.banked_data_read.ready
-  io.perfEvents.PerfEvents(4).incr_step  := s0_valid && !meta_ready 
-  io.perfEvents.PerfEvents(5).incr_step  := s0_valid && set_conflict 
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(6))
+  })
+  val perfEvents = Seq(
+    ("dcache_mp_req                    ", s0_fire                                                                     ),
+    ("dcache_mp_total_penalty          ", (PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))             ),
+    ("pipe_blocked_by_wbu              ", s3_valid && need_writeback && !io.wb_req.ready                              ),
+    ("pipe_blocked_by_nack_data        ", s1_valid && s1_need_data && !io.banked_data_read.ready                      ),
+    ("pipe_reject_req_for_nack_meta    ", s0_valid && !meta_ready                                                     ),
+    ("pipe_reject_req_for_set_conflict ", s0_valid && set_conflict                                                    ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 }

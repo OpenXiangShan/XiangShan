@@ -212,7 +212,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
     val perf = Vec(numPerfPorts, Output(new RsPerfCounter))
-    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
 
     override def cloneType: SchedulerExtraIO.this.type =
       new SchedulerExtraIO().asInstanceOf[this.type]
@@ -242,8 +241,10 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
-  val intbtperfEvents = Wire(new PerfEventsBundle(numPCntCtrl))
-  val fpbtperfEvents = Wire(new PerfEventsBundle(numPCntCtrl))
+  val intbtperfEvents = Wire(new PerfEventsBundle(4))
+  val fpbtperfEvents = Wire(new PerfEventsBundle(4))
+  intbtperfEvents := DontCare
+  fpbtperfEvents  := DontCare
   if (readIntState.nonEmpty) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
     busyTable.io.flush := io.flush
@@ -255,7 +256,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       pregWb.valid := exuWb.valid && exuWb.bits.uop.ctrl.rfWen
       pregWb.bits := exuWb.bits.uop.pdest
     }
-    intbtperfEvents <> busyTable.io.perfEvents
+    intbtperfEvents <> busyTable.perfinfo.perfEvents
     busyTable.io.read <> readIntState
   }
   val readFpState = io.extra.fpStateReadOut.getOrElse(Seq()) ++ dispatch2.flatMap(_.io.readFpState.getOrElse(Seq()))
@@ -276,7 +277,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         pregWb.bits := exuWb.bits.uop.pdest
       }
       busyTable.io.read <> readFpState.take(numBusyTableRead)
-      fpbtperfEvents <> busyTable.io.perfEvents
+      fpbtperfEvents <> busyTable.perfinfo.perfEvents
       busyTable.io.read <> readFpState
     }
     if (io.extra.fpStateReadIn.isDefined) {
@@ -462,19 +463,18 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   XSPerfAccumulate("allocate_fire", PopCount(allocate.map(_.fire())))
   XSPerfAccumulate("issue_valid", PopCount(io.issue.map(_.valid)))
   XSPerfAccumulate("issue_fire", PopCount(io.issue.map(_.fire)))
-  for(i <- 0 until numPCntCtrl ) {
-    io.extra.perfEvents.PerfEvents(i).incr_step := DontCare
-    intbtperfEvents.PerfEvents(i ).incr_step  := DontCare
-    fpbtperfEvents.PerfEvents(i ).incr_step  := DontCare
+  val perfEvents_list = Wire(new PerfEventsBundle(2))
+  val perfEvents = Seq(
+    ("sche_allocate_fire    ", PopCount(allocate.map(_.fire()))   ),
+    ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))     ),
+  )
+  for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  io.extra.perfEvents.PerfEvents(0 ).incr_step   := PopCount(allocate.map(_.fire()))   
-  io.extra.perfEvents.PerfEvents(1 ).incr_step   := PopCount(io.issue.map(_.fire))   
-  io.extra.perfEvents.PerfEvents(2 ).incr_step   := intbtperfEvents.PerfEvents(0 ).incr_step   
-  io.extra.perfEvents.PerfEvents(3 ).incr_step   := intbtperfEvents.PerfEvents(1 ).incr_step   
-  io.extra.perfEvents.PerfEvents(4 ).incr_step   := intbtperfEvents.PerfEvents(2 ).incr_step   
-  io.extra.perfEvents.PerfEvents(5 ).incr_step   := intbtperfEvents.PerfEvents(3 ).incr_step   
-  io.extra.perfEvents.PerfEvents(6 ).incr_step   :=  fpbtperfEvents.PerfEvents(0 ).incr_step   
-  io.extra.perfEvents.PerfEvents(7 ).incr_step   :=  fpbtperfEvents.PerfEvents(1 ).incr_step   
-  io.extra.perfEvents.PerfEvents(8 ).incr_step   :=  fpbtperfEvents.PerfEvents(2 ).incr_step   
-  io.extra.perfEvents.PerfEvents(9 ).incr_step   :=  fpbtperfEvents.PerfEvents(3 ).incr_step   
+
+  val perf_list =  perfEvents_list.perf_events ++  intbtperfEvents.perf_events ++  fpbtperfEvents.perf_events
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
 }

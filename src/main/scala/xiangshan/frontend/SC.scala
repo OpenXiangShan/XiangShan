@@ -384,6 +384,27 @@ trait HasSC extends HasSCParameter { this: Tage =>
   XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
   XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
 
-  io.perfEvents.PerfEvents(50).incr_step  :=  PopCount(update_on_mispred)
-  io.perfEvents.PerfEvents(51).incr_step  :=  PopCount(update_on_unconf)
+    val perfinfo = IO(new Bundle(){
+      val perfEvents = Output(new PerfEventsBundle(3))
+    })
+  if(EnableSC){
+    val perfEvents = Seq(
+      ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid                ),
+      ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
+      ("sc_update_on_unconf           ", PopCount(update_on_unconf)  ),
+    )
+    for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+      perf_out.incr_step := perf
+    }
+  }
+  else {
+    val perfEvents = Seq(
+      ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid                ),
+      ("sc_update_on_mispred          ", 0.U ),
+      ("sc_update_on_unconf           ", 0.U ),
+    )
+    for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+      perf_out.incr_step := perf
+    }
+  }
 }

@@ -36,7 +36,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
     val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val read = Vec(numReadPorts, new BusyTableReadIO)
-    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   val table = RegInit(0.U(NRPhyRegs.W))
@@ -68,11 +67,17 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   }
 
   XSPerfAccumulate("busy_count", PopCount(table))
-  for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(4))
+  })
+  val perfEvents = Seq(
+    ("std_freelist_1/4_valid          ", (PopCount(table) < (NRPhyRegs.U/4.U))                                             ),
+    ("std_freelist_2/4_valid          ", (PopCount(table) > (NRPhyRegs.U/4.U)) & (PopCount(table) <= (NRPhyRegs.U/2.U))    ),
+    ("std_freelist_3/4_valid          ", (PopCount(table) > (NRPhyRegs.U/2.U)) & (PopCount(table) <= (NRPhyRegs.U*3.U/4.U))),
+    ("std_freelist_4/4_valid          ", (PopCount(table) > (NRPhyRegs.U*3.U/4.U))                                         ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  io.perfEvents.PerfEvents(0).incr_step  := (PopCount(table) < (NRPhyRegs.U/4.U))
-  io.perfEvents.PerfEvents(1).incr_step  := (PopCount(table) > (NRPhyRegs.U/4.U)) & (PopCount(table) <= (NRPhyRegs.U/2.U))
-  io.perfEvents.PerfEvents(2).incr_step  := (PopCount(table) > (NRPhyRegs.U/2.U)) & (PopCount(table) <= (NRPhyRegs.U*3.U/4.U))
-  io.perfEvents.PerfEvents(3).incr_step  := (PopCount(table) > (NRPhyRegs.U*3.U/4.U))
 }

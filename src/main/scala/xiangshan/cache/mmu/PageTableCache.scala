@@ -56,7 +56,6 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
   }))
   val sfence = Input(new SfenceBundle)
-  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
 }
 
 
@@ -497,17 +496,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L2RefillIndex${i}", l) }
   l3RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"L3RefillIndex${i}", l) }
   spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPRefillIndex${i}", l) }
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(4).incr_step  := second_valid
-  io.perfEvents.PerfEvents(5).incr_step  := l1Hit
-  io.perfEvents.PerfEvents(6).incr_step  := l2Hit
-  io.perfEvents.PerfEvents(7).incr_step  := l3Hit
-  io.perfEvents.PerfEvents(8).incr_step  := spHit
-  io.perfEvents.PerfEvents(9).incr_step  := l3Hit || spHit
-  io.perfEvents.PerfEvents(10).incr_step  := io.req.valid && !io.req.ready
-  io.perfEvents.PerfEvents(11).incr_step  := io.resp.valid && !io.resp.ready
 
   // debug
   XSDebug(sfence.valid, p"[sfence] original v and g vector:\n")
@@ -522,4 +510,22 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSDebug(RegNext(sfence.valid), p"[sfence] l3v:${Binary(l3v)}\n")
   XSDebug(RegNext(sfence.valid), p"[sfence] l3g:${Binary(l3g)}\n")
   XSDebug(RegNext(sfence.valid), p"[sfence] spv:${Binary(spv)}\n")
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("access           ", second_valid                    ),
+    ("l1_hit           ", l1Hit                           ),
+    ("l2_hit           ", l2Hit                           ),
+    ("l3_hit           ", l3Hit                           ),
+    ("sp_hit           ", spHit                           ),
+    ("pte_hit          ", l3Hit || spHit                  ),
+    ("rwHarzad         ",  io.req.valid && !io.req.ready  ),
+    ("out_blocked      ",  io.resp.valid && !io.resp.ready),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 }

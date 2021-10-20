@@ -356,6 +356,7 @@ trait HasXSParameter {
 
   val exuConfigs = coreParams.exuConfigs
 
+  val PCntIncrStep: Int = 6
   val numPCntFrontendifu = 15
   val numPCntFrontendibuffer = 8
   val numPCntFrontendicache = 2

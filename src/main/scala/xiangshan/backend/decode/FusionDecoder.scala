@@ -542,7 +542,6 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     val out = Vec(DecodeWidth - 1, DecoupledIO(new CtrlSignals))
     // fused instruction needs to be cleared
     val clear = Vec(DecodeWidth, Output(Bool()))
-    val perfEvents      = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
   io.clear.head := false.B
@@ -593,8 +592,4 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
   }
 
   XSPerfAccumulate("fused_instr", PopCount(io.out.map(_.fire)))
-  for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0).incr_step  := PopCount(io.out.map(_.fire))
 }

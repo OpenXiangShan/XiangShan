@@ -48,7 +48,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val error  = new L1CacheErrorInfo
-    val perfEvents      = Output(new PerfEventsBundle(numCSRPCntFrontend))
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
       val bpuInfo = new Bundle {
@@ -133,86 +132,14 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 
-
-  val hpmEvents = Wire(new PerfEventsBundle(numPCntFrontend))
-  for(i <- 0 until numPCntFrontend ) {
-    hpmEvents.PerfEvents(i).incr_step := DontCare
-  }
-  //hpmEvents.PerfEvents.map(_.incr_step) := frontendBubble +: ifu.io.perfEvents.PerfEvents.map(_.incr_step) + ibuffer.io.perfEvents.PerfEvents.map(_.incr_step) + 
-
-  //hpmEvents.PerfEvents := ifu.io.perfEvents.PerfEvents + ibuffer.io.perfEvents.PerfEvents + ftq.io.perfEvents.PerfEvents + bpu.io.perfEvents.PerfEvents
-
-  hpmEvents.PerfEvents(0 ).incr_step   := frontendBubble
-  hpmEvents.PerfEvents(1 ).incr_step   := ifu.io.perfEvents.PerfEvents(1).incr_step   
-  hpmEvents.PerfEvents(2 ).incr_step   := ifu.io.perfEvents.PerfEvents(2).incr_step   
-  hpmEvents.PerfEvents(3 ).incr_step   := ifu.io.perfEvents.PerfEvents(3).incr_step   
-  hpmEvents.PerfEvents(4 ).incr_step   := ifu.io.perfEvents.PerfEvents(4).incr_step   
-  hpmEvents.PerfEvents(5 ).incr_step   := ifu.io.perfEvents.PerfEvents(5).incr_step   
-  hpmEvents.PerfEvents(6 ).incr_step   := ifu.io.perfEvents.PerfEvents(6).incr_step   
-  hpmEvents.PerfEvents(7 ).incr_step   := ifu.io.perfEvents.PerfEvents(7).incr_step   
-  hpmEvents.PerfEvents(8 ).incr_step   := ifu.io.perfEvents.PerfEvents(8).incr_step   
-  hpmEvents.PerfEvents(9 ).incr_step   := ifu.io.perfEvents.PerfEvents(9).incr_step   
-  hpmEvents.PerfEvents(10).incr_step  := ifu.io.perfEvents.PerfEvents(10).incr_step  
-  hpmEvents.PerfEvents(11).incr_step  := ifu.io.perfEvents.PerfEvents(11).incr_step  
-  hpmEvents.PerfEvents(12).incr_step  := ifu.io.perfEvents.PerfEvents(12).incr_step  
-  hpmEvents.PerfEvents(13).incr_step  := ifu.io.perfEvents.PerfEvents(13).incr_step  
-  hpmEvents.PerfEvents(14).incr_step  := ifu.io.perfEvents.PerfEvents(14).incr_step  
-  hpmEvents.PerfEvents(15).incr_step  := ifu.io.perfEvents.PerfEvents(15).incr_step  
-  hpmEvents.PerfEvents(16).incr_step  := ibuffer.io.perfEvents.PerfEvents(16).incr_step  
-  hpmEvents.PerfEvents(17).incr_step  := ibuffer.io.perfEvents.PerfEvents(17).incr_step  
-  hpmEvents.PerfEvents(18).incr_step  := ibuffer.io.perfEvents.PerfEvents(18).incr_step  
-  hpmEvents.PerfEvents(19).incr_step  := ibuffer.io.perfEvents.PerfEvents(19).incr_step  
-  hpmEvents.PerfEvents(20).incr_step  := ibuffer.io.perfEvents.PerfEvents(20).incr_step  
-  hpmEvents.PerfEvents(21).incr_step  := ibuffer.io.perfEvents.PerfEvents(21).incr_step  
-  hpmEvents.PerfEvents(22).incr_step  := ibuffer.io.perfEvents.PerfEvents(22).incr_step  
-  hpmEvents.PerfEvents(23).incr_step  := ibuffer.io.perfEvents.PerfEvents(23).incr_step  
-  hpmEvents.PerfEvents(24).incr_step  := icache.io.perfEvents.PerfEvents(24).incr_step   
-  hpmEvents.PerfEvents(25).incr_step  := icache.io.perfEvents.PerfEvents(25).incr_step   
-  hpmEvents.PerfEvents(26).incr_step  := ftq.io.perfEvents.PerfEvents(26).incr_step   
-  hpmEvents.PerfEvents(27).incr_step  := ftq.io.perfEvents.PerfEvents(27).incr_step   
-  hpmEvents.PerfEvents(28).incr_step  := ftq.io.perfEvents.PerfEvents(28).incr_step   
-  hpmEvents.PerfEvents(29).incr_step  := ftq.io.perfEvents.PerfEvents(29).incr_step   
-  hpmEvents.PerfEvents(30).incr_step  := ftq.io.perfEvents.PerfEvents(30).incr_step   
-  hpmEvents.PerfEvents(31).incr_step  := ftq.io.perfEvents.PerfEvents(31).incr_step   
-  hpmEvents.PerfEvents(32).incr_step  := ftq.io.perfEvents.PerfEvents(32).incr_step   
-  hpmEvents.PerfEvents(33).incr_step  := ftq.io.perfEvents.PerfEvents(33).incr_step   
-  hpmEvents.PerfEvents(34).incr_step  := ftq.io.perfEvents.PerfEvents(34).incr_step   
-  hpmEvents.PerfEvents(35).incr_step  := ftq.io.perfEvents.PerfEvents(35).incr_step   
-  hpmEvents.PerfEvents(36).incr_step  := ftq.io.perfEvents.PerfEvents(36).incr_step   
-  hpmEvents.PerfEvents(37).incr_step  := ftq.io.perfEvents.PerfEvents(37).incr_step   
-  hpmEvents.PerfEvents(38).incr_step  := ftq.io.perfEvents.PerfEvents(38).incr_step   
-  hpmEvents.PerfEvents(39).incr_step  := ftq.io.perfEvents.PerfEvents(39).incr_step   
-  hpmEvents.PerfEvents(40).incr_step  := ftq.io.perfEvents.PerfEvents(40).incr_step   
-  hpmEvents.PerfEvents(41).incr_step  := ftq.io.perfEvents.PerfEvents(41).incr_step   
-  hpmEvents.PerfEvents(42).incr_step  := ftq.io.perfEvents.PerfEvents(42).incr_step   
-  hpmEvents.PerfEvents(43).incr_step  := ftq.io.perfEvents.PerfEvents(43).incr_step   
-  hpmEvents.PerfEvents(44).incr_step  := ftq.io.perfEvents.PerfEvents(44).incr_step   
-  hpmEvents.PerfEvents(45).incr_step  := ftq.io.perfEvents.PerfEvents(45).incr_step   
-  hpmEvents.PerfEvents(46).incr_step  := ftq.io.perfEvents.PerfEvents(46).incr_step   
-  hpmEvents.PerfEvents(47).incr_step  := ftq.io.perfEvents.PerfEvents(47).incr_step   
-  hpmEvents.PerfEvents(48).incr_step  := bpu.io.perfEvents.PerfEvents(48).incr_step
-  hpmEvents.PerfEvents(49).incr_step  := bpu.io.perfEvents.PerfEvents(49).incr_step
-  hpmEvents.PerfEvents(50).incr_step  := bpu.io.perfEvents.PerfEvents(50).incr_step
-  hpmEvents.PerfEvents(51).incr_step  := bpu.io.perfEvents.PerfEvents(51).incr_step
-  hpmEvents.PerfEvents(52).incr_step  := bpu.io.perfEvents.PerfEvents(52).incr_step
-  hpmEvents.PerfEvents(53).incr_step  := bpu.io.perfEvents.PerfEvents(53).incr_step
-  hpmEvents.PerfEvents(54).incr_step  := bpu.io.perfEvents.PerfEvents(54).incr_step
-  hpmEvents.PerfEvents(55).incr_step  := bpu.io.perfEvents.PerfEvents(55).incr_step
-//
-//  hpmEvents.PerfEvents := (ifu.io.perfEvents.PerfEvents) ++ ibuffer.io.perfEvents.PerfEvents ++ icache.io.perfEvents.PerfEvents ++ ftq.io.perfEvents.PerfEvents ++ bpu.io.perfEvents.PerfEvents
-             
-  //for(i <- 0 until numCSRPCntFrontend ) {
-  //  io.perfEvents.PerfEvents(i).incr_step := DontCare
-  //}
-  val hpm_frontend = Module(new HPerfmonitor(numPCntFrontend,numCSRPCntFrontend))
-  hpm_frontend.io.HPMEvent(0) := pfevent.io.HPMEvent(0)
-  hpm_frontend.io.HPMEvent(1) := pfevent.io.HPMEvent(1)
-  hpm_frontend.io.HPMEvent(2) := pfevent.io.HPMEvent(2)
-  hpm_frontend.io.HPMEvent(3) := pfevent.io.HPMEvent(3)
-  hpm_frontend.io.HPMEvent(4) := pfevent.io.HPMEvent(4)
-  hpm_frontend.io.HPMEvent(5) := pfevent.io.HPMEvent(5)
-  hpm_frontend.io.HPMEvent(6) := pfevent.io.HPMEvent(6)
-  hpm_frontend.io.HPMEvent(7) := pfevent.io.HPMEvent(7)
-  hpm_frontend.io.Events_sets := hpmEvents
-  io.perfEvents := hpm_frontend.io.Events_selected
+  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++ icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ bpu.perfinfo.perfEvents.perf_events
+  val perf_length = hpmEvents.length
+  val csrevents = pfevent.io.hpmevent.slice(0,8)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+  })
+  val hpm_frontend = Module(new HPerfmonitor(perf_length,csrevents.length))
+  hpm_frontend.io.hpm_event := csrevents
+  hpm_frontend.io.events_sets.perf_events := hpmEvents
+  perfinfo.perfEvents := hpm_frontend.io.events_selected
 }

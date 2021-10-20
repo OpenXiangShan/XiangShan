@@ -307,31 +307,15 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
     TimeOutAssert(sfence_latch(i), timeOutThreshold, s"ptw mem resp time out sfence_latch${i}")
   }
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
 
-  io.perfEvents.PerfEvents(0 ).incr_step   := missQueue.io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(1 ).incr_step   := missQueue.io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(2 ).incr_step   := missQueue.io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(3 ).incr_step   := missQueue.io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(4 ).incr_step   := cache.io.perfEvents.PerfEvents(4).incr_step 
-  io.perfEvents.PerfEvents(5 ).incr_step   := cache.io.perfEvents.PerfEvents(5).incr_step 
-  io.perfEvents.PerfEvents(6 ).incr_step   := cache.io.perfEvents.PerfEvents(6).incr_step 
-  io.perfEvents.PerfEvents(7 ).incr_step   := cache.io.perfEvents.PerfEvents(7).incr_step 
-  io.perfEvents.PerfEvents(8 ).incr_step   := cache.io.perfEvents.PerfEvents(8).incr_step 
-  io.perfEvents.PerfEvents(9 ).incr_step   := cache.io.perfEvents.PerfEvents(9).incr_step 
-  io.perfEvents.PerfEvents(10).incr_step   := cache.io.perfEvents.PerfEvents(10).incr_step
-  io.perfEvents.PerfEvents(11).incr_step   := cache.io.perfEvents.PerfEvents(11).incr_step
-  io.perfEvents.PerfEvents(12).incr_step   := fsm.io.perfEvents.PerfEvents(12).incr_step
-  io.perfEvents.PerfEvents(13).incr_step   := fsm.io.perfEvents.PerfEvents(13).incr_step
-  io.perfEvents.PerfEvents(14).incr_step   := fsm.io.perfEvents.PerfEvents(14).incr_step
-  io.perfEvents.PerfEvents(15).incr_step   := fsm.io.perfEvents.PerfEvents(15).incr_step
-  io.perfEvents.PerfEvents(16).incr_step   := fsm.io.perfEvents.PerfEvents(16).incr_step
-  io.perfEvents.PerfEvents(17).incr_step   := fsm.io.perfEvents.PerfEvents(17).incr_step
-  io.perfEvents.PerfEvents(18).incr_step   := fsm.io.perfEvents.PerfEvents(18).incr_step
-//  io.perfEvents.PerfEvents(12).incr_step   := io.perfEvents.PerfEvents(19).incr_step
-//  io.perfEvents.PerfEvents(12).incr_step   := io.perfEvents.PerfEvents(20).incr_step
+
+  val perf_list = missQueue.perfinfo.perfEvents.perf_events ++ cache.perfinfo.perfEvents.perf_events ++ fsm.perfinfo.perfEvents.perf_events
+  val perf_length = perf_list.length
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
+
 }
 
 class PTEHelper() extends ExtModule {
@@ -380,12 +364,16 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new PtwIO)
-    if (useSoftPTW) {
+    val perfinfo = IO(new Bundle(){
+      val perfEvents = Output(new PerfEventsBundle(ptw.asInstanceOf[PTW].module.perf_length))
+    })
+    if(useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
     }
     else {
-      io <> ptw.module.io
+        io <> ptw.module.io
+        perfinfo := ptw.asInstanceOf[PTW].module.perfinfo
     }
   }
 }

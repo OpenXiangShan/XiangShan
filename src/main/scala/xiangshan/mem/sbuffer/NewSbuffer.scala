@@ -95,7 +95,6 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
     val sqempty = Input(Bool())
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
-    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val dataModule = Module(new SbufferData)
@@ -503,18 +502,24 @@ class NewSbuffer(implicit p: Parameters) extends XSModule with HasSbufferConst {
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step  := DontCare
-  }
-  io.perfEvents.PerfEvents( 0).incr_step  := PopCount(VecInit(io.in.map(_.valid)).asUInt)
-  io.perfEvents.PerfEvents( 1).incr_step  := PopCount(VecInit(io.in.map(_.fire())).asUInt)
-  io.perfEvents.PerfEvents( 2).incr_step  := PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt)
-  io.perfEvents.PerfEvents( 3).incr_step  := PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt)
-  io.perfEvents.PerfEvents( 4).incr_step  := io.dcache.req.valid
-  io.perfEvents.PerfEvents( 5).incr_step  := io.dcache.req.fire()
-  io.perfEvents.PerfEvents( 6).incr_step  := (perf_valid_entry_count < (StoreBufferSize.U/4.U))
-  io.perfEvents.PerfEvents( 7).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))
-  io.perfEvents.PerfEvents( 8).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))
-  io.perfEvents.PerfEvents( 9).incr_step  := (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U))
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(10))
+  })
+  val perfEvents = Seq(
+    ("sbuffer_req_valid ", PopCount(VecInit(io.in.map(_.valid)).asUInt)                                                                ),
+    ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire())).asUInt)                                                               ),
+    ("sbuffer_merge     ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt)                ),
+    ("sbuffer_newline   ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt)               ),
+    ("dcache_req_valid  ", io.dcache.req.valid                                                                                         ),
+    ("dcache_req_fire   ", io.dcache.req.fire()                                                                                        ),
+    ("sbuffer_1/4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
+    ("sbuffer_2/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
+    ("sbuffer_3/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
+    ("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 }

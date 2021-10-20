@@ -149,25 +149,31 @@ class PerfBundle(implicit p: Parameters) extends XSBundle {
 
 class PerfEventsBundle (val numPCnt: Int) (implicit p: Parameters)extends XSBundle{
 
-  val PerfEvents = Vec(numPCnt, (new PerfBundle))
+  val perf_events = Vec(numPCnt, (new PerfBundle))
+  def length = numPCnt
+  //def ++(others: PerfEventsBundle): PerfEventsBundle = {
+  //  val new_bundle = Vec((perf_events.length + others.perf_events.length),(new PerfBundle))
+  //  new_bundle.perf_events := perf_events ++ others.perf_events
+  //  
+  //} 
 
 }
 
 class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
-    val HPMEvent         = Input(UInt(XLEN.W))
-    val Events_sets      = Input(new PerfEventsBundle(numPCnt))
-    val Event_selected   = Output(new PerfBundle)
+    val hpm_event         = Input(UInt(XLEN.W))
+    val events_sets      = Input(new PerfEventsBundle(numPCnt))
+    val event_selected   = Output(new PerfBundle)
   })
   
-  val events_incr_0 = io.Events_sets.PerfEvents(io.HPMEvent(9,0))
-  val events_incr_1 = io.Events_sets.PerfEvents(io.HPMEvent(19,10))
-  val events_incr_2 = io.Events_sets.PerfEvents(io.HPMEvent(29,20))
-  val events_incr_3 = io.Events_sets.PerfEvents(io.HPMEvent(39,30))
+  val events_incr_0 = io.events_sets.perf_events(io.hpm_event(9,0))
+  val events_incr_1 = io.events_sets.perf_events(io.hpm_event(19,10))
+  val events_incr_2 = io.events_sets.perf_events(io.hpm_event(29,20))
+  val events_incr_3 = io.events_sets.perf_events(io.hpm_event(39,30))
 
-    val event_op_0 = io.HPMEvent(44,40)
-    val event_op_1 = io.HPMEvent(49,45)
-    val event_op_2 = io.HPMEvent(54,50)
+    val event_op_0 = io.hpm_event(44,40)
+    val event_op_1 = io.hpm_event(49,45)
+    val event_op_2 = io.hpm_event(54,50)
 
 
     val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
@@ -175,22 +181,22 @@ class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
     val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
                                        Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  (events_incr_1.incr_step | events_incr_0.incr_step))))
 
-    io.Event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),Mux(event_op_1(1),(event_step_0 ^ event_step_1),Mux(event_op_1(2),(event_step_0 + event_step_1),(event_step_0 | event_step_1))))
+    io.event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),Mux(event_op_1(1),(event_step_0 ^ event_step_1),Mux(event_op_1(2),(event_step_0 + event_step_1),(event_step_0 | event_step_1))))
 }
 
 class HPerfmonitor (val numPCnt: Int, val numCSRPCnt: Int) (implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
-    val HPMEvent         = Input(Vec(numCSRPCnt, UInt(XLEN.W)))
-    val Events_sets      = Input(new PerfEventsBundle(numPCnt))
+    val hpm_event         = Input(Vec(numCSRPCnt, UInt(XLEN.W)))
+    val events_sets      = Input(new PerfEventsBundle(numPCnt))
     //val Events_selected  = Output(Vec(numCSRPCnt,(new PerfBundle)))
-    val Events_selected  = Output(new PerfEventsBundle(numCSRPCnt))
+    val events_selected  = Output(new PerfEventsBundle(numCSRPCnt))
   })
   
   for (i <- 0 until numCSRPCnt) {
     val hpc = Module(new HPerfCounter(numPCnt))
-    hpc.io.Events_sets       <> io.Events_sets
-    hpc.io.HPMEvent          := io.HPMEvent(i)
-    hpc.io.Event_selected   <> io.Events_selected.PerfEvents(i)
+    hpc.io.events_sets       <> io.events_sets
+    hpc.io.hpm_event         := io.hpm_event(i)
+    hpc.io.event_selected    <> io.events_selected.perf_events(i)
   }
 }
 

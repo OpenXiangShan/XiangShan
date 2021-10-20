@@ -63,7 +63,6 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val icacheInter     = new ICacheInterface
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val iTLBInter       = Vec(2, new BlockTlbRequestIO)
-  val perfEvents      = Output(new PerfEventsBundle(numPCntFrontend))
   val pmp             = Vec(2, new Bundle {
     val req = Valid(new PMPReqBundle())
     val resp = Input(new PMPRespBundle())
@@ -570,25 +569,31 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
-  for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(15))
+  })
 
-  io.perfEvents.PerfEvents(1).incr_step   := f3_redirect
-  io.perfEvents.PerfEvents(2).incr_step   := io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(3).incr_step   := io.toIbuffer.fire() && !f3_hit
-  io.perfEvents.PerfEvents(4).incr_step   := f3_req_0
-  io.perfEvents.PerfEvents(5).incr_step   := f3_req_1
-  io.perfEvents.PerfEvents(6).incr_step   := f3_hit_1
-  io.perfEvents.PerfEvents(7).incr_step   := f3_hit_1
-  io.perfEvents.PerfEvents(8).incr_step   := f3_only_0_hit       && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(9).incr_step   := f3_only_0_miss      && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(10).incr_step  := f3_hit_0_hit_1      && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(11).incr_step  := f3_hit_0_miss_1     && io.toIbuffer.fire() 
-  io.perfEvents.PerfEvents(12).incr_step  := f3_miss_0_hit_1     && io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(13).incr_step  := f3_miss_0_miss_1    && io.toIbuffer.fire()
-  io.perfEvents.PerfEvents(14).incr_step  := io.toIbuffer.fire() && f3_situation(0)
-  io.perfEvents.PerfEvents(15).incr_step  := io.toIbuffer.fire() && f3_situation(1)
+  val perfEvents = Seq(
+    ("frontendFlush                ", f3_redirect                                ),
+    ("ifu_req                      ", io.toIbuffer.fire()                        ),
+    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_hit             ),
+    ("ifu_req_cacheline_0          ", f3_req_0                                   ),
+    ("ifu_req_cacheline_1          ", f3_req_1                                   ),
+    ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
+    ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
+    ("only_0_hit                   ", f3_only_0_hit       && io.toIbuffer.fire() ),
+    ("only_0_miss                  ", f3_only_0_miss      && io.toIbuffer.fire() ),
+    ("hit_0_hit_1                  ", f3_hit_0_hit_1      && io.toIbuffer.fire() ),
+    ("hit_0_miss_1                 ", f3_hit_0_miss_1     && io.toIbuffer.fire() ),
+    ("miss_0_hit_1                 ", f3_miss_0_hit_1     && io.toIbuffer.fire() ),
+    ("miss_0_miss_1                ", f3_miss_0_miss_1    && io.toIbuffer.fire() ),
+    ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
+    ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 
   f3_redirect := !predecodeFlushReg && predecodeFlush
 

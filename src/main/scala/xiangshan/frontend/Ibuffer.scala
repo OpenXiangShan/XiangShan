@@ -33,7 +33,6 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
   val in = Flipped(DecoupledIO(new FetchToIBuffer))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val full = Output(Bool())
-  val perfEvents      = Output(new PerfEventsBundle(numPCntFrontend))
 }
 
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -180,15 +179,21 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   QueuePerf(IBufSize, validEntries, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
-  for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("IBuffer_Flushed        ", io.flush                                                                     ),
+    ("IBuffer_hungry         ", instrHungry                                                                  ),
+    ("IBuffer_1/4_valid      ", (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)   ),
+    ("IBuffer_2/4_valid      ", (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)   ),
+    ("IBuffer_3/4_valid      ", (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)   ),
+    ("IBuffer_4/4_valid      ", (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)   ),
+    ("IBuffer_full           ",  validEntries.andR                                                           ),
+    ("Front_Bubble           ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid))),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  io.perfEvents.PerfEvents(16).incr_step  := io.flush
-  io.perfEvents.PerfEvents(17).incr_step  := instrHungry
-  io.perfEvents.PerfEvents(18).incr_step  := instrHungry
-  io.perfEvents.PerfEvents(19).incr_step  := (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(20).incr_step  := (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(21).incr_step  := (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(22).incr_step  := (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)
-  io.perfEvents.PerfEvents(23).incr_step  :=  validEntries.andR
 }

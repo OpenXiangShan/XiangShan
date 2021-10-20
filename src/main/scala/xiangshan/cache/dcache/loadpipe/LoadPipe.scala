@@ -55,7 +55,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
     //for preformance monitor
-    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   val s1_ready = Wire(Bool())
@@ -258,13 +257,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire() && s1_tag_match)
 
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0).incr_step  := io.lsu.req.fire()
-  io.perfEvents.PerfEvents(1).incr_step  := io.lsu.resp.fire() && resp.bits.replay
-  io.perfEvents.PerfEvents(2).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_data
-  io.perfEvents.PerfEvents(3).incr_step  := io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr
-  io.perfEvents.PerfEvents(4).incr_step  := io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(5))
+  })
+  val perfEvents = Seq(
+    ("load_req                     ", io.lsu.req.fire()                                               ),
+    ("load_replay                  ", io.lsu.resp.fire() && resp.bits.replay                          ),
+    ("load_replay_for_data_nack    ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_data          ),
+    ("load_replay_for_no_mshr      ", io.lsu.resp.fire() && resp.bits.replay && s2_nack_no_mshr       ),
+    ("load_replay_for_conflict     ", io.lsu.resp.fire() && resp.bits.replay && io.bank_conflict_slow ),
+  )
 
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 }

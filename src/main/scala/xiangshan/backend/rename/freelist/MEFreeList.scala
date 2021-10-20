@@ -37,8 +37,6 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
 
   val stepBack = IO(Input(UInt(log2Up(CommitWidth + 1).W)))
 
-  val perfEvents = IO(Output(new PerfEventsBundle(numPCntCtrl)))
-
   // additional ports designed for move elimination
   val psrcOfMove = IO(Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W)))))
   val eliminatedMove = IO(Vec(CommitWidth, Input(Bool())))
@@ -277,11 +275,17 @@ class MEFreeList(implicit val p: config.Parameters) extends MultiIOModule with M
     archRefCounter(i) :=   Mux(clearArchRefCounter(i), 0.U, Mux(updateArchRefCounter(i), archRefCounterNext(i), archRefCounter(i) ))
     cmtCounter(i)     :=   Mux(clearCmtCounter(i),     0.U, Mux(updateCmtCounter(i),     cmtCounterNext(i),     cmtCounter(i)     ))
   }
-  for(i <- 0 until numPCntCtrl ) {
-    perfEvents.PerfEvents(i).incr_step := DontCare
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(4))
+  })
+  val perfEvents = Seq(
+    ("me_freelist_1/4_valid          ", (freeRegCnt < ((NRPhyRegs-32).U/4.U))                                             ),
+    ("me_freelist_2/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U/4.U)) & (freeRegCnt <= ((NRPhyRegs-32).U/2.U))    ),
+    ("me_freelist_3/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U/2.U)) & (freeRegCnt <= ((NRPhyRegs-32).U*3.U/4.U))),
+    ("me_freelist_4/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U*3.U/4.U))                                         ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  perfEvents.PerfEvents(0).incr_step  := (freeRegCnt < ((NRPhyRegs-32).U/4.U))
-  perfEvents.PerfEvents(1).incr_step  := (freeRegCnt > ((NRPhyRegs-32).U/4.U)) & (freeRegCnt <= ((NRPhyRegs-32).U/2.U))
-  perfEvents.PerfEvents(2).incr_step  := (freeRegCnt > ((NRPhyRegs-32).U/2.U)) & (freeRegCnt <= ((NRPhyRegs-32).U*3.U/4.U))
-  perfEvents.PerfEvents(3).incr_step  := (freeRegCnt > ((NRPhyRegs-32).U*3.U/4.U))
 }

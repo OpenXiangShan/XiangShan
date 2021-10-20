@@ -335,10 +335,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSDebug(u_valid, "update_pc=%x, tag=%x, update_write_way=%b, pred_cycle=%d\n",
     update.pc, ftbAddr.getTag(update.pc), u_way_mask, u_meta.pred_cycle)
 
-
-
-
-
   XSPerfAccumulate("ftb_first_miss", u_valid && !u_updated && !update.preds.hit)
   XSPerfAccumulate("ftb_updated_miss", u_valid && u_updated && !update.preds.hit)
 
@@ -354,6 +350,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_update_req", io.update.valid)
   XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
-  io.perfEvents.PerfEvents(54).incr_step  :=  u_valid  &&  update.preds.hit
-  io.perfEvents.PerfEvents(55).incr_step  :=  u_valid  && !update.preds.hit
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+  val perfEvents = Seq(
+    ("ftb_commit_hits            ", u_valid  &&  update.preds.hit),
+    ("ftb_commit_misses          ", u_valid  && !update.preds.hit),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 }

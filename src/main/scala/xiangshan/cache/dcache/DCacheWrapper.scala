@@ -282,7 +282,6 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
-  val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
 }
 
 
@@ -521,40 +520,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("num_loads", num_loads)
 
   io.mshrFull := missQueue.io.full
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0 ).incr_step  := wb.io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(1 ).incr_step  := wb.io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(2 ).incr_step  := wb.io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(3 ).incr_step  := wb.io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(4 ).incr_step  := wb.io.perfEvents.PerfEvents(4).incr_step
-  io.perfEvents.PerfEvents(5 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(6 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(7 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(8 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(9 ).incr_step  := mainPipe.io.perfEvents.PerfEvents(4).incr_step
-  io.perfEvents.PerfEvents(10).incr_step  := mainPipe.io.perfEvents.PerfEvents(5).incr_step
-  io.perfEvents.PerfEvents(11).incr_step  := missQueue.io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(12).incr_step  := missQueue.io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(13).incr_step  := missQueue.io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(14).incr_step  := missQueue.io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(15).incr_step  := missQueue.io.perfEvents.PerfEvents(4).incr_step
-  io.perfEvents.PerfEvents(16).incr_step  := probeQueue.io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(17).incr_step  := probeQueue.io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(18).incr_step  := probeQueue.io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(19).incr_step  := probeQueue.io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(20).incr_step  := probeQueue.io.perfEvents.PerfEvents(4).incr_step
-  io.perfEvents.PerfEvents(21).incr_step  := ldu(0).io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(22).incr_step  := ldu(0).io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(23).incr_step  := ldu(0).io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(24).incr_step  := ldu(0).io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(25).incr_step  := ldu(0).io.perfEvents.PerfEvents(4).incr_step
-  io.perfEvents.PerfEvents(26).incr_step  := ldu(1).io.perfEvents.PerfEvents(0).incr_step
-  io.perfEvents.PerfEvents(27).incr_step  := ldu(1).io.perfEvents.PerfEvents(1).incr_step
-  io.perfEvents.PerfEvents(28).incr_step  := ldu(1).io.perfEvents.PerfEvents(2).incr_step
-  io.perfEvents.PerfEvents(29).incr_step  := ldu(1).io.perfEvents.PerfEvents(3).incr_step
-  io.perfEvents.PerfEvents(30).incr_step  := ldu(1).io.perfEvents.PerfEvents(4).incr_step
+
+  val perflist = wb.perfinfo.perfEvents.perf_events ++ mainPipe.perfinfo.perfEvents.perf_events ++ missQueue.perfinfo.perfEvents.perf_events ++ probeQueue.perfinfo.perfEvents.perf_events ++ ldu(0).perfinfo.perfEvents.perf_events ++ ldu(1).perfinfo.perfEvents.perf_events
+  val perf_length = perflist.length
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perflist.length))
+  })
+  perfinfo.perfEvents.perf_events := perflist
+
 }                          
                            
 class AMOHelper() extends ExtModule {
@@ -579,6 +552,9 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new DCacheIO)
+    val perfinfo = IO(new Bundle(){
+      val perfEvents = Output(new PerfEventsBundle(dcache.asInstanceOf[DCache].module.perf_length))
+    })
     if (!useDcache) {
       // a fake dcache which uses dpi-c to access memory, only for debug usage!
       val fake_dcache = Module(new FakeDCache())
@@ -586,6 +562,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
     }
     else {
       io <> dcache.module.io
+      perfinfo := dcache.asInstanceOf[DCache].module.perfinfo
     }
   }
 }

@@ -36,7 +36,6 @@ class StdFreeList(implicit val p: config.Parameters) extends MultiIOModule with 
   val freePhyReg = IO(Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W))))
 
   val stepBack = IO(Input(UInt(log2Up(CommitWidth + 1).W)))
-  val perfEvents = IO(Output(new PerfEventsBundle(numPCntCtrl)))
 
 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](StdFreeListSize)
@@ -113,11 +112,17 @@ class StdFreeList(implicit val p: config.Parameters) extends MultiIOModule with 
   XSPerfAccumulate("utilization", freeRegCnt)
   XSPerfAccumulate("allocation_blocked", !canAllocate)
   XSPerfAccumulate("can_alloc_wrong", !canAllocate && freeRegCnt >= RenameWidth.U)
-  for(i <- 0 until numPCntCtrl ) {
-    perfEvents.PerfEvents(i).incr_step := DontCare
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(4))
+  })
+  val perfEvents = Seq(
+    ("std_freelist_1/4_valid          ", (freeRegCnt < (StdFreeListSize.U/4.U))                                              ),
+    ("std_freelist_2/4_valid          ", (freeRegCnt > (StdFreeListSize.U/4.U)) & (freeRegCnt <= (StdFreeListSize.U/2.U))    ),
+    ("std_freelist_3/4_valid          ", (freeRegCnt > (StdFreeListSize.U/2.U)) & (freeRegCnt <= (StdFreeListSize.U*3.U/4.U))),
+    ("std_freelist_4/4_valid          ", (freeRegCnt > (StdFreeListSize.U*3.U/4.U))                                          ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  perfEvents.PerfEvents(0).incr_step  := (freeRegCnt < (StdFreeListSize.U/4.U))
-  perfEvents.PerfEvents(1).incr_step  := (freeRegCnt > (StdFreeListSize.U/4.U)) & (freeRegCnt <= (StdFreeListSize.U/2.U))
-  perfEvents.PerfEvents(2).incr_step  := (freeRegCnt > (StdFreeListSize.U/2.U)) & (freeRegCnt <= (StdFreeListSize.U*3.U/4.U))
-  perfEvents.PerfEvents(3).incr_step  := (freeRegCnt > (StdFreeListSize.U*3.U/4.U))
 }

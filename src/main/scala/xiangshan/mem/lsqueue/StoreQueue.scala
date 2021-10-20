@@ -68,7 +68,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr) // used to wake up delayed load/store
     val sqFull = Output(Bool())
-    val perfEvents = Output(new PerfEventsBundle(numPCntLsu))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -557,18 +556,23 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
-  for(i <- 0 until numPCntLsu ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(22).incr_step  := uncacheState =/= s_idle
-  io.perfEvents.PerfEvents(23).incr_step  := io.uncache.req.fire()
-  io.perfEvents.PerfEvents(24).incr_step  := io.mmioStout.fire()
-  io.perfEvents.PerfEvents(25).incr_step  := io.mmioStout.valid && !io.mmioStout.ready
-  io.perfEvents.PerfEvents(26).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U))
-  io.perfEvents.PerfEvents(27).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U))
-  io.perfEvents.PerfEvents(28).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U))
-  io.perfEvents.PerfEvents(29).incr_step  := (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U))
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("mmioCycle         ", uncacheState =/= s_idle                                                                                                                             ),
+    ("mmioCnt           ", io.uncache.req.fire()                                                                                                                               ),
+    ("mmio_wb_success   ", io.mmioStout.fire()                                                                                                                                 ),
+    ("mmio_wb_blocked   ", io.mmioStout.valid && !io.mmioStout.ready                                                                                                           ),
+    ("stq_1/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U))                                                                              ),
+    ("stq_2/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U))    ),
+    ("stq_3/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U))),
+    ("stq_4/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U))                                                                          ),
+  )
 
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
 

@@ -63,13 +63,6 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     update_meta = update_meta >> c.meta_size
   }
 
-  io.perfEvents.PerfEvents(49).incr_step  :=  components(2).io.perfEvents.PerfEvents(49).incr_step 
-  io.perfEvents.PerfEvents(50).incr_step  :=  components(2).io.perfEvents.PerfEvents(50).incr_step 
-  io.perfEvents.PerfEvents(51).incr_step  :=  components(2).io.perfEvents.PerfEvents(51).incr_step 
-  io.perfEvents.PerfEvents(52).incr_step  :=  components(1).io.perfEvents.PerfEvents(52).incr_step 
-  io.perfEvents.PerfEvents(53).incr_step  :=  components(1).io.perfEvents.PerfEvents(53).incr_step 
-  io.perfEvents.PerfEvents(54).incr_step  :=  components(3).io.perfEvents.PerfEvents(54).incr_step 
-  io.perfEvents.PerfEvents(55).incr_step  :=  components(3).io.perfEvents.PerfEvents(55).incr_step 
   def extractMeta(meta: UInt, idx: Int): UInt = {
     var update_meta = meta
     var metas: Seq[UInt] = Nil
@@ -79,4 +72,10 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     }
     metas(idx)
   }
+
+  val perf_list = components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events ++ components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events ++ components(3).asInstanceOf[FTB].perfinfo.perfEvents.perf_events
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
 }

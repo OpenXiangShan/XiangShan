@@ -82,7 +82,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     // singleStep
     val singleStep = Input(Bool())
-    val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   })
 
 
@@ -383,20 +382,23 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_fp_dq",  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_ls_dq",  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
-  for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(9))
+  })
+  val perfEvents = Seq(
+    ("dispatch_in                 ", PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                                                                       ),
+    ("dispatch_empty              ", !hasValidInstr                                                                                                                      ),
+    ("dispatch_utili              ", PopCount(io.fromRename.map(_.valid))                                                                                                ),
+    ("dispatch_waitinstr          ", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))                                                     ),
+    ("dispatch_stall_cycle_lsq    ", hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_rob    ", hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_int_dq ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_fp_dq  ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_ls_dq  ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-//  io.perfEvents.PerfEvents(30).incr_valid :=  RegNext(io.fromRename(0).ready) 
-  io.perfEvents.PerfEvents(20).incr_step  :=  PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))
-
-  io.perfEvents.PerfEvents(21).incr_step  :=  !hasValidInstr
-
-  io.perfEvents.PerfEvents(22).incr_step  :=  PopCount(io.fromRename.map(_.valid))
-
-  io.perfEvents.PerfEvents(23).incr_step  :=  PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))
-  io.perfEvents.PerfEvents(24).incr_step  :=  hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(25).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(26).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-  io.perfEvents.PerfEvents(27).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept 
-  io.perfEvents.PerfEvents(28).incr_step  :=  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  
 }

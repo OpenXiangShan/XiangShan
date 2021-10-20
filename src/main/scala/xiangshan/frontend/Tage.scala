@@ -137,7 +137,6 @@ class FakeTageTable()(implicit p: Parameters) extends TageModule {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
-    val perfEvents = Output(new PerfEventsBundle(numPCntFrontend))
   })
   io.resp := DontCare
 
@@ -822,8 +821,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
     // XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     // XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
-  io.perfEvents.PerfEvents(49).incr_step  :=  updateMetas(1).provider.valid + updateMetas(0).provider.valid
-
 }
 
 

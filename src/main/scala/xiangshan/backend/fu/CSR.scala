@@ -136,7 +136,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = (new PerfEventsBundle(numCSRPCntFrontend ))
   val perfEventsCtrl      = (new PerfEventsBundle(numCSRPCntCtrl     ))
   val perfEventsLsu       = (new PerfEventsBundle(numCSRPCntLsu      ))
-  val perfEventsHc        = Vec(numPCntHc,(UInt(6.W)))
+  val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks,(UInt(6.W)))
   val retiredInstr = UInt(3.W)
   val frontendInfo = new Bundle {
     val ibufFull  = Bool()
@@ -576,20 +576,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
   }
 
-  val hpmEvents = Wire(new PerfEventsBundle(numPCntHc))
+  val hpmEvents = Wire(new PerfEventsBundle(numPCntHc * coreParams.L2NBanks))
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := csrio.customCtrl.distribute_csr
-  for(i <- 0 until numPCntHc ) {
-    hpmEvents.PerfEvents(i).incr_step := csrio.perf.perfEventsHc(i)
+  for(i <- 0 until numPCntHc * coreParams.L2NBanks) {
+    hpmEvents.perf_events(i).incr_step := csrio.perf.perfEventsHc(i)
   }
 
-  val hpm_hc = Module(new HPerfmonitor(numPCntHc,numCSRPCntHc))
-  hpm_hc.io.HPMEvent(0) := pfevent.io.HPMEvent(24)
-  hpm_hc.io.HPMEvent(1) := pfevent.io.HPMEvent(25)
-  hpm_hc.io.HPMEvent(2) := pfevent.io.HPMEvent(26)
-  hpm_hc.io.HPMEvent(3) := pfevent.io.HPMEvent(27)
-  hpm_hc.io.HPMEvent(4) := pfevent.io.HPMEvent(28)
-  hpm_hc.io.Events_sets := hpmEvents
+  val hpm_hc = Module(new HPerfmonitor(numPCntHc * coreParams.L2NBanks,numCSRPCntHc))
+  val csrevents = pfevent.io.hpmevent.slice(24,29)
+  hpm_hc.io.hpm_event := csrevents
+  hpm_hc.io.events_sets := hpmEvents
   val mcountinhibit = RegInit(0.U(XLEN.W))
   val mcycle = RegInit(0.U(XLEN.W))
   mcycle := mcycle + 1.U
@@ -615,35 +612,35 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //bpRight := bpRight + RegNext(csrio.perf.frontendInfo.bpuInfo.bpRight)
   //val bpWrong   = RegInit(0.U(XLEN.W))
   //bpWrong := bpWrong + RegNext(csrio.perf.frontendInfo.bpuInfo.bpWrong)
-  perfCnts( 0)  := Mux((mcountinhibit( 3) | perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(0 ).incr_step)))
-  perfCnts( 1)  := Mux((mcountinhibit( 4) | perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(1 ).incr_step)))
-  perfCnts( 2)  := Mux((mcountinhibit( 5) | perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(2 ).incr_step)))
-  perfCnts( 3)  := Mux((mcountinhibit( 6) | perfEventscounten( 3)),perfCnts( 3) , (perfCnts( 3) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(3 ).incr_step)))
-  perfCnts( 4)  := Mux((mcountinhibit( 7) | perfEventscounten( 4)),perfCnts( 4) , (perfCnts( 4) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(4 ).incr_step)))
-  perfCnts( 5)  := Mux((mcountinhibit( 8) | perfEventscounten( 5)),perfCnts( 5) , (perfCnts( 5) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(5 ).incr_step)))
-  perfCnts( 6)  := Mux((mcountinhibit( 9) | perfEventscounten( 6)),perfCnts( 6) , (perfCnts( 6) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(6 ).incr_step)))
-  perfCnts( 7)  := Mux((mcountinhibit(10) | perfEventscounten( 7)),perfCnts( 7) , (perfCnts( 7) + RegNext(csrio.perf.perfEventsFrontend.PerfEvents(7 ).incr_step)))
-  perfCnts( 8)  := Mux((mcountinhibit(11) | perfEventscounten( 8)),perfCnts( 8) , (perfCnts( 8) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(0 ).incr_step)))
-  perfCnts( 9)  := Mux((mcountinhibit(12) | perfEventscounten( 9)),perfCnts( 9) , (perfCnts( 9) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(1 ).incr_step)))
-  perfCnts(10)  := Mux((mcountinhibit(13) | perfEventscounten(10)),perfCnts(10) , (perfCnts(10) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(2 ).incr_step)))
-  perfCnts(11)  := Mux((mcountinhibit(14) | perfEventscounten(11)),perfCnts(11) , (perfCnts(11) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(3 ).incr_step)))
-  perfCnts(12)  := Mux((mcountinhibit(15) | perfEventscounten(12)),perfCnts(12) , (perfCnts(12) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(4 ).incr_step)))
-  perfCnts(13)  := Mux((mcountinhibit(16) | perfEventscounten(13)),perfCnts(13) , (perfCnts(13) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(5 ).incr_step)))
-  perfCnts(14)  := Mux((mcountinhibit(17) | perfEventscounten(14)),perfCnts(14) , (perfCnts(14) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(6 ).incr_step)))
-  perfCnts(15)  := Mux((mcountinhibit(18) | perfEventscounten(15)),perfCnts(15) , (perfCnts(15) + RegNext(csrio.perf.perfEventsCtrl.PerfEvents(7 ).incr_step)))
-  perfCnts(16)  := Mux((mcountinhibit(19) | perfEventscounten(16)),perfCnts(16) , (perfCnts(16) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(0 ).incr_step)))
-  perfCnts(17)  := Mux((mcountinhibit(20) | perfEventscounten(17)),perfCnts(17) , (perfCnts(17) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(1 ).incr_step)))
-  perfCnts(18)  := Mux((mcountinhibit(21) | perfEventscounten(18)),perfCnts(18) , (perfCnts(18) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(2 ).incr_step)))
-  perfCnts(19)  := Mux((mcountinhibit(22) | perfEventscounten(19)),perfCnts(19) , (perfCnts(19) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(3 ).incr_step)))
-  perfCnts(20)  := Mux((mcountinhibit(23) | perfEventscounten(20)),perfCnts(20) , (perfCnts(20) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(4 ).incr_step)))
-  perfCnts(21)  := Mux((mcountinhibit(24) | perfEventscounten(21)),perfCnts(21) , (perfCnts(21) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(5 ).incr_step)))
-  perfCnts(22)  := Mux((mcountinhibit(25) | perfEventscounten(22)),perfCnts(22) , (perfCnts(22) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(6 ).incr_step)))
-  perfCnts(23)  := Mux((mcountinhibit(26) | perfEventscounten(23)),perfCnts(23) , (perfCnts(23) + RegNext(csrio.perf.perfEventsLsu.PerfEvents(7 ).incr_step)))
-  perfCnts(24)  := Mux((mcountinhibit(27) | perfEventscounten(24)),perfCnts(24) , (perfCnts(24) + RegNext(hpm_hc.io.Events_selected.PerfEvents(0 ).incr_step)))
-  perfCnts(25)  := Mux((mcountinhibit(28) | perfEventscounten(25)),perfCnts(25) , (perfCnts(25) + RegNext(hpm_hc.io.Events_selected.PerfEvents(1 ).incr_step)))
-  perfCnts(26)  := Mux((mcountinhibit(29) | perfEventscounten(26)),perfCnts(26) , (perfCnts(26) + RegNext(hpm_hc.io.Events_selected.PerfEvents(2 ).incr_step)))
-  perfCnts(27)  := Mux((mcountinhibit(30) | perfEventscounten(27)),perfCnts(27) , (perfCnts(27) + RegNext(hpm_hc.io.Events_selected.PerfEvents(3 ).incr_step)))
-  perfCnts(28)  := Mux((mcountinhibit(31) | perfEventscounten(28)),perfCnts(28) , (perfCnts(28) + RegNext(hpm_hc.io.Events_selected.PerfEvents(4 ).incr_step)))
+  perfCnts( 0)  := Mux((mcountinhibit( 3) | perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.perf_events(0 ).incr_step)))
+  perfCnts( 1)  := Mux((mcountinhibit( 4) | perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.perf_events(1 ).incr_step)))
+  perfCnts( 2)  := Mux((mcountinhibit( 5) | perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.perf_events(2 ).incr_step)))
+  perfCnts( 3)  := Mux((mcountinhibit( 6) | perfEventscounten( 3)),perfCnts( 3) , (perfCnts( 3) + RegNext(csrio.perf.perfEventsFrontend.perf_events(3 ).incr_step)))
+  perfCnts( 4)  := Mux((mcountinhibit( 7) | perfEventscounten( 4)),perfCnts( 4) , (perfCnts( 4) + RegNext(csrio.perf.perfEventsFrontend.perf_events(4 ).incr_step)))
+  perfCnts( 5)  := Mux((mcountinhibit( 8) | perfEventscounten( 5)),perfCnts( 5) , (perfCnts( 5) + RegNext(csrio.perf.perfEventsFrontend.perf_events(5 ).incr_step)))
+  perfCnts( 6)  := Mux((mcountinhibit( 9) | perfEventscounten( 6)),perfCnts( 6) , (perfCnts( 6) + RegNext(csrio.perf.perfEventsFrontend.perf_events(6 ).incr_step)))
+  perfCnts( 7)  := Mux((mcountinhibit(10) | perfEventscounten( 7)),perfCnts( 7) , (perfCnts( 7) + RegNext(csrio.perf.perfEventsFrontend.perf_events(7 ).incr_step)))
+  perfCnts( 8)  := Mux((mcountinhibit(11) | perfEventscounten( 8)),perfCnts( 8) , (perfCnts( 8) + RegNext(csrio.perf.perfEventsCtrl.perf_events(0 ).incr_step)))
+  perfCnts( 9)  := Mux((mcountinhibit(12) | perfEventscounten( 9)),perfCnts( 9) , (perfCnts( 9) + RegNext(csrio.perf.perfEventsCtrl.perf_events(1 ).incr_step)))
+  perfCnts(10)  := Mux((mcountinhibit(13) | perfEventscounten(10)),perfCnts(10) , (perfCnts(10) + RegNext(csrio.perf.perfEventsCtrl.perf_events(2 ).incr_step)))
+  perfCnts(11)  := Mux((mcountinhibit(14) | perfEventscounten(11)),perfCnts(11) , (perfCnts(11) + RegNext(csrio.perf.perfEventsCtrl.perf_events(3 ).incr_step)))
+  perfCnts(12)  := Mux((mcountinhibit(15) | perfEventscounten(12)),perfCnts(12) , (perfCnts(12) + RegNext(csrio.perf.perfEventsCtrl.perf_events(4 ).incr_step)))
+  perfCnts(13)  := Mux((mcountinhibit(16) | perfEventscounten(13)),perfCnts(13) , (perfCnts(13) + RegNext(csrio.perf.perfEventsCtrl.perf_events(5 ).incr_step)))
+  perfCnts(14)  := Mux((mcountinhibit(17) | perfEventscounten(14)),perfCnts(14) , (perfCnts(14) + RegNext(csrio.perf.perfEventsCtrl.perf_events(6 ).incr_step)))
+  perfCnts(15)  := Mux((mcountinhibit(18) | perfEventscounten(15)),perfCnts(15) , (perfCnts(15) + RegNext(csrio.perf.perfEventsCtrl.perf_events(7 ).incr_step)))
+  perfCnts(16)  := Mux((mcountinhibit(19) | perfEventscounten(16)),perfCnts(16) , (perfCnts(16) + RegNext(csrio.perf.perfEventsLsu.perf_events(0 ).incr_step)))
+  perfCnts(17)  := Mux((mcountinhibit(20) | perfEventscounten(17)),perfCnts(17) , (perfCnts(17) + RegNext(csrio.perf.perfEventsLsu.perf_events(1 ).incr_step)))
+  perfCnts(18)  := Mux((mcountinhibit(21) | perfEventscounten(18)),perfCnts(18) , (perfCnts(18) + RegNext(csrio.perf.perfEventsLsu.perf_events(2 ).incr_step)))
+  perfCnts(19)  := Mux((mcountinhibit(22) | perfEventscounten(19)),perfCnts(19) , (perfCnts(19) + RegNext(csrio.perf.perfEventsLsu.perf_events(3 ).incr_step)))
+  perfCnts(20)  := Mux((mcountinhibit(23) | perfEventscounten(20)),perfCnts(20) , (perfCnts(20) + RegNext(csrio.perf.perfEventsLsu.perf_events(4 ).incr_step)))
+  perfCnts(21)  := Mux((mcountinhibit(24) | perfEventscounten(21)),perfCnts(21) , (perfCnts(21) + RegNext(csrio.perf.perfEventsLsu.perf_events(5 ).incr_step)))
+  perfCnts(22)  := Mux((mcountinhibit(25) | perfEventscounten(22)),perfCnts(22) , (perfCnts(22) + RegNext(csrio.perf.perfEventsLsu.perf_events(6 ).incr_step)))
+  perfCnts(23)  := Mux((mcountinhibit(26) | perfEventscounten(23)),perfCnts(23) , (perfCnts(23) + RegNext(csrio.perf.perfEventsLsu.perf_events(7 ).incr_step)))
+  perfCnts(24)  := Mux((mcountinhibit(27) | perfEventscounten(24)),perfCnts(24) , (perfCnts(24) + RegNext(hpm_hc.io.events_selected.perf_events(0 ).incr_step)))
+  perfCnts(25)  := Mux((mcountinhibit(28) | perfEventscounten(25)),perfCnts(25) , (perfCnts(25) + RegNext(hpm_hc.io.events_selected.perf_events(1 ).incr_step)))
+  perfCnts(26)  := Mux((mcountinhibit(29) | perfEventscounten(26)),perfCnts(26) , (perfCnts(26) + RegNext(hpm_hc.io.events_selected.perf_events(2 ).incr_step)))
+  perfCnts(27)  := Mux((mcountinhibit(30) | perfEventscounten(27)),perfCnts(27) , (perfCnts(27) + RegNext(hpm_hc.io.events_selected.perf_events(3 ).incr_step)))
+  perfCnts(28)  := Mux((mcountinhibit(31) | perfEventscounten(28)),perfCnts(28) , (perfCnts(28) + RegNext(hpm_hc.io.events_selected.perf_events(4 ).incr_step)))
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -1199,7 +1196,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
-    val HPMEvent = Output(Vec(29, UInt(XLEN.W)))
+    val hpmevent = Output(Vec(29, UInt(XLEN.W)))
   })
 
   val w = io.distribute_csr.w
@@ -1269,34 +1266,34 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
 
   val rdata = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(perfEventMapping, w.bits.addr, rdata, w.valid, w.bits.data)
-  io.HPMEvent( 0) := csrevent3 
-  io.HPMEvent( 1) := csrevent4 
-  io.HPMEvent( 2) := csrevent5 
-  io.HPMEvent( 3) := csrevent6 
-  io.HPMEvent( 4) := csrevent7 
-  io.HPMEvent( 5) := csrevent8 
-  io.HPMEvent( 6) := csrevent9 
-  io.HPMEvent( 7) := csrevent10
-  io.HPMEvent( 8) := csrevent11
-  io.HPMEvent( 9) := csrevent12
-  io.HPMEvent(10) := csrevent13
-  io.HPMEvent(11) := csrevent14
-  io.HPMEvent(12) := csrevent15
-  io.HPMEvent(13) := csrevent16
-  io.HPMEvent(14) := csrevent17
-  io.HPMEvent(15) := csrevent18
-  io.HPMEvent(16) := csrevent19
-  io.HPMEvent(17) := csrevent20
-  io.HPMEvent(18) := csrevent21
-  io.HPMEvent(19) := csrevent22
-  io.HPMEvent(20) := csrevent23
-  io.HPMEvent(21) := csrevent24
-  io.HPMEvent(22) := csrevent25
-  io.HPMEvent(23) := csrevent26
-  io.HPMEvent(24) := csrevent27
-  io.HPMEvent(25) := csrevent28
-  io.HPMEvent(26) := csrevent29
-  io.HPMEvent(27) := csrevent30
-  io.HPMEvent(28) := csrevent31
+  io.hpmevent( 0) := csrevent3 
+  io.hpmevent( 1) := csrevent4 
+  io.hpmevent( 2) := csrevent5 
+  io.hpmevent( 3) := csrevent6 
+  io.hpmevent( 4) := csrevent7 
+  io.hpmevent( 5) := csrevent8 
+  io.hpmevent( 6) := csrevent9 
+  io.hpmevent( 7) := csrevent10
+  io.hpmevent( 8) := csrevent11
+  io.hpmevent( 9) := csrevent12
+  io.hpmevent(10) := csrevent13
+  io.hpmevent(11) := csrevent14
+  io.hpmevent(12) := csrevent15
+  io.hpmevent(13) := csrevent16
+  io.hpmevent(14) := csrevent17
+  io.hpmevent(15) := csrevent18
+  io.hpmevent(16) := csrevent19
+  io.hpmevent(17) := csrevent20
+  io.hpmevent(18) := csrevent21
+  io.hpmevent(19) := csrevent22
+  io.hpmevent(20) := csrevent23
+  io.hpmevent(21) := csrevent24
+  io.hpmevent(22) := csrevent25
+  io.hpmevent(23) := csrevent26
+  io.hpmevent(24) := csrevent27
+  io.hpmevent(25) := csrevent28
+  io.hpmevent(26) := csrevent29
+  io.hpmevent(27) := csrevent30
+  io.hpmevent(28) := csrevent31
 }             
 

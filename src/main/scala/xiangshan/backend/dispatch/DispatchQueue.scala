@@ -36,7 +36,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val redirect = Flipped(ValidIO(new Redirect))
   val flush = Input(Bool())
   val dqFull = Output(Bool())
-  val perfEvents = Output(new PerfEventsBundle(numPCntCtrl))
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
@@ -233,18 +232,22 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
   XSPerfAccumulate("fake_block", fake_block)
 
-  for(i <- 0 until numPCntCtrl ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
-  }
-  io.perfEvents.PerfEvents(0).incr_step  := numEnq
-  io.perfEvents.PerfEvents(1).incr_step  := PopCount(io.deq.map(_.fire()))
-  io.perfEvents.PerfEvents(2).incr_step  := PopCount(io.deq.map(_.valid))
-  io.perfEvents.PerfEvents(3).incr_step  := numEnq
-  io.perfEvents.PerfEvents(4).incr_step  := fake_block
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("dispatchq_in           ", numEnq                                                                                                                           ),
+    ("dispatchq_out          ", PopCount(io.deq.map(_.fire()))                                                                                                   ),
+    ("dispatchq_out_try      ", PopCount(io.deq.map(_.valid))                                                                                                    ),
+    ("dispatchq_fake_block   ", fake_block                                                                                                                       ),
+    ("dispatchq_1/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U))                                                                     ),
+    ("dispatchq_2/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U))     ),
+    ("dispatchq_3/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U)) ),
+    ("dispatchq_4/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U))                                                                 ),
+  )
 
-  io.perfEvents.PerfEvents(5).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U))
-  io.perfEvents.PerfEvents(6).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U))
-  io.perfEvents.PerfEvents(7).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U))
-  io.perfEvents.PerfEvents(8).incr_step  := (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U)) 
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
+  }
 
 }                                                                                                                  

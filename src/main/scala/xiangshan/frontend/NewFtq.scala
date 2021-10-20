@@ -412,7 +412,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val toBpu = new FtqToBpuIO
     val toIfu = new FtqToIfuIO
     val toBackend = new FtqToCtrlIO
-    val perfEvents = Output(new PerfEventsBundle(numPCntFrontend))
 
     val bpuInfo = new Bundle {
       val bpRight = Output(UInt(XLEN.W))
@@ -1158,31 +1157,37 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
-  for(i <- 0 until numPCntFrontend ) {
-    io.perfEvents.PerfEvents(i).incr_step := DontCare
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(22))
+  })
+  val perfEvents = Seq(
+    ("bpu_s2_redirect        ", bpu_s2_redirect                                                             ),
+    ("bpu_s3_redirect        ", bpu_s3_redirect                                                             ),
+    ("bpu_to_ftq_stall       ", enq.valid && ~enq.ready                                                     ),
+    ("mispredictRedirect     ", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level),
+    ("replayRedirect         ", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level)  ),
+    ("predecodeRedirect      ", fromIfuRedirect.valid                                                       ),
+    ("to_ifu_bubble          ", io.toIfu.req.ready && !io.toIfu.req.valid                                   ),
+    ("from_bpu_real_bubble   ", !enq.valid && enq.ready && allowBpuIn                                       ),
+    ("BpInstr                ", PopCount(mbpInstrs)                                                         ),
+    ("BpBInstr               ", PopCount(mbpBRights | mbpBWrongs)                                           ),
+    ("BpRight                ", PopCount(mbpRights)                                                         ),
+    ("BpWrong                ", PopCount(mbpWrongs)                                                         ),
+    ("BpBRight               ", PopCount(mbpBRights)                                                        ),
+    ("BpBWrong               ", PopCount(mbpBWrongs)                                                        ),
+    ("BpJRight               ", PopCount(mbpJRights)                                                        ),
+    ("BpJWrong               ", PopCount(mbpJWrongs)                                                        ),
+    ("BpIRight               ", PopCount(mbpIRights)                                                        ),
+    ("BpIWrong               ", PopCount(mbpIWrongs)                                                        ),
+    ("BpCRight               ", PopCount(mbpCRights)                                                        ),
+    ("BpCWrong               ", PopCount(mbpCWrongs)                                                        ),
+    ("BpRRight               ", PopCount(mbpRRights)                                                        ),
+    ("BpRWrong               ", PopCount(mbpRWrongs)                                                        ),
+    ("ftb_false_hit          ", PopCount(ftb_false_hit)                                                     ),
+    ("ftb_hit                ", PopCount(ftb_hit)                                                           ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := perf
   }
-  io.perfEvents.PerfEvents(26).incr_step  :=  enq.valid && ~enq.ready
-  io.perfEvents.PerfEvents(27).incr_step  :=  perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level
-  io.perfEvents.PerfEvents(28).incr_step  :=  perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level)
-  io.perfEvents.PerfEvents(29).incr_step  :=  fromIfuRedirect.valid
-  io.perfEvents.PerfEvents(30).incr_step  :=  io.toIfu.req.ready && !io.toIfu.req.valid
-  io.perfEvents.PerfEvents(31).incr_step  :=  !enq.valid && enq.ready && allowBpuIn
-  io.perfEvents.PerfEvents(32).incr_step  :=  PopCount(mbpInstrs)
-  io.perfEvents.PerfEvents(33).incr_step  :=  PopCount(mbpBRights | mbpBWrongs)
-  io.perfEvents.PerfEvents(34).incr_step  :=  PopCount(mbpRights)
-  io.perfEvents.PerfEvents(35).incr_step  :=  PopCount(mbpWrongs)
-  io.perfEvents.PerfEvents(36).incr_step  :=  PopCount(mbpBRights)
-  io.perfEvents.PerfEvents(37).incr_step  :=  PopCount(mbpBWrongs)
-  io.perfEvents.PerfEvents(38).incr_step  :=  PopCount(mbpJRights)
-  io.perfEvents.PerfEvents(39).incr_step  :=  PopCount(mbpJWrongs)
-  io.perfEvents.PerfEvents(40).incr_step  :=  PopCount(mbpIRights)
-  io.perfEvents.PerfEvents(41).incr_step  :=  PopCount(mbpIWrongs)
-  io.perfEvents.PerfEvents(42).incr_step  :=  PopCount(mbpCRights)
-  io.perfEvents.PerfEvents(43).incr_step  :=  PopCount(mbpCWrongs)
-  io.perfEvents.PerfEvents(44).incr_step  :=  PopCount(mbpRRights)
-  io.perfEvents.PerfEvents(45).incr_step  :=  PopCount(mbpRWrongs)
-  io.perfEvents.PerfEvents(46).incr_step  :=  PopCount(ftb_false_hit)
-  io.perfEvents.PerfEvents(47).incr_step  :=  PopCount(ftb_hit)
-
-
 }
