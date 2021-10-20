@@ -694,7 +694,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
     }
 
-    //update base table condition
+    // update base table if used base table to predict
     when (updateValid) { 
       when(updateMeta.provider.valid) {
         when(~up_altpredhit && updateMisPred && (updateMeta.predcnt === 3.U || updateMeta.predcnt === 4.U)) {
@@ -712,8 +712,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
       baseupdate(w) := false.B
     }
     updatebcnt(w) := updateMeta.basecnt
-        
-    when (updateValid && updateMisPred && ~((((updateMeta.predcnt === 3.U && (~isUpdateTaken))) || ((updateMeta.predcnt === 4.U && isUpdateTaken))) && updateMeta.provider.valid)) {
+  
+    // if mispredicted and not the case that
+    // provider offered correct target but used altpred due to unconfident
+    when (updateValid && updateMisPred && ~((updateMeta.predcnt === 3.U && ~isUpdateTaken || updateMeta.predcnt === 4.U && isUpdateTaken) && updateMeta.provider.valid)) {
     //when (updateValid && updateMisPred) {
       val allocate = updateMeta.allocate
       when (allocate.valid) {
