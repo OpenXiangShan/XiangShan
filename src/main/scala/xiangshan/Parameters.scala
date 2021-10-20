@@ -44,6 +44,7 @@ case class XSCoreParameters
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
+  HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
@@ -190,8 +191,7 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
-    nReleaseEntries = 16,
-    nStoreReplayEntries = 16
+    nReleaseEntries = 32
   )),
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
@@ -252,6 +252,7 @@ trait HasXSParameter {
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = coreParams.HasFPU
+  val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = coreParams.EnableBPU

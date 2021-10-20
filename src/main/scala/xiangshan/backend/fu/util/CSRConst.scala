@@ -71,6 +71,8 @@ trait HasCSRConst {
   val Slvpredctl    = 0x5C2
   val Smblockctl    = 0x5C3
   val Srnctl        = 0x5C4
+  val Scachebase    = 0x5C5
+  /** 0x5C5-0x5E5 for cache instruction register*/
 
   val Sdsid         = 0x9C0
 
