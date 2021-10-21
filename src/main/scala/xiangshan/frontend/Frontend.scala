@@ -23,8 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.HasExceptionNO
-import system.L1CacheErrorInfo
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
@@ -47,6 +46,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error  = new L1CacheErrorInfo
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
@@ -64,10 +64,22 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
   //icache
 
+  val tlbCsr = RegNext(io.tlbCsr)
+  // pmp
+  val pmp = Module(new PMP())
+  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
+  pmp.io.distribute_csr := io.csrCtrl.distribute_csr
+  for (i <- pmp_check.indices) {
+    pmp_check(i).env.pmp  := pmp.io.pmp
+    pmp_check(i).env.mode := tlbCsr.priv.imode
+    pmp_check(i).req <> ifu.io.pmp(i).req
+    ifu.io.pmp(i).resp <> pmp_check(i).resp
+  }
+
   io.ptw <> TLB(
     in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
     sfence = io.sfence,
-    csr = io.tlbCsr,
+    csr = tlbCsr,
     width = 2,
     shouldBlock = true,
     itlbParams
@@ -97,6 +109,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   }
 
   icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
+  
+  icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  icache.io.csr.update <> io.csrUpdate
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

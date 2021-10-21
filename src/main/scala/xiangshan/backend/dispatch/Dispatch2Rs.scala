@@ -37,18 +37,15 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
 
   // Different mode of dispatch
   // (1) isDistinct: no overlap
-  val isDistinct = exuConfigCases.flatMap(_._1).distinct.length == exuConfigCases.flatMap(_._1).length
+  val isDistinct = exuConfigCases.flatMap(_._1).distinct.length == exuConfigCases.flatMap(_._1).length && exuConfigCases.length > 1
   // (2) isLessExu: exu becomes less and less
-  val isSubset = configs.dropRight(1).zip(configs.tail).forall(x => x._2.toSet.subsetOf(x._1.toSet))
-  val isLessExu = configs.length > 1 && isSubset
+  val isLessExu = configs.dropRight(1).zip(configs.tail).forall(x => x._2.toSet.subsetOf(x._1.toSet))
   val supportedDpMode = Seq(isDistinct, isLessExu)
-  println(exuConfigTypes)
   require(supportedDpMode.count(x => x) == 1, s"dispatch mode valid iff one mode is found in $supportedDpMode")
 
   val numIntStateRead = if (isLessExu) numIntSrc.max * numIn else numIntSrc.sum
   val numFpStateRead = if (isLessExu) numFpSrc.max * numIn else numFpSrc.sum
 
-  println(numIntStateRead, numFpStateRead)
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 
@@ -101,17 +98,42 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
     io.readFpState.get.map(_.req).zip(req).foreach(x => x._1 := x._2)
   }
 
+  val enableLoadBalance = outer.numOut > 2
+  val numPingPongBits = outer.numOut / 2
+  val pingpong = Seq.fill(numPingPongBits)(RegInit(false.B))
+  pingpong.foreach(p => p := !p)
+  val pairIndex = (0 until outer.numOut).map(i => (i + 2) % outer.numOut)
+
+  def needLoadBalance(index: Int): Bool = {
+    val bitIndex = Seq(index, pairIndex(index), numPingPongBits - 1).min
+    // When ping pong bit is set, use pairIndex
+    if (enableLoadBalance) pingpong(bitIndex) && (index != pairIndex(index)).B else false.B
+  }
   // out is directly connected from in for better timing
   // TODO: select critical instruction first
-  val maxExuConfig = outer.exuConfigCases.last._1
+  val numMaxExuConfig = outer.exuConfigCases.last._1.length
   for ((config, i) <- outer.configs.zipWithIndex) {
     io.out(i) <> io.in(i)
     // When the corresponding execution units do not have full functionalities,
     // we have to filter out the instructions that these execution units does not accept.
-    if (config.length < maxExuConfig.length) {
+    if (config.length < numMaxExuConfig) {
       val thisCanAccept = config.map(_.canAccept(io.in(i).bits.ctrl.fuType)).reduce(_ || _)
       io.out(i).valid := io.in(i).valid && thisCanAccept
       io.in(i).ready := io.out(i).ready && thisCanAccept
+    }
+  }
+  // For load balance, the out port alternates between different in ports
+  // It must be another for loop because the former for loop does not have any condition
+  // and will override the assignments.
+  for ((config, i) <- outer.configs.zipWithIndex) {
+    when (needLoadBalance(i)) {
+      io.out(i) <> io.in(pairIndex(i))
+      if (config.length < numMaxExuConfig) {
+        val thisCanAccept = config.map(_.canAccept(io.in(pairIndex(i)).bits.ctrl.fuType)).reduce(_ || _)
+        io.out(i).valid := io.in(pairIndex(i)).valid && thisCanAccept
+        io.in(pairIndex(i)).ready := io.out(i).ready && thisCanAccept
+      }
+      println(s"Dispatch2Rs ports balance between $i and ${pairIndex(i)}")
     }
   }
 
@@ -119,11 +141,23 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
   if (io.readIntState.isDefined) {
     val intSrcStateVec = io.out.flatMap(_.bits.srcState.take(numIntSrc))
     io.readIntState.get.map(_.resp).zip(intSrcStateVec).foreach(x => x._2 := x._1)
+    for (i <- 0 until outer.numOut) {
+      val pairState = io.readIntState.get.slice(numIntSrc * pairIndex(i), numIntSrc * pairIndex(i) + numIntSrc)
+      when (needLoadBalance(i)) {
+        pairState.map(_.resp).zip(io.out(i).bits.srcState.take(numIntSrc)).foreach(x => x._2 := x._1)
+      }
+    }
   }
   if (io.readFpState.isDefined) {
     require(io.readIntState.isEmpty, "we do not implement int+fp in isLessExu")
     val fpSrcStateVec = io.out.flatMap(_.bits.srcState.take(numFpSrc))
     io.readFpState.get.map(_.resp).zip(fpSrcStateVec).foreach(x => x._2 := x._1)
+    for (i <- 0 until outer.numOut) {
+      val pairState = io.readFpState.get.slice(numFpSrc * pairIndex(i), numFpSrc * pairIndex(i) + numFpSrc)
+      when (needLoadBalance(i)) {
+        pairState.map(_.resp).zip(io.out(i).bits.srcState.take(numFpSrc)).foreach(x => x._2 := x._1)
+      }
+    }
   }
 
   // If io.out is wider than io.in, we need to set io.in.ready to false.B.
@@ -150,7 +184,6 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
         io.out(idx).valid := selectValid && sta.ready
         sta.valid := selectValid && io.out(idx).ready
         io.out(idx).bits.ctrl.srcType(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.srcType(1)))
-        io.out(idx).bits.ctrl.lsrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.lsrc(1)))
         io.out(idx).bits.psrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.psrc(1)))
         io.in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready && sta.ready }}
         XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !io.out(idx).ready))

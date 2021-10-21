@@ -24,8 +24,8 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
+import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
 import xiangshan.backend.fu.fpu.{FMAMidResult, FMAMidResultIO}
-import xiangshan.mem.{SqPtr, StoreDataBundle}
 
 import scala.math.max
 
@@ -153,9 +153,9 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       )
     })
     val io = IO(new ReservationStationIO(params)(updatedP))
+    val perf = IO(Vec(rs.length, Output(new RsPerfCounter)))
 
     rs.foreach(_.io.redirect <> io.redirect)
-    rs.foreach(_.io.flush <> io.flush)
     io.numExist <> rs.map(_.io.numExist).reduce(_ +& _)
     io.fromDispatch <> rs.flatMap(_.io.fromDispatch)
     io.srcRegValue <> rs.flatMap(_.io.srcRegValue)
@@ -187,6 +187,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.fmaMid.isDefined) {
       io.fmaMid.get <> rs.flatMap(_.io.fmaMid.get)
     }
+    perf <> rs.map(_.perf)
   }
 
   var fastWakeupIdx = 0
@@ -204,7 +205,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
 class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
-  val flush = Input(Bool())
   val numExist = Output(UInt(log2Up(params.numEntries + 1).W))
   // enq
   val fromDispatch = Vec(params.numEnq, Flipped(DecoupledIO(new MicroOp)))
@@ -222,13 +222,13 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
   }) else None
-  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, new Bundle {
-    val memfeedback = Flipped(ValidIO(new RSFeedback()))
-    val rsIdx = Output(UInt(params.indexWidth.W))
-    val isFirstIssue = Output(Bool()) // NOTE: just use for tlb perf cnt
-  })) else None
+  val feedback = if (params.hasFeedback) Some(Vec(params.numDeq, 
+    Flipped(new MemRSFeedbackIO) 
+  )) else None
   val checkwait = if (params.checkWaitBit) Some(new Bundle {
     val stIssuePtr = Input(new SqPtr())
+    val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
+    val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
   val store = if (params.isStore) Some(new Bundle {
     val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
@@ -242,8 +242,13 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     new ReservationStationIO(params).asInstanceOf[this.type]
 }
 
+class RsPerfCounter(implicit p: Parameters) extends XSBundle {
+  val full = Bool()
+}
+
 class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new ReservationStationIO(params))
+  val perf = IO(Output(new RsPerfCounter))
 
   val statusArray = Module(new StatusArray(params))
   val select = Module(new SelectPolicy(params))
@@ -253,8 +258,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val s2_deq = Wire(io.deq.cloneType)
 
   io.numExist := PopCount(statusArray.io.isValid)
+  perf.full := RegNext(statusArray.io.isValid.andR)
   statusArray.io.redirect := io.redirect
-  statusArray.io.flush := io.flush
 
   /**
     * S0: Update status (from dispatch and wakeup) and schedule possible instructions to issue.
@@ -262,8 +267,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // enqueue from dispatch
   select.io.validVec := statusArray.io.isValid
   // agreement with dispatch: don't enqueue when io.redirect.valid
-  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid && !io.flush))
-  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect, io.flush))
+  val doEnqueue = VecInit(io.fromDispatch.map(_.fire && !io.redirect.valid))
+  val enqShouldNotFlushed = io.fromDispatch.map(d => d.fire && !d.bits.robIdx.needFlush(io.redirect))
   XSPerfAccumulate("wrong_stall", Mux(io.redirect.valid, PopCount(enqShouldNotFlushed), 0.U))
   val needFpSource = io.fromDispatch.map(_.bits.needRfRPort(1, 1, false))
   for (i <- 0 until params.numEnq) {
@@ -281,6 +286,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
     statusArray.io.update(i).data.srcType := VecInit(io.fromDispatch(i).bits.ctrl.srcType.take(params.numSrc))
     statusArray.io.update(i).data.robIdx := io.fromDispatch(i).bits.robIdx
     statusArray.io.update(i).data.sqIdx := io.fromDispatch(i).bits.sqIdx
+    statusArray.io.update(i).data.waitForSqIdx := io.fromDispatch(i).bits.cf.waitForSqIdx
+    statusArray.io.update(i).data.waitForStoreData := false.B
+    statusArray.io.update(i).data.strictWait := io.fromDispatch(i).bits.cf.loadWaitStrict
     statusArray.io.update(i).data.isFirstIssue := true.B
     // for better power, we don't write payload array when there's a redirect
     payloadArray.io.write(i).enable := doEnqueue(i)
@@ -292,6 +300,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   // when config.checkWaitBit is set, we need to block issue until the corresponding store issues
   if (params.checkWaitBit) {
     statusArray.io.stIssuePtr := io.checkwait.get.stIssuePtr
+    statusArray.io.memWaitUpdateReq := io.checkwait.get.memWaitUpdateReq
   }
   // wakeup from other RS or function units
   val wakeupValid = io.fastUopsIn.map(_.valid) ++ io.slowPorts.map(_.valid)
@@ -356,20 +365,30 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   s1_out.foreach(_.bits.uop.debugInfo.selectTime := GTimer())
 
   for (i <- 0 until params.numDeq) {
-    s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect, io.flush)
+    s1_out(i).valid := issueVec(i).valid && !s1_out(i).bits.uop.robIdx.needFlush(io.redirect)
     statusArray.io.issueGranted(i).valid := issueVec(i).valid && s1_out(i).ready
     statusArray.io.issueGranted(i).bits := issueVec(i).bits
-    // For FMAs that can be scheduled multiple times, only when
-    // all source operands are ready we dequeue the instruction.
-    statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
-    statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
-    statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
-    statusArray.io.deqResp(i).bits.resptype := DontCare
     if (io.feedback.isDefined) {
-      statusArray.io.deqResp(i).valid := io.feedback.get(i).memfeedback.valid
-      statusArray.io.deqResp(i).bits.rsMask := UIntToOH(io.feedback.get(i).memfeedback.bits.rsIdx)
-      statusArray.io.deqResp(i).bits.success := io.feedback.get(i).memfeedback.bits.hit
-      statusArray.io.deqResp(i).bits.resptype := io.feedback.get(i).memfeedback.bits.sourceType
+      // feedbackSlow
+      statusArray.io.deqResp(2*i).valid := io.feedback.get(i).feedbackSlow.valid
+      statusArray.io.deqResp(2*i).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackSlow.bits.rsIdx)
+      statusArray.io.deqResp(2*i).bits.success := io.feedback.get(i).feedbackSlow.bits.hit
+      statusArray.io.deqResp(2*i).bits.resptype := io.feedback.get(i).feedbackSlow.bits.sourceType
+      statusArray.io.deqResp(2*i).bits.dataInvalidSqIdx := io.feedback.get(i).feedbackSlow.bits.dataInvalidSqIdx
+      // feedbackFast, for load pipeline only
+      statusArray.io.deqResp(2*i+1).valid := io.feedback.get(i).feedbackFast.valid
+      statusArray.io.deqResp(2*i+1).bits.rsMask := UIntToOH(io.feedback.get(i).feedbackFast.bits.rsIdx)
+      statusArray.io.deqResp(2*i+1).bits.success := io.feedback.get(i).feedbackFast.bits.hit
+      statusArray.io.deqResp(2*i+1).bits.resptype := io.feedback.get(i).feedbackFast.bits.sourceType
+      statusArray.io.deqResp(2*i+1).bits.dataInvalidSqIdx := DontCare
+    } else {
+      // For FMAs that can be scheduled multiple times, only when
+      // all source operands are ready we dequeue the instruction.
+      statusArray.io.deqResp(i).valid := issueVec(i).valid && s1_out(i).ready && statusArray.io.allSrcReady(i)
+      statusArray.io.deqResp(i).bits.rsMask := issueVec(i).bits
+      statusArray.io.deqResp(i).bits.success := s2_deq(i).ready
+      statusArray.io.deqResp(i).bits.resptype := DontCare
+      statusArray.io.deqResp(i).bits.dataInvalidSqIdx := DontCare
     }
 
     if (io.fastWakeup.isDefined) {
@@ -380,7 +399,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       wakeupQueue.io.in.bits := s1_out(i).bits.uop
       wakeupQueue.io.in.bits.debugInfo.issueTime := GTimer() + 1.U
       wakeupQueue.io.redirect := io.redirect
-      wakeupQueue.io.flush := io.flush
       io.fastWakeup.get(i) := wakeupQueue.io.out
       XSPerfAccumulate(s"fast_blocked_$i", issueVec(i).valid && fuCheck && !s1_out(i).ready)
     }
@@ -501,7 +519,7 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for (i <- 0 until params.numDeq) {
     // payload: send to function units
     // TODO: these should be done outside RS
-    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect, io.flush), false.B)
+    PipelineConnect(s1_out(i), s2_deq(i), s2_deq(i).ready || s2_deq(i).bits.uop.robIdx.needFlush(io.redirect), false.B)
     if (params.hasFeedback) {
       io.feedback.get(i).rsIdx := s2_issue_index(i)
       io.feedback.get(i).isFirstIssue := s2_first_issue(i)
@@ -711,7 +729,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
 
   XSPerfAccumulate("redirect_num", io.redirect.valid)
-  XSPerfAccumulate("flush_num", io.flush)
   XSPerfHistogram("allocate_num", PopCount(io.fromDispatch.map(_.valid)), true.B, 0, params.numEnq, 1)
   XSPerfHistogram("issue_num", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
 

@@ -126,7 +126,9 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
+    io.out(i).bits.waitForSqIdx := DontCare
     io.out(i).bits.storeSetHit := DontCare
+    io.out(i).bits.loadWaitStrict := DontCare
     io.out(i).bits.ssid := DontCare
     io.out(i).bits.replayInst := false.B
   }

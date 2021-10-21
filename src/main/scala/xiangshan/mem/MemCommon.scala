@@ -55,6 +55,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
+  val wlineflag = Bool() // store write the whole cache line
 
   val miss = Bool()
   val tlbMiss = Bool()
@@ -67,6 +68,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
 
   // For debug usage
   val isFirstIssue = Bool()
+  //softprefetch
+  val isSoftPrefetch = Bool() 
+  //softprefetch except
+  val isSoftPreExcept = Bool()
+  val isSoftPremmio = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {
@@ -112,4 +118,11 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
+  val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
+}
+
+// // Bundle for load / store wait waking up
+class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
+  val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
 }

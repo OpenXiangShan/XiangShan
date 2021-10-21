@@ -31,23 +31,25 @@ class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
   val useDRAMSim = debugOpts.UseDRAMSim
 
-  val l_soc = LazyModule(new XSTopWithoutDMA())
+  val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
 
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.peripheralNode.in.head._2))
+  l_soc.module.dma <> DontCare
+
+  val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
-  l_simMMIO.connectToSoC(l_soc)
+  l_simMMIO.io_axi4 <> soc.peripheral
 
   if(!useDRAMSim){
     val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
+      l_soc.misc.memAXI4SlaveNode, 8L * 1024 * 1024 * 1024, useBlackBox = true
     ))
     val simAXIMem = Module(l_simAXIMem.module)
-    l_simAXIMem.connectToSoC(l_soc)
+    l_simAXIMem.io_axi4 <> soc.memory
   }
 
-  soc.io.clock := clock.asBool()
-  soc.io.reset := reset.asBool()
+  soc.io.clock := clock.asBool
+  soc.io.reset := reset.asBool
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.osc_clock := false.B
   soc.io.sram_config := 0.U
@@ -63,13 +65,13 @@ class SimTop(implicit p: Parameters) extends Module {
     val logCtrl = new LogCtrlIO
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
-    val memAXI = if(useDRAMSim) l_soc.memory.cloneType else null
+    val memAXI = if(useDRAMSim) soc.memory.cloneType else null
   })
 
   simMMIO.io.uart <> io.uart
 
   if(useDRAMSim){
-    io.memAXI <> l_soc.memory
+    io.memAXI <> soc.memory
   }
 
   if (debugOpts.EnableDebug || debugOpts.EnablePerfDebug) {
