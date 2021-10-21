@@ -535,7 +535,7 @@ package object xiangshan {
     name = "fence",
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
-    FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
     hasExceptionOut = true
   )

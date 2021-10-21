@@ -65,6 +65,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   //PFEvent
   val pfevent = Module(new PFEvent)
+  val tlbCsr = RegNext(io.tlbCsr)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   // pmp
   val pmp = Module(new PMP())
@@ -72,7 +73,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   pmp.io.distribute_csr := io.csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
     pmp_check(i).env.pmp  := pmp.io.pmp
-    pmp_check(i).env.mode := io.tlbCsr.priv.imode
+    pmp_check(i).env.mode := tlbCsr.priv.imode
     pmp_check(i).req <> ifu.io.pmp(i).req
     ifu.io.pmp(i).resp <> pmp_check(i).resp
   }
@@ -80,7 +81,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.ptw <> TLB(
     in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
     sfence = io.sfence,
-    csr = io.tlbCsr,
+    csr = tlbCsr,
     width = 2,
     shouldBlock = true,
     itlbParams
