@@ -335,20 +335,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
-  val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
-  ptw.reset := ptw_reset_gen.io.out
-  itlbRepeater.reset := ptw_reset_gen.io.out
-  dtlbRepeater.reset := ptw_reset_gen.io.out
-
-  val memBlock_reset_gen = Module(new ResetGen(3, !debugOpts.FPGAPlatform))
-  memBlock.reset := memBlock_reset_gen.io.out
-
-  val exuBlock_reset_gen = Module(new ResetGen(4, !debugOpts.FPGAPlatform))
-  exuBlocks.foreach(_.reset := exuBlock_reset_gen.io.out)
-
-  val ctrlBlock_reset_gen = Module(new ResetGen(6, !debugOpts.FPGAPlatform))
-  ctrlBlock.reset := ctrlBlock_reset_gen.io.out
-
-  val frontend_reset_gen = Module(new ResetGen(7, !debugOpts.FPGAPlatform))
-  frontend.reset := frontend_reset_gen.io.out
+  // Modules are reset one by one
+  // reset --> SYNC ----> SYNC ------> SYNC -----> SYNC -----> SYNC ---
+  //                  |          |            |           |           |
+  //                  v          v            v           v           v
+  //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
+  val resetChain = Seq(
+    Seq(ptw),
+    Seq(memBlock, dtlbRepeater),
+    // Note: arbiters don't actually have reset ports
+    exuBlocks ++ Seq(intArbiter, fpArbiter),
+    Seq(ctrlBlock),
+    Seq(frontend, itlbRepeater)
+  )
+  ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
 }

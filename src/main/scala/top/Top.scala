@@ -124,51 +124,56 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val part_number = Input(UInt(16.W))
         val version = Input(UInt(4.W))
       }
+      val debug_reset = Output(Bool())
+      val core_reset = Input(Vec(NumCores, Bool()))
     })
+    // override LazyRawModuleImp's clock and reset
+    childClock := io.clock.asClock
+    childReset := io.reset
+
+    // output
     io.pll_output := DontCare
+    io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
+
+    // input
     dontTouch(io.sram_config)
     dontTouch(io.osc_clock)
-    dontTouch(io.pll_output)
-    childClock := io.clock.asClock
+    misc.module.ext_intrs := io.extIntrs
 
-    withClockAndReset(childClock, io.reset) {
-      val resetGen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-      resetGen.suggestName("top_reset_gen")
-      childReset := resetGen.io.out | misc.module.debug_module_io.debugIO.ndreset
+    for ((core, i) <- core_with_l2.zipWithIndex) {
+      core.module.io.reset := io.core_reset(i)
+      core.module.io.hartId := i.U
     }
 
-    withClockAndReset(childClock, childReset) {
-      misc.module.ext_intrs := io.extIntrs
+    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
+    misc.module.debug_module_io.clock := io.clock
+    misc.module.debug_module_io.reset := io.reset
 
-      for (i <- 0 until NumCores) {
-        val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-        core_reset_gen.suggestName(s"core_${i}_reset_gen")
-        core_with_l2(i).module.reset := core_reset_gen.io.out
-        core_with_l2(i).module.io.hartId := i.U
-      }
-
-      if (l3cacheOpt.nonEmpty) {
-        val l3_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-        l3_reset_gen.suggestName("l3_reset_gen")
-        l3cacheOpt.get.module.reset := l3_reset_gen.io.out
-      }
-
-      misc.module.debug_module_io.resetCtrl.hartIsInReset.foreach {x => x := childReset.asBool() }
-      misc.module.debug_module_io.clock := io.clock
-      misc.module.debug_module_io.reset := io.reset
-
-      misc.module.debug_module_io.debugIO.reset := io.systemjtag.reset // TODO: use synchronizer?
-      misc.module.debug_module_io.debugIO.clock := childClock
-      misc.module.debug_module_io.debugIO.dmactiveAck  := misc.module.debug_module_io.debugIO.dmactive // TODO: delay 3 cycles?
-      // jtag connector
-      misc.module.debug_module_io.debugIO.systemjtag.foreach { x =>
-        x.jtag <> io.systemjtag.jtag
-        x.reset  := io.systemjtag.reset
-        x.mfr_id := io.systemjtag.mfr_id
-        x.part_number := io.systemjtag.part_number
-        x.version := io.systemjtag.version
-      }
+    // TODO: use synchronizer?
+    misc.module.debug_module_io.debugIO.reset := io.systemjtag.reset
+    misc.module.debug_module_io.debugIO.clock := io.clock.asClock
+    // TODO: delay 3 cycles?
+    misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
+    // jtag connector
+    misc.module.debug_module_io.debugIO.systemjtag.foreach { x =>
+      x.jtag        <> io.systemjtag.jtag
+      x.reset       := io.systemjtag.reset
+      x.mfr_id      := io.systemjtag.mfr_id
+      x.part_number := io.systemjtag.part_number
+      x.version     := io.systemjtag.version
     }
+
+    withClockAndReset(io.clock.asClock, io.reset) {
+      // Modules are reset one by one
+      // reset ----> SYNC --> {L3 Cache, Cores}
+      //         |
+      //         v
+      //        misc
+      val l3cacheMod = if (l3cacheOpt.isDefined) Seq(l3cacheOpt.get.module) else Seq()
+      val resetChain = Seq(l3cacheMod ++ core_with_l2.map(_.module))
+      ResetGen(resetChain, io.reset, !debugOpts.FPGAPlatform)
+    }
+
   }
 }
 
