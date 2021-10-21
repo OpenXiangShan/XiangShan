@@ -315,7 +315,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     Seq(ptw),
     Seq(memBlock, dtlbRepeater),
     // Note: arbiters don't actually have reset ports
-    exuBlocks ++ Seq(intArbiter, fpArbiter),
+    exuBlocks ++ Seq(outer.wbArbiter.module),
     Seq(ctrlBlock),
     Seq(frontend, itlbRepeater)
   )
