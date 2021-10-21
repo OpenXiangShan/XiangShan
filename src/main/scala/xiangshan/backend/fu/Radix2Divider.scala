@@ -58,7 +58,7 @@ class Radix2Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(le
   val uopReg = RegEnable(uop, newReq)
 
   val cnt = Counter(len)
-  when (newReq && !io.in.bits.uop.robIdx.needFlush(io.redirectIn, io.flushIn)) {
+  when (newReq && !io.in.bits.uop.robIdx.needFlush(io.redirectIn)) {
     state := s_log2
   } .elsewhen (state === s_log2) {
     // `canSkipShift` is calculated as following:
@@ -88,7 +88,7 @@ class Radix2Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(le
     }
   }
 
-  val kill = state=/=s_idle && uopReg.robIdx.needFlush(io.redirectIn, io.flushIn)
+  val kill = state=/=s_idle && uopReg.robIdx.needFlush(io.redirectIn)
   when(kill){
     state := s_idle
   }

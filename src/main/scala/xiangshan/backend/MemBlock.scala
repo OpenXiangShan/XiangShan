@@ -21,7 +21,6 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
-import system.L1CacheErrorInfo
 import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -62,7 +61,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // in
     val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
     val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
@@ -124,7 +122,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // TODO: fast load wakeup
   val lsq     = Module(new LsqWrappper)
-  val sbuffer = Module(new NewSbuffer)
+  val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
   io.stIssuePtr := lsq.io.issuePtrExt
@@ -209,7 +207,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.redirect
-    loadUnits(i).io.flush         <> io.flush
     loadUnits(i).io.feedbackSlow  <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedbackFast  <> io.rsfeedback(i).feedbackFast
     loadUnits(i).io.rsIdx         := io.rsfeedback(i).rsIdx
@@ -250,13 +247,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stu = storeUnits(i)
 
     stdExeUnits(i).io.redirect <> io.redirect
-    stdExeUnits(i).io.flush <> io.flush
     stdExeUnits(i).io.fromInt <> io.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
     stdExeUnits(i).io.fromFp := DontCare
     stdExeUnits(i).io.out := DontCare
 
     stu.io.redirect     <> io.redirect
-    stu.io.flush        <> io.flush
     stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
     stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
@@ -295,7 +290,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.enqLsq
   lsq.io.brqRedirect    <> io.redirect
-  lsq.io.flush          <> io.flush
   io.memoryViolation    <> lsq.io.rollback
   lsq.io.uncache        <> uncache.io.lsq
   // delay dcache refill for 1 cycle for better timing
@@ -310,9 +304,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  sbuffer.io.dcache.resp.valid := RegNext(dcache.io.lsu.store.resp.valid)
-  sbuffer.io.dcache.resp.bits := RegNext(dcache.io.lsu.store.resp.bits)
-  assert(sbuffer.io.dcache.resp.ready === true.B)
+  // TODO: if dcache sbuffer resp needs to ne delayed 
+  // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
+  // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
@@ -361,7 +355,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.storeDataIn.bits  := Mux(st0_data_atomics, stData(0).bits, stData(1).bits)
   atomicsUnit.io.rsIdx    := Mux(st0_atomics, io.rsfeedback(atomic_rs0).rsIdx, io.rsfeedback(atomic_rs1).rsIdx)
   atomicsUnit.io.redirect <> io.redirect
-  atomicsUnit.io.flush <> io.flush
 
   // TODO: complete amo's pmp support
   val amoTlb = dtlb_ld(0).requestor(0)

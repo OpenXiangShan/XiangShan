@@ -44,6 +44,7 @@ case class XSCoreParameters
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
+  HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
@@ -111,7 +112,6 @@ case class XSCoreParameters
   LoadQueueSize: Int = 80,
   StoreQueueSize: Int = 64,
   RobSize: Int = 256,
-  IntRefCounterWidth: Int = 2,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -191,8 +191,7 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
-    nReleaseEntries = 16,
-    nStoreReplayEntries = 16
+    nReleaseEntries = 32
   )),
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
@@ -253,6 +252,7 @@ trait HasXSParameter {
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = coreParams.HasFPU
+  val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = coreParams.EnableBPU
@@ -291,9 +291,8 @@ trait HasXSParameter {
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
-  val IntRefCounterWidth = coreParams.IntRefCounterWidth
+  val IntRefCounterWidth = log2Ceil(RobSize)
   val StdFreeListSize = NRPhyRegs - 32
-  // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
   val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize

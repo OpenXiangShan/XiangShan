@@ -514,7 +514,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f3_hit_0 = io.toIbuffer.fire() & f3_bank_hit(0)
   val f3_hit_1 = io.toIbuffer.fire() && f3_doubleLine & f3_bank_hit(1)
 
-
   preDecoderIn.instValid     :=  f3_valid && !f3_has_except
   preDecoderIn.data          :=  f3_cut_data
   preDecoderIn.startAddr     :=  f3_ftq_req.startAddr

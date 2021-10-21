@@ -51,6 +51,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     // read SSIT, get SSID
     ssit.io.raddr(i) := io.in(i).bits.foldpc
     decoders(i).io.enq.ctrl_flow.storeSetHit := ssit.io.rdata(i).valid
+    decoders(i).io.enq.ctrl_flow.loadWaitStrict := ssit.io.rdata(i).strict
     decoders(i).io.enq.ctrl_flow.ssid := ssit.io.rdata(i).ssid
 
     io.out(i).valid      := io.in(i).valid

@@ -16,20 +16,37 @@
 
 package xiangshan.backend.rename.freelist
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 
-trait MEFreeListIO extends FreeListBaseIO {
-  // psrc of move instructions ready for elimination
-  def psrcOfMove: Vec[Valid[UInt]]
 
-  // instruction fits move elimination
-  def eliminatedMove: Vec[Bool]
-  // for eliminated move instruction, increase arch ref count of (new) p_dest reg
-  def multiRefPhyReg: Vec[UInt]
+abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle {
+    val redirect = Input(Bool())
+    val walk = Input(Bool())
 
-  // max vector from speculative reference counter
-  def maxVec: Vec[Bool]
+    val allocateReq = Input(Vec(RenameWidth, Bool()))
+    val allocatePhyReg = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
+    val canAllocate = Output(Bool())
+    val doAllocate = Input(Bool())
+
+    val freeReq = Input(Vec(CommitWidth, Bool()))
+    val freePhyReg = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
+
+    val stepBack = Input(UInt(log2Up(CommitWidth + 1).W))
+  })
+
+  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
+
+  object FreeListPtr {
+    def apply(f: Bool, v: UInt): FreeListPtr = {
+      val ptr = Wire(new FreeListPtr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
 }

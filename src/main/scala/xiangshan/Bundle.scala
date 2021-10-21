@@ -110,7 +110,12 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
-  val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
+  // Load wait is needed
+  // load inst will not be executed until former store (predicted by mdp) addr calcuated
+  val loadWaitBit = Bool() 
+  // If (loadWaitBit && loadWaitStrict), strict load wait is needed 
+  // load inst will not be executed until ALL former store addr calcuated
+  val loadWaitStrict = Bool() 
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)

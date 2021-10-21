@@ -34,7 +34,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   }
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
-  val flush = Input(Bool())
   val dqFull = Output(Bool())
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
@@ -66,7 +65,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
   val canEnqueue = allowEnqueue
-  val canActualEnqueue = canEnqueue && !(io.redirect.valid || io.flush)
+  val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -98,7 +97,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
-    when (io.deq(i).fire() && !(io.redirect.valid || io.flush)) {
+    when (io.deq(i).fire() && !io.redirect.valid) {
       stateEntries(headPtr(i).value) := s_invalid
 
 //      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
@@ -108,7 +107,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && (robIdxEntries(i).needFlush(io.redirect, io.flush) || io.flush)
+    needCancel(i) := stateEntries(i) =/= s_invalid && robIdxEntries(i).needFlush(io.redirect)
 
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
@@ -139,9 +138,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   // agreement with reservation station: don't dequeue when redirect.valid
   val nextHeadPtr = Wire(Vec(deqnum, new DispatchQueuePtr))
   for (i <- 0 until deqnum) {
-    nextHeadPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new DispatchQueuePtr),
-      Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq))
+    nextHeadPtr(i) := Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq)
     headPtr(i) := nextHeadPtr(i)
   }
 
@@ -162,35 +159,28 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
-  tailPtr(0) := Mux(io.flush,
-    0.U.asTypeOf(new DispatchQueuePtr),
-    Mux(io.redirect.valid,
-      tailPtr(0),
-      Mux(lastCycleMisprediction,
-        Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
-        tailPtr(0) + numEnq))
+  tailPtr(0) := Mux(io.redirect.valid,
+    tailPtr(0),
+    Mux(lastCycleMisprediction,
+      Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
+      tailPtr(0) + numEnq)
   )
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction && !io.flush)
+  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
   for (i <- 1 until enqnum) {
-    tailPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new DispatchQueuePtr),
-      Mux(io.redirect.valid,
-        tailPtr(i),
-        Mux(lastLastCycleMisprediction,
-          tailPtr(0) + i.U,
-          tailPtr(i) + numEnq))
-      )
+    tailPtr(i) := Mux(io.redirect.valid,
+      tailPtr(i),
+      Mux(lastLastCycleMisprediction,
+        tailPtr(0) + i.U,
+        tailPtr(i) + numEnq)
+    )
   }
 
   // update valid counter and allowEnqueue reg
-  validCounter := Mux(io.flush,
-    0.U,
-    Mux(io.redirect.valid,
-      validCounter,
-      Mux(lastLastCycleMisprediction,
-        currentValidCounter,
-        validCounter + numEnq - numDeq)
-    )
+  validCounter := Mux(io.redirect.valid,
+    validCounter,
+    Mux(lastLastCycleMisprediction,
+      currentValidCounter,
+      validCounter + numEnq - numDeq)
   )
   allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
 

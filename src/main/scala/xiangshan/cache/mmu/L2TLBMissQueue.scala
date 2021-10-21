@@ -33,7 +33,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = UInt(vpnLen.W)
-  val source = UInt(bPtwWidth.W)
+  val source = UInt(bSourceWidth.W)
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(MSHRSize).W)
   val af = Bool()
@@ -41,13 +41,13 @@ class L2TlbMQEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 
 class L2TlbMQInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = Output(UInt(vpnLen.W))
-  val source = Output(UInt(bPtwWidth.W))
+  val source = Output(UInt(bSourceWidth.W))
   val l3 = Valid(Output(UInt(PAddrBits.W)))
 }
 
 class L2TlbMQCacheBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = Output(UInt(vpnLen.W))
-  val source = Output(UInt(bPtwWidth.W))
+  val source = Output(UInt(bSourceWidth.W))
 }
 
 class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
@@ -56,7 +56,7 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val cache = Decoupled(new L2TlbMQCacheBundle())
   val fsm_done = Input(Bool())
   val out = DecoupledIO(new Bundle {
-    val source = Output(UInt(bPtwWidth.W))
+    val source = Output(UInt(bSourceWidth.W))
     val id = Output(UInt(bMemID.W))
     val vpn = Output(UInt(vpnLen.W))
     val af = Output(Bool())
@@ -68,7 +68,10 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
     }))
     val enq_ptr = Output(UInt(log2Ceil(MSHRSize).W))
     val buffer_it = Output(Vec(MSHRSize, Bool()))
-    val refill_vpn = Output(UInt(vpnLen.W))
+    val refill = Output(new Bundle {
+      val vpn = UInt(vpnLen.W)
+      val source = UInt(bSourceWidth.W)
+    })
     val req_mask = Input(Vec(MSHRSize, Bool()))
   }
   val pmp = new Bundle {
@@ -79,6 +82,8 @@ class L2TlbMQIO(implicit p: Parameters) extends XSBundle with HasPtwConst {
 
 @chiselName
 class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
+  require(MSHRSize >= (2 + l2tlbParams.filterSize))
+
   val io = IO(new L2TlbMQIO())
 
   val entries = Reg(Vec(MSHRSize, new L2TlbMQEntry()))
@@ -96,7 +101,7 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   val cache_high_ptr = ParallelPriorityEncoder(is_caches_high)
   val cache_low_ptr = ParallelPriorityEncoder(is_caches_low)
 
-  val cache_arb = Module(new Arbiter(new L2TlbMQCacheBundle(), 2))
+  val cache_arb = Module(new RRArbiter(new L2TlbMQCacheBundle(), 2))
   cache_arb.io.in(0).valid := Cat(is_caches_high).orR && io.fsm_done // fsm busy, required l1/l2 pte is not ready
   cache_arb.io.in(0).bits.vpn := entries(cache_high_ptr).vpn
   cache_arb.io.in(0).bits.source := entries(cache_high_ptr).source
@@ -138,7 +143,10 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     Mux(to_wait, state_mem_waiting, // wait for the prev mem resp
     Mux(io.in.bits.l3.valid, state_addr_check, state_cache_high))))
   when (io.in.fire()) {
-    state(enq_ptr) := enq_state
+    // if prefetch req does not need mem access, just give it up.
+    // so there will be at most 1 + FilterSize entries that needs re-access page cache
+    // so 2 + FilterSize is enough to avoid dead-lock
+    state(enq_ptr) := Mux(from_pre(io.in.bits.source) && enq_state =/= state_addr_check, state_idle, enq_state)
     entries(enq_ptr).vpn := io.in.bits.vpn
     entries(enq_ptr).ppn := io.in.bits.l3.bits
     entries(enq_ptr).source := io.in.bits.source
@@ -207,7 +215,8 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
-  io.mem.refill_vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
+  io.mem.refill.vpn := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).vpn
+  io.mem.refill.source := entries(RegNext(io.mem.resp.bits.id(log2Up(MSHRSize)-1, 0))).source
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
@@ -225,11 +234,11 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
   XSPerfAccumulate("mem_count", io.mem.req.fire())
   XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
+  XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
 
   for (i <- 0 until MSHRSize) {
     TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
   }
-  assert(!io.in.valid || io.in.ready, "when io.in.valid, should always ready")
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(4))

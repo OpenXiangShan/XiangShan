@@ -31,13 +31,13 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
  */
 class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val req = Flipped(DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val l1Hit = Bool()
     val vpn = UInt(vpnLen.W)
     val ppn = UInt(ppnLen.W)
   }))
   val resp = DecoupledIO(new Bundle {
-    val source = UInt(bPtwWidth.W)
+    val source = UInt(bSourceWidth.W)
     val resp = new PtwResp
   })
 
@@ -58,6 +58,7 @@ class PtwFsmIO()(implicit p: Parameters) extends PtwBundle {
   val refill = Output(new Bundle {
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
+    val source = UInt(bSourceWidth.W)
   })
 }
 
@@ -173,10 +174,11 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
   mem.req.bits.addr := mem_addr
-  mem.req.bits.id := MSHRSize.U(bMemID.W)
+  mem.req.bits.id := FsmReqID.U(bMemID.W)
 
   io.refill.vpn := vpn
   io.refill.level := level
+  io.refill.source := source
 
   XSDebug(p"[fsm] state:${state} level:${level} notFound:${pageFault}\n")
 

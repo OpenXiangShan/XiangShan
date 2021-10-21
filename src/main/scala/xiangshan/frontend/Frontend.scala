@@ -22,9 +22,8 @@ import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.mmu.{TLB, TlbPtwIO, TlbRequestIO}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker,PFEvent}
-import system.L1CacheErrorInfo
+import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
