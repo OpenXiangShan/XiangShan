@@ -586,7 +586,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   io.toIbuffer.bits.pd        := preDecoderOut.pd
   io.toIbuffer.bits.ftqPtr    := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc        := preDecoderOut.pc
-  io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i)}
+  io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := preDecoderOut.takens(i) && !f3_mmio}
   io.toIbuffer.bits.foldpc    := preDecoderOut.pc.map(i => XORFold(i(VAddrBits-1,1), MemPredPCWidth))
   io.toIbuffer.bits.ipf       := preDecoderOut.pageFault
   io.toIbuffer.bits.acf       := preDecoderOut.accessFault
