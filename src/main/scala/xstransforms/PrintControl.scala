@@ -139,6 +139,7 @@ class PrintControl extends Transform with DependencyAPIMigration {
           case _: Print if disable =>
             EmptyStmt
           case _: Stop if removeAssert => EmptyStmt
+          case _: Verification if removeAssert => EmptyStmt
           case other => other.mapStmt(onStmt)
         }
         m.mapStmt(onStmt)

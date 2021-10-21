@@ -29,9 +29,9 @@ class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
   p => p(XSCoreParamsKey).RobSize
 ) with HasCircularQueuePtrHelper {
 
-  def needFlush(redirect: Valid[Redirect], flush: Bool): Bool = {
+  def needFlush(redirect: Valid[Redirect]): Bool = {
     val flushItself = redirect.bits.flushItself() && this === redirect.bits.robIdx
-    flush || (redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx)))
+    redirect.valid && (flushItself || isAfter(this, redirect.bits.robIdx))
   }
 
   override def cloneType = (new RobPtr).asInstanceOf[this.type]
@@ -103,7 +103,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
-  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.robIdx === deqPtrVec(0)
+  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && !io.exception_state.bits.flushPipe && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
@@ -111,13 +111,13 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.robIdx, deqPtrVec.last)
   val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !io.misPredBlock && !io.isReplaying))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
-  // when io.intrBitSetReg or there're possible exceptions in these instructions, only one instruction is allowed to commit
+  // when io.intrBitSetReg or there're possible exceptions in these instructions,
+  // only one instruction is allowed to commit
   val allowOnlyOne = commit_exception || io.intrBitSetReg
   val commitCnt = Mux(allowOnlyOne, canCommit(0), normalCommitCnt)
 
-  val resetDeqPtrVec = VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RobPtr)))
   val commitDeqPtrVec = VecInit(deqPtrVec.map(_ + commitCnt))
-  val deqPtrVec_next = Mux(redirectOutValid, resetDeqPtrVec, Mux(io.state === 0.U, commitDeqPtrVec, deqPtrVec))
+  val deqPtrVec_next = Mux(io.state === 0.U && !redirectOutValid, commitDeqPtrVec, deqPtrVec)
 
   deqPtrVec := deqPtrVec_next
 
@@ -132,15 +132,6 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
 class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
-    // for exceptions and interrupts
-    val state = Input(UInt(2.W))
-    val deq_v = Input(Bool())
-    val deq_w = Input(Bool())
-    val deqPtr = Input(new RobPtr)
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo))
-    val intrBitSetReg = Input(Bool())
-    val hasNoSpecExec = Input(Bool())
-    val commitType = Input(CommitType())
     // for input redirect
     val redirect = Input(Valid(new Redirect))
     // for enqueue
@@ -152,19 +143,11 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   val enqPtr = RegInit(0.U.asTypeOf(new RobPtr))
 
-  // for exceptions (flushPipe included) and interrupts:
-  // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
-  val exceptionEnable = io.deq_w(0) && io.exception_state.valid && io.exception_state.bits.robIdx === io.deqPtr
-  val redirectOutValid = io.state === 0.U && io.deq_v && (intrEnable || exceptionEnable)
-
   // enqueue
   val canAccept = io.allowEnqueue && !io.hasBlockBackward
-  val dispatchNum = Mux(canAccept && !RegNext(redirectOutValid), PopCount(io.enq), 0.U)
+  val dispatchNum = Mux(canAccept, PopCount(io.enq), 0.U)
 
-  when (redirectOutValid) {
-    enqPtr := 0.U.asTypeOf(new RobPtr)
-  }.elsewhen (io.redirect.valid) {
+  when (io.redirect.valid) {
     enqPtr := io.redirect.bits.robIdx + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
   }.otherwise {
     enqPtr := enqPtr + dispatchNum
@@ -205,7 +188,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
   // s0: compare wb(1),wb(2) and wb(3),wb(4)
-  val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !bits.robIdx.needFlush(io.redirect, io.flush) }
+  val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }
   val csr_wb_bits = io.wb(0).bits
   val load_wb_bits = Mux(!in_wb_valid(2) || in_wb_valid(1) && isAfter(io.wb(2).bits.robIdx, io.wb(1).bits.robIdx), io.wb(1).bits, io.wb(2).bits)
   val store_wb_bits = Mux(!in_wb_valid(4) || in_wb_valid(3) && isAfter(io.wb(4).bits.robIdx, io.wb(3).bits.robIdx), io.wb(3).bits, io.wb(4).bits)
@@ -213,7 +196,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   val s0_out_bits = RegNext(VecInit(Seq(csr_wb_bits, load_wb_bits, store_wb_bits)))
 
   // s1: compare last four and current flush
-  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !b.robIdx.needFlush(io.redirect, io.flush) })
+  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
   val compare_01_valid = s0_out_valid(0) || s0_out_valid(1)
   val compare_01_bits = Mux(!s0_out_valid(0) || s0_out_valid(1) && isAfter(s0_out_bits(0).robIdx, s0_out_bits(1).robIdx), s0_out_bits(1), s0_out_bits(0))
   val compare_bits = Mux(!s0_out_valid(2) || compare_01_valid && isAfter(s0_out_bits(2).robIdx, compare_01_bits.robIdx), compare_01_bits, s0_out_bits(2))
@@ -228,8 +211,8 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
   // (1) system reset
   // (2) current is valid: flush, remain, merge, update
   // (3) current is not valid: s1 or enq
-  val current_flush = current.bits.robIdx.needFlush(io.redirect, io.flush)
-  val s1_flush = s1_out_bits.robIdx.needFlush(io.redirect, io.flush)
+  val current_flush = current.bits.robIdx.needFlush(io.redirect) || io.flush
+  val s1_flush = s1_out_bits.robIdx.needFlush(io.redirect) || io.flush
   when (reset.asBool) {
     current.valid := false.B
   }.elsewhen (current.valid) {
@@ -262,6 +245,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
+  val robIdx = new RobPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val replayInst = Bool()
 }
@@ -270,7 +254,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
-    val flushOut = ValidIO(new RobFlushInfo)
+    val flushOut = ValidIO(new Redirect)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
@@ -434,16 +418,23 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val exceptionEnable = writebacked(deqPtr.value) && deqHasException
   val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
 
-  io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
+  // io.flushOut will trigger redirect at the next cycle.
+  // Block any redirect or commit at the next cycle.
+  val lastCycleFlush = RegNext(io.flushOut.valid)
+
+  io.flushOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe) && !lastCycleFlush
+  io.flushOut.bits := DontCare
+  io.flushOut.bits.robIdx := deqPtr
   io.flushOut.bits.ftqIdx := deqDispatchData.ftqIdx
   io.flushOut.bits.ftqOffset := deqDispatchData.ftqOffset
-  io.flushOut.bits.replayInst := deqHasReplayInst
+  io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || exceptionEnable, RedirectLevel.flush, RedirectLevel.flushAfter)
+  io.flushOut.bits.interrupt := true.B
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && exceptionEnable)
   XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable)
+  val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.uop := RegEnable(debug_deqUop, exceptionHappen)
   io.exception.bits.uop.ctrl.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
@@ -462,7 +453,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     * Commits (and walk)
     * They share the same width.
     */
-  val walkCounter = Reg(UInt(log2Up(RobSize).W))
+  val walkCounter = Reg(UInt(log2Up(RobSize + 1).W))
   val shouldWalkVec = VecInit((0 until CommitWidth).map(_.U < walkCounter))
   val walkFinished = walkCounter <= CommitWidth.U
 
@@ -513,7 +504,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
-    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying
+    io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !misPredBlock && !isReplaying && !lastCycleFlush
     io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_walk) {
@@ -572,14 +563,11 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     * (3) walk: when walking comes to the end, switch to s_walk
     * (4) s_extrawalk to s_walk
     */
-  val state_next = Mux(io.flushOut.valid,
-    s_idle,
-    Mux(io.redirect.valid,
-      Mux(io.enq.needAlloc.asUInt.orR, s_extrawalk, s_walk),
-      Mux(state === s_walk && walkFinished,
-        s_idle,
-        Mux(state === s_extrawalk, s_walk, state)
-      )
+  val state_next = Mux(io.redirect.valid,
+    Mux(io.enq.needAlloc.asUInt.orR, s_extrawalk, s_walk),
+    Mux(state === s_walk && walkFinished,
+      s_idle,
+      Mux(state === s_extrawalk, s_walk, state)
     )
   )
   state := state_next
@@ -602,14 +590,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val deqPtrVec_next = deqPtrGenModule.io.next_out
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
-  enqPtrGenModule.io.state := state
-  enqPtrGenModule.io.deq_v := commit_v(0)
-  enqPtrGenModule.io.deq_w := commit_w(0)
-  enqPtrGenModule.io.deqPtr := deqPtr
-  enqPtrGenModule.io.exception_state := exceptionDataRead
-  enqPtrGenModule.io.intrBitSetReg := intrBitSetReg
-  enqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
-  enqPtrGenModule.io.commitType := deqDispatchData.commitType
   enqPtrGenModule.io.redirect := io.redirect
   enqPtrGenModule.io.allowEnqueue := allowEnqueue
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
@@ -632,28 +612,30 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val lastCycleRedirect = RegNext(io.redirect.valid)
   val trueValidCounter = Mux(lastCycleRedirect, distanceBetween(enqPtr, deqPtr), validCounter)
   val commitCnt = PopCount(io.commits.valid)
-  validCounter := Mux(io.flushOut.valid,
-    0.U,
-    Mux(state === s_idle,
-      (validCounter - commitCnt) + dispatchNum,
-      trueValidCounter
-    )
+  validCounter := Mux(state === s_idle,
+    (validCounter - commitCnt) + dispatchNum,
+    trueValidCounter
   )
 
-  allowEnqueue := Mux(io.flushOut.valid,
-    true.B,
-    Mux(state === s_idle,
-      validCounter + dispatchNum <= (RobSize - RenameWidth).U,
-      trueValidCounter <= (RobSize - RenameWidth).U
-    )
+  allowEnqueue := Mux(state === s_idle,
+    validCounter + dispatchNum <= (RobSize - RenameWidth).U,
+    trueValidCounter <= (RobSize - RenameWidth).U
   )
 
   val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtr, enqPtr - 1.U)
   val redirectWalkDistance = distanceBetween(currentWalkPtr, io.redirect.bits.robIdx)
   when (io.redirect.valid) {
     walkCounter := Mux(state === s_walk,
-      redirectWalkDistance + io.redirect.bits.flushItself() - commitCnt,
-      redirectWalkDistance + io.redirect.bits.flushItself()
+      // NOTE: +& is used here because:
+      // When rob is full and the head instruction causes an exception,
+      // the redirect robIdx is the deqPtr. In this case, currentWalkPtr is
+      // enqPtr - 1.U and redirectWalkDistance is RobSize - 1.
+      // Since exceptions flush the instruction itself, flushItSelf is true.B.
+      // Previously we use `+` to count the walk distance and it causes overflows
+      // when RobSize is power of 2. We change it to `+&` to allow walkCounter to be RobSize.
+      // The width of walkCounter also needs to be changed.
+      redirectWalkDistance +& io.redirect.bits.flushItself() - commitCnt,
+      redirectWalkDistance +& io.redirect.bits.flushItself()
     )
   }.elsewhen (state === s_walk) {
     walkCounter := walkCounter - commitCnt
@@ -672,7 +654,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
-    when (canEnqueue(i) && !io.redirect.valid && !RegNext(io.flushOut.valid)) {
+    when (canEnqueue(i) && !io.redirect.valid) {
       valid(enqPtrVec(i).value) := true.B
     }
   }
@@ -683,11 +665,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
   // reset: when exception, reset all valid to false
-  when (io.flushOut.valid) {
-    for (i <- 0 until RobSize) {
-      valid(i) := false.B
-    }
-  }
   when (reset.asBool) {
     for (i <- 0 until RobSize) {
       valid(i) := false.B

@@ -66,6 +66,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
@@ -98,9 +99,14 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
+  // mmio cbo decoder
+  val is_mmio_cbo = io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_clean ||
+    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
+    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_inval
+
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = io.dtlbResp.bits.mmio
+  val s1_mmio = io.dtlbResp.bits.mmio || is_mmio_cbo
   val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
 
   io.in.ready := true.B
@@ -179,7 +185,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Input(new PMPRespBundle())
@@ -199,16 +204,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   store_s0.io.rsIdx := io.rsIdx
   store_s0.io.isFirstIssue := io.isFirstIssue
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.feedbackSlow
 
-  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
-  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
+  PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout
 

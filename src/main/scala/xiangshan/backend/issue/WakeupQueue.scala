@@ -27,7 +27,6 @@ class WakeupQueue(number: Int)(implicit p: Parameters) extends XSModule {
     val in  = Flipped(ValidIO(new MicroOp))
     val out = ValidIO(new MicroOp)
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
   })
   if (number < 0) {
     io.out.valid := false.B
@@ -41,11 +40,11 @@ class WakeupQueue(number: Int)(implicit p: Parameters) extends XSModule {
       val valid = Bool()
       val bits = new MicroOp
     })))
-    queue(0).valid := io.in.valid && !io.in.bits.robIdx.needFlush(io.redirect, io.flush)
+    queue(0).valid := io.in.valid && !io.in.bits.robIdx.needFlush(io.redirect)
     queue(0).bits  := io.in.bits
     (0 until (number-1)).map{i =>
       queue(i+1) := queue(i)
-      queue(i+1).valid := queue(i).valid && !queue(i).bits.robIdx.needFlush(io.redirect, io.flush)
+      queue(i+1).valid := queue(i).valid && !queue(i).bits.robIdx.needFlush(io.redirect)
     }
     io.out.valid := queue(number-1).valid
     io.out.bits := queue(number-1).bits

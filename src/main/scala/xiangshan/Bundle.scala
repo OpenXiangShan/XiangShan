@@ -110,7 +110,12 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
-  val loadWaitBit = Bool() // load inst should not be executed until all former store addr calcuated
+  // Load wait is needed
+  // load inst will not be executed until former store (predicted by mdp) addr calcuated
+  val loadWaitBit = Bool() 
+  // If (loadWaitBit && loadWaitStrict), strict load wait is needed 
+  // load inst will not be executed until ALL former store addr calcuated
+  val loadWaitStrict = Bool() 
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -368,11 +373,27 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 
+class SatpStruct extends Bundle {
+  val mode = UInt(4.W)
+  val asid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new Bundle {
+    val changed = Bool()
     val mode = UInt(4.W) // TODO: may change number to parameter
     val asid = UInt(16.W)
     val ppn = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
+
+    def apply(satp_value: UInt): Unit = {
+      require(satp_value.getWidth == XLEN)
+      val sa = satp_value.asTypeOf(new SatpStruct)
+      mode := sa.mode
+      asid := sa.asid
+      ppn := sa.ppn
+      changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+    }
   }
   val priv = new Bundle {
     val mxr = Bool()
@@ -393,6 +414,7 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+    val asid = UInt(AsidLength.W)
   }
 
   override def toPrintable: Printable = {
@@ -437,8 +459,29 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  // CSR has been writen by csr inst, copies of csr should be updated
   val w = ValidIO(new Bundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))
   })
+}
+
+class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
+  // Request csr to be updated
+  //
+  // Note that this request will ONLY update CSR Module it self,
+  // copies of csr will NOT be updated, use it with care!
+  //
+  // For each cycle, no more than 1 DistributedCSRUpdateReq is valid
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
+  def apply(valid: Bool, addr: UInt, data: UInt, src_description: String) = {
+    when(valid){
+      w.bits.addr := addr
+      w.bits.data := data
+    }
+    println("Distributed CSR update req registered for " + src_description)
+  }
 }

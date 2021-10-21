@@ -63,3 +63,12 @@ object DataHoldBypass {
     Mux(valid, data, RegEnable(data, valid))
   }
 }
+
+/*
+ * Data change or not
+ */
+object DataChanged {
+  def apply(data: UInt): UInt = {
+    data =/= RegNext(data)
+  }
+}
