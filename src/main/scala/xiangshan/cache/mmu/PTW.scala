@@ -324,12 +324,14 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   }
 
 
-  val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
-  val cache_perf     = cache.perfEvents.map(_._1).zip(cache.perfinfo.perfEvents.perf_events)
-  val fsm_perf       = fsm.perfEvents.map(_._1).zip(fsm.perfinfo.perfEvents.perf_events)
-  val perfEvents  = missq_perf ++ cache_perf ++ fsm_perf
-  for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-    println(s"ptw perf $i: $perf_name")
+  if(print_perfcounter){
+    val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
+    val cache_perf     = cache.perfEvents.map(_._1).zip(cache.perfinfo.perfEvents.perf_events)
+    val fsm_perf       = fsm.perfEvents.map(_._1).zip(fsm.perfinfo.perfEvents.perf_events)
+    val perfEvents  = missq_perf ++ cache_perf ++ fsm_perf
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"ptw perf $i: $perf_name")
+    }
   }
   val perf_list = missQueue.perfinfo.perfEvents.perf_events ++ cache.perfinfo.perfEvents.perf_events ++ fsm.perfinfo.perfEvents.perf_events
   val perf_length = perf_list.length

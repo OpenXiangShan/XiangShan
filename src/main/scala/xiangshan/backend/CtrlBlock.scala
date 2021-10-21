@@ -362,28 +362,32 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val csrevents = pfevent.io.hpmevent.slice(8,16)
   val perfinfo = IO(new Bundle(){
     val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+    val perfEventsRs      = Input(new PerfEventsBundle(NumRs))
     val perfEventsEu0     = Input(new PerfEventsBundle(10))
     val perfEventsEu1     = Input(new PerfEventsBundle(10))
   })
 
-  val decode_perf     = decode.perfEvents.map(_._1).zip(decode.perfinfo.perfEvents.perf_events)
-  val rename_perf     = rename.perfEvents.map(_._1).zip(rename.perfinfo.perfEvents.perf_events)
-  val dispat_perf     = dispatch.perfEvents.map(_._1).zip(dispatch.perfinfo.perfEvents.perf_events)
-  val intdq_perf      = intDq.perfEvents.map(_._1).zip(intDq.perfinfo.perfEvents.perf_events)
-  val fpdq_perf       = fpDq.perfEvents.map(_._1).zip(fpDq.perfinfo.perfEvents.perf_events)
-  val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
-  val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
-  val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
+  if(print_perfcounter){
+    val decode_perf     = decode.perfEvents.map(_._1).zip(decode.perfinfo.perfEvents.perf_events)
+    val rename_perf     = rename.perfEvents.map(_._1).zip(rename.perfinfo.perfEvents.perf_events)
+    val dispat_perf     = dispatch.perfEvents.map(_._1).zip(dispatch.perfinfo.perfEvents.perf_events)
+    val intdq_perf      = intDq.perfEvents.map(_._1).zip(intDq.perfinfo.perfEvents.perf_events)
+    val fpdq_perf       = fpDq.perfEvents.map(_._1).zip(fpDq.perfinfo.perfEvents.perf_events)
+    val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
+    val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
+    val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
 
-  for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-    println(s"ctrl perf $i: $perf_name")
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"ctrl perf $i: $perf_name")
+    }
   }
 
   val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ 
                   dispatch.perfinfo.perfEvents.perf_events ++ 
                   intDq.perfinfo.perfEvents.perf_events ++ fpDq.perfinfo.perfEvents.perf_events ++
                   lsDq.perfinfo.perfEvents.perf_events ++ rob.perfinfo.perfEvents.perf_events ++
-                  perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events
+                  perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events ++ 
+                  perfinfo.perfEventsRs.perf_events
 
   val perf_length = hpmEvents.length
   val hpm_ctrl = Module(new HPerfmonitor(perf_length,csrevents.length))

@@ -131,15 +131,17 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   XSPerfAccumulate("FrontendBubble", frontendBubble)
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
 
-  val ifu_perf     = ifu.perfEvents.map(_._1).zip(ifu.perfinfo.perfEvents.perf_events)
-  val ibuffer_perf = ibuffer.perfEvents.map(_._1).zip(ibuffer.perfinfo.perfEvents.perf_events)
-  val icache_perf  = icache.perfEvents.map(_._1).zip(icache.perfinfo.perfEvents.perf_events)
-  val ftq_perf     = ftq.perfEvents.map(_._1).zip(ftq.perfinfo.perfEvents.perf_events)
-  val bpu_perf     = bpu.perfEvents.map(_._1).zip(bpu.perfinfo.perfEvents.perf_events)
-  val perfEvents = ifu_perf ++ ibuffer_perf ++ icache_perf ++ ftq_perf ++ bpu_perf
+  if(print_perfcounter){
+    val ifu_perf     = ifu.perfEvents.map(_._1).zip(ifu.perfinfo.perfEvents.perf_events)
+    val ibuffer_perf = ibuffer.perfEvents.map(_._1).zip(ibuffer.perfinfo.perfEvents.perf_events)
+    val icache_perf  = icache.perfEvents.map(_._1).zip(icache.perfinfo.perfEvents.perf_events)
+    val ftq_perf     = ftq.perfEvents.map(_._1).zip(ftq.perfinfo.perfEvents.perf_events)
+    val bpu_perf     = bpu.perfEvents.map(_._1).zip(bpu.perfinfo.perfEvents.perf_events)
+    val perfEvents = ifu_perf ++ ibuffer_perf ++ icache_perf ++ ftq_perf ++ bpu_perf
 
-  for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
-    println(s"frontend perf $i: $perf_name")
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"frontend perf $i: $perf_name")
+    }
   }
 
   val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++

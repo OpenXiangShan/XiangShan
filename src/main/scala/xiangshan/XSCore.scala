@@ -283,10 +283,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // TODO: connect rsPerf
   val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
+  val rs_perf = Wire(new PerfEventsBundle(rsPerf.length))
+  val rs_cnt = rs_perf.length
+  for (i <- 0 until rs_cnt){
+    rs_perf.perf_events(i).incr_step := rsPerf(i).asUInt
+  }
   dontTouch(rsPerf)
   exuBlocks(0).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu0
   exuBlocks(1).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu1
   memBlock.perfinfo.perfEventsPTW <> ptw.perfinfo.perfEvents
+  ctrlBlock.perfinfo.perfEventsRs := rs_perf
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
