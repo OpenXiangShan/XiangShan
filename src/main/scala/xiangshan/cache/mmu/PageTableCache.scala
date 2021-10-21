@@ -31,7 +31,7 @@ import freechips.rocketchip.tilelink._
  * the cache should not be blocked
  * when miss queue if full, just block req outside
  */
-class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
+class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new L2TlbInnerBundle()))
   val req_isFirst = Input(Bool()) // only for perf counter
   val resp = DecoupledIO(new Bundle {
@@ -51,8 +51,6 @@ class PtwCacheIO()(implicit p: Parameters) extends PtwBundle {
     val level = UInt(log2Up(Level).W)
     val addr_low = UInt((log2Up(l2tlbParams.blockBytes) - log2Up(XLEN/8)).W)
   }))
-  val sfence = Input(new SfenceBundle)
-  val csr = Input(new TlbCsrBundle)
 }
 
 @chiselName
@@ -68,12 +66,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val sfence = io.sfence
   val refill = io.refill.bits
   val refill_prefetch = from_pre(io.refill.bits.req_info.source)
+  val flush = sfence.valid || io.csr.satp.changed
 
   val stage1_valid = io.req.valid
   val stage1_fire = stage1_valid && io.req.ready
   val stage1_req = io.req.bits
   val stage2_ready = Wire(Bool())
-  val stage2_valid = ValidHold(stage1_fire && !sfence.valid, io.resp.fire(), sfence.valid)
+  val stage2_valid = ValidHold(stage1_fire && !flush, io.resp.fire(), flush)
   val stage2_req = RegEnable(stage1_req, stage1_fire)
   // NOTE: if ptw cache resp may be blocked, hard to handle refill
   // when miss queue is full, please to block itlb and dtlb input
@@ -155,7 +154,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   l3AccessPerf.map(_ := false.B)
   spAccessPerf.map(_ := false.B)
 
-  val cache_read_valid = OneCycleValid(stage1_fire, sfence.valid)
+  val cache_read_valid = OneCycleValid(stage1_fire, flush)
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
@@ -281,7 +280,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val resp = Wire(io.resp.bits.cloneType)
   val resp_latch = RegEnable(resp, io.resp.valid && !io.resp.ready)
-  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.fire(), sfence.valid)
+  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.fire(), flush)
   stage2_ready := !stage2_valid || io.resp.fire()
   resp.req_info   := stage2_req
   resp.hit      := l3Hit || spHit
@@ -329,7 +328,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   memPte.suggestName("memPte")
 
   // TODO: handle sfenceLatch outsize
-  when (io.refill.valid && !memPte.isPf(refill.level) && !sfence.valid ) {
+  when (io.refill.valid && !memPte.isPf(refill.level) && !flush ) {
     when (refill.level === 0.U && !memPte.isLeaf()) {
       // val refillIdx = LFSR64()(log2Up(l2tlbParams.l1Size)-1,0) // TODO: may be LRU
       val refillIdx = replaceWrapper(l1v, ptwl1replace.way)
