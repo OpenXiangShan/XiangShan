@@ -374,11 +374,13 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
   val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
   val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
+
   for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
     println(s"ctrl perf $i: $perf_name")
   }
 
-  val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ dispatch.perfinfo.perfEvents.perf_events ++ 
+  val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ 
+                  dispatch.perfinfo.perfEvents.perf_events ++ 
                   intDq.perfinfo.perfEvents.perf_events ++ fpDq.perfinfo.perfEvents.perf_events ++
                   lsDq.perfinfo.perfEvents.perf_events ++ rob.perfinfo.perfEvents.perf_events ++
                   perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events

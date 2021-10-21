@@ -343,11 +343,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("empty", !hasValidInstr)
   XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
-  XSPerfAccumulate("stall_cycle_lsq",    hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_rob",    hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_rob", hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_fp_dq",  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_ls_dq",  hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(9))

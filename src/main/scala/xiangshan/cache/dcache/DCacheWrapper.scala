@@ -680,15 +680,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val ldu_0_perf     = ldu(0).perfEvents.map(_._1).zip(ldu(0).perfinfo.perfEvents.perf_events)
   val ldu_1_perf     = ldu(1).perfEvents.map(_._1).zip(ldu(1).perfinfo.perfEvents.perf_events)
   val perfEvents = wb_perf ++ mainp_perf ++ missq_perf ++ probq_perf ++ ldu_0_perf ++ ldu_1_perf
-  val perflist = wb.perfinfo.perfEvents.perf_events ++ mainPipe.perfinfo.perfEvents.perf_events ++ missQueue.perfinfo.perfEvents.perf_events ++ probeQueue.perfinfo.perfEvents.perf_events ++ ldu(0).perfinfo.perfEvents.perf_events ++ ldu(1).perfinfo.perfEvents.perf_events
+  val perflist = wb.perfinfo.perfEvents.perf_events ++ mainPipe.perfinfo.perfEvents.perf_events ++
+                 missQueue.perfinfo.perfEvents.perf_events ++ probeQueue.perfinfo.perfEvents.perf_events ++
+                 ldu(0).perfinfo.perfEvents.perf_events ++ ldu(1).perfinfo.perfEvents.perf_events
   val perf_length = perflist.length
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(perflist.length))
   })
   perfinfo.perfEvents.perf_events := perflist
 
-}                          
-                           
+}
+
 class AMOHelper() extends ExtModule {
   val clock  = IO(Input(Clock()))
   val enable = IO(Input(Bool()))
@@ -697,15 +699,14 @@ class AMOHelper() extends ExtModule {
   val wdata  = IO(Input(UInt(64.W)))
   val mask   = IO(Input(UInt(8.W)))
   val rdata  = IO(Output(UInt(64.W)))
-}                          
-                           
-                           
+}
+
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
-                           
+
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null
   val dcache = if (useDcache) LazyModule(new DCache()) else null
-  if (useDcache) {         
+  if (useDcache) {
     clientNode := dcache.clientNode
   }
 

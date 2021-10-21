@@ -411,7 +411,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     println(s"lsu perf $i: $perf_name")
   }
 
-  val hpmEvents = perfEvents_list.perf_events ++ loadUnits(0).perfinfo.perfEvents.perf_events ++ loadUnits(1).perfinfo.perfEvents.perf_events ++ sbuffer.perfinfo.perfEvents.perf_events ++ lsq.perfinfo.perfEvents.perf_events ++ dcache.perfinfo.perfEvents.perf_events ++ perfinfo.perfEventsPTW.perf_events
+  val hpmEvents = perfEvents_list.perf_events ++ loadUnits(0).perfinfo.perfEvents.perf_events ++ 
+                  loadUnits(1).perfinfo.perfEvents.perf_events ++ sbuffer.perfinfo.perfEvents.perf_events ++ 
+                  lsq.perfinfo.perfEvents.perf_events ++ dcache.perfinfo.perfEvents.perf_events ++ 
+                  perfinfo.perfEventsPTW.perf_events
   val perf_length = hpmEvents.length
 
   val hpm_lsu = Module(new HPerfmonitor(perf_length,csrevents.length))

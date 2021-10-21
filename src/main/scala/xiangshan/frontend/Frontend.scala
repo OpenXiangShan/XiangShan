@@ -126,7 +126,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   instrUncache.io.resp  <> DontCare
   instrUncache.io.flush <> DontCare
   io.error <> DontCare
-//  val numPCntFrontend = 64
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
@@ -143,7 +142,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     println(s"frontend perf $i: $perf_name")
   }
 
-  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++ icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ bpu.perfinfo.perfEvents.perf_events
+  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++
+                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ 
+                  bpu.perfinfo.perfEvents.perf_events
   val perf_length = hpmEvents.length
   val csrevents = pfevent.io.hpmevent.slice(0,8)
   val perfinfo = IO(new Bundle(){

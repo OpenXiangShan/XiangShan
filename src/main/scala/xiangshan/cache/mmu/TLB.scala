@@ -302,7 +302,6 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
         perf_out.incr_step := perf
       }
     }
-
 }
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
@@ -370,7 +369,6 @@ object TLB {
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
     }
-
     tlb.io.ptw
   }
 }

@@ -62,7 +62,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
 
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
-    //for preformance monitor
   })
 
   assert(RegNext(io.meta_read.ready))

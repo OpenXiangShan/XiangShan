@@ -151,11 +151,6 @@ class PerfEventsBundle (val numPCnt: Int) (implicit p: Parameters)extends XSBund
 
   val perf_events = Vec(numPCnt, (new PerfBundle))
   def length = numPCnt
-  //def ++(others: PerfEventsBundle): PerfEventsBundle = {
-  //  val new_bundle = Vec((perf_events.length + others.perf_events.length),(new PerfBundle))
-  //  new_bundle.perf_events := perf_events ++ others.perf_events
-  //  
-  //} 
 
 }
 
@@ -176,12 +171,19 @@ class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
     val event_op_2 = io.hpm_event(54,50)
 
 
-    val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
-                                       Mux(event_op_0(2),(events_incr_3.incr_step + events_incr_2.incr_step),  (events_incr_3.incr_step | events_incr_2.incr_step))))
-    val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
-                                       Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  (events_incr_1.incr_step | events_incr_0.incr_step))))
+    val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),
+                       Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
+                       Mux(event_op_0(2),(events_incr_3.incr_step + events_incr_2.incr_step),  
+                                         (events_incr_3.incr_step | events_incr_2.incr_step))))
+    val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),
+                       Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
+                       Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  
+                                         (events_incr_1.incr_step | events_incr_0.incr_step))))
 
-    io.event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),Mux(event_op_1(1),(event_step_0 ^ event_step_1),Mux(event_op_1(2),(event_step_0 + event_step_1),(event_step_0 | event_step_1))))
+    io.event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),
+                                    Mux(event_op_1(1),(event_step_0 ^ event_step_1),
+                                    Mux(event_op_1(2),(event_step_0 + event_step_1),
+                                                      (event_step_0 | event_step_1))))
 }
 
 class HPerfmonitor (val numPCnt: Int, val numCSRPCnt: Int) (implicit p: Parameters) extends XSModule{
@@ -199,4 +201,3 @@ class HPerfmonitor (val numPCnt: Int, val numCSRPCnt: Int) (implicit p: Paramete
     hpc.io.event_selected    <> io.events_selected.perf_events(i)
   }
 }
-

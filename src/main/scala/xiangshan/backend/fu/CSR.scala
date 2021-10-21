@@ -579,26 +579,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
-  //val ibufFull  = RegInit(0.U(XLEN.W))
-  //ibufFull := ibufFull + RegNext(csrio.perf.frontendInfo.ibufFull)
-  //val robFull   = RegInit(0.U(XLEN.W))
-  //robFull := robFull + RegNext(csrio.perf.ctrlInfo.robFull)
-  //val intdqFull = RegInit(0.U(XLEN.W))
-  //intdqFull := intdqFull + RegNext(csrio.perf.ctrlInfo.intdqFull)
-  //val fpdqFull  = RegInit(0.U(XLEN.W))
-  //fpdqFull := fpdqFull + RegNext(csrio.perf.ctrlInfo.fpdqFull)
-  //val lsdqFull  = RegInit(0.U(XLEN.W))
-  //lsdqFull := lsdqFull + RegNext(csrio.perf.ctrlInfo.lsdqFull)
-  //val sqFull    = RegInit(0.U(XLEN.W))
-  //sqFull := sqFull + RegNext(csrio.perf.memInfo.sqFull)
-  //val lqFull    = RegInit(0.U(XLEN.W))
-  //lqFull := lqFull + RegNext(csrio.perf.memInfo.lqFull)
-  //val dcacheMSHRFull = RegInit(0.U(XLEN.W))
-  //dcacheMSHRFull := dcacheMSHRFull + RegNext(csrio.perf.memInfo.dcacheMSHRFull)
-  //val bpRight   = RegInit(0.U(XLEN.W))
-  //bpRight := bpRight + RegNext(csrio.perf.frontendInfo.bpuInfo.bpRight)
-  //val bpWrong   = RegInit(0.U(XLEN.W))
-  //bpWrong := bpWrong + RegNext(csrio.perf.frontendInfo.bpuInfo.bpWrong)
   perfCnts( 0)  := Mux((mcountinhibit( 3) | perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.perf_events(0 ).incr_step)))
   perfCnts( 1)  := Mux((mcountinhibit( 4) | perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.perf_events(1 ).incr_step)))
   perfCnts( 2)  := Mux((mcountinhibit( 5) | perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.perf_events(2 ).incr_step)))
@@ -766,16 +746,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mhpmcounter29, perfCnts(26)),
     MaskedRegMap(Mhpmcounter30, perfCnts(27)),
     MaskedRegMap(Mhpmcounter31, perfCnts(28)),
-    //MaskedRegMap(Mhpmevent3, ibufFull),
-    //MaskedRegMap(Mhpmevent4, robFull),
-    //MaskedRegMap(Mhpmevent5, intdqFull),
-    //MaskedRegMap(Mhpmevent6, fpdqFull),
-    //MaskedRegMap(Mhpmevent7, lsdqFull),
-    //MaskedRegMap(Mhpmevent8, sqFull),
-    //MaskedRegMap(Mhpmevent9, lqFull),
-    //MaskedRegMap(Mhpmevent10, dcacheMSHRFull),
-    //MaskedRegMap(Mhpmevent11, bpRight),
-    //MaskedRegMap(Mhpmevent12, bpWrong),
   )
   // TODO: mechanism should be implemented later
   // val MhpmcounterStart = Mhpmcounter3

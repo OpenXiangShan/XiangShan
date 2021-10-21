@@ -471,7 +471,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     println(s"scheduler perf $i: $perf_name")
   }
 
-  val perf_list =  perfEvents_list.perf_events ++  intbtperfEvents.perf_events ++  fpbtperfEvents.perf_events
+  val perf_list =  perfEvents_list.perf_events ++ intbtperfEvents.perf_events ++ fpbtperfEvents.perf_events
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(perf_list.length))
   })

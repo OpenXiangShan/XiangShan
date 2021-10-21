@@ -314,7 +314,9 @@ class Rename(implicit p: Parameters) extends XSModule {
     perf_out.incr_step := perf
   }
 
-  val perfEvents_list = perf_list.perf_events ++  intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++  fpFreeList.perfinfo.perfEvents.perf_events
+  val perfEvents_list = perf_list.perf_events ++
+                        intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++
+                        fpFreeList.perfinfo.perfEvents.perf_events
 
   val perfEvents = perf_seq ++ intfl_perf ++ fpfl_perf
   val perfinfo = IO(new Bundle(){
