@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheWordIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIOWithVaddr, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbRequestIO, TlbCmd}
 import difftest._
 
@@ -30,7 +30,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val in            = Flipped(Decoupled(new ExuInput))
     val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
-    val dcache        = new DCacheWordIO
+    val dcache        = new DCacheWordIOWithVaddr
     val dtlb          = new TlbRequestIO
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
@@ -45,7 +45,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
-  val addr_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
   val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
@@ -89,19 +88,16 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     when (io.in.fire()) {
       in := io.in.bits
       in.src(1) := in.src(1) // leave src2 unchanged
-      addr_valid := true.B
-    }
-    when (io.storeDataIn.fire()) {
-      in.src(1) := io.storeDataIn.bits.data
-      data_valid := true.B
-    }
-    when(data_valid && addr_valid) {
       state := s_tlb
-      addr_valid := false.B
-      data_valid := false.B
     }
   }
 
+  when (io.storeDataIn.fire()) {
+    in.src(1) := io.storeDataIn.bits.data
+    data_valid := true.B
+  }
+
+  assert(!(io.storeDataIn.fire() && data_valid), "atomic unit re-receive data")
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
@@ -119,7 +115,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src(0)
-    io.dtlb.req.bits.roqIdx := in.uop.roqIdx
+    io.dtlb.req.bits.robIdx := in.uop.robIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
@@ -198,6 +194,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     ))
 
     io.dcache.req.bits.addr := paddr
+    io.dcache.req.bits.vaddr := in.src(0) // vaddr
     io.dcache.req.bits.data := genWdata(in.src(1), in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
@@ -213,7 +210,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   }
 
   when (state === s_cache_resp) {
-    io.dcache.resp.ready := true.B
+    io.dcache.resp.ready := data_valid
     when(io.dcache.resp.fire()) {
       is_lrsc_valid := io.dcache.resp.bits.id
       val rdata = io.dcache.resp.bits.data
@@ -273,6 +270,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
       state := s_invalid
     }
+    data_valid := false.B
   }
 
   when(io.redirect.valid || io.flush){

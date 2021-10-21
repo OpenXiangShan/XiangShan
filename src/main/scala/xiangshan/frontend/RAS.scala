@@ -159,14 +159,14 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   // confirm that the call/ret is the taken cfi
   spec_push := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_call
   spec_pop  := io.s2_fire && io.in.bits.resp_in(0).s2.hit_taken_on_ret
-  
+
   when (spec_pop) {
     io.out.resp.s2.preds.jmp_target := spec_top_addr
   }
 
   io.out.resp.s2.rasSp  := spec_ras.sp
   io.out.resp.s2.rasTop := spec_ras.top
-  
+
   io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   val redirect = RegNext(io.redirect)

@@ -40,7 +40,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   val enqVec = selectEnq._2
 
   // enqueue
-  val doEnqueue = io.in.fire() && !io.in.bits.uop.roqIdx.needFlush(io.redirect, io.flush)
+  val doEnqueue = io.in.fire() && !io.in.bits.uop.robIdx.needFlush(io.redirect, io.flush)
   when (doEnqueue) {
     for (i <- 0 until numEntries) {
       when (enqVec(i)) {
@@ -66,7 +66,7 @@ class InputBuffer(numEntries: Int)(implicit p: Parameters) extends XSModule {
   }
 
   // flush
-  val flushVec = data.map(_.uop.roqIdx).zip(emptyVec).map{ case (r, e) => !e && r.needFlush(io.redirect, io.flush) }
+  val flushVec = data.map(_.uop.robIdx).zip(emptyVec).map{ case (r, e) => !e && r.needFlush(io.redirect, io.flush) }
   for (i <- 0 until numEntries) {
     when (flushVec(i)) {
       emptyVec(i) := true.B
