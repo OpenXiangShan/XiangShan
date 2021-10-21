@@ -222,7 +222,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // dispatch and issue ports
     // val allocate = Vec(outer.numDpPorts, Flipped(DecoupledIO(new MicroOp)))
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
@@ -243,7 +242,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))
   if (readIntState.nonEmpty) {
     val busyTable = Module(new BusyTable(readIntState.length, intRfWritePorts))
-    busyTable.io.flush := io.flush
     busyTable.io.allocPregs.zip(io.allocPregs).foreach{ case (pregAlloc, allocReq) =>
       pregAlloc.valid := allocReq.isInt
       pregAlloc.bits := allocReq.preg
@@ -262,7 +260,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val numBusyTableRead = readFpState.length - numInFpStateRead
     if (numBusyTableRead > 0) {
       val busyTable = Module(new BusyTable(numBusyTableRead, fpRfWritePorts))
-      busyTable.io.flush := io.flush
       busyTable.io.allocPregs.zip(io.allocPregs).foreach { case (pregAlloc, allocReq) =>
         pregAlloc.valid := allocReq.isFp
         pregAlloc.bits := allocReq.preg
@@ -294,16 +291,15 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val wbPorts = if (isInt) io.writeback.take(intRfWritePorts) else io.writeback.drop(intRfWritePorts)
     val waddr = wbPorts.map(_.bits.uop.pdest)
     val wdata = wbPorts.map(_.bits.data)
-    val debugReadPorts = Some(if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat)
-    val debugRead = if (env.FPGAPlatform) None else debugReadPorts
+    val debugRead = if (isInt) io.extra.debug_int_rat else io.extra.debug_fp_rat
     if (isInt) {
       val wen = wbPorts.map(wb => wb.valid && wb.bits.uop.ctrl.rfWen)
-      Regfile(NRPhyRegs, readIntRf, wen, waddr, wdata, true, debugRead = debugRead)
+      Regfile(NRPhyRegs, readIntRf, wen, waddr, wdata, true, debugRead = Some(debugRead))
     }
     else {
       // For floating-point function units, every instruction writes either int or fp regfile.
       val wen = wbPorts.map(_.valid)
-      Regfile(NRPhyRegs, readFpRf, wen, waddr, wdata, false, debugRead = debugRead)
+      Regfile(NRPhyRegs, readFpRf, wen, waddr, wdata, false, debugRead = Some(debugRead))
     }
   }
 
@@ -312,20 +308,24 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   if (io.extra.intRfReadIn.isDefined) {
     io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
+    require(io.extra.intRfReadIn.get.length == readIntRf.length)
   }
 
   if (io.extra.fpRfReadIn.isDefined) {
     io.extra.fpRfReadIn.get.map(_.addr).zip(readFpRf).foreach{ case (r, addr) => r := addr}
+    require(io.extra.fpRfReadIn.get.length == readFpRf.length)
   }
 
   if (io.extra.intRfReadOut.isDefined) {
     val extraIntReadData = intRfReadData.dropRight(32).takeRight(outer.outIntRfReadPorts)
     io.extra.intRfReadOut.get.map(_.data).zip(extraIntReadData).foreach{ case (a, b) => a := b }
+    require(io.extra.intRfReadOut.get.length == extraIntReadData.length)
   }
 
   if (io.extra.fpRfReadOut.isDefined) {
     val extraFpReadData = fpRfReadData.dropRight(32).takeRight(outer.outFpRfReadPorts)
     io.extra.fpRfReadOut.get.map(_.data).zip(extraFpReadData).foreach{ case (a, b) => a := b }
+    require(io.extra.fpRfReadOut.get.length == extraFpReadData.length)
   }
 
   var issueIdx = 0
@@ -337,8 +337,6 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val rs = node.module
 
     rs.io.redirect <> io.redirect
-    rs.io.redirect <> io.redirect
-    rs.io.flush <> io.flush
 
     val issueWidth = rs.io.deq.length
     rs.io.deq <> io.issue.slice(issueIdx, issueIdx + issueWidth)

@@ -71,6 +71,8 @@ trait HasCSRConst {
   val Slvpredctl    = 0x5C2
   val Smblockctl    = 0x5C3
   val Srnctl        = 0x5C4
+  val Scachebase    = 0x5C5
+  /** 0x5C5-0x5E5 for cache instruction register*/
 
   val Sdsid         = 0x9C0
 
@@ -201,6 +203,22 @@ trait HasCSRConst {
   def IRQ_MSIP  = 11
 
   def IRQ_DEBUG = 12
+
+  val Asid_true_len = 16
+  
+  def Asid_true_mask(AsidLength : Int) : UInt = {
+    val res = Wire(Vec(Asid_true_len,Bool()))
+    (0 until Asid_true_len).map(i => {
+      res(i) := (i <= AsidLength).B
+  })
+    Cat(res.reverse)
+  // val zero = "h0".U(1.W)
+  // val one = "h1".U(1.W)
+  // val mask_high = Fill(Asid_true_len - AsidLength, zero)
+  // val mask_low  = Fill(AsidLength, one)
+
+  // Cat(mask_high, mask_low)
+  }
 
   val IntPriority = Seq(
     IRQ_DEBUG,

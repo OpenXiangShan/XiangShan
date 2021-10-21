@@ -24,6 +24,7 @@ import utils.MaskedRegMap.WritableMask
 import utils._
 import xiangshan._
 import xiangshan.backend._
+import xiangshan.cache._
 import xiangshan.frontend.BPUCtrl
 import xiangshan.backend.fu.util._
 import difftest._
@@ -187,6 +188,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
   // distributed csr w
@@ -260,12 +262,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     assert(this.getWidth == XLEN)
   }
 
-  class SatpStruct extends Bundle {
-    val mode = UInt(4.W)
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
-  }
-
   class Interrupt extends Bundle {
 //  val d = Output(Bool())    // Debug
     val e = new Priv
@@ -285,24 +281,25 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val dpcPrev = RegNext(dpc)
   XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x.", dpc, dpcPrev)
 
-// dcsr value table
-// | debugver | 0100
-// | zero     | 10 bits of 0
-// | ebreakvs | 0
-// | ebreakvu | 0
-// | ebreakm  | 1 if ebreak enters debug
-// | zero     | 0
-// | ebreaks  |
-// | ebreaku  |
-// | stepie   | 0 disable interrupts in singlestep
-// | stopcount| stop counter, 0
-// | stoptime | stop time, 0
-// | cause    | 3 bits read only
-// | v        | 0
-// | mprven   | 1
-// | nmip     | read only
-// | step     |
-// | prv      | 2 bits
+  // dcsr value table
+  // | debugver | 0100
+  // | zero     | 10 bits of 0
+  // | ebreakvs | 0
+  // | ebreakvu | 0
+  // | ebreakm  | 1 if ebreak enters debug
+  // | zero     | 0
+  // | ebreaks  |
+  // | ebreaku  |
+  // | stepie   | 0 disable interrupts in singlestep
+  // | stopcount| stop counter, 0
+  // | stoptime | stop time, 0
+  // | cause    | 3 bits read only
+  // | v        | 0
+  // | mprven   | 1
+  // | nmip     | read only
+  // | step     |
+  // | prv      | 2 bits
+
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
   val dcsrMask = ZeroExt(GenMask(15) | GenMask(13, 11) | GenMask(2, 0), XLEN)// Dcsr write mask
@@ -438,7 +435,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val sipWMask = "h2".U(XLEN.W) // ssip is writeable in smode
   val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
-  val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
+  // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
+  // TODO: use config to control the length of asid
+  // val satpMask = "h8fffffffffffffff".U(XLEN.W) // enable asid, mode can only be 8 / 0
+  val satpMask = Cat("h8".U(4.W),Asid_true_mask(AsidLength),"hfffffffffff".U((XLEN - 4 - 16).W))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
@@ -483,7 +483,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.move_elim_enable := srnctl(0)
 
   val tlbBundle = Wire(new TlbCsrBundle)
-  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+  tlbBundle.satp.apply(satp)
 
   csrio.tlb := tlbBundle
 
@@ -533,18 +533,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Frm, fcsr, wfn = frm_wfn, rfn = frm_rfn),
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
-
-  // Atom LR/SC Control Bits
-  //  val setLr = WireInit(Bool(), false.B)
-  //  val setLrVal = WireInit(Bool(), false.B)
-  //  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare) //TODO : need check
-  //  val lr = RegInit(Bool(), false.B)
-  //  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
-  //
-  //  when (setLr) {
-  //    lr := setLrVal
-  //    lrAddr := setLrAddr
-  //  }
 
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
@@ -689,14 +677,23 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
 
-
+  val cacheopRegs = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+    name -> RegInit(0.U(attribute("width").toInt.W))
+  }}
+  val cacheopMapping = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+    MaskedRegMap(
+      Scachebase + attribute("offset").toInt, 
+      cacheopRegs(name)
+    )
+  }}
 
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
                 pmpMapping ++
                 emuPerfCntsLoMapping ++
                 (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
-                (if (HasFPU) fcsrMapping else Nil)
+                (if (HasFPU) fcsrMapping else Nil) ++
+                (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
   val addr = src2(11, 0)
   val csri = ZeroExt(src2(16, 12), XLEN)
@@ -787,30 +784,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val isIllegalAccess = !permitted
   val isIllegalPrivOp = illegalSModeSret
 
-  // def MMUPermissionCheck(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool)
-  // def MMUPermissionCheckLoad(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool) && (pter || (mstatusStruct.mxr && ptex))
-  // imem
-  // val imemPtev = true.B
-  // val imemPteu = true.B
-  // val imemPtex = true.B
-  // val imemReq = true.B
-  // val imemPermissionCheckPassed = MMUPermissionCheck(imemPtev, imemPteu)
-  // val hasInstrPageFault = imemReq && !(imemPermissionCheckPassed && imemPtex)
-  // assert(!hasInstrPageFault)
-
-  // dmem
-  // val dmemPtev = true.B
-  // val dmemPteu = true.B
-  // val dmemReq = true.B
-  // val dmemPermissionCheckPassed = MMUPermissionCheck(dmemPtev, dmemPteu)
-  // val dmemIsStore = true.B
-
-  // val hasLoadPageFault  = dmemReq && !dmemIsStore && !(dmemPermissionCheckPassed)
-  // val hasStorePageFault = dmemReq &&  dmemIsStore && !(dmemPermissionCheckPassed)
-  // assert(!hasLoadPageFault)
-  // assert(!hasStorePageFault)
-
-  //TODO: Havn't test if io.dmemMMU.priviledgeMode is correct yet
+  // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
   tlbBundle.priv.imode := priviledgeMode
@@ -985,7 +959,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
   val retTargetReg = Reg(retTarget.cloneType)
-  when (io.flushIn) {
+  when (io.redirectIn.valid) {
     isXRetFlag := false.B
   }.elsewhen (isXRet) {
     isXRetFlag := true.B
@@ -1046,6 +1020,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
+
+  // Distributed CSR update req
+  //
+  // For now we use it to implement customized cache op
+
+  when(csrio.distributedUpdate.w.valid){
+    // cacheopRegs can be distributed updated
+    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+      when((Scachebase + attribute("offset").toInt).U === csrio.distributedUpdate.w.bits.addr){
+        cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
+      }
+    }}
+  }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 

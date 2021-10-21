@@ -260,7 +260,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>
     exu.redirect <> ctrlBlock.io.redirect
-    exu.flush <> ctrlBlock.io.flush
     exu.allocPregs <> ctrlBlock.io.allocPregs
     exu.rfWriteback <> rfWriteback
     exu.fastUopIn <> allFastUop1
@@ -307,11 +306,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
+  csrioIn.distributedUpdate <> memBlock.io.csrUpdate // TODO
+
   fenceio.sfence <> memBlock.io.sfence
   fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
   memBlock.io.redirect <> ctrlBlock.io.redirect
-  memBlock.io.flush <> ctrlBlock.io.flush
   memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
   memBlock.io.csrCtrl <> csrioIn.customCtrl
   memBlock.io.tlbCsr <> csrioIn.tlb
@@ -321,11 +321,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
 
   val itlbRepeater = Module(new PTWRepeater(2))
-  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.missQueueSize - 1))
+  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.filterSize))
   itlbRepeater.io.tlb <> frontend.io.ptw
   dtlbRepeater.io.tlb <> memBlock.io.ptw
   itlbRepeater.io.sfence <> fenceio.sfence
   dtlbRepeater.io.sfence <> fenceio.sfence
+  itlbRepeater.io.csr <> csrioIn.tlb
+  dtlbRepeater.io.csr <> csrioIn.tlb
   ptw.io.tlb(0) <> itlbRepeater.io.ptw
   ptw.io.tlb(1) <> dtlbRepeater.io.ptw
   ptw.io.sfence <> fenceio.sfence

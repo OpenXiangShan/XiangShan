@@ -32,6 +32,7 @@ class SSITEntry(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
   val isload = Bool()
   val ssid = UInt(SSIDWidth.W) // store set identifier
+  val strict = Bool() // strict load wait is needed
 }
 
 // Store Set Identifier Table
@@ -47,6 +48,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
   val isload = Reg(Vec(SSITSize, Bool()))
   val ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
+  val strict = Reg(Vec(SSITSize, Bool()))
 
   val resetCounter = RegInit(0.U(ResetTimeMax2Pow.W))
   resetCounter := resetCounter + 1.U
@@ -57,6 +59,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
     io.rdata(i).valid := valid(io.raddr(i))
     io.rdata(i).isload := isload(io.raddr(i))
     io.rdata(i).ssid := ssid(io.raddr(i))
+    io.rdata(i).strict := strict(io.raddr(i)) && valid(io.raddr(i))
   }
 
   // update SSIT if load violation redirect is detected
@@ -78,6 +81,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
   val winnerSSID = Mux(loadOldSSID < storeOldSSID, loadOldSSID, storeOldSSID)
+  val ssidIsSame = loadOldSSID === storeOldSSID
 
   // for now we just use lowest bits of ldpc as store set id
   val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
@@ -91,9 +95,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.ldpc) := true.B
         isload(memPredUpdateReqReg.ldpc) := true.B
         ssid(memPredUpdateReqReg.ldpc) := ssidAllocate
+        strict(memPredUpdateReqReg.ldpc) := false.B
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := ssidAllocate
+        strict(memPredUpdateReqReg.stpc) := false.B
       }
       // 2. "If the load has been assigned a store set, but the store has not,
       // the store is assigned the load’s store set."
@@ -101,6 +107,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := loadOldSSID
+        strict(memPredUpdateReqReg.stpc) := false.B
       }
       // 3. "If the store has been assigned a store set, but the load has not,
       // the load is assigned the store’s store set."
@@ -108,6 +115,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.ldpc) := true.B
         isload(memPredUpdateReqReg.ldpc) := true.B
         ssid(memPredUpdateReqReg.ldpc) := storeOldSSID
+        strict(memPredUpdateReqReg.ldpc) := false.B
       }
       // 4. "If both the load and the store have already been assigned store sets,
       // one of the two store sets is declared the "winner".
@@ -119,6 +127,9 @@ class SSIT(implicit p: Parameters) extends XSModule {
         valid(memPredUpdateReqReg.stpc) := true.B
         isload(memPredUpdateReqReg.stpc) := false.B
         ssid(memPredUpdateReqReg.stpc) := winnerSSID
+        when(ssidIsSame){
+          strict(memPredUpdateReqReg.ldpc) := true.B
+        }
       }
     }
   }
@@ -127,6 +138,10 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_update_lysx", memPredUpdateReqValid && loadAssigned && !storeAssigned)
   XSPerfAccumulate("ssit_update_lxsy", memPredUpdateReqValid && !loadAssigned && storeAssigned)
   XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
+  XSPerfAccumulate("ssit_update_should_strict", memPredUpdateReqValid && ssidIsSame && loadAssigned && storeAssigned)
+  XSPerfAccumulate("ssit_update_strict_failed", 
+    memPredUpdateReqValid && ssidIsSame && strict(memPredUpdateReqReg.ldpc) && loadAssigned && storeAssigned
+  ) // should be zero
 
   // reset period: ResetTimeMax2Pow
   when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
@@ -173,7 +188,6 @@ class LFST(implicit p: Parameters) extends XSModule  {
     // val update = Input(new MemPredUpdateReq) // RegNext should be added outside
     // when redirect, mark canceled store as invalid
     val redirect = Input(Valid(new Redirect))
-    val flush = Input(Bool())
     // when store is dispatched, mark it as valid
     val dispatch = Vec(RenameWidth, Flipped(Valid(new DispatchToLFST)))
     // when store issued, mark store as invalid
@@ -244,7 +258,7 @@ class LFST(implicit p: Parameters) extends XSModule  {
   // when redirect, cancel store influenced
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(robIdxVec(i)(j).needFlush(io.redirect, io.flush)){
+      when(robIdxVec(i)(j).needFlush(io.redirect)){
         validVec(i)(j) := false.B
       }
     })
