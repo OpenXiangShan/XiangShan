@@ -46,6 +46,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error  = new L1CacheErrorInfo
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
@@ -111,6 +112,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   }
 
   icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
+  
+  icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  icache.io.csr.update <> io.csrUpdate
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

@@ -90,6 +90,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
   def eccBits = encWordBits - wordBits
 
+  def encTagBits = cacheParams.tagCode.width(tagBits)
+  def eccTagBits = encTagBits - tagBits
+
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
   def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
@@ -309,6 +312,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
 }
@@ -560,12 +564,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // refill pipe
-  val refillShouldBeBlocked = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req.bits.idx) ||
-	Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-	  s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
-    )).orR
+  val refillShouldBeBlocked = Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+    s.valid &&
+      s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
+      s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+  )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
   io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
 
@@ -640,6 +643,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     source.ready := sink.ready   && !block_signal
     sink.bits    := source.bits
   }
+
+  //----------------------------------------
+  // Customized csr cache op support
+  val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
+  cacheOpDecoder.io.csr <> io.csr
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
+    metaArray.io.cacheOp.resp.valid ||
+    tagArray.io.cacheOp.resp.valid
+  cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
+    bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
+    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
+    tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
+  ))
+  assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------
   // performance counters
