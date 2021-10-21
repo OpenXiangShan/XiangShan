@@ -161,7 +161,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
-  val isFused = UInt(3.W)
   val isORI = Bool() //for softprefetch
   val isSoftPrefetchRead = Bool() //for softprefetch
   val isSoftPrefetchWrite = Bool() //for softprefetch
@@ -332,7 +331,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)

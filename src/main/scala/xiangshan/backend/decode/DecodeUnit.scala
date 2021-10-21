@@ -544,8 +544,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.isSoftPrefetchRead := false.B
   cs.isSoftPrefetchWrite := false.B
 
-  cs.isFused := 0.U
-
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl

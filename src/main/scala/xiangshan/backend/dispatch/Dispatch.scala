@@ -134,10 +134,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     updatedUop(i) := io.fromRename(i).bits
     updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
     // update commitType
-    updatedUop(i).ctrl.commitType := updatedCommitType(i)
+    when (!CommitType.isFused(io.fromRename(i).bits.ctrl.commitType)) {
+      updatedUop(i).ctrl.commitType := updatedCommitType(i)
+    }.otherwise {
+      XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
+    }
     // update robIdx, lqIdx, sqIdx
-    // updatedUop(i).robIdx := io.enqRob.resp(i)
-//    XSError(io.fromRename(i).valid && updatedUop(i).robIdx.asUInt =/= io.enqRob.resp(i).asUInt, "they should equal")
     updatedUop(i).lqIdx  := io.enqLsq.resp(i).lqIdx
     updatedUop(i).sqIdx  := io.enqLsq.resp(i).sqIdx
 
