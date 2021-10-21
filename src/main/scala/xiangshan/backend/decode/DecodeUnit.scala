@@ -419,6 +419,9 @@ object SvinvalDecode extends DecodeConstants {
    * sfence.vma should be executed in-order and it flushes the pipeline after committing
    * we can parallel sfence instrucions with this extension 
    */
+    )
+}
+/*
  * CBO decode
  */
 object CBODecode extends DecodeConstants {
