@@ -373,11 +373,27 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 
+class SatpStruct extends Bundle {
+  val mode = UInt(4.W)
+  val asid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new Bundle {
+    val changed = Bool()
     val mode = UInt(4.W) // TODO: may change number to parameter
     val asid = UInt(16.W)
     val ppn = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
+
+    def apply(satp_value: UInt): Unit = {
+      require(satp_value.getWidth == XLEN)
+      val sa = satp_value.asTypeOf(new SatpStruct)
+      mode := sa.mode
+      asid := sa.asid
+      ppn := sa.ppn
+      changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+    }
   }
   val priv = new Bundle {
     val mxr = Bool()
@@ -398,6 +414,7 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+    val asid = UInt(AsidLength.W)
   }
 
   override def toPrintable: Printable = {

@@ -90,20 +90,23 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
   }
-
 
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
+  normalPage.csr <> io.csr
+  superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
     val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
@@ -216,7 +219,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid
+  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },
