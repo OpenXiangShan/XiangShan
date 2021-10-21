@@ -591,7 +591,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   )
 
   for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
   }
 
   f3_redirect := !predecodeFlushReg && predecodeFlush

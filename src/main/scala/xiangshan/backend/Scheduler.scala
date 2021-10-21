@@ -467,7 +467,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     ("sche_issue_fire       ", PopCount(io.issue.map(_.fire))     ),
   )
   for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
     println(s"scheduler perf $i: $perf_name")
   }
 

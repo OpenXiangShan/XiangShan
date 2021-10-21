@@ -389,6 +389,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val hpm_ctrl = Module(new HPerfmonitor(perf_length,csrevents.length))
   hpm_ctrl.io.hpm_event := csrevents
   hpm_ctrl.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := hpm_ctrl.io.events_selected
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  perfinfo.perfEvents := RegNext(hpm_ctrl.io.events_selected)
+  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
 }

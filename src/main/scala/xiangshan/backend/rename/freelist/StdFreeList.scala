@@ -95,6 +95,6 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   )
 
   for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
   }
 }

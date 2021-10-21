@@ -153,5 +153,5 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val hpm_frontend = Module(new HPerfmonitor(perf_length,csrevents.length))
   hpm_frontend.io.hpm_event := csrevents
   hpm_frontend.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := hpm_frontend.io.events_selected
+  perfinfo.perfEvents := RegNext(hpm_frontend.io.events_selected)
 }

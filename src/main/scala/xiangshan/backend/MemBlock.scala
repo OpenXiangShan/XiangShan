@@ -403,7 +403,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     ("stDeqCount                   ", stDeqCount      ),
   ) 
   for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
   }
   val mem_perf = perfEvents ++ ldu0_perf ++ ldu1_perf ++ sbuf_perf ++ lsq_perf ++ dc_perf
 
@@ -420,5 +420,5 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val hpm_lsu = Module(new HPerfmonitor(perf_length,csrevents.length))
   hpm_lsu.io.hpm_event := csrevents
   hpm_lsu.io.events_sets.perf_events := hpmEvents
-  perfinfo.perfEvents := hpm_lsu.io.events_selected
+  perfinfo.perfEvents := RegNext(hpm_lsu.io.events_selected)
 }

@@ -708,7 +708,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   )
 
   for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
   }
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)

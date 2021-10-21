@@ -311,7 +311,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     ("rename_stall_cycle_walk     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk ),
   ) 
   for (((perf_out,(perf_name,perf)),i) <- perf_list.perf_events.zip(perf_seq).zipWithIndex) {
-    perf_out.incr_step := perf
+    perf_out.incr_step := RegNext(perf)
   }
 
   val perfEvents_list = perf_list.perf_events ++

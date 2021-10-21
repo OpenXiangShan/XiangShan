@@ -291,7 +291,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
         ("miss           ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i) && missVec(i)))                           ),
         )
       for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-        perf_out.incr_step := perf
+        perf_out.incr_step := RegNext(perf)
       }
     } else {
       val perfEvents = Seq(
@@ -299,7 +299,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
         ("miss           ", PopCount((0 until Width).map(i => ptw.req(i).fire()))                                    ),
       )
       for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-        perf_out.incr_step := perf
+        perf_out.incr_step := RegNext(perf)
       }
     }
 }
