@@ -84,6 +84,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val rob = Flipped(new RobLsqIO) // rob to lsq
     }
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
@@ -95,6 +96,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
+  dcache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  io.csrUpdate <> dcache.io.csr.update
   io.error <> RegNext(RegNext(dcache.io.error))
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
