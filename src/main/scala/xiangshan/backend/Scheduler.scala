@@ -470,6 +470,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   )
   for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
     perf_out.incr_step := perf
+    println(s"scheduler perf $i: $perf_name")
   }
 
   val perf_list =  perfEvents_list.perf_events ++  intbtperfEvents.perf_events ++  fpbtperfEvents.perf_events

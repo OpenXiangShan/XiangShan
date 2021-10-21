@@ -417,14 +417,23 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
     val perfEventsPTW     = Input(new PerfEventsBundle(19))
   })
+  val ldu0_perf     = loadUnits(0).perfEvents.map(_._1).zip(loadUnits(0).perfinfo.perfEvents.perf_events)
+  val ldu1_perf     = loadUnits(1).perfEvents.map(_._1).zip(loadUnits(1).perfinfo.perfEvents.perf_events)
+  val sbuf_perf     = sbuffer.perfEvents.map(_._1).zip(sbuffer.perfinfo.perfEvents.perf_events)
+  val lsq_perf      = lsq.perfEvents.map(_._1).zip(lsq.perfinfo.perfEvents.perf_events)
+  val dc_perf       = dcache.perfEvents.map(_._1).zip(dcache.perfinfo.perfEvents.perf_events)
   val perfEvents_list = Wire(new PerfEventsBundle(2))
   val perfEvents = Seq(
     ("ldDeqCount                   ", ldDeqCount      ),
     ("stDeqCount                   ", stDeqCount      ),
-  )
-
+  ) 
   for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
     perf_out.incr_step := perf
+  }
+  val mem_perf = perfEvents ++ ldu0_perf ++ ldu1_perf ++ sbuf_perf ++ lsq_perf ++ dc_perf
+
+  for (((perf_name,perf),i) <- mem_perf.zipWithIndex) {
+    println(s"lsu perf $i: $perf_name")
   }
 
   val hpmEvents = perfEvents_list.perf_events ++ loadUnits(0).perfinfo.perfEvents.perf_events ++ loadUnits(1).perfinfo.perfEvents.perf_events ++ sbuffer.perfinfo.perfEvents.perf_events ++ lsq.perfinfo.perfEvents.perf_events ++ dcache.perfinfo.perfEvents.perf_events ++ perfinfo.perfEventsPTW.perf_events

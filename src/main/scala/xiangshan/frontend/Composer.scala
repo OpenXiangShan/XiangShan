@@ -73,6 +73,10 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     metas(idx)
   }
 
+  val comp_1_perf = components(1).asInstanceOf[MicroBTB].perfEvents.map(_._1).zip(components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events)
+  val comp_2_perf = components(2).asInstanceOf[Tage_SC].perfEvents.map(_._1).zip(components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events)
+  val comp_3_perf = components(3).asInstanceOf[FTB].perfEvents.map(_._1).zip(components(3).asInstanceOf[FTB].perfinfo.perfEvents.perf_events)
+  val perfEvents = comp_1_perf ++ comp_2_perf ++ comp_3_perf
   val perf_list = components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events ++ components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events ++ components(3).asInstanceOf[FTB].perfinfo.perfEvents.perf_events
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(perf_list.length))

@@ -387,7 +387,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
     val perfinfo = IO(new Bundle(){
       val perfEvents = Output(new PerfEventsBundle(3))
     })
-  if(EnableSC){
     val perfEvents = Seq(
       ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid                ),
       ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
@@ -396,15 +395,4 @@ trait HasSC extends HasSCParameter { this: Tage =>
     for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
       perf_out.incr_step := perf
     }
-  }
-  else {
-    val perfEvents = Seq(
-      ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid                ),
-      ("sc_update_on_mispred          ", 0.U ),
-      ("sc_update_on_unconf           ", 0.U ),
-    )
-    for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
-      perf_out.incr_step := perf
-    }
-  }
 }

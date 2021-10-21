@@ -444,6 +444,9 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(2*2))
   })
+  val entry_0_perf = entries(0).perfEvents.map(_._1).zip(entries(0).perfinfo.perfEvents.perf_events)
+  val entry_1_perf = entries(1).perfEvents.map(_._1).zip(entries(1).perfinfo.perfEvents.perf_events)
+  val perfEvents = entry_0_perf ++ entry_1_perf
   perfinfo.perfEvents.perf_events := entries(0).perfinfo.perfEvents.perf_events ++ entries(1).perfinfo.perfEvents.perf_events
 
   (0 until nWays).map{ w =>
@@ -509,6 +512,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.c.bits  := DontCare
   bus.e.valid := false.B
   bus.e.bits  := DontCare
+  val perfEvents = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(2*2))
   })

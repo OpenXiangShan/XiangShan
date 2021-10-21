@@ -333,22 +333,26 @@ class Rename(implicit p: Parameters) extends XSModule {
     p"ME_CANCELLED: pc group [ " + (0 until RenameWidth).map(i => p"fire:${io.out(i).fire()},pc:0x${Hexadecimal(io.in(i).bits.cf.pc)} ").reduceLeft(_ + _) + p"]\n")
   XSInfo(meEnable.asUInt().orR(), p"meEnableVec:${Binary(meEnable.asUInt)}\n")
 
-  val perfEvents_list = Wire(new PerfEventsBundle(6))
-  val perfEvents = Seq(
+  val intfl_perf     = intFreeList.perfEvents.map(_._1).zip(intFreeList.perfinfo.perfEvents.perf_events)
+  val fpfl_perf      = fpFreeList.perfEvents.map(_._1).zip(fpFreeList.perfinfo.perfEvents.perf_events)
+  val perf_list = Wire(new PerfEventsBundle(6))
+  val perf_seq = Seq(
     ("rename_in                   ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
     ("rename_waitinstr            ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
     ("rename_stall_cycle_dispatch ", hasValid && !io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk ),
     ("rename_stall_cycle_fp       ", hasValid &&  io.out(0).ready && !fpFreeList.canAllocate &&  intFreeList.canAllocate && !io.robCommits.isWalk ),
     ("rename_stall_cycle_int      ", hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate && !intFreeList.canAllocate && !io.robCommits.isWalk ),
     ("rename_stall_cycle_walk     ", hasValid &&  io.out(0).ready &&  fpFreeList.canAllocate &&  intFreeList.canAllocate &&  io.robCommits.isWalk ),
-  )
-
-  for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
+  ) 
+  for (((perf_out,(perf_name,perf)),i) <- perf_list.perf_events.zip(perf_seq).zipWithIndex) {
     perf_out.incr_step := perf
   }
-  val perf_list = perfEvents_list.perf_events ++  intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++  fpFreeList.perfinfo.perfEvents.perf_events
+
+  val perfEvents_list = perf_list.perf_events ++  intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++  fpFreeList.perfinfo.perfEvents.perf_events
+
+  val perfEvents = perf_seq ++ intfl_perf ++ fpfl_perf
   val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+    val perfEvents = Output(new PerfEventsBundle(perfEvents_list.length))
   })
-  perfinfo.perfEvents.perf_events := perf_list
+  perfinfo.perfEvents.perf_events := perfEvents_list
 }
