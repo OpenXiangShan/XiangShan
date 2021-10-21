@@ -230,7 +230,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info  := Mux(refill_from_mq, mq_mem.refill, fsm.io.refill.req_info)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
-  cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
+  cache.io.refill.bits.addr_low := RegNext(req_addr_low(mem.d.bits.source))
 
   // pmp
   pmp_check(0).req <> fsm.io.pmp.req
