@@ -368,11 +368,13 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   // it should either be the given last br or the new br
   when (pft_need_to_change) {
     val new_pft_offset =
-      Mux(!oe.tailSlot.sharing || new_br_insert_onehot.asUInt.orR,
-        oe.tailSlot.offset,
-        new_br_offset
-      )
-    
+      Mux(!new_br_insert_onehot.asUInt.orR,
+        new_br_offset, oe.allSlotsForBr.last.offset)
+
+    // set jmp to invalid
+    if (!shareTailSlot) {
+      old_entry_modified.tailSlot.valid := false.B
+    }
     old_entry_modified.pftAddr := getLower(io.start_addr) + new_pft_offset
     old_entry_modified.last_is_rvc := pd.rvcMask(new_pft_offset - 1.U) // TODO: fix this
     old_entry_modified.carry := (getLower(io.start_addr) +& new_pft_offset).head(1).asBool
@@ -383,8 +385,8 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   }
 
   val old_entry_jmp_target_modified = WireInit(oe)
-  val old_target = oe.tailSlot.getTarget(io.start_addr)
-  val old_tail_is_jmp = !oe.tailSlot.sharing
+  val old_target = oe.tailSlot.getTarget(io.start_addr) // may be wrong because we store only 20 lowest bits
+  val old_tail_is_jmp = !oe.tailSlot.sharing || !shareTailSlot.B
   val jalr_target_modified = cfi_is_jalr && (old_target =/= io.target) && old_tail_is_jmp // TODO: pass full jalr target
   when (jalr_target_modified) {
     old_entry_jmp_target_modified.setByJmpTarget(io.start_addr, io.target)
@@ -396,7 +398,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   for (i <- 0 until numBr) {
     old_entry_always_taken.always_taken(i) :=
       oe.always_taken(i) && io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i)
-    always_taken_modified_vec(i) := oe.always_taken(i) && !(io.cfiIndex.valid && oe.brValids(i) && io.cfiIndex.bits === oe.brOffset(i))
+    always_taken_modified_vec(i) := oe.always_taken(i) && !old_entry_always_taken.always_taken(i)
   }
   val always_taken_modified = always_taken_modified_vec.reduce(_||_)
 
