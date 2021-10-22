@@ -112,6 +112,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
+      val reset = Input(Bool())
     })
 
     core.module.io.hartId := io.hartId
@@ -119,10 +120,15 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     misc.module.beu_errors <> core.module.io.beu_errors
 
-    val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    core.module.reset := core_reset_gen.io.out
-
-    val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    l2cache.foreach( _.module.reset := l2_reset_gen.io.out)
+    // Modules are reset one by one
+    // io_reset ----
+    //             |
+    //             v
+    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
+    val l2cacheMod = if (l2cache.isDefined) Seq(l2cache.get.module) else Seq()
+    val resetChain = Seq(
+      Seq(misc.module, core.module) ++ l2cacheMod
+    )
+    ResetGen(resetChain, reset.asBool || io.reset, !debugOpts.FPGAPlatform)
   }
 }
