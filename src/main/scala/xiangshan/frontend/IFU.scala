@@ -283,6 +283,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val pmpExcpAF = fromPMP.map(port => port.instr)
 
+
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
   val f2_hit      = RegEnable(next = f1_hit   , enable = f1_fire)
   val f2_bank_hit = RegEnable(next = f1_bank_hit, enable = f1_fire)
@@ -339,8 +340,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   switch(wait_state){
     is(wait_idle){
-      when(f2_mmio){
-        wait_state :=  Mux(toUncache.ready, wait_send_mmio ,wait_idle )
+      when(f2_mmio && !f2_except_af(0) && !f2_except_pf(0)){
+        wait_state :=  wait_send_mmio
       }.elsewhen(miss_0_except_1){
         wait_state :=  Mux(toMissQueue(0).ready, wait_queue_ready ,wait_idle )
       }.elsewhen( only_0_miss  || miss_0_hit_1){
@@ -353,7 +354,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     }
 
     is(wait_send_mmio){
-      wait_state :=  wait_mmio_resp
+      wait_state := Mux(toUncache.fire(), wait_mmio_resp,wait_send_mmio )
     }
 
     is(wait_mmio_resp){
@@ -420,6 +421,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   }
 
   toUncache.valid :=  (wait_state === wait_send_mmio) && !f2_except_af(0)
+  //assert( (GTimer() < 5000.U && toUncache.fire()) || !toUncache.fire() ) 
   toUncache.bits.addr := f2_ftq_req.startAddr
 
   fromUncache.ready := true.B
