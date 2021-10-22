@@ -96,9 +96,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (coreParams.dcacheParametersOpt.nonEmpty) {
     misc.l1d_logger := core.memBlock.dcache.clientNode
   }
-  misc.busPMU := core.frontend.icache.clientNode
+  misc.busPMU := TLLogger(s"L2_L1I_$hardId", !debugOpts.FPGAPlatform) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
-    misc.busPMU := core.ptw.node
+    misc.busPMU := TLLogger(s"L2_PTW_$hardId", !debugOpts.FPGAPlatform) := core.ptw.node
   }
   l2cache match {
     case Some(l2) =>

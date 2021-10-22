@@ -43,8 +43,10 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt((PAddrBits).W)))
-    val violationMdata = Input(Vec(2, UInt((PAddrBits).W)))
-    val violationMmask = Output(Vec(2, Vec(numEntries, Bool())))
+    val violationMdata = Input(Vec(StorePipelineWidth, UInt((PAddrBits).W)))
+    val violationMmask = Output(Vec(StorePipelineWidth, Vec(numEntries, Bool())))
+    val releaseMdata = Input(Vec(LoadPipelineWidth, UInt((PAddrBits).W)))
+    val releaseMmask = Output(Vec(LoadPipelineWidth, Vec(numEntries, Bool())))
     val refillMdata = Input(UInt((PAddrBits).W))
     val refillMmask = Output(Vec(numEntries, Bool()))
   })
@@ -64,9 +66,14 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
   }
 
   // content addressed match
-  for (i <- 0 until 2) {
+  for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, 3) === data(j)(PAddrBits-1, 3)
+      io.violationMmask(i)(j) := io.violationMdata(i)(PAddrBits-1, DCacheIndexOffset) === data(j)(PAddrBits-1, DCacheIndexOffset)
+    }
+  }
+  for (i <- 0 until LoadPipelineWidth) {
+    for (j <- 0 until numEntries) {
+      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheTagOffset) === data(j)(PAddrBits-1, DCacheTagOffset)
     }
   }
 
@@ -89,8 +96,8 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Param
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
     val wdata = Input(Vec(numWrite, UInt(8.W)))
-    val violationMdata = Input(Vec(2, UInt((PAddrBits).W)))
-    val violationMmask = Output(Vec(2, Vec(numEntries, Bool())))
+    val violationMdata = Input(Vec(StorePipelineWidth, UInt((PAddrBits).W)))
+    val violationMmask = Output(Vec(StorePipelineWidth, Vec(numEntries, Bool())))
   })
 
   val data = Reg(Vec(numEntries, UInt(8.W)))
@@ -108,7 +115,7 @@ class MaskModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Param
   }
 
   // content addressed match
-  for (i <- 0 until 2) {
+  for (i <- 0 until StorePipelineWidth) {
     for (j <- 0 until numEntries) {
       io.violationMmask(i)(j) := (io.violationMdata(i) & data(j)).orR
     }
@@ -276,10 +283,17 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
       val refillMask = Input(Vec(size, Bool()))
       val matchMask = Output(Vec(size, Bool()))
     }
+    // st-ld violation query, word level cam
     val violation = Vec(StorePipelineWidth, new Bundle() {
       val paddr = Input(UInt(PAddrBits.W))
       val mask = Input(UInt(8.W))
       val violationMask = Output(Vec(size, Bool()))
+    })
+    // ld-ld violation query, cache line level cam
+    val release_violation = Vec(LoadPipelineWidth, new Bundle() {
+      val paddr = Input(UInt(PAddrBits.W))
+      val match_mask = Output(Vec(size, Bool()))
+      // if ld-ld violation does happened, we replay from the elder load
     })
     val debug = Output(Vec(size, new LQDataEntry))
 
@@ -303,9 +317,9 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
 
   // val data = Reg(Vec(size, new LQDataEntry))
   // data module
-  val paddrModule = Module(new LQPaddrModule(size, numRead = 3, numWrite = 2))
-  val maskModule = Module(new MaskModule(size, numRead = 3, numWrite = 2))
-  val coredataModule = Module(new CoredataModule(size, numRead = 3, numWrite = 3))
+  val paddrModule = Module(new LQPaddrModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth))
+  val maskModule = Module(new MaskModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth))
+  val coredataModule = Module(new CoredataModule(size, numRead = LoadPipelineWidth+1, numWrite = LoadPipelineWidth+1))
 
   // read data
   // read port 0 -> wbNumRead-1
@@ -370,16 +384,17 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int)(implicit p: Para
   coredataModule.io.paddrWdata(wbNumWrite) := DontCare
   coredataModule.io.wdata(wbNumWrite) := io.uncache.wdata
 
-  // mem access violation check, gen violationMask
+  // st-ld mem access violation check, gen violationMask
   (0 until StorePipelineWidth).map(i => {
     paddrModule.io.violationMdata(i) := io.violation(i).paddr
     maskModule.io.violationMdata(i) := io.violation(i).mask
     io.violation(i).violationMask := (paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt).asBools
-    // VecInit((0 until size).map(j => {
-      // val addrMatch = io.violation(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      // val violationVec = (0 until 8).map(k => data(j).mask(k) && io.violation(i).mask(k))
-      // Cat(violationVec).orR() && addrMatch
-    // }))
+  })
+
+  // ld-ld mem access violation check, gen violationMask (cam match mask)
+  (0 until LoadPipelineWidth).map(i => {
+    paddrModule.io.releaseMdata(i) := io.release_violation(i).paddr
+    io.release_violation(i).match_mask := paddrModule.io.releaseMmask(i)
   })
 
   // refill missed load
