@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rob.RobPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
@@ -34,7 +34,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   }
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
-  val flush = Input(Bool())
   val dqFull = Output(Bool())
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
@@ -48,7 +47,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // queue data array
   val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
-  val roqIdxEntries = Reg(Vec(size, new RoqPtr))
+  val robIdxEntries = Reg(Vec(size, new RobPtr))
   val debug_uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
@@ -66,7 +65,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
   val canEnqueue = allowEnqueue
-  val canActualEnqueue = canEnqueue && !(io.redirect.valid || io.flush)
+  val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -90,7 +89,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
       dataModule.io.wen(i) := true.B
       val sel = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
       dataModule.io.waddr(i) := tailPtr(sel).value
-      roqIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.roqIdx
+      robIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.robIdx
       debug_uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
       stateEntries(tailPtr(sel).value) := s_valid
     }
@@ -98,7 +97,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
-    when (io.deq(i).fire() && !(io.redirect.valid || io.flush)) {
+    when (io.deq(i).fire() && !io.redirect.valid) {
       stateEntries(headPtr(i).value) := s_invalid
 
 //      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
@@ -108,15 +107,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && (roqIdxEntries(i).needFlush(io.redirect, io.flush) || io.flush)
+    needCancel(i) := stateEntries(i) =/= s_invalid && robIdxEntries(i).needFlush(io.redirect)
 
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
     XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(debug_uopEntries(i).cf.pc)}) " +
-      p"roqIndex ${roqIdxEntries(i)} " +
-      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx.asUInt)}\n")
+      p"robIndex ${robIdxEntries(i)} " +
+      p"cancelled with redirect robIndex 0x${Hexadecimal(io.redirect.bits.robIdx.asUInt)}\n")
   }
 
   /**
@@ -139,9 +138,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   // agreement with reservation station: don't dequeue when redirect.valid
   val nextHeadPtr = Wire(Vec(deqnum, new DispatchQueuePtr))
   for (i <- 0 until deqnum) {
-    nextHeadPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new DispatchQueuePtr),
-      Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq))
+    nextHeadPtr(i) := Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq)
     headPtr(i) := nextHeadPtr(i)
   }
 
@@ -162,46 +159,39 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
-  tailPtr(0) := Mux(io.flush,
-    0.U.asTypeOf(new DispatchQueuePtr),
-    Mux(io.redirect.valid,
-      tailPtr(0),
-      Mux(lastCycleMisprediction,
-        Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
-        tailPtr(0) + numEnq))
+  tailPtr(0) := Mux(io.redirect.valid,
+    tailPtr(0),
+    Mux(lastCycleMisprediction,
+      Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
+      tailPtr(0) + numEnq)
   )
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction && !io.flush)
+  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
   for (i <- 1 until enqnum) {
-    tailPtr(i) := Mux(io.flush,
-      i.U.asTypeOf(new DispatchQueuePtr),
-      Mux(io.redirect.valid,
-        tailPtr(i),
-        Mux(lastLastCycleMisprediction,
-          tailPtr(0) + i.U,
-          tailPtr(i) + numEnq))
-      )
+    tailPtr(i) := Mux(io.redirect.valid,
+      tailPtr(i),
+      Mux(lastLastCycleMisprediction,
+        tailPtr(0) + i.U,
+        tailPtr(i) + numEnq)
+    )
   }
 
   // update valid counter and allowEnqueue reg
-  validCounter := Mux(io.flush,
-    0.U,
-    Mux(io.redirect.valid,
-      validCounter,
-      Mux(lastLastCycleMisprediction,
-        currentValidCounter,
-        validCounter + numEnq - numDeq)
-    )
+  validCounter := Mux(io.redirect.valid,
+    validCounter,
+    Mux(lastLastCycleMisprediction,
+      currentValidCounter,
+      validCounter + numEnq - numDeq)
   )
   allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
 
   /**
     * Part 3: set output and input
     */
-  // TODO: remove this when replay moves to roq
+  // TODO: remove this when replay moves to rob
   dataModule.io.raddr := VecInit(nextHeadPtr.map(_.value))
   for (i <- 0 until deqnum) {
     io.deq(i).bits := dataModule.io.rdata(i)
-    io.deq(i).bits.roqIdx := roqIdxEntries(headPtr(i).value)
+    io.deq(i).bits.robIdx := robIdxEntries(headPtr(i).value)
     // io.deq(i).bits := debug_uopEntries(headPtr(i).value)
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := stateEntries(headPtr(i).value) === s_valid && !lastCycleMisprediction

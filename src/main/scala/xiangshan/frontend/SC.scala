@@ -74,7 +74,7 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
-  
+
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2, shouldReset=true, holdRead=true, singlePort=false))
 
@@ -96,7 +96,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val update_wdata = Wire(SInt(ctrBits.W))
   val updateWayMask =
       VecInit((0 to 1).map(io.update.mask && _.U === io.update.tagePred.asUInt)).asUInt
-  
+
   val update_idx = getIdx(io.update.hist, io.update.pc)
 
   table.io.w.apply(

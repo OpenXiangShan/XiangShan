@@ -23,7 +23,8 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.fu.{PMPChecker, PMPReqBundle}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
 
@@ -39,6 +40,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val req = io.requestor.map(_.req)
   val resp = io.requestor.map(_.resp)
   val ptw = io.ptw
+  val pmp = io.pmp
 
   val sfence = io.sfence
   val csr = io.csr
@@ -88,20 +90,23 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
   }
-
 
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
+  normalPage.csr <> io.csr
+  superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
     val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
@@ -113,9 +118,11 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
     val pf = perm.pf && hit
+    val af = perm.af && hit
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
+    val sizeReg = if (!q.sameCycle) RegNext(req(i).bits.size) else req(i).bits.size
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
@@ -133,20 +140,33 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
-    val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    pmp(i).valid := resp(i).valid
+    pmp(i).bits.addr := resp(i).bits.paddr
+    pmp(i).bits.size := sizeReg
+    pmp(i).bits.cmd := cmdReg
+
+    val ldUpdate = hit && !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+    val stUpdate = hit && (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+    val instrUpdate = hit && !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
-    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
-    val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit
-    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit
+    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+    val stPermFail = !(modeCheck && perm.w)
+    val instrPermFail = !(modeCheck && perm.x)
+    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
+    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.st := (stPf || stUpdate) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && vmEnable && hit && !af
+    // NOTE: pf need && with !af, page fault has higher priority than access fault
+    // but ptw may also have access fault, then af happens, the translation is wrong.
+    // In this case, pf has lower priority than af
 
     // if vmenable, use pre-calcuated pma check result
     resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg) && vmEnable && hit
-    resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe) && vmEnable && hit
+    resp(i).bits.excp.af.ld := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.st := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)) && vmEnable && hit
+    resp(i).bits.excp.af.instr := (af || Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)) && vmEnable && hit
 
     // if !vmenable, check pma
     val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
@@ -204,7 +224,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid
+  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },

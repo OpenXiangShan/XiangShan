@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.cache.{DCacheParameters, L1plusCacheParameters}
+import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
@@ -44,7 +44,9 @@ case class XSCoreParameters
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
   HasFPU: Boolean = true,
+  HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
+  AsidLength: Int = 16,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -93,30 +95,24 @@ case class XSCoreParameters
       ftb.io.in.bits.resp_in(0)  := tage.io.out.resp
       ittage.io.in.bits.resp_in(0)  := ftb.io.out.resp
       ras.io.in.bits.resp_in(0) := ittage.io.out.resp
-      
+
       (preds, ras.io.out.resp)
     }),
-
-
-  EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  BrqSize: Int = 32,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
-  NRPhyRegs: Int = 160,
+  NRPhyRegs: Int = 192,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  LoadQueueSize: Int = 64,
-  StoreQueueSize: Int = 48,
-  RoqSize: Int = 192,
-  EnableIntMoveElim: Boolean = true,
-  IntRefCounterWidth: Int = 2,
+  LoadQueueSize: Int = 80,
+  StoreQueueSize: Int = 64,
+  RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -141,7 +137,9 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
+  EnableLdVioCheckAfterReset: Boolean = false,
   RefillSize: Int = 512,
+  MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -180,8 +178,8 @@ case class XSCoreParameters
     normalNWays = 64,
     superNWays = 4,
   ),
-  useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
+  NumPMP: Int = 16, // 0 or 16 or 64
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -189,40 +187,30 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2
   ),
-  l1plusCacheParameters: L1plusCacheParameters = L1plusCacheParameters(
-    tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    replacer = Some("setplru"),
-    nMissEntries = 8
-  ),
-  dcacheParameters: DCacheParameters = DCacheParameters(
+  dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 16,
-    nReleaseEntries = 16,
-    nStoreReplayEntries = 16
-  ),
-  L2CacheParams: HCCacheParameters = HCCacheParameters(
+    nReleaseEntries = 32
+  )),
+  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
     level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
     prefetch = Some(huancun.prefetch.BOPParameters())
-  ),
+  )),
+  L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
-  useFakePTW: Boolean = false,
-  useFakeDCache: Boolean = false,
-  useFakeL1plusCache: Boolean = false,
-  useFakeL2Cache: Boolean = false
+  softPTW: Boolean = false // dpi-c debug only
 ){
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
-  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
   val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
-    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg) ++
-    Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
+    Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg)
 
   val fpExuConfigs =
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
@@ -262,10 +250,12 @@ trait HasXSParameter {
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
   val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
+  val AsidLength = coreParams.AsidLength
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
   val HasFPU = coreParams.HasFPU
+  val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
   val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = coreParams.EnableBPU
@@ -294,23 +284,18 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = coreParams.UBtbWays
   val BtbWays = coreParams.BtbWays
-  val EnableL1plusPrefetcher = coreParams.EnableL1plusPrefetcher
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
-  val BrqSize = coreParams.BrqSize
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
-  val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = coreParams.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val RoqSize = coreParams.RoqSize
-  val EnableIntMoveElim = coreParams.EnableIntMoveElim
-  val IntRefCounterWidth = coreParams.IntRefCounterWidth
+  val RobSize = coreParams.RobSize
+  val IntRefCounterWidth = log2Ceil(RobSize)
   val StdFreeListSize = NRPhyRegs - 32
-  // val MEFreeListSize = NRPhyRegs - { if (IntRefCounterWidth > 0 && IntRefCounterWidth < 5) (32 / Math.pow(2, IntRefCounterWidth)).toInt else 1 }
   val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
@@ -326,54 +311,30 @@ trait HasXSParameter {
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnableFastForward = coreParams.EnableFastForward
+  val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val RefillSize = coreParams.RefillSize
+  val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
-  val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
+  val NumPMP = coreParams.NumPMP
+  val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
 
   val icacheParameters = coreParams.icacheParameters
-  val l1plusCacheParameters = coreParams.l1plusCacheParameters
-  val dcacheParameters = coreParams.dcacheParameters
+  val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   val LRSCCycles = 100
 
-
   // cache hierarchy configurations
   val l1BusDataWidth = 256
-
-  val useFakeDCache = coreParams.useFakeDCache
-  val useFakePTW = coreParams.useFakePTW
-  val useFakeL1plusCache = coreParams.useFakeL1plusCache
-  // L2 configurations
-  val useFakeL2Cache = useFakeDCache && useFakePTW && useFakeL1plusCache || coreParams.useFakeL2Cache
-  val L1BusWidth = 256
-  val L2BlockSize = 64
-
-  // L3 configurations
-  val L2BusWidth = 256
-
-  // icache prefetcher
-  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = true,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 2,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = l1plusCacheParameters.blockBytes,
-      reallocStreamOnMissInstantly = true,
-      cacheName = "icache"
-    )
-  )
 
   // load violation predict
   val ResetTimeMax2Pow = 20 //1078576

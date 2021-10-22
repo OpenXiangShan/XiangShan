@@ -19,18 +19,27 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class ResetGen(level: Int = 1, sim: Boolean) extends Module {
+class ResetGen extends Module {
   val io = IO(new Bundle() {
     val out = Output(Bool())
   })
-  var reset_out = WireInit(reset.asBool)
 
-  if (!sim) {
-    for (i <- 0 until level) {
-      reset_out = RegNext(reset_out)
-      reset_out.suggestName(s"reset_${i}")
+  io.out := RegNext(reset.asBool)
+}
+
+object ResetGen {
+  def apply(resetChain: Seq[Seq[Module]], reset: Bool, sim: Boolean): Seq[Bool] = {
+    val resetReg = Wire(Vec(resetChain.length + 1, Bool()))
+    resetReg.foreach(_ := reset)
+    for ((resetLevel, i) <- resetChain.zipWithIndex) {
+      if (!sim) {
+        withReset(resetReg(i)) {
+          val resetGen = Module(new ResetGen)
+          resetReg(i + 1) := resetGen.io.out
+        }
+      }
+      resetLevel.foreach(_.reset := resetReg(i + 1))
     }
+    resetReg.tail
   }
-
-  io.out := reset_out
 }

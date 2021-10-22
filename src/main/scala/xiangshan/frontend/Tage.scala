@@ -158,7 +158,7 @@ class TageBTable
    // val update  = Input(new TageUpdate)
     val update = Flipped(Valid(new BranchPredictionUpdate))
   })
-    
+
   val bimAddr = new TableAddr(log2Up(BtSize), 1)
 
   val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = false, holdRead = true))
@@ -178,8 +178,8 @@ class TageBTable
   io.s1_cnt := bt.io.r.resp.data
 
   // Update logic
-  val u_valid = RegNext(io.update.valid)
-  val update = RegNext(io.update.bits)
+  val u_valid = io.update.valid
+  val update = io.update.bits
 
   val u_idx = bimAddr.getIdx(update.pc)
 
@@ -494,7 +494,7 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
 
 @chiselName
 class Tage(implicit p: Parameters) extends BaseTage {
-  
+
   val resp_meta = Wire(MixedVec((0 until TageBanks).map(new TageMeta(_))))
   override val meta_size = resp_meta.getWidth
   val bank_tables = BankTableInfos.zipWithIndex.map {
@@ -518,7 +518,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // Keep the table responses to process in s3
 
 
-  val s1_resps = MixedVecInit(bank_tables.map(b => VecInit(b.map(t => t.io.resp)))) 
+  val s1_resps = MixedVecInit(bank_tables.map(b => VecInit(b.map(t => t.io.resp))))
 
   //val s1_bim = io.in.bits.resp_in(0).s1.preds
   // val s2_bim = RegEnable(s1_bim, enable=io.s1_fire)
@@ -758,9 +758,9 @@ class Tage(implicit p: Parameters) extends BaseTage {
       bank_tables(w)(i).io.update.phist := RegNext(updatePhist)
     }
   }
-  bt.io.update  := io.update 
-  bt.io.update.valid := baseupdate.reduce(_||_)
-  bt.io.update_cnt := updatebcnt
+  bt.io.update  := RegNext(io.update)
+  bt.io.update.valid := RegNext(baseupdate.reduce(_||_))
+  bt.io.update_cnt := RegNext(updatebcnt)
 
   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
   def commit_perf(name: String, cnt: UInt) = XSPerfAccumulate(s"${name}_at_commit", cnt)
@@ -814,7 +814,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
   XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
     debug_pc_s2, io.out.resp.s2.target, debug_hist_s2, s2_provideds.asUInt, s2_tageTakens.asUInt)
-  
+
   for (b <- 0 until TageBanks) {
     for (i <- 0 until BankTageNTables(b)) {
       XSDebug("bank(%d)_tage_table(%d): valid:%b, resp_ctr:%d, resp_us:%d\n",

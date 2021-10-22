@@ -30,9 +30,12 @@ class ExuBlock(
   val intRfWbPorts: Seq[Seq[ExuConfig]],
   val fpRfWbPorts: Seq[Seq[ExuConfig]],
   val outFastPorts: Seq[Seq[Int]],
-  val outFpRfReadPorts: Int
+  val outIntRfReadPorts: Int,
+  val outFpRfReadPorts: Int,
+  val hasIntRf: Boolean,
+  val hasFpRf: Boolean
 )(implicit p: Parameters) extends LazyModule {
-  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outFpRfReadPorts))
+  val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
 
   val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts
   def getWbIndex(cfg: ExuConfig): Seq[Int] = allRfWbPorts.zipWithIndex.filter(_._1.contains(cfg)).map(_._2)
@@ -43,16 +46,19 @@ class ExuBlock(
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer) {
   val scheduler = outer.scheduler.module
 
-  val fuConfigs = outer.configs.map(c => (c._1, c._2))
+  val fuConfigs = outer.configs.map(c => (c._1, c._2)).filter(_._1.extendsExu)
   val fuBlock = Module(new FUBlock(fuConfigs))
+
+  val numOutFu = outer.configs.filterNot(_._1.extendsExu).map(_._2).sum
 
   val io = IO(new Bundle {
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     // dispatch ports
-    val allocate = scheduler.io.allocate.cloneType
+    val allocPregs = scheduler.io.allocPregs.cloneType
+    val in = scheduler.io.in.cloneType
     // issue and wakeup ports
+    val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput))) else None
     val fastUopOut = scheduler.io.fastUopOut.cloneType
     val rfWriteback = scheduler.io.writeback.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
@@ -64,22 +70,21 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
 
   // IO for the scheduler
   scheduler.io.redirect <> io.redirect
-  scheduler.io.flush <> io.flush
-  scheduler.io.allocate <> io.allocate
+  scheduler.io.allocPregs <> io.allocPregs
+  scheduler.io.in <> io.in
   scheduler.io.fastUopOut <> io.fastUopOut
   scheduler.io.writeback <> io.rfWriteback
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
 
   // the scheduler issues instructions to function units
-  scheduler.io.issue <> fuBlock.io.issue
+  scheduler.io.issue <> fuBlock.io.issue ++ io.issue.getOrElse(Seq())
   if (scheduler.io.fmaMid.isDefined) {
     scheduler.io.fmaMid.get <> fuBlock.io.fmaMid.get
   }
 
   // IO for the function units
   fuBlock.io.redirect <> io.redirect
-  fuBlock.io.flush <> io.flush
   fuBlock.io.writeback <> io.fuWriteback
   fuBlock.io.extra <> io.fuExtra
 
@@ -112,7 +117,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     scheWb.valid := wb.valid
     scheWb.bits := wb.bits
     if (cfg.hasFastUopOut) {
-      val isFlushed = wb.bits.uop.roqIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = wb.bits.uop.robIdx.needFlush(io.redirect)
       scheWb.valid := RegNext(wb.valid && !isFlushed)
       scheWb.bits.uop := RegNext(wb.bits.uop)
     }
@@ -120,7 +125,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     println(s"scheduler.writeback($i) is connected from exu ${cfg.name}")
     val outerWb = io.rfWriteback(i)
     val hasWb = outerWb.valid || scheWb.valid
-    XSError(hasWb && outerWb.bits.uop.roqIdx =/= scheWb.bits.uop.roqIdx,
+    XSError(hasWb && outerWb.bits.uop.robIdx =/= scheWb.bits.uop.robIdx,
       "different instruction between io.rfWriteback and fu.writeback\n")
     XSError(hasWb && outerWb.bits.data =/= scheWb.bits.data,
       "different data between io.rfWriteback and fu.writeback\n")
@@ -142,7 +147,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
       wbOut.bits.uop := fastWakeup.bits
     }
     else {
-      val isFlushed = fastWakeup.bits.roqIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = fastWakeup.bits.robIdx.needFlush(io.redirect)
       wbOut.valid := RegNext(fastWakeup.valid && !isFlushed)
       wbOut.bits.uop := RegNext(fastWakeup.bits)
     }
@@ -152,8 +157,8 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     require(cfg.hasExclusiveWbPort, "it's impossible to have allWakeupFromRs if it doesn't have exclusive rf ports")
     val fuWb = fuBlock.io.writeback(i)
     val fuWbValid = if (cfg.hasFastUopOut) RegNext(fuWb.valid) else fuWb.valid
-    val fuWbRoqIdx = if (cfg.hasFastUopOut) RegNext(fuWb.bits.uop.roqIdx) else fuWb.bits.uop.roqIdx
-    XSError((wbOut.valid || fuWbValid) && wbOut.bits.uop.roqIdx =/= fuWbRoqIdx,
+    val fuWbRobIdx = if (cfg.hasFastUopOut) RegNext(fuWb.bits.uop.robIdx) else fuWb.bits.uop.robIdx
+    XSError((wbOut.valid || fuWbValid) && wbOut.bits.uop.robIdx =/= fuWbRobIdx,
       "different instruction between rs.fastUopOut and fu.writeback\n")}
   }
 
@@ -166,7 +171,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     require(wakeupIdx.length == wbIdx.length)
     for ((i, j) <- wakeupIdx.zip(wbIdx)) {
       val scheWb = scheduler.io.writeback(j)
-      val isFlushed = scheduler.io.fastUopOut(i).bits.roqIdx.needFlush(io.redirect, io.flush)
+      val isFlushed = scheduler.io.fastUopOut(i).bits.robIdx.needFlush(io.redirect)
       scheWb.valid := RegNext(scheduler.io.fastUopOut(i).valid && !isFlushed)
       scheWb.bits.uop := RegNext(scheduler.io.fastUopOut(i).bits)
     }

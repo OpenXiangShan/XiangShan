@@ -43,7 +43,7 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val numBpStages = BP_STAGES.length
   
   val debug = true
-  val resetVector = 0x80000000L//TODO: set reset vec
+  val resetVector = 0x10000000L//TODO: set reset vec
   // TODO: Replace log2Up by log2Ceil
 }
 
@@ -107,7 +107,7 @@ trait BPUUtils extends HasXSParameter {
 
   def foldTag(tag: UInt, l: Int): UInt = {
     val nChunks = (tag.getWidth + l - 1) / l
-    val chunks = (0 until nChunks).map { i => 
+    val chunks = (0 until nChunks).map { i =>
       tag(min((i+1)*l, tag.getWidth)-1, i*l)
     }
     ParallelXOR(chunks)
