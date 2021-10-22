@@ -46,6 +46,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error  = new L1CacheErrorInfo
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
@@ -63,13 +64,14 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
   //icache
 
+  val tlbCsr = RegNext(io.tlbCsr)
   // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
     pmp_check(i).env.pmp  := pmp.io.pmp
-    pmp_check(i).env.mode := io.tlbCsr.priv.imode
+    pmp_check(i).env.mode := tlbCsr.priv.imode
     pmp_check(i).req <> ifu.io.pmp(i).req
     ifu.io.pmp(i).resp <> pmp_check(i).resp
   }
@@ -77,7 +79,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.ptw <> TLB(
     in = Seq(ifu.io.iTLBInter(0), ifu.io.iTLBInter(1)),
     sfence = io.sfence,
-    csr = io.tlbCsr,
+    csr = tlbCsr,
     width = 2,
     shouldBlock = true,
     itlbParams
@@ -107,6 +109,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   }
 
   icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
+  
+  icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  icache.io.csr.update <> io.csrUpdate
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in
@@ -118,9 +123,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   io.backend.cfVec <> ibuffer.io.out
 
-  instrUncache.io.req   <> DontCare
-  instrUncache.io.resp  <> DontCare
-  instrUncache.io.flush <> DontCare
+  instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
+  ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
+  instrUncache.io.flush := icache.io.missQueue.flush
   io.error <> DontCare
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))

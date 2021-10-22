@@ -115,16 +115,17 @@ package object xiangshan {
   }
 
   object CommitType {
-    def NORMAL = "b00".U  // int/fp
-    def BRANCH = "b01".U  // branch
-    def LOAD   = "b10".U  // load
-    def STORE  = "b11".U  // store
+    def NORMAL = "b000".U  // int/fp
+    def BRANCH = "b001".U  // branch
+    def LOAD   = "b010".U  // load
+    def STORE  = "b011".U  // store
 
-    def apply() = UInt(2.W)
-    def isLoadStore(commitType: UInt) = commitType(1)
-    def lsInstIsStore(commitType: UInt) = commitType(0)
-    def isStore(commitType: UInt) = isLoadStore(commitType) && lsInstIsStore(commitType)
-    def isBranch(commitType: UInt) = commitType(0) && !commitType(1)
+    def apply() = UInt(3.W)
+    def isFused(commitType: UInt): Bool = commitType(2)
+    def isLoadStore(commitType: UInt): Bool = !isFused(commitType) && commitType(1)
+    def lsInstIsStore(commitType: UInt): Bool = commitType(0)
+    def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
+    def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1) && !isFused(commitType)
   }
 
   object RedirectLevel {
@@ -351,20 +352,27 @@ package object xiangshan {
   object LSUOpType {
     // normal load/store
     // bit(1, 0) are size
-    def lb   = "b000000".U
-    def lh   = "b000001".U
-    def lw   = "b000010".U
-    def ld   = "b000011".U
-    def lbu  = "b000100".U
-    def lhu  = "b000101".U
-    def lwu  = "b000110".U
-    def sb   = "b001000".U
-    def sh   = "b001001".U
-    def sw   = "b001010".U
-    def sd   = "b001011".U
+    def lb       = "b000000".U
+    def lh       = "b000001".U
+    def lw       = "b000010".U
+    def ld       = "b000011".U
+    def lbu      = "b000100".U
+    def lhu      = "b000101".U
+    def lwu      = "b000110".U
+    def sb       = "b001000".U
+    def sh       = "b001001".U
+    def sw       = "b001010".U
+    def sd       = "b001011".U
+
+    def cbo_zero  = "b001111".U // l1 cache op
+
+    def cbo_clean = "b011111".U // llc op 
+    def cbo_flush = "b101111".U // llc op
+    def cbo_inval = "b111111".U // llc op
 
     def isLoad(op: UInt): Bool = !op(3)
     def isStore(op: UInt): Bool = op(3)
+    def isCbo(op: UInt): Bool = op(3, 0) === "b1111".U
 
     // atomics
     // bit(1, 0) are size
@@ -528,7 +536,7 @@ package object xiangshan {
     name = "fence",
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
-    FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
     latency = UncertainLatency(), // TODO: need rewrite latency structure, not just this value,
     hasExceptionOut = true
   )

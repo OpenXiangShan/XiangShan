@@ -90,20 +90,23 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
   }
-
 
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
+  normalPage.csr <> io.csr
+  superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
     val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
@@ -142,14 +145,19 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    val ldUpdate = hit && !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+    val stUpdate = hit && (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+    val instrUpdate = hit && !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
-    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
-    val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit && !af
+    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+    val stPermFail = !(modeCheck && perm.w)
+    val instrPermFail = !(modeCheck && perm.x)
+    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
+    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.st := (stPf || stUpdate) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && vmEnable && hit && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
@@ -216,7 +224,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid
+  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },

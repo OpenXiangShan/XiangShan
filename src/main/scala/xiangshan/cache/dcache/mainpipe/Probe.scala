@@ -174,9 +174,9 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     io.mem_probe.bits.dump
   }
 
-  when (io.pipe_req.fire()) {
-    io.pipe_req.bits.dump()
-  }
+//  when (io.pipe_req.fire()) {
+//    io.pipe_req.bits.dump()
+//  }
 
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)

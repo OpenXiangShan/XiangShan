@@ -48,14 +48,11 @@ class Rename(implicit p: Parameters) extends XSModule {
   val fpFreeList = Module(new StdFreeList(StdFreeListSize))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
-  val isIntDest = io.in.map(in => in.bits.ctrl.rfWen && in.bits.ctrl.ldest =/= 0.U)
-  val isFpDest = io.in.map(_.bits.ctrl.fpWen)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
   def needDestRegCommit[T <: RobCommitInfo](fp: Boolean, x: T): Bool = {
-    // TODO: why this ldest?
-    {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
+    if(fp) x.fpWen else x.rfWen
   }
 
   // connect [redirect + walk] ports for __float point__ & __integer__ free list

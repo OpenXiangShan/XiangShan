@@ -134,7 +134,12 @@ object GenMask {
 }
 
 object UIntToMask {
-  def apply(ptr: UInt, length: Integer) = UIntToOH(ptr)(length - 1, 0) - 1.U
+  def apply(ptr: UInt, length: Integer) = leftmask(ptr, length)
+  def reverseUInt(input: UInt): UInt = {
+    VecInit(input.asBools.reverse).asUInt
+  }
+  def leftmask(ptr: UInt, length: Integer) = UIntToOH(ptr)(length - 1, 0) - 1.U
+  def rightmask(ptr: UInt, length: Integer) = reverseUInt(reverseUInt(UIntToOH(ptr)(length - 1, 0)) - 1.U)
 }
 
 object GetEvenBits {

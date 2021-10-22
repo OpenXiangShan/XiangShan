@@ -61,7 +61,7 @@ class XSArgs(object):
         self.numa = args.numa
         self.fork = not args.disable_fork
         # wave dump path
-        if args.wave_dump is not None:   
+        if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
         else:
             self.set_wave_home(self.default_wave_home)
@@ -147,7 +147,7 @@ class XSArgs(object):
 
     def set_wave_home(self, path):
         print(f"set wave home to {path}")
-        self.wave_home = path    
+        self.wave_home = path
 
 # XiangShan environment
 class XiangShan(object):
@@ -236,6 +236,7 @@ class XiangShan(object):
             "ext_intr/amtest-riscv64-xs.bin",
             "cache-alias/aliastest-riscv64-xs.bin",
             "pmp/pmp.riscv.bin",
+            "asid/asid.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)

@@ -43,17 +43,13 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
-  val hasDuplicate = false.B +: deallocate.zipWithIndex.tail.map(x => VecInit(deallocate.take(x._2).map(_.bits === x._1.bits)).asUInt.orR)
-  val isFreed = deallocate.map(de => de.valid && refCounterNext(de.bits) === 0.U && refCounter(de.bits) =/= 0.U)
-  for (i <- 0 until CommitWidth) {
-    io.freeRegs(i).valid := isFreed(i)
-    if (i > 0) {
-      val hasDuplicate = deallocate.take(i).map(de => de.valid && de.bits === deallocate(i).bits)
-      when (VecInit(hasDuplicate).asUInt.orR) {
-        io.freeRegs(i).valid := false.B
-      }
-    }
-    io.freeRegs(i).bits := deallocate(i).bits
+  for ((de, i) <- deallocate.zipWithIndex) {
+    val isNonZero = de.valid && refCounter(de.bits) =/= 0.U
+    val hasDuplicate = deallocate.take(i).map(de => de.valid && de.bits === deallocate(i).bits)
+    val blockedByDup = if (i == 0) false.B else VecInit(hasDuplicate).asUInt.orR
+    val isFreed = refCounter(RegNext(de.bits)) === 0.U
+    io.freeRegs(i).valid := RegNext(isNonZero && !blockedByDup) && isFreed
+    io.freeRegs(i).bits := RegNext(deallocate(i).bits)
   }
 
   /**

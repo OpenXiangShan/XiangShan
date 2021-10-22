@@ -53,12 +53,13 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(2.W)
-  val mshrFull = 1.U(2.W)
-  val dataInvalid = 2.U(2.W)
-  val bankConflict = 3.U(2.W)
+  val tlbMiss = 0.U(3.W)
+  val mshrFull = 1.U(3.W)
+  val dataInvalid = 2.U(3.W)
+  val bankConflict = 3.U(3.W)
+  val ldVioCheckRedo = 4.U(3.W)
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(3.W)
 }
 
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
@@ -161,7 +162,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
-  val isFused = UInt(3.W)
   val isORI = Bool() //for softprefetch
   val isSoftPrefetchRead = Bool() //for softprefetch
   val isSoftPrefetchWrite = Bool() //for softprefetch
@@ -333,7 +333,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
@@ -374,11 +373,27 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 
+class SatpStruct extends Bundle {
+  val mode = UInt(4.W)
+  val asid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new Bundle {
+    val changed = Bool()
     val mode = UInt(4.W) // TODO: may change number to parameter
     val asid = UInt(16.W)
     val ppn = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
+
+    def apply(satp_value: UInt): Unit = {
+      require(satp_value.getWidth == XLEN)
+      val sa = satp_value.asTypeOf(new SatpStruct)
+      mode := sa.mode
+      asid := sa.asid
+      ppn := sa.ppn
+      changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+    }
   }
   val priv = new Bundle {
     val mxr = Bool()
@@ -399,6 +414,7 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+    val asid = UInt(AsidLength.W)
   }
 
   override def toPrintable: Printable = {
@@ -436,6 +452,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
   // distribute csr write signal
@@ -443,8 +460,29 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  // CSR has been writen by csr inst, copies of csr should be updated
   val w = ValidIO(new Bundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))
   })
+}
+
+class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
+  // Request csr to be updated
+  //
+  // Note that this request will ONLY update CSR Module it self,
+  // copies of csr will NOT be updated, use it with care!
+  //
+  // For each cycle, no more than 1 DistributedCSRUpdateReq is valid
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
+  def apply(valid: Bool, addr: UInt, data: UInt, src_description: String) = {
+    when(valid){
+      w.bits.addr := addr
+      w.bits.data := data
+    }
+    println("Distributed CSR update req registered for " + src_description)
+  }
 }
