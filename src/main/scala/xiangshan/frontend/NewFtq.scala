@@ -953,6 +953,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
+
+    val bpRight = v && do_commit && isCfi && !misPred
+    val bpWrong = v && do_commit && isCfi && misPred
+    val bpPc = pc
+    ExcitingUtils.addSource(bpRight, s"bpRight_$i")
+    ExcitingUtils.addSource(bpWrong, s"bpWrong_$i")
+    ExcitingUtils.addSource(bpPc, s"bpPc_$i")
   }
 
   val enq = io.fromBpu.resp

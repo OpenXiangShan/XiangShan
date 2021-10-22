@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
-import xiangshan.backend.pubs.BrSliceTable
+import xiangshan.backend.pubs.{BrSliceTable, ConfTable}
 import xiangshan.backend.rename.freelist._
 
 class Rename(implicit p: Parameters) extends XSModule {
@@ -260,7 +260,9 @@ class Rename(implicit p: Parameters) extends XSModule {
   }
 
   val brSliceTab = Module(new BrSliceTable)
+  val confTab = Module(new ConfTable)
   val defTab = Module(new DataModuleTemplate(UInt(VAddrBits.W), 32, 2*RenameWidth, RenameWidth, false, true))
+  val isBranch = io.in.map(in => in.bits.ctrl.fuType === FuType.alu && ALUOpType.isBranch(in.bits.ctrl.fuOpType))
   for (i <- 0 until RenameWidth) {
     // The index of the def_tab is the logical destination register number of a decoding instruction,
     // and each entry has the PC of the instruction.
@@ -271,22 +273,32 @@ class Rename(implicit p: Parameters) extends XSModule {
     defTab.io.waddr(i) := Mux(io.robCommits.isWalk, io.robCommits.info(i).ldest, io.in(i).bits.ctrl.ldest)
     defTab.io.wdata(i) := Mux(io.robCommits.isWalk, io.robCommits.info(i).pc, io.in(i).bits.cf.pc)
 
-    brSliceTab.io.read(i).address := io.in(i).bits.cf.pc
-    val isBranch = io.in(i).bits.ctrl.fuType === FuType.alu && ALUOpType.isBranch(io.in(i).bits.ctrl.fuOpType)
-    // TODO: read conf table
-    val lowConf = LFSR64()(0)
-    val dataflowLowConf = LFSR64()(0) && brSliceTab.io.read(i).data.valid
-    brSliceTab.io.write(2*i).enable := io.in(i).valid && canOut && Mux(isBranch, lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(0) === SrcType.reg
-    brSliceTab.io.write(2*i).address := defTab.io.rdata(2*i)
-    brSliceTab.io.write(2*i).data.valid := true.B
-    brSliceTab.io.write(2*i).data.pc_br := Mux(isBranch, io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
-    brSliceTab.io.write(2*i+1).enable := io.in(i).valid && canOut && Mux(isBranch, lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(1) === SrcType.reg
-    brSliceTab.io.write(2*i+1).address := defTab.io.rdata(2*i+1)
-    brSliceTab.io.write(2*i+1).data.valid := true.B
-    brSliceTab.io.write(2*i+1).data.pc_br := Mux(isBranch, io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
+    confTab.io.read(i).enable := io.out(i).valid && canOut
+    confTab.io.read(i).address := Mux(isBranch(i), io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
 
-    io.out(i).bits.priority := Mux(isBranch, lowConf, dataflowLowConf)
+    brSliceTab.io.read(i).enable := io.out(i).valid && canOut
+    brSliceTab.io.read(i).address := io.in(i).bits.cf.pc
+    val lowConf = confTab.io.read(i).data.isLowConf()
+    val dataflowLowConf = lowConf(0) && brSliceTab.io.read(i).data.valid
+    brSliceTab.io.write(2*i).enable := io.in(i).valid && canOut && Mux(isBranch(i), lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(0) === SrcType.reg
+    brSliceTab.io.write(2*i).address := defTab.io.rdata(2*i)
+    brSliceTab.io.write(2*i).data.tag := brSliceTab.pcTag(defTab.io.rdata(2*i))
+    brSliceTab.io.write(2*i).data.valid := true.B
+    brSliceTab.io.write(2*i).data.pc_br := Mux(isBranch(i), io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
+    brSliceTab.io.write(2*i+1).enable := io.in(i).valid && canOut && Mux(isBranch(i), lowConf, dataflowLowConf) && io.in(i).bits.ctrl.srcType(1) === SrcType.reg
+    brSliceTab.io.write(2*i+1).address := defTab.io.rdata(2*i+1)
+    brSliceTab.io.write(2*i+1).data.tag := brSliceTab.pcTag(defTab.io.rdata(2*i+1))
+    brSliceTab.io.write(2*i+1).data.valid := true.B
+    brSliceTab.io.write(2*i+1).data.pc_br := Mux(isBranch(i), io.in(i).bits.cf.pc, brSliceTab.io.read(i).data.pc_br)
+
+    io.out(i).bits.priority := Mux(isBranch(i), lowConf, dataflowLowConf)
   }
+  XSPerfAccumulate("high_priority", PopCount(io.out.map(out => out.fire && out.bits.priority)))
+  XSPerfAccumulate("high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && out._2)))
+  XSPerfAccumulate("high_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && !out._2)))
+  XSPerfAccumulate("low_priority", PopCount(io.out.map(out => out.fire && !out.bits.priority)))
+  XSPerfAccumulate("high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && out._2)))
+  XSPerfAccumulate("high_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && !out._2)))
 
   /*
   Debug and performance counters

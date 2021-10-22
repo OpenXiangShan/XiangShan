@@ -295,4 +295,6 @@ class StatusArray(params: RSParams)(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("not_selected_entries", notSelected)
   val isReplayed = PopCount(io.deqResp.map(resp => resp.valid && !resp.bits.success))
   XSPerfAccumulate("replayed_entries", isReplayed)
+  XSPerfAccumulate("high_priority_entries", PopCount(statusArray.map(s => s.valid && s.priority)))
+  XSPerfAccumulate("low_priority_entries", PopCount(statusArray.map(s => s.valid && !s.priority)))
 }
