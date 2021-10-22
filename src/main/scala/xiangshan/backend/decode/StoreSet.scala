@@ -30,7 +30,12 @@ import xiangshan.backend.rob.RobPtr
 // Store Set Identifier Table Entry
 class SSITEntry(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
-  val isload = Bool()
+  val ssid = UInt(SSIDWidth.W) // store set identifier
+  val strict = Bool() // strict load wait is needed
+}
+
+// Store Set Identifier Table Entry
+class SSITDataEntry(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W) // store set identifier
   val strict = Bool() // strict load wait is needed
 }
@@ -38,46 +43,110 @@ class SSITEntry(implicit p: Parameters) extends XSBundle {
 // Store Set Identifier Table
 class SSIT(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
+    // to decode
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
-    val rdata = Vec(DecodeWidth, Output(new SSITEntry))
+    // to rename
+    val rdata = Vec(RenameWidth, Output(new SSITEntry))
     val update = Input(new MemPredUpdateReq) // RegNext should be added outside
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
-  // TODO: use MemTemplate
-  val valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
-  val isload = Reg(Vec(SSITSize, Bool()))
-  val ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
-  val strict = Reg(Vec(SSITSize, Bool()))
+  // raddrs are sent to ssit in decode
+  // raddrs are sent to ssit in rename
+  require(DecodeWidth == RenameWidth)
+
+  // data sram read port allocate 
+  //
+  // SSIT update logic will reuse decode ssit read port.
+  // If io.update.valid, a redirect will be send to frontend,
+  // then decode will not need to read SSIT
+  val SSIT_DECODE_READ_PORT_BASE = 0
+  val SSIT_UPDATE_LOAD_READ_PORT = 0
+  val SSIT_UPDATE_STORE_READ_PORT = 1
+  val SSIT_READ_PORT_NUM = DecodeWidth
+
+  // data sram write port allocate 
+  val SSIT_UPDATE_LOAD_WRITE_PORT = 0
+  val SSIT_UPDATE_STORE_WRITE_PORT = 1
+  val SSIT_MISC_WRITE_PORT = 2
+  val SSIT_WRITE_PORT_NUM = 3
+
+  // TODO: reorg sram size
+  val valid_sram = Module(new SyncDataModuleTemplate(
+    Bool(),
+    SSITSize,
+    SSIT_READ_PORT_NUM,
+    SSIT_WRITE_PORT_NUM
+  ))
+
+  val data_sram = Module(new SyncDataModuleTemplate(
+    new SSITDataEntry,
+    SSITSize,
+    SSIT_READ_PORT_NUM,
+    SSIT_WRITE_PORT_NUM
+  ))
+
+  (0 until SSIT_WRITE_PORT_NUM).map(i => {
+    valid_sram.io.wen(i) := false.B
+    valid_sram.io.waddr(i) := DontCare
+    valid_sram.io.wdata(i) := DontCare
+    data_sram.io.wen(i) := false.B
+    data_sram.io.waddr(i) := DontCare
+    data_sram.io.wdata(i) := DontCare
+  })
+
+  val debug_valid = RegInit(VecInit(Seq.fill(SSITSize)(false.B)))
+  val debug_ssid = Reg(Vec(SSITSize, UInt(SSIDWidth.W)))
+  val debug_strict = Reg(Vec(SSITSize, Bool()))
+  if(!env.FPGAPlatform){
+    dontTouch(debug_valid)
+    dontTouch(debug_ssid)
+    dontTouch(debug_strict)
+  }
 
   val resetCounter = RegInit(0.U(ResetTimeMax2Pow.W))
   resetCounter := resetCounter + 1.U
 
-  // read SSIT in decode stage
   for (i <- 0 until DecodeWidth) {
-    // io.rdata(i) := (data(io.raddr(i))(1) || io.csrCtrl.no_spec_load) && !io.csrCtrl.lvpred_disable
-    io.rdata(i).valid := valid(io.raddr(i))
-    io.rdata(i).isload := isload(io.raddr(i))
-    io.rdata(i).ssid := ssid(io.raddr(i))
-    io.rdata(i).strict := strict(io.raddr(i)) && valid(io.raddr(i))
+    // io.rdata(i).valid := RegNext(valid(io.raddr(i)))
+    // io.rdata(i).ssid := RegNext(ssid(io.raddr(i)))
+    // io.rdata(i).strict := RegNext(strict(io.raddr(i)) && valid(io.raddr(i)))
+
+    // read SSIT in decode stage
+    valid_sram.io.raddr(i) := io.raddr(i)
+    data_sram.io.raddr(i) := io.raddr(i)
+    
+    // gen result in rename stage
+    io.rdata(i).valid := valid_sram.io.rdata(i)
+    io.rdata(i).ssid := data_sram.io.rdata(i).ssid
+    io.rdata(i).strict := data_sram.io.rdata(i).strict
   }
 
   // update SSIT if load violation redirect is detected
 
-  // update stage -1
-  // when io.update.valid, we should RegNext() it for at least 1 cycle
-  // outside of SSIT.
-
-  // update stage 0
-  // RegNext(io.update) while reading SSIT entry for necessary information
+  // update stage 0: read ssit
   val memPredUpdateReqValid = RegNext(io.update.valid)
   val memPredUpdateReqReg = RegEnable(io.update, enable = io.update.valid)
+
+  // when io.update.valid, take over ssit read port
+  when (io.update.valid) {
+    valid_sram.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
+    valid_sram.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+    data_sram.io.raddr(SSIT_UPDATE_LOAD_READ_PORT) := io.update.ldpc
+    data_sram.io.raddr(SSIT_UPDATE_STORE_READ_PORT) := io.update.stpc
+  }
+
+  // update stage 1: get ssit read result, update ssit data_sram
+
+  // Read result
   // load has already been assigned with a store set
-  val loadAssigned = RegNext(valid(io.update.ldpc))
-  val loadOldSSID = RegNext(ssid(io.update.ldpc))
+  val loadAssigned = valid_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT)
+  val loadOldSSID = data_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).ssid
+  val loadStrict = data_sram.io.rdata(SSIT_UPDATE_LOAD_READ_PORT).strict
   // store has already been assigned with a store set
-  val storeAssigned = RegNext(valid(io.update.stpc))
-  val storeOldSSID = RegNext(ssid(io.update.stpc))
+  val storeAssigned = valid_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT)
+  val storeOldSSID = data_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT).ssid
+  val storeStrict = data_sram.io.rdata(SSIT_UPDATE_STORE_READ_PORT).strict
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
   val winnerSSID = Mux(loadOldSSID < storeOldSSID, loadOldSSID, storeOldSSID)
@@ -86,49 +155,90 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // for now we just use lowest bits of ldpc as store set id
   val ssidAllocate = memPredUpdateReqReg.ldpc(SSIDWidth-1, 0)
 
+  def update_ld_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
+    valid_sram.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
+    valid_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
+    valid_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT) := valid
+    data_sram.io.wen(SSIT_UPDATE_LOAD_WRITE_PORT) := true.B
+    data_sram.io.waddr(SSIT_UPDATE_LOAD_WRITE_PORT) := pc
+    data_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).ssid := ssid
+    data_sram.io.wdata(SSIT_UPDATE_LOAD_WRITE_PORT).strict := strict
+    debug_valid(pc) := valid
+    debug_ssid(pc) := ssid
+    debug_strict(pc) := strict 
+  }
+
+  def update_st_ssit_entry(pc: UInt, valid: Bool, ssid: UInt, strict: Bool) = {
+    valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
+    valid_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
+    valid_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT):= valid
+    data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := true.B
+    data_sram.io.waddr(SSIT_UPDATE_STORE_WRITE_PORT) := pc
+    data_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).ssid := ssid
+    data_sram.io.wdata(SSIT_UPDATE_STORE_WRITE_PORT).strict := strict
+    debug_valid(pc) := valid
+    debug_ssid(pc) := ssid
+    debug_strict(pc) := strict 
+  }
+
   // update stage 1
   when(memPredUpdateReqValid){
     switch (Cat(loadAssigned, storeAssigned)) {
       // 1. "If neither the load nor the store has been assigned a store set,
       // one is allocated and assigned to both instructions."
       is ("b00".U(2.W)) {
-        valid(memPredUpdateReqReg.ldpc) := true.B
-        isload(memPredUpdateReqReg.ldpc) := true.B
-        ssid(memPredUpdateReqReg.ldpc) := ssidAllocate
-        strict(memPredUpdateReqReg.ldpc) := false.B
-        valid(memPredUpdateReqReg.stpc) := true.B
-        isload(memPredUpdateReqReg.stpc) := false.B
-        ssid(memPredUpdateReqReg.stpc) := ssidAllocate
-        strict(memPredUpdateReqReg.stpc) := false.B
+        update_ld_ssit_entry(
+          pc = memPredUpdateReqReg.ldpc,
+          valid = true.B,
+          ssid = ssidAllocate,
+          strict = false.B
+        )
+        update_st_ssit_entry(
+          pc = memPredUpdateReqReg.stpc,
+          valid = true.B,
+          ssid = ssidAllocate,
+          strict = false.B
+        )
       }
       // 2. "If the load has been assigned a store set, but the store has not,
       // the store is assigned the load’s store set."
       is ("b10".U(2.W)) {
-        valid(memPredUpdateReqReg.stpc) := true.B
-        isload(memPredUpdateReqReg.stpc) := false.B
-        ssid(memPredUpdateReqReg.stpc) := loadOldSSID
-        strict(memPredUpdateReqReg.stpc) := false.B
+        update_st_ssit_entry(
+          pc = memPredUpdateReqReg.stpc,
+          valid = true.B,
+          ssid = loadOldSSID,
+          strict = false.B
+        )
       }
       // 3. "If the store has been assigned a store set, but the load has not,
       // the load is assigned the store’s store set."
       is ("b01".U(2.W)) {
-        valid(memPredUpdateReqReg.ldpc) := true.B
-        isload(memPredUpdateReqReg.ldpc) := true.B
-        ssid(memPredUpdateReqReg.ldpc) := storeOldSSID
-        strict(memPredUpdateReqReg.ldpc) := false.B
+        update_ld_ssit_entry(
+          pc = memPredUpdateReqReg.ldpc,
+          valid = true.B,
+          ssid = storeOldSSID,
+          strict = false.B
+        )
       }
       // 4. "If both the load and the store have already been assigned store sets,
       // one of the two store sets is declared the "winner".
       // The instruction belonging to the loser’s store set is assigned the winner’s store set."
       is ("b11".U(2.W)) {
-        valid(memPredUpdateReqReg.ldpc) := true.B
-        isload(memPredUpdateReqReg.ldpc) := true.B
-        ssid(memPredUpdateReqReg.ldpc) := winnerSSID
-        valid(memPredUpdateReqReg.stpc) := true.B
-        isload(memPredUpdateReqReg.stpc) := false.B
-        ssid(memPredUpdateReqReg.stpc) := winnerSSID
+        update_ld_ssit_entry(
+          pc = memPredUpdateReqReg.ldpc,
+          valid = true.B,
+          ssid = winnerSSID,
+          strict = false.B
+        )
+        update_st_ssit_entry(
+          pc = memPredUpdateReqReg.stpc,
+          valid = true.B,
+          ssid = winnerSSID,
+          strict = false.B
+        )
         when(ssidIsSame){
-          strict(memPredUpdateReqReg.ldpc) := true.B
+          data_sram.io.wdata(SSIT_UPDATE_LOAD_READ_PORT).strict := true.B
+          debug_strict(memPredUpdateReqReg.ldpc) := false.B
         }
       }
     }
@@ -140,22 +250,39 @@ class SSIT(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("ssit_update_lysy", memPredUpdateReqValid && loadAssigned && storeAssigned)
   XSPerfAccumulate("ssit_update_should_strict", memPredUpdateReqValid && ssidIsSame && loadAssigned && storeAssigned)
   XSPerfAccumulate("ssit_update_strict_failed", 
-    memPredUpdateReqValid && ssidIsSame && strict(memPredUpdateReqReg.ldpc) && loadAssigned && storeAssigned
+    memPredUpdateReqValid && ssidIsSame && loadStrict && loadAssigned && storeAssigned
   ) // should be zero
 
   // reset period: ResetTimeMax2Pow
-  when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
-    for (j <- 0 until SSITSize) {
-      valid(j) := 0.U
+  val resetStepCounter = RegInit(0.U((log2Up(SSITSize)+1).W))
+  val resetStepCounterFull = resetStepCounter(log2Up(SSITSize))
+  val s_idle :: s_flush :: Nil = Enum(2)
+  val state = RegInit(s_idle)
+
+  switch (state) {
+    is(s_idle) {
+      when(resetCounter(ResetTimeMax2Pow-1, ResetTimeMin2Pow)(RegNext(io.csrCtrl.lvpred_timeout))) {
+        state := s_flush
+        resetCounter := 0.U
+      }
     }
-    resetCounter:= 0.U
+    is(s_flush) {
+      when(resetStepCounterFull) {
+        state := s_idle // reset finished
+      }
+
+      valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+      valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+      valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+      debug_valid(resetStepCounter) := false.B
+    }
   }
 
   // debug
   for (i <- 0 until StorePipelineWidth) {
     when (memPredUpdateReqReg.valid) {
       XSDebug("%d: SSIT update: load pc %x store pc %x\n", GTimer(), memPredUpdateReqReg.ldpc, memPredUpdateReqReg.stpc)
-      XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), loadAssigned, loadOldSSID, storeAssigned,storeOldSSID)
+      XSDebug("%d: SSIT update: load valid %b ssid %x  store valid %b ssid %x\n", GTimer(), loadAssigned, loadOldSSID, storeAssigned, storeOldSSID)
     }
   }
 }
