@@ -24,7 +24,7 @@ import freechips.rocketchip.tile.HasFPUParameters
 import xiangshan._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, BridgeTLB, PtwResp, TLB, TlbReplace}
+import xiangshan.cache.mmu.{BTlbPtwIO, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule}
 import utils._
@@ -84,6 +84,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val rob = Flipped(new RobLsqIO) // rob to lsq
     }
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
+    val csrUpdate = new DistributedCSRUpdateReq
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
@@ -95,6 +96,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
+  dcache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  io.csrUpdate <> dcache.io.csr.update
   io.error <> RegNext(RegNext(dcache.io.error))
 
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
@@ -160,35 +163,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   val dtlb = dtlb_ld ++ dtlb_st
 
-  if (!useBTlb) {
-    (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
-      tlb(0) <> io.ptw.req(i)
-    }
-    dtlb_ld.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
-    dtlb_st.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
-    if (refillBothTlb) {
-      dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
-      dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
-    } else {
-      dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
-      dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
-    }
+  (dtlb_ld.map(_.ptw.req) ++ dtlb_st.map(_.ptw.req)).zipWithIndex.map{ case (tlb, i) =>
+    tlb(0) <> io.ptw.req(i)
+  }
+  dtlb_ld.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
+  dtlb_st.map(_.ptw.resp.bits := io.ptw.resp.bits.data)
+  if (refillBothTlb) {
+    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
+    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector).orR)
   } else {
-    val btlb = Module(new BridgeTLB(BTLBWidth, btlbParams))
-    btlb.suggestName("btlb")
-
-    io.ptw <> btlb.io.ptw
-    btlb.io.sfence <> sfence
-    btlb.io.csr <> tlbcsr
-    btlb.io.requestor.take(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_ld.map(_.ptw.req)).map{case (a,b) => a <> b}
-    btlb.io.requestor.drop(exuParameters.LduCnt).map(_.req(0)).zip(dtlb_st.map(_.ptw.req)).map{case (a,b) => a <> b}
-
-    val arb_ld = Module(new Arbiter(new PtwResp, exuParameters.LduCnt))
-    val arb_st = Module(new Arbiter(new PtwResp, exuParameters.StuCnt))
-    arb_ld.io.in <> btlb.io.requestor.take(exuParameters.LduCnt).map(_.resp)
-    arb_st.io.in <> btlb.io.requestor.drop(exuParameters.LduCnt).map(_.resp)
-    VecInit(dtlb_ld.map(_.ptw.resp)) <> arb_ld.io.out
-    VecInit(dtlb_st.map(_.ptw.resp)) <> arb_st.io.out
+    dtlb_ld.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.take(exuParameters.LduCnt)).orR)
+    dtlb_st.map(_.ptw.resp.valid := io.ptw.resp.valid && Cat(io.ptw.resp.bits.vector.drop(exuParameters.LduCnt)).orR)
   }
   io.ptw.resp.ready := true.B
 

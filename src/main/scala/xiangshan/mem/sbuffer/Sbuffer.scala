@@ -67,6 +67,7 @@ class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   val mask = UInt((DataBits/8).W)
   val data = UInt(DataBits.W)
   val wordOffset = UInt(WordOffsetWidth.W)
+  val wline = Bool()
 }
 
 class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst {
@@ -81,9 +82,14 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
   for(i <- 0 until StorePipelineWidth) {
     when(req(i).valid){
-      for(j <- 0 until DataBytes){
-        when(req(i).bits.mask(j)){
-          data(req(i).bits.idx)(req(i).bits.wordOffset)(j) := req(i).bits.data(j*8+7, j*8)
+      for(word <- 0 until CacheLineWords){
+        for(byte <- 0 until DataBytes){
+          when(
+            req(i).bits.mask(byte) && (req(i).bits.wordOffset(WordsWidth-1, 0) === word.U) || 
+            req(i).bits.wline
+          ){
+            data(req(i).bits.idx)(word)(byte) := req(i).bits.data(byte*8+7, byte*8)
+          }
         }
       }
     }
@@ -272,6 +278,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     writeReq(i).bits.wordOffset := wordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
+    writeReq(i).bits.wline := in.bits.wline
     val insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val flushMask = if(i == 0) true.B else !sameTag
     accessIdx(i).valid := RegNext(in.fire())

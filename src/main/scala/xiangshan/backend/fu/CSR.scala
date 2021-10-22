@@ -188,6 +188,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
+  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
   // distributed csr w
@@ -259,12 +260,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val pie = new Priv
     val ie = new Priv
     assert(this.getWidth == XLEN)
-  }
-
-  class SatpStruct extends Bundle {
-    val mode = UInt(4.W)
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
   }
 
   class Interrupt extends Bundle {
@@ -440,7 +435,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val sipWMask = "h2".U(XLEN.W) // ssip is writeable in smode
   val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
-  val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
+  // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
+  // TODO: use config to control the length of asid
+  // val satpMask = "h8fffffffffffffff".U(XLEN.W) // enable asid, mode can only be 8 / 0
+  val satpMask = Cat("h8".U(4.W),Asid_true_mask(AsidLength),"hfffffffffff".U((XLEN - 4 - 16).W))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
@@ -485,7 +483,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.move_elim_enable := srnctl(0)
 
   val tlbBundle = Wire(new TlbCsrBundle)
-  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
+  tlbBundle.satp.apply(satp)
 
   csrio.tlb := tlbBundle
 
@@ -679,10 +677,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   //   perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
   // }
 
+  val cacheopRegs = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+    name -> RegInit(0.U(attribute("width").toInt.W))
+  }}
   val cacheopMapping = CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
     MaskedRegMap(
       Scachebase + attribute("offset").toInt, 
-      RegInit(0.U(attribute("width").toInt.W))
+      cacheopRegs(name)
     )
   }}
 
@@ -1019,6 +1020,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
+
+  // Distributed CSR update req
+  //
+  // For now we use it to implement customized cache op
+
+  when(csrio.distributedUpdate.w.valid){
+    // cacheopRegs can be distributed updated
+    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
+      when((Scachebase + attribute("offset").toInt).U === csrio.distributedUpdate.w.bits.addr){
+        cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
+      }
+    }}
+  }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 

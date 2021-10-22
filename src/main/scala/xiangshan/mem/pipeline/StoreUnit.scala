@@ -66,6 +66,7 @@ class StoreUnit_S0(implicit p: Parameters) extends XSModule {
   io.out.bits.rsIdx := io.rsIdx
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.isFirstIssue := io.isFirstIssue
+  io.out.bits.wlineflag := io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_zero
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
@@ -98,9 +99,14 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val rsFeedback = ValidIO(new RSFeedback)
   })
 
+  // mmio cbo decoder
+  val is_mmio_cbo = io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_clean ||
+    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
+    io.in.bits.uop.ctrl.fuOpType === LSUOpType.cbo_inval
+
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = io.dtlbResp.bits.mmio
+  val s1_mmio = io.dtlbResp.bits.mmio || is_mmio_cbo
   val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
 
   io.in.ready := true.B

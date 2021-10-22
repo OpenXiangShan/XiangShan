@@ -74,7 +74,7 @@ case class DCacheParameters
 // | Above index  | Set | Bank | Offset |
 // --------------------------------------
 //                |     |      |        |
-//                |     |      |        DCacheWordOffset
+//                |     |      |        0
 //                |     |      DCacheBankOffset
 //                |     DCacheSetOffset
 //                DCacheAboveIndexOffset
@@ -89,6 +89,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
   def eccBits = encWordBits - wordBits
+
+  def encTagBits = cacheParams.tagCode.width(tagBits)
+  def eccTagBits = encTagBits - tagBits
 
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
   def lrscBackoff = 3 // disallow LRSC reacquisition briefly
@@ -114,19 +117,23 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64 // hardcoded
+  val DCacheWordBits = 64 // hardcoded
+  val DCacheWordBytes = DCacheWordBits / 8
 
-  val DCacheLineBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
-  val DCacheLineBytes = DCacheLineBits / 8
-  val DCacheLineWords = DCacheLineBits / 64 // TODO
+  val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
+  val DCacheSizeBytes = DCacheSizeBits / 8
+  val DCacheSizeWords = DCacheSizeBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
-  val DCacheWordOffset = 0
-  val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
+  val DCacheWordOffset = log2Up(DCacheWordBytes)
+
+  val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
+  val DCacheLineOffset = DCacheSetOffset
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -206,6 +213,7 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val vaddr = UInt(VAddrBits.W)
+  val wline = Bool()
 }
 
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
@@ -304,6 +312,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
 }
@@ -555,12 +564,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // refill pipe
-  val refillShouldBeBlocked = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req.bits.idx) ||
-	Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-	  s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
-    )).orR
+  val refillShouldBeBlocked = Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+    s.valid &&
+      s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
+      s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
+  )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
   io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
 
@@ -635,6 +643,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     source.ready := sink.ready   && !block_signal
     sink.bits    := source.bits
   }
+
+  //----------------------------------------
+  // Customized csr cache op support
+  val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
+  cacheOpDecoder.io.csr <> io.csr
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
+    metaArray.io.cacheOp.resp.valid ||
+    tagArray.io.cacheOp.resp.valid
+  cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
+    bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
+    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
+    tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
+  ))
+  assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
 
   //----------------------------------------
   // performance counters
