@@ -99,6 +99,8 @@ func paramstr(chn, param) {
       $i = sprintf("%016lx", $i);
     }
   }
+  $13 = sprintf("user: %lx", $13);
+  $14 = sprintf("echo: %lx", $14);
 }
 
 1                                   # print every line

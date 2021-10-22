@@ -277,6 +277,7 @@ object TlbCmd {
   def isExec(a: UInt) = a(1,0)===exec
 
   def isAtom(a: UInt) = a(2)
+  def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
