@@ -293,12 +293,12 @@ class Rename(implicit p: Parameters) extends XSModule {
 
     io.out(i).bits.priority := Mux(isBranch(i), lowConf, dataflowLowConf)
   }
-  XSPerfAccumulate("high_priority", PopCount(io.out.map(out => out.fire && out.bits.priority)))
-  XSPerfAccumulate("high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && out._2)))
-  XSPerfAccumulate("high_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && !out._2)))
-  XSPerfAccumulate("low_priority", PopCount(io.out.map(out => out.fire && !out.bits.priority)))
-  XSPerfAccumulate("high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && out._2)))
-  XSPerfAccumulate("high_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && !out._2)))
+  XSPerfAccumulate("pubs_high_priority", PopCount(io.out.map(out => out.fire && out.bits.priority)))
+  XSPerfAccumulate("pubs_high_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && out._2)))
+  XSPerfAccumulate("pubs_high_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && out._1.bits.priority && !out._2)))
+  XSPerfAccumulate("pubs_low_priority", PopCount(io.out.map(out => out.fire && !out.bits.priority)))
+  XSPerfAccumulate("pubs_low_priority_branch", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && out._2)))
+  XSPerfAccumulate("pubs_low_priority_normal", PopCount(io.out.zip(isBranch).map(out => out._1.fire && !out._1.bits.priority && !out._2)))
 
   /*
   Debug and performance counters
