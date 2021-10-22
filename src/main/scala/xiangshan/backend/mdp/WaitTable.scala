@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.decode
+package xiangshan.backend.mdp
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._

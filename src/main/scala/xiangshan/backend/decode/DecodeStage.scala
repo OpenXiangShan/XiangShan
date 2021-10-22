@@ -26,45 +26,19 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
-    // from memblock
-    val memPredUpdate = Vec(StorePipelineWidth, Input(new MemPredUpdateReq))
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
-    // waitable ctrl
-    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
-  // basic wait table load violation predictor (for debug only)
-  val waittable = Module(new WaitTable)
-  // store set load violation predictor stage 1: SSIT look up
-  val ssit = Module(new SSIT)
-
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
-
-    // read waittable, update loadWaitBit
-    waittable.io.raddr(i) := io.in(i).bits.foldpc
-    decoders(i).io.enq.ctrl_flow.loadWaitBit := waittable.io.rdata(i)
-
-    // read SSIT, get SSID
-    ssit.io.raddr(i) := io.in(i).bits.foldpc
-    decoders(i).io.enq.ctrl_flow.storeSetHit := ssit.io.rdata(i).valid
-    decoders(i).io.enq.ctrl_flow.loadWaitStrict := ssit.io.rdata(i).strict
-    decoders(i).io.enq.ctrl_flow.ssid := ssit.io.rdata(i).ssid
 
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
     io.in(i).ready       := io.out(i).ready
   }
-
-  for (i <- 0 until StorePipelineWidth) {
-    waittable.io.update(i) <> RegNext(io.memPredUpdate(i))
-  }
-  waittable.io.csrCtrl <> io.csrCtrl
-  ssit.io.update <> RegNext(io.memPredUpdate(0))
-  ssit.io.csrCtrl <> io.csrCtrl
 
   // instruction fusion
   val fusionDecoder = Module(new FusionDecoder())
@@ -97,11 +71,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
       v := false.B
     }
   }
-
-  val loadWaitBitSet = PopCount(io.out.map(o => o.fire() && o.bits.cf.loadWaitBit))
-  XSPerfAccumulate("loadWaitBitSet", loadWaitBitSet)
-  val storeSetHit = PopCount(io.out.map(o => o.fire() && o.bits.cf.storeSetHit))
-  XSPerfAccumulate("storeset_ssit_hit", storeSetHit)
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))

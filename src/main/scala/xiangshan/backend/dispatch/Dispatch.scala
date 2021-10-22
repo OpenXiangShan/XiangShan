@@ -22,9 +22,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import difftest._
-import xiangshan.backend.decode.{DispatchToLFST, LFST}
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.rob.RobEnqIO
+import xiangshan.backend.mdp.{DispatchToLFST, LFST}
 import xiangshan.mem.LsqEnqIO
 
 case class DispatchParameters
@@ -229,22 +229,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
   )))
-  // XSPerfAccumulate("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
 
   /**
     * Part 3:

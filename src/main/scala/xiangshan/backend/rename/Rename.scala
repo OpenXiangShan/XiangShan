@@ -24,6 +24,7 @@ import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.dispatch.PreDispatchInfo
 import xiangshan.backend.rename.freelist._
+import xiangshan.backend.mdp._
 
 class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -31,6 +32,8 @@ class Rename(implicit p: Parameters) extends XSModule {
     val robCommits = Flipped(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
+    // ssit read result
+    val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
@@ -113,6 +116,11 @@ class Rename(implicit p: Parameters) extends XSModule {
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+
+    // update cf according to ssit result
+    uops(i).cf.storeSetHit := io.ssit(i).valid
+    uops(i).cf.loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid
+    uops(i).cf.ssid := io.ssit(i).ssid
 
     val inValid = io.in(i).valid
 

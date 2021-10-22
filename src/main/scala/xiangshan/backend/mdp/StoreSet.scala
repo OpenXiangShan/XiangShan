@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.decode
+package xiangshan.backend.mdp
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
@@ -47,12 +47,13 @@ class SSIT(implicit p: Parameters) extends XSModule {
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
     // to rename
     val rdata = Vec(RenameWidth, Output(new SSITEntry))
+    // misc
     val update = Input(new MemPredUpdateReq) // RegNext should be added outside
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   // raddrs are sent to ssit in decode
-  // raddrs are sent to ssit in rename
+  // rdata will be send to rename
   require(DecodeWidth == RenameWidth)
 
   // data sram read port allocate 
