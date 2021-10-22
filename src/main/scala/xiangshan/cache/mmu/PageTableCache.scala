@@ -42,11 +42,11 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
 
   def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
             ecc: Bool = false.B, level: UInt = 0.U) {
-    this.hit := hit
+    this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
     this.perm := perm
-    this.ecc := ecc
+    this.ecc := ecc && hit
     this.level := level
   }
 }
