@@ -24,7 +24,7 @@ object TriggerCmp {
     val equal = actual === tdata
     val greater = actual >= tdata
     val less = actual <= tdata
-    val res = MuxLookup(action, false.B,
+    val res = MuxLookup(actual, false.B,
       Seq(0.U -> equal,
           2.U -> greater,
           3.U -> less))

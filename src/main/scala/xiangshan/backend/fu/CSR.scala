@@ -125,6 +125,95 @@ trait HasExceptionNO {
     partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
 }
 
+// Trigger Tdata1 bundles
+trait HasTriggerConst {
+  def I_DATA = 0
+  def I_ADDR = 1
+  def S_DATA = 2
+  def S_ADDR = 3
+  def L_DATA = 4
+  def L_ADDR = 5
+  def GenSelect(triggerType: Int) = if(triggerType % 2 == 1) false.B else true.B
+  def GenESL(triggerType: Int) = Cat((triggerType / 2 == 0).B, (triggerType / 2 == 1).B, (triggerType / 2 == 2).B)
+}
+
+class TdataBundle(canChain: Boolean = false, triggerType: Int) extends Bundle with HasTriggerConst {
+  val hit = Bool()
+  val timing = Bool()
+//  val size = UInt(4.W) // hardwire to 0
+  val action = Bool()
+  val chain = Bool()
+  val matchType = UInt(2.W)
+  val m = Bool()
+  val s = Bool()
+  val u = Bool()
+  val data = UInt(64.W) // tdata2
+  def Type = triggerType
+  def Chain = canChain
+}
+
+class TriggerRegBundle extends Bundle with HasTriggerConst {
+  val tselect = UInt(4.W) // 16 triggers is more than we need
+  val tdata1_list = Seq(
+    new TdataBundle(false, I_DATA),
+    new TdataBundle(true, I_ADDR),
+
+    new TdataBundle(false, S_DATA),
+    new TdataBundle(false, S_ADDR),
+
+    new TdataBundle(false, L_DATA),
+    new TdataBundle(false, L_ADDR),
+
+    new TdataBundle(false, I_ADDR),
+    new TdataBundle(false, L_ADDR),
+
+    new TdataBundle(false, I_ADDR),
+    new TdataBundle(false, L_DATA)
+  )
+  val tdata2_list = Vec(10, UInt(64.W))
+  val i_data_0 = new TdataBundle(false, I_DATA)
+  val i_addr_1 = new TdataBundle(false, I_ADDR)
+  val l_data = new TdataBundle(false, L_DATA)
+  val l_addr = new TdataBundle(false, L_ADDR)
+  val s_data = new TdataBundle(false, S_DATA)
+  val s_addr = new TdataBundle(false, S_ADDR)
+  def ReadTdata1(tdata1: TdataBundle) = Cat(
+    2.U(4.W), // type, hardwired
+    0.U(1.W), // dmode, hardwired
+    0.U(6.W), // maskmax, hardwired to 0 because we don not support
+    0.U(2.W), // sizehi
+    tdata1.hit,
+    GenSelect(tdata1.Type), // select
+    tdata1.timing,
+    0.U(2.W), // sizelo
+    0.U(3.W), tdata1.action, // action, 0 is breakpoint 1 is enter debug
+    tdata1.chain,
+    0.U(2.W), tdata1.matchType,
+    tdata1.m, false.B, tdata1.s, tdata1.u,
+    GenESL(tdata1.Type)
+  )
+
+  def WriteTdata1(wdata: UInt, tdata1: TdataBundle): TdataBundle = {
+    val tdata1_new = WireInit(tdata1)
+    tdata1_new.hit := wdata(20)
+    tdata1_new.timing := wdata(18)
+    tdata1_new.action := wdata(12)
+    tdata1_new.chain := tdata1.Chain && wdata(11)
+    tdata1_new.matchType := if (wdata1(10, 7) === 0.U  || wdata1(10, 7) === 2.U || wdata1(10, 7) === 3.U) wdata1(8, 7)
+    tdata1_new.m := wdata(6)
+    tdata1_new.s := wdata(4)
+    tdata1_new.u := wdata(3)
+    tdata1_new
+  }
+
+  def ReadTselect(tselect: UInt) = Cat(0.U(60.W), tselect)
+  def WriteTselect(wdata: UInt, tselect: UInt) = {
+    val tselect_new = WireInit(tselect)
+    if (wdata <= 10.U) tselect_new := wdata(3, 0)
+    tselect_new
+  }
+}
+
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
@@ -683,6 +772,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
+    //--- Trigger ---
+
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
@@ -804,7 +895,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
+  val dcsrPermitted = dcsrPermissionCheck(addr, TODO, debugMode) // todo
+  val triggerPermitted = triggerPermissionCheck(addr, TODO, debugMode) // todo
+  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) && dcsrPermitted && triggerPermitted
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
