@@ -451,7 +451,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * (1) When store commits, mark it as commited.
     * (2) They will not be cancelled and can be sent to lower level.
     */
-  XSError(uncacheState === s_wait && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
