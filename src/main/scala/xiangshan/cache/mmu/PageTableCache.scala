@@ -220,11 +220,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.entries.hit(stage2.bits.req_info.vpn, io.csr.satp.asid) && v })
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
-    val hitWayEcc = hitWayEntry.ecc
     val hit = ParallelOR(hitVec) && cache_read_valid && RegNext(l2.io.r.req.ready, init = false.B)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U))
-
-    val eccError = ecc.decode(Cat(hitWayEcc, hitWayData.asUInt())).error
+    val eccError = hitWayEntry.decode()
 
     ridx.suggestName(s"l2_ridx")
     vidx.suggestName(s"l2_vidx")
@@ -260,8 +258,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val hitWayEcc = hitWayEntry.ecc
     val hit = ParallelOR(hitVec) && cache_read_valid && RegNext(l3.io.r.req.ready, init = false.B)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U))
-
-    val eccError = ecc.decode(Cat(hitWayEcc, hitWayData.asUInt())).error
+    val eccError = hitWayEntry.decode()
 
     when (hit) { ptwl3replace.access(genPtwL3SetIdx(stage2.bits.req_info.vpn), hitWay) }
 
@@ -398,14 +395,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       val wdata = Wire(l2EntryType)
-      wdata.entries := wdata.entries.genEntries(
+      wdata.gen(
         vpn = refill.req_info.vpn,
         asid = io.csr.satp.asid,
         data = memRdata,
         levelUInt = 1.U,
         refill_prefetch
       )
-      wdata.ecc := ecc.encode(wdata.entries.asUInt()) >> wdata.entries.getWidth
       l2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
@@ -437,14 +433,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       val wdata = Wire(l3EntryType)
-      wdata.entries := wdata.entries.genEntries(
+      wdata.gen(
         vpn = refill.req_info.vpn,
         asid = io.csr.satp.asid,
         data = memRdata,
         levelUInt = 2.U,
         refill_prefetch
       )
-      wdata.ecc := ecc.encode(wdata.entries.asUInt()) >> wdata.entries.getWidth
       l3.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
