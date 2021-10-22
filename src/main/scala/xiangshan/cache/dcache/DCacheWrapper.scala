@@ -259,6 +259,14 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   }
 }
 
+class Release(implicit p: Parameters) extends DCacheBundle
+{
+  val paddr  = UInt(PAddrBits.W)
+  def dump() = {
+    XSDebug("Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
+  }
+}
+
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
@@ -308,6 +316,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
+  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
@@ -550,6 +559,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
+  io.lsu.release.valid := bus.c.fire()
+  io.lsu.release.bits.paddr := bus.c.bits.address
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B
