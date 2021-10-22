@@ -123,9 +123,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.flush := needFlush
   io.backend.cfVec <> ibuffer.io.out
 
-  instrUncache.io.req   <> DontCare
-  instrUncache.io.resp  <> DontCare
-  instrUncache.io.flush <> DontCare
+  instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
+  ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
+  instrUncache.io.flush := icache.io.missQueue.flush
   io.error <> DontCare
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
