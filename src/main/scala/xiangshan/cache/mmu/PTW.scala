@@ -124,9 +124,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   arb2.io.out.ready := cache.io.req.ready
 
   cache.io.req.valid := arb2.io.out.valid
-  cache.io.req.bits.vpn := arb2.io.out.bits.vpn
-  cache.io.req.bits.source := arb2.io.out.bits.source
-  cache.io.req_isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
+  cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
+  cache.io.req.bits.req_info.source := arb2.io.out.bits.source
+  cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))

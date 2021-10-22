@@ -31,9 +31,40 @@ import freechips.rocketchip.tilelink._
  * the cache should not be blocked
  * when miss queue if full, just block req outside
  */
+
+class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
+  val hit = Bool()
+  val pre = Bool()
+  val ppn = UInt(ppnLen.W)
+  val perm = new PtePermBundle()
+  val ecc = Bool()
+  val level = UInt(2.W)
+
+  def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
+            ecc: Bool = false.B, level: UInt = 0.U) {
+    this.hit := hit
+    this.pre := pre
+    this.ppn := ppn
+    this.perm := perm
+    this.ecc := ecc
+    this.level := level
+  }
+}
+
+class PageCacheRespBundle(implicit p: Parameters) extends PtwBundle {
+  val l1 = new PageCachePerPespBundle
+  val l2 = new PageCachePerPespBundle
+  val l3 = new PageCachePerPespBundle
+  val sp = new PageCachePerPespBundle
+}
+
+class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
+  val req_info = new L2TlbInnerBundle()
+  val isFirst = Bool()
+}
+
 class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
-  val req = Flipped(DecoupledIO(new L2TlbInnerBundle()))
-  val req_isFirst = Input(Bool()) // only for perf counter
+  val req = Flipped(DecoupledIO(new PtwCacheReq()))
   val resp = DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
     val hit = Bool()
@@ -68,21 +99,17 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val refill_prefetch = from_pre(io.refill.bits.req_info.source)
   val flush = sfence.valid || io.csr.satp.changed
 
-  val stage1_valid = io.req.valid
-  val stage1_fire = stage1_valid && io.req.ready
-  val stage1_req = io.req.bits
-  val stage2_ready = Wire(Bool())
-  val stage2_valid = ValidHold(stage1_fire && !flush, io.resp.fire(), flush)
-  val stage2_req = RegEnable(stage1_req, stage1_fire)
-  // NOTE: if ptw cache resp may be blocked, hard to handle refill
-  // when miss queue is full, please to block itlb and dtlb input
-  val stage2_isFirst = RegEnable(io.req_isFirst, stage1_fire) // only for perf counter
-
   // when refill, refuce to accept new req
   val rwHarzad = if (sramSinglePort) io.refill.valid else false.B
-  io.req.ready := !rwHarzad && stage2_ready
-  // NOTE: when write, don't ready, whe
-  //       when replay, just come in, out make sure resp.fire()
+
+  // handle hand signal and req_info
+  val stage1 = Wire(Decoupled(new PtwCacheReq()))
+  val stage2 = Wire(Decoupled(new PtwCacheReq()))
+  val stage3 = Wire(Decoupled(new PtwCacheReq()))
+  stage1 <> io.req
+  PipelineConnect(stage1, stage2, stage3.ready, flush, rwHarzad)
+  PipelineConnect(stage2, stage3, io.resp.ready, flush)
+  stage3.ready := io.resp.ready
 
   // l1: level 0 non-leaf pte
   val l1 = Reg(Vec(l2tlbParams.l1Size, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -154,24 +181,26 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   l3AccessPerf.map(_ := false.B)
   spAccessPerf.map(_ := false.B)
 
-  val cache_read_valid = OneCycleValid(stage1_fire, flush)
+  // stage1 & stage2, read page cache and data resp
+
+  val cache_read_valid = OneCycleValid(stage1.fire, flush)
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
-    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stage1_req.vpn, io.csr.satp.asid) && l1v(i) }
-    val hitVec = hitVecT.map(RegEnable(_, stage1_fire))
+    val hitVecT = l1.zipWithIndex.map { case (e, i) => e.hit(stage1.bits.req_info.vpn, io.csr.satp.asid) && l1v(i) }
+    val hitVec = hitVecT.map(RegEnable(_, stage1.fire))
     val hitPPN = ParallelPriorityMux(hitVec zip l1.map(_.ppn))
     val hitPre = ParallelPriorityMux(hitVec zip l1.map(_.prefetch))
     val hit = ParallelOR(hitVec) && cache_read_valid
 
     when (hit) { ptwl1replace.access(OHToUInt(hitVec)) }
 
-    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1_fire)}
+    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1.fire)}
     for (i <- 0 until l2tlbParams.l1Size) {
-      XSDebug(stage1_fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(stage1_req.vpn, io.csr.satp.asid)}\n")
+      XSDebug(stage1.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(stage1.bits.req_info.vpn, io.csr.satp.asid)}\n")
     }
-    XSDebug(stage1_fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
-    XSDebug(stage2_valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
+    XSDebug(stage1.fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
+    XSDebug(stage2.valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
 
     VecInit(hitVecT).suggestName(s"l1_hitVecT")
     VecInit(hitVec).suggestName(s"l1_hitVec")
@@ -182,13 +211,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   // l2
   val ptwl2replace = ReplacementPolicy.fromString(l2tlbParams.l2Replacer,l2tlbParams.l2nWays,l2tlbParams.l2nSets)
   val (l2Hit, l2HitPPN, l2Pre, l2eccError) = {
-    val ridx = genPtwL2SetIdx(stage1_req.vpn)
-    val vidx = RegEnable(VecInit(getl2vSet(stage1_req.vpn).asBools), stage1_fire)
-    val asids_idx = RegEnable(getl2asidSet(stage1_req.vpn), stage1_fire)
-    l2.io.r.req.valid := stage1_fire
+    val ridx = genPtwL2SetIdx(stage1.bits.req_info.vpn)
+    val vidx = RegEnable(VecInit(getl2vSet(stage1.bits.req_info.vpn).asBools), stage1.fire)
+    val asids_idx = RegEnable(getl2asidSet(stage1.bits.req_info.vpn), stage1.fire)
+    l2.io.r.req.valid := stage1.fire
     l2.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l2.io.r.resp.data
-    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.entries.hit(stage2_req.vpn, io.csr.satp.asid) && v })
+    val hitVec = VecInit(ramDatas.zip(vidx).map { case (wayData, v) => wayData.entries.hit(stage2.bits.req_info.vpn, io.csr.satp.asid) && v })
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
@@ -204,28 +233,28 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     hitWayData.suggestName(s"l2_hitWayData")
     hitWay.suggestName(s"l2_hitWay")
 
-    when (hit) { ptwl2replace.access(genPtwL2SetIdx(stage2_req.vpn), hitWay) }
+    when (hit) { ptwl2replace.access(genPtwL2SetIdx(stage2.bits.req_info.vpn), hitWay) }
 
-    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1_fire) }
-    XSDebug(stage1_fire, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
+    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1.fire) }
+    XSDebug(stage1.fire, p"[l2] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l2nWays) {
-      XSDebug(RegNext(stage1_fire), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).entries.hit(stage2_req.vpn, io.csr.satp.asid)}\n")
+      XSDebug(RegNext(stage1.fire), p"[l2] ramDatas(${i.U}) ${ramDatas(i)}  l2v:${vidx(i)}  hit:${ramDatas(i).entries.hit(stage2.bits.req_info.vpn, io.csr.satp.asid)}\n")
     }
-    XSDebug(stage2_valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(stage2_req.vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
+    XSDebug(stage2.valid, p"[l2] l2Hit:${hit} l2HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL2SectorIdx(stage2.bits.req_info.vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
 
-    (hit && !eccError, hitWayData.ppns(genPtwL2SectorIdx(stage2_req.vpn)), hitWayData.prefetch, hit && eccError)
+    (hit, hitWayData.ppns(genPtwL2SectorIdx(stage2.bits.req_info.vpn)), hitWayData.prefetch, eccError)
   }
 
   // l3
   val ptwl3replace = ReplacementPolicy.fromString(l2tlbParams.l3Replacer,l2tlbParams.l3nWays,l2tlbParams.l3nSets)
   val (l3Hit, l3HitData, l3Pre, l3eccError) = {
-    val ridx = genPtwL3SetIdx(stage1_req.vpn)
-    val vidx = RegEnable(VecInit(getl3vSet(stage1_req.vpn).asBools), stage1_fire)
-    val asids_idx = RegEnable(getl3asidSet(stage1_req.vpn), stage1_fire)
-    l3.io.r.req.valid := stage1_fire
+    val ridx = genPtwL3SetIdx(stage1.bits.req_info.vpn)
+    val vidx = RegEnable(VecInit(getl3vSet(stage1.bits.req_info.vpn).asBools), stage1.fire)
+    val asids_idx = RegEnable(getl3asidSet(stage1.bits.req_info.vpn), stage1.fire)
+    l3.io.r.req.valid := stage1.fire
     l3.io.r.req.bits.apply(setIdx = ridx)
     val ramDatas = l3.io.r.resp.data
-    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.entries.hit(stage2_req.vpn, io.csr.satp.asid) && v })
+    val hitVec = VecInit(ramDatas.zip(vidx).map{ case (wayData, v) => wayData.entries.hit(stage2.bits.req_info.vpn, io.csr.satp.asid) && v })
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
@@ -234,14 +263,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
     val eccError = ecc.decode(Cat(hitWayEcc, hitWayData.asUInt())).error
 
-    when (hit) { ptwl3replace.access(genPtwL3SetIdx(stage2_req.vpn), hitWay) }
+    when (hit) { ptwl3replace.access(genPtwL3SetIdx(stage2.bits.req_info.vpn), hitWay) }
 
-    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1_fire) }
-    XSDebug(stage1_fire, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
+    l3AccessPerf.zip(hitVec).map{ case (l, h) => l := h && RegNext(stage1.fire) }
+    XSDebug(stage1.fire, p"[l3] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l3nWays) {
-      XSDebug(RegNext(stage1_fire), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).entries.hit(stage2_req.vpn, io.csr.satp.asid)}\n")
+      XSDebug(RegNext(stage1.fire), p"[l3] ramDatas(${i.U}) ${ramDatas(i)}  l3v:${vidx(i)}  hit:${ramDatas(i).entries.hit(stage2.bits.req_info.vpn, io.csr.satp.asid)}\n")
     }
-    XSDebug(stage2_valid, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
+    XSDebug(stage2.valid, p"[l3] l3Hit:${hit} l3HitData:${hitWayData} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${Binary(vidx.asUInt)}\n")
 
     ridx.suggestName(s"l3_ridx")
     vidx.suggestName(s"l3_vidx")
@@ -249,26 +278,26 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     hitVec.suggestName(s"l3_hitVec")
     hitWay.suggestName(s"l3_hitWay")
 
-    (hit && !eccError, hitWayData, hitWayData.prefetch, hit && eccError)
+    (hit, hitWayData, hitWayData.prefetch, eccError)
   }
-  val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(stage2_req.vpn))
-  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(stage2_req.vpn))
+  val l3HitPPN = l3HitData.ppns(genPtwL3SectorIdx(stage2.bits.req_info.vpn))
+  val l3HitPerm = l3HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL3SectorSize, new PtePermBundle)))(genPtwL3SectorIdx(stage2.bits.req_info.vpn))
 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stage1_req.vpn, io.csr.satp.asid) && spv(i) }
-    val hitVec = hitVecT.map(RegEnable(_, stage1_fire))
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(stage1.bits.req_info.vpn, io.csr.satp.asid) && spv(i) }
+    val hitVec = hitVecT.map(RegEnable(_, stage1.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec) && cache_read_valid
 
     when (hit) { spreplace.access(OHToUInt(hitVec)) }
 
-    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(stage1_fire) }
+    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && RegNext(stage1.fire) }
     for (i <- 0 until l2tlbParams.spSize) {
-      XSDebug(stage1_fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(stage1_req.vpn, io.csr.satp.asid)} spv:${spv(i)}\n")
+      XSDebug(stage1.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(stage1.bits.req_info.vpn, io.csr.satp.asid)} spv:${spv(i)}\n")
     }
-    XSDebug(stage2_valid, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
+    XSDebug(stage2.valid, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
 
     VecInit(hitVecT).suggestName(s"sp_hitVecT")
     VecInit(hitVec).suggestName(s"sp_hitVec")
@@ -278,25 +307,32 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
 
-  val resp = Wire(io.resp.bits.cloneType)
-  val resp_latch = RegEnable(resp, io.resp.valid && !io.resp.ready)
-  val resp_latch_valid = ValidHold(io.resp.valid && !io.resp.ready, io.resp.fire(), flush)
-  stage2_ready := !stage2_valid || io.resp.fire()
-  resp.req_info   := stage2_req
-  resp.hit      := l3Hit || spHit
-  resp.prefetch := l3Pre && l3Hit || spPre && spHit
-  resp.toFsm.l1Hit := l1Hit
-  resp.toFsm.l2Hit := l2Hit
-  resp.toFsm.ppn   := Mux(l2Hit, l2HitPPN, l1HitPPN)
-  resp.toTlb.tag   := stage2_req.vpn
-  resp.toTlb.asid  := io.csr.satp.asid // DontCare
-  resp.toTlb.ppn   := Mux(l3Hit, l3HitPPN, spHitData.ppn)
-  resp.toTlb.perm.map(_ := Mux(l3Hit, l3HitPerm, spHitPerm))
-  resp.toTlb.level.map(_ := Mux(l3Hit, 2.U, spHitLevel))
-  resp.toTlb.prefetch := from_pre(stage2_req.source)
+  val s2_res = Wire(new PageCacheRespBundle)
+  s2_res.l1.apply(l1Hit, l1Pre, l1HitPPN)
+  s2_res.l2.apply(l2Hit, l2Pre, l2HitPPN, ecc = l2eccError)
+  s2_res.l3.apply(l3Hit, l3Pre, l3HitPPN, l3HitPerm, l3eccError)
+  s2_res.sp.apply(spHit, spPre, spHitData.ppn, spHitPerm, false.B, spHitLevel)
+  val s2_res_reg = DataHoldBypass(s2_res, RegNext(stage1.fire()))
 
-  io.resp.valid := stage2_valid
-  io.resp.bits := Mux(resp_latch_valid, resp_latch, resp)
+  // stage3, add stage 3 for ecc check...
+  val s3_res = Reg(new PageCacheRespBundle)
+  when (stage2.fire()) {
+    s3_res := s2_res_reg
+  }
+
+  io.resp.bits.req_info   := stage3.bits.req_info
+  io.resp.bits.hit      := s3_res.l3.hit || s3_res.sp.hit
+  io.resp.bits.prefetch := s3_res.l3.pre && s3_res.l3.hit || s3_res.sp.pre && s3_res.sp.hit
+  io.resp.bits.toFsm.l1Hit := s3_res.l1.hit
+  io.resp.bits.toFsm.l2Hit := s3_res.l2.hit
+  io.resp.bits.toFsm.ppn   := Mux(s3_res.l2.hit, s3_res.l2.ppn, s3_res.l1.ppn)
+  io.resp.bits.toTlb.tag   := stage3.bits.req_info.vpn
+  io.resp.bits.toTlb.asid  := io.csr.satp.asid // DontCare
+  io.resp.bits.toTlb.ppn   := Mux(s3_res.l3.hit, s3_res.l3.ppn, s3_res.sp.ppn)
+  io.resp.bits.toTlb.perm.map(_ := Mux(s3_res.l3.hit, s3_res.l3.perm, s3_res.sp.perm))
+  io.resp.bits.toTlb.level.map(_ := Mux(s3_res.l3.hit, 2.U, s3_res.sp.level))
+  io.resp.bits.toTlb.prefetch := from_pre(stage3.bits.req_info.source)
+  io.resp.valid := stage3.valid
   assert(!(l3Hit && spHit), "normal page and super page both hit")
 
   // refill Perf
@@ -358,7 +394,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
     when (refill.level === 1.U && !memPte.isLeaf()) {
       val refillIdx = genPtwL2SetIdx(refill.req_info.vpn)
-      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(refill.req_info.vpn).asBools).asUInt, stage1_fire), ptwl2replace.way(refillIdx))
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl2vSet(refill.req_info.vpn).asBools).asUInt, stage1.fire), ptwl2replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       val wdata = Wire(l2EntryType)
@@ -397,7 +433,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
     when (refill.level === 2.U && memPte.isLeaf()) {
       val refillIdx = genPtwL3SetIdx(refill.req_info.vpn)
-      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(refill.req_info.vpn).asBools).asUInt, stage1_fire), ptwl3replace.way(refillIdx))
+      val victimWay = replaceWrapper(RegEnable(VecInit(getl3vSet(refill.req_info.vpn).asBools).asUInt, stage1.fire), ptwl3replace.way(refillIdx))
       val victimWayOH = UIntToOH(victimWay)
       val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
       val wdata = Wire(l3EntryType)
@@ -459,9 +495,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
   }
 
-  val l2eccFlush = RegNext(l2eccError, init = false.B)
-  val l3eccFlush = RegNext(l3eccError, init = false.B)
-  val eccVpn = RegNext(stage2_req.vpn)
+  val l2eccFlush = s3_res.l2.ecc && stage3.fire() // RegNext(l2eccError, init = false.B)
+  val l3eccFlush = s3_res.l3.ecc && stage3.fire() // RegNext(l3eccError, init = false.B)
+  val eccVpn = stage3.bits.req_info.vpn
 
   assert(!l2eccFlush)
   assert(!l3eccFlush)
@@ -521,12 +557,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   // Perf Count
-  val resp_l3 = DataHoldBypass(l3Hit, io.resp.valid && !resp_latch_valid).asBool()
-  val resp_sp = DataHoldBypass(spHit, io.resp.valid && !resp_latch_valid).asBool()
-  val resp_l1_pre = DataHoldBypass(l1Pre, io.resp.valid && !resp_latch_valid).asBool()
-  val resp_l2_pre = DataHoldBypass(l2Pre, io.resp.valid && !resp_latch_valid).asBool()
-  val resp_l3_pre = DataHoldBypass(l3Pre, io.resp.valid && !resp_latch_valid).asBool()
-  val resp_sp_pre = DataHoldBypass(spPre, io.resp.valid && !resp_latch_valid).asBool()
+  val resp_l3 = s3_res.l3.hit
+  val resp_sp = s3_res.sp.hit
+  val resp_l1_pre = s3_res.l1.pre
+  val resp_l2_pre = s3_res.l2.pre
+  val resp_l3_pre = s3_res.l3.pre
+  val resp_sp_pre = s3_res.sp.pre
   val base_valid_access_0 = !from_pre(io.resp.bits.req_info.source) && io.resp.fire()
   XSPerfAccumulate("access", base_valid_access_0)
   XSPerfAccumulate("l1_hit", base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
@@ -555,7 +591,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("pre_sp_hit_pre", base_valid_access_1 && resp_sp_pre && resp_sp)
   XSPerfAccumulate("pre_pte_hit_pre",base_valid_access_1 && (resp_l3_pre && resp_l3 || resp_sp_pre && resp_sp) && io.resp.bits.hit)
 
-  val base_valid_access_2 = stage2_isFirst && !from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_2 = stage3.bits.isFirst && !from_pre(io.resp.bits.req_info.source) && io.resp.fire()
   XSPerfAccumulate("access_first", base_valid_access_2)
   XSPerfAccumulate("l1_hit_first", base_valid_access_2 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("l2_hit_first", base_valid_access_2 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
@@ -569,7 +605,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("sp_hit_pre_first", base_valid_access_2 && resp_sp_pre && resp_sp)
   XSPerfAccumulate("pte_hit_pre_first",base_valid_access_2 && (resp_l3_pre && resp_l3 || resp_sp_pre && resp_sp) && io.resp.bits.hit)
 
-  val base_valid_access_3 = stage2_isFirst && from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_3 = stage3.bits.isFirst && from_pre(io.resp.bits.req_info.source) && io.resp.fire()
   XSPerfAccumulate("pre_access_first", base_valid_access_3)
   XSPerfAccumulate("pre_l1_hit_first", base_valid_access_3 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("pre_l2_hit_first", base_valid_access_3 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
