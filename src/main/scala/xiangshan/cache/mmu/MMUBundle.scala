@@ -288,7 +288,6 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val hit = Output(Bool())
       val ppn = Output(UInt(ppnLen.W))
       val perm = Output(new TlbPermBundle())
-      val hitVec = Output(UInt(nWays.W))
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -303,6 +302,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val entry = new TlbEntry(pageNormal = true, pageSuper = false)
     })))
   }
+  val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
   def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
@@ -310,7 +310,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
@@ -322,20 +322,23 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
+class ReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
+  val sets = Output(UInt(log2Up(nSets).W))
+  val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
+
+  override def cloneType: this.type =new ReplaceAccessBundle(nSets, nWays).asInstanceOf[this.type]
+}
+
 class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
-  val access = Flipped(new Bundle {
-    val sets = Output(Vec(Width, UInt(log2Up(nSets).W)))
-    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nWays).W))))
-  })
+  val access = Vec(Width, Flipped(new ReplaceAccessBundle(nSets, nWays)))
 
   val refillIdx = Output(UInt(log2Up(nWays).W))
   val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
 
   def apply_sep(in: Seq[ReplaceIO], vpn: UInt): Unit = {
     for (i <- 0 until Width) {
-      this.access.sets(i) := in(i).access.sets(0)
-      this.access.touch_ways(i) := in(i).access.touch_ways(0)
-      this.chosen_set := get_idx(vpn, nSets)
+      this.access(i) := in(i).access(0)
+      this.chosen_set := get_set_idx(vpn, nSets)
       in(i).refillIdx := this.refillIdx
     }
   }

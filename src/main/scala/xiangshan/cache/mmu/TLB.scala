@@ -109,8 +109,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
-    val (super_hit, super_ppn, super_perm, super_hitVec) = superPage.r_resp_apply(i)
+    val (normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
+    val (super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
     assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
@@ -172,15 +172,13 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
       resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
     }
 
-    (hit, miss, normal_hitVec, super_hitVec, validReg)
+    (hit, miss, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
   val hitVec = readResult.map(_._1)
   val missVec = readResult.map(_._2)
-  val normalhitVecVec = readResult.map(_._3)
-  val superhitVecVec = readResult.map(_._4)
-  val validRegVec = readResult.map(_._5)
+  val validRegVec = readResult.map(_._3)
 
   // replacement
   def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
@@ -191,31 +189,26 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   }
 
   val normal_refill_idx = if (q.outReplace) {
-    io.replace.normalPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
-    io.replace.normalPage.access.touch_ways := normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))}
-    io.replace.normalPage.chosen_set := get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
+    io.replace.normalPage.access <> normalPage.access
+    io.replace.normalPage.chosen_set := get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
     io.replace.normalPage.refillIdx
   } else if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.access(normalPage.access.map(_.touch_ways)) // normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
     re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(vpn.map(get_idx(_, q.normalNSets)), normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))})
-    re.way(get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
+    re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
+    re.way(get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
   }
 
   val super_refill_idx = if (q.outReplace) {
-    io.replace.superPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
-    io.replace.superPage.access.touch_ways := superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))}
+    io.replace.superPage.access <> superPage.access
     io.replace.superPage.chosen_set := DontCare
     io.replace.superPage.refillIdx
   } else {
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.access(superPage.access.map(_.touch_ways))
     re.way
   }
 
@@ -289,21 +282,21 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
 
   if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(io.normalPage.access.touch_ways)
+    re.access(io.normalPage.access.map(_.touch_ways))
     io.normalPage.refillIdx := re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(io.normalPage.access.sets, io.normalPage.access.touch_ways)
+    re.access(io.normalPage.access.map(_.sets), io.normalPage.access.map(_.touch_ways))
     io.normalPage.refillIdx := { if (q.normalNWays == 1) 0.U else re.way(io.normalPage.chosen_set) }
   }
 
   if (q.superAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(io.superPage.access.touch_ways)
+    re.access(io.superPage.access.map(_.touch_ways))
     io.superPage.refillIdx := re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
-    re.access(io.superPage.access.sets, io.superPage.access.touch_ways)
+    re.access(io.superPage.access.map(_.sets), io.superPage.access.map(_.touch_ways))
     io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
   }
 }
