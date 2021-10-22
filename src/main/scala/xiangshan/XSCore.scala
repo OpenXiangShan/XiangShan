@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.{ExuConfig, WbArbiter}
+import xiangshan.backend.exu.{ExuConfig, WbArbiter, WbArbiterWrapper}
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
@@ -71,15 +71,9 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
 
-  val intConfigs = exuConfigs.filter(_.writeIntRf)
-  val intArbiter = LazyModule(new WbArbiter(intConfigs, NRIntWritePorts, isFp = false))
-  val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
-  val numIntWbPorts = intWbPorts.length
-
-  val fpConfigs = exuConfigs.filter(_.writeFpRf)
-  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, NRFpWritePorts, isFp = true))
-  val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
-  val numFpWbPorts = fpWbPorts.length
+  val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
+  val intWbPorts = wbArbiter.intWbPorts
+  val fpWbPorts = wbArbiter.fpWbPorts
 
   // TODO: better RS organization
   // generate rs according to number of function units
@@ -118,7 +112,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       val otherFpSource = otherCfg.filter(_._4.contains(cfg._1)).map(_._1)
       val intSource = findInWbPorts(intWbPorts, intraIntScheOuter ++ otherIntSource)
       val fpSource = findInWbPorts(fpWbPorts, intraFpScheOuter ++ otherFpSource)
-      getFastWakeupIndex(cfg._1, intSource, fpSource, numIntWbPorts).sorted
+      getFastWakeupIndex(cfg._1, intSource, fpSource, intWbPorts.length).sorted
     })
     println(s"inter-scheduler wakeup sources for $i: $outerPorts")
     outerPorts
@@ -187,34 +181,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
-
-  val intWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
-
-  // set default value for ready
-  exuBlocks.foreach(_.io.fuWriteback.foreach(_.ready := true.B))
-  memBlock.io.writeback.foreach(_.ready := true.B)
-
-  val intArbiter = outer.intArbiter.module
-  intArbiter.io.in.zip(intWriteback).foreach { case (arb, wb) =>
-    arb.valid := wb.valid && !wb.bits.uop.ctrl.fpWen
-    arb.bits := wb.bits
-    when (arb.valid) {
-      wb.ready := arb.ready
-    }
-  }
-
-  val fpArbiter = outer.fpArbiter.module
-  val fpWriteback = allWriteback.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
-  fpArbiter.io.in.zip(fpWriteback).foreach{ case (arb, wb) =>
-    arb.valid := wb.valid && wb.bits.uop.ctrl.fpWen
-    arb.bits := wb.bits
-    when (arb.valid) {
-      wb.ready := arb.ready
-    }
-  }
-
-  val rfWriteback = VecInit(intArbiter.io.out ++ fpArbiter.io.out)
+  outer.wbArbiter.module.io.in <> allWriteback
+  val rfWriteback = outer.wbArbiter.module.io.out
 
   io.beu_errors.icache <> frontend.io.error
   io.beu_errors.dcache <> memBlock.io.error
@@ -243,8 +212,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
   val intFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
-  val intFastUop1 = outer.intArbiter.allConnections.map(c => intFastUop(c.head))
-  val fpFastUop1 = outer.fpArbiter.allConnections.map(c => fpFastUop(c.head))
+  val intFastUop1 = outer.wbArbiter.intConnections.map(c => intFastUop(c.head))
+  val fpFastUop1 = outer.wbArbiter.fpConnections.map(c => fpFastUop(c.head))
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
@@ -270,7 +239,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     exu.scheExtra.debug_int_rat <> ctrlBlock.io.debug_int_rat
     exu.scheExtra.memWaitUpdateReq.staIssue.zip(memBlock.io.stIn).foreach{case (sink, src) => {
       sink.bits := src.bits
-      sink.valid := src.valid && !csrioIn.customCtrl.storeset_no_fast_wakeup
+      sink.valid := src.valid
     }}
     exu.scheExtra.memWaitUpdateReq.stdIssue.zip(stdIssue).foreach{case (sink, src) => {
       sink.valid := src.valid
@@ -337,20 +306,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
-  val ptw_reset_gen = Module(new ResetGen(2, !debugOpts.FPGAPlatform))
-  ptw.reset := ptw_reset_gen.io.out
-  itlbRepeater.reset := ptw_reset_gen.io.out
-  dtlbRepeater.reset := ptw_reset_gen.io.out
-
-  val memBlock_reset_gen = Module(new ResetGen(3, !debugOpts.FPGAPlatform))
-  memBlock.reset := memBlock_reset_gen.io.out
-
-  val exuBlock_reset_gen = Module(new ResetGen(4, !debugOpts.FPGAPlatform))
-  exuBlocks.foreach(_.reset := exuBlock_reset_gen.io.out)
-
-  val ctrlBlock_reset_gen = Module(new ResetGen(6, !debugOpts.FPGAPlatform))
-  ctrlBlock.reset := ctrlBlock_reset_gen.io.out
-
-  val frontend_reset_gen = Module(new ResetGen(7, !debugOpts.FPGAPlatform))
-  frontend.reset := frontend_reset_gen.io.out
+  // Modules are reset one by one
+  // reset --> SYNC ----> SYNC ------> SYNC -----> SYNC -----> SYNC ---
+  //                  |          |            |           |           |
+  //                  v          v            v           v           v
+  //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
+  val resetChain = Seq(
+    Seq(ptw),
+    Seq(memBlock, dtlbRepeater),
+    // Note: arbiters don't actually have reset ports
+    exuBlocks ++ Seq(outer.wbArbiter.module),
+    Seq(ctrlBlock),
+    Seq(frontend, itlbRepeater)
+  )
+  ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
 }

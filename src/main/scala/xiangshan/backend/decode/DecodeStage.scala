@@ -88,7 +88,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
       val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
       val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
       val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
-      out.bits.ctrl.isFused := Mux(cond1, 1.U, Mux(cond2, 2.U, Mux(cond3, 3.U, 4.U)))
+      out.bits.ctrl.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
       XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
     }
   }

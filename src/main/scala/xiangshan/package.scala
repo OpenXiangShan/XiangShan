@@ -115,16 +115,17 @@ package object xiangshan {
   }
 
   object CommitType {
-    def NORMAL = "b00".U  // int/fp
-    def BRANCH = "b01".U  // branch
-    def LOAD   = "b10".U  // load
-    def STORE  = "b11".U  // store
+    def NORMAL = "b000".U  // int/fp
+    def BRANCH = "b001".U  // branch
+    def LOAD   = "b010".U  // load
+    def STORE  = "b011".U  // store
 
-    def apply() = UInt(2.W)
-    def isLoadStore(commitType: UInt) = commitType(1)
-    def lsInstIsStore(commitType: UInt) = commitType(0)
-    def isStore(commitType: UInt) = isLoadStore(commitType) && lsInstIsStore(commitType)
-    def isBranch(commitType: UInt) = commitType(0) && !commitType(1)
+    def apply() = UInt(3.W)
+    def isFused(commitType: UInt): Bool = commitType(2)
+    def isLoadStore(commitType: UInt): Bool = !isFused(commitType) && commitType(1)
+    def lsInstIsStore(commitType: UInt): Bool = commitType(0)
+    def isStore(commitType: UInt): Bool = isLoadStore(commitType) && lsInstIsStore(commitType)
+    def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1) && !isFused(commitType)
   }
 
   object RedirectLevel {
