@@ -166,6 +166,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val l2_pf_enable = Output(Bool())
+    val perfEvents = Vec(numPCntHc * coreParams.L2NBanks,(Input(UInt(6.W))))
     val beu_errors = Output(new XSL1BusErrors())
   })
 
@@ -251,7 +252,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // TODO: connect rsPerf
   val rsPerf = VecInit(exuBlocks.flatMap(_.io.scheExtra.perf))
+  val rs_perf = Wire(new PerfEventsBundle(rsPerf.length))
+  val rs_cnt = rs_perf.length
+  for (i <- 0 until rs_cnt){
+    rs_perf.perf_events(i).incr_step := rsPerf(i).asUInt
+  }
   dontTouch(rsPerf)
+  exuBlocks(0).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu0
+  exuBlocks(1).perfinfo.perfEvents <> ctrlBlock.perfinfo.perfEventsEu1
+  memBlock.perfinfo.perfEventsPTW <> ptw.perfinfo.perfEvents
+  ctrlBlock.perfinfo.perfEventsRs := rs_perf
 
   csrioIn.hartId <> io.hartId
   csrioIn.perf <> DontCare
@@ -259,6 +269,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrioIn.perf.memInfo <> memBlock.io.memInfo
   csrioIn.perf.frontendInfo <> frontend.io.frontendInfo
+
+  csrioIn.perf.perfEventsFrontend <> frontend.perfinfo.perfEvents
+  csrioIn.perf.perfEventsCtrl     <> ctrlBlock.perfinfo.perfEvents
+  csrioIn.perf.perfEventsLsu      <> memBlock.perfinfo.perfEvents
+  csrioIn.perf.perfEventsHc       <> io.perfEvents
 
   csrioIn.fpu.fflags <> ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B

@@ -266,6 +266,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val sbuffer = new LoadForwardQueryIO
     val dataForwarded = Output(Bool())
     val needReplayFromRS = Output(Bool())
+    val fullForward = Output(Bool())
     val fastpath = Output(new LoadToLoadIO)
     val dcache_kill = Output(Bool())
     val loadViolationQueryResp = Flipped(Valid(new LoadViolationQueryResp))
@@ -311,6 +312,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U && !io.lsq.dataInvalid
   io.lsq := DontCare
   io.sbuffer := DontCare
+  io.fullForward := fullForward
 
   // generate XLEN/8 Muxs
   for (i <- 0 until XLEN / 8) {
@@ -562,6 +564,29 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
   io.lsq.ldout.ready := !hitLoadOut.valid
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(12))
+  })
+
+  val perfEvents = Seq(
+    ("load_s0_in_fire         ", load_s0.io.in.fire()                                                                                                            ),
+    ("load_to_load_forward    ", load_s0.io.loadFastMatch.orR && load_s0.io.in.fire()                                                                            ),
+    ("stall_dcache            ", load_s0.io.out.valid && load_s0.io.out.ready && !load_s0.io.dcacheReq.ready                                                     ),
+    ("addr_spec_success       ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) === load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
+    ("addr_spec_failed        ", load_s0.io.out.fire() && load_s0.io.dtlbReq.bits.vaddr(VAddrBits-1, 12) =/= load_s0.io.in.bits.src(0)(VAddrBits-1, 12)          ),
+    ("load_s1_in_fire         ", load_s1.io.in.fire                                                                                                              ),
+    ("load_s1_tlb_miss        ", load_s1.io.in.fire && load_s1.io.dtlbResp.bits.miss                                                                             ),
+    ("load_s2_in_fire         ", load_s2.io.in.fire                                                                                                              ),
+    ("load_s2_dcache_miss     ", load_s2.io.in.fire && load_s2.io.dcacheResp.bits.miss                                                                           ),
+    ("load_s2_replay          ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit                                                                  ),
+    ("load_s2_replay_tlb_miss ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && load_s2.io.in.bits.tlbMiss                                    ),
+    ("load_s2_replay_cache    ", load_s2.io.rsFeedback.valid && !load_s2.io.rsFeedback.bits.hit && !load_s2.io.in.bits.tlbMiss && load_s2.io.dcacheResp.bits.miss),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)

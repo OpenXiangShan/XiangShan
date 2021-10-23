@@ -350,4 +350,23 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
   XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(9))
+  })
+  val perfEvents = Seq(
+    ("dispatch_in                 ", PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                                                                       ),
+    ("dispatch_empty              ", !hasValidInstr                                                                                                                      ),
+    ("dispatch_utili              ", PopCount(io.fromRename.map(_.valid))                                                                                                ),
+    ("dispatch_waitinstr          ", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))                                                     ),
+    ("dispatch_stall_cycle_lsq    ", hasValidInstr && !io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_rob    ", hasValidInstr && io.enqLsq.canAccept && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_int_dq ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_fp_dq  ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept  ),
+    ("dispatch_stall_cycle_ls_dq  ", hasValidInstr && io.enqLsq.canAccept && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept  ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

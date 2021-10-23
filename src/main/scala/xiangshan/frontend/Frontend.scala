@@ -23,7 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
-import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker}
+import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
@@ -64,7 +64,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ftq = Module(new Ftq)
   //icache
 
+  //PFEvent
+  val pfevent = Module(new PFEvent)
   val tlbCsr = RegNext(io.tlbCsr)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   // pmp
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
@@ -131,6 +134,31 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)
-
   io.frontendInfo.ibufFull := RegNext(ibuffer.io.full)
+
+  if(print_perfcounter){
+    val ifu_perf     = ifu.perfEvents.map(_._1).zip(ifu.perfinfo.perfEvents.perf_events)
+    val ibuffer_perf = ibuffer.perfEvents.map(_._1).zip(ibuffer.perfinfo.perfEvents.perf_events)
+    val icache_perf  = icache.perfEvents.map(_._1).zip(icache.perfinfo.perfEvents.perf_events)
+    val ftq_perf     = ftq.perfEvents.map(_._1).zip(ftq.perfinfo.perfEvents.perf_events)
+    val bpu_perf     = bpu.perfEvents.map(_._1).zip(bpu.perfinfo.perfEvents.perf_events)
+    val perfEvents = ifu_perf ++ ibuffer_perf ++ icache_perf ++ ftq_perf ++ bpu_perf
+
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"frontend perf $i: $perf_name")
+    }
+  }
+
+  val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++
+                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ 
+                  bpu.perfinfo.perfEvents.perf_events
+  val perf_length = hpmEvents.length
+  val csrevents = pfevent.io.hpmevent.slice(0,8)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+  })
+  val hpm_frontend = Module(new HPerfmonitor(perf_length,csrevents.length))
+  hpm_frontend.io.hpm_event := csrevents
+  hpm_frontend.io.events_sets.perf_events := hpmEvents
+  perfinfo.perfEvents := RegNext(hpm_frontend.io.events_selected)
 }

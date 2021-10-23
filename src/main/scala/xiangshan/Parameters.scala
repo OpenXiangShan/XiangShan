@@ -327,6 +327,11 @@ trait HasXSParameter {
   val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
 
+  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 
+              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 + 
+              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
+              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2) 
+
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
 
@@ -361,4 +366,13 @@ trait HasXSParameter {
 
   val exuConfigs = coreParams.exuConfigs
 
+  val PCntIncrStep: Int = 6
+  val numPCntHc: Int = 25
+  val numPCntPtw: Int = 19
+
+  val numCSRPCntFrontend = 8
+  val numCSRPCntCtrl     = 8
+  val numCSRPCntLsu      = 8
+  val numCSRPCntHc       = 5
+  val print_perfcounter  = false
 }
