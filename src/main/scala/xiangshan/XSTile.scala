@@ -129,6 +129,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     })
 
     core.module.io.hartId := io.hartId
+    if(l2cache.isDefined){
+      core.module.io.perfEvents <> l2cache.get.module.io.perfEvents.flatten
+    }
+    else {
+      core.module.io.perfEvents <> DontCare
+    }
 
     misc.module.beu_errors <> core.module.io.beu_errors
 

@@ -413,7 +413,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
-      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_queue_ready
+      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1 || miss_0_except_1) && wait_state === wait_queue_ready
     toMissQueue(i).bits.addr    := f2_pAddrs(i)
     toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
     toMissQueue(i).bits.waymask := f2_waymask(i)
@@ -615,6 +615,31 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val predecodeFlush     = ((preDecoderOut.misOffset.valid || f3_mmio) && f3_valid) 
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(15))
+  })
+
+  val perfEvents = Seq(
+    ("frontendFlush                ", f3_redirect                                ),
+    ("ifu_req                      ", io.toIbuffer.fire()                        ),
+    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_hit             ),
+    ("ifu_req_cacheline_0          ", f3_req_0                                   ),
+    ("ifu_req_cacheline_1          ", f3_req_1                                   ),
+    ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
+    ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
+    ("only_0_hit                   ", f3_only_0_hit       && io.toIbuffer.fire() ),
+    ("only_0_miss                  ", f3_only_0_miss      && io.toIbuffer.fire() ),
+    ("hit_0_hit_1                  ", f3_hit_0_hit_1      && io.toIbuffer.fire() ),
+    ("hit_0_miss_1                 ", f3_hit_0_miss_1     && io.toIbuffer.fire() ),
+    ("miss_0_hit_1                 ", f3_miss_0_hit_1     && io.toIbuffer.fire() ),
+    ("miss_0_miss_1                ", f3_miss_0_miss_1    && io.toIbuffer.fire() ),
+    ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
+    ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 
   f3_redirect := !predecodeFlushReg && predecodeFlush
 
