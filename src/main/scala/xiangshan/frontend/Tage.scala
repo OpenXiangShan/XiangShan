@@ -207,7 +207,7 @@ class TageBTable
         Mux(taken, old + 1.U, old - 1.U)))
   }
 
-  val newTakens = update.preds.taken_mask
+  val newTakens = update.preds.br_taken_mask
   val newCtrs = VecInit((0 until numBr).map(i =>
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
@@ -570,7 +570,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val update = io.update.bits
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
-      !(PriorityEncoder(update.preds.taken_mask) < w.U)))
+      !(PriorityEncoder(update.preds.br_taken_mask) < w.U)))
   val updateHist = update.ghist
   val updatePhist = update.phist
 
@@ -665,7 +665,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     // Update in loop
     val updateValid = updateValids(w)
     val updateMeta = updateMetas(w)
-    val isUpdateTaken = updateValid && update.preds.taken_mask(w)
+    val isUpdateTaken = updateValid && update.preds.br_taken_mask(w)
     val updateMisPred = updateMisPreds(w)
     val up_altpredhit = updateMeta.altpredhit
     val up_prednum    = updateMeta.prednum.bits
@@ -694,8 +694,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
       }
     }
 
-    //update base table condition
-    when (updateValid) {
+    // update base table if used base table to predict
+    when (updateValid) { 
       when(updateMeta.provider.valid) {
         when(~up_altpredhit && updateMisPred && (updateMeta.predcnt === 3.U || updateMeta.predcnt === 4.U)) {
         baseupdate(w) := true.B
@@ -712,8 +712,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
       baseupdate(w) := false.B
     }
     updatebcnt(w) := updateMeta.basecnt
-
-    when (updateValid && updateMisPred && ~((((updateMeta.predcnt === 3.U && (~isUpdateTaken))) || ((updateMeta.predcnt === 4.U && isUpdateTaken))) && updateMeta.provider.valid)) {
+  
+    // if mispredicted and not the case that
+    // provider offered correct target but used altpred due to unconfident
+    when (updateValid && updateMisPred && ~((updateMeta.predcnt === 3.U && ~isUpdateTaken || updateMeta.predcnt === 4.U && isUpdateTaken) && updateMeta.provider.valid)) {
     //when (updateValid && updateMisPred) {
       val allocate = updateMeta.allocate
       when (allocate.valid) {
@@ -737,7 +739,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
 
   for (i <- 0 until numBr) {
-    resp_s2.preds.taken_mask(i) := s2_tageTakens(i)
+    resp_s2.preds.br_taken_mask(i) := s2_tageTakens(i)
   }
   // io.out.resp.s3 := RegEnable(resp_s2, io.s2_fire)
 
@@ -803,7 +805,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val m = updateMetas(b)
     // val bri = u.metas(b)
     XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-      b.U, update.pc, 0.U, updateHist.predHist, update.preds.taken_mask(b), update.mispred_mask(b),
+      b.U, update.pc, 0.U, updateHist.predHist, update.preds.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
     )
   }
