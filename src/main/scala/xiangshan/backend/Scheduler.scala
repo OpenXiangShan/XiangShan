@@ -29,7 +29,7 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.backend.issue.{ReservationStation, ReservationStationWrapper, RsPerfCounter}
 import xiangshan.backend.regfile.{Regfile, RfReadPort, RfWritePort}
 import xiangshan.backend.rename.{BusyTable, BusyTableReadIO}
-import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
+import xiangshan.mem.{LsqEnqIO, MemWaitUpdateReq, SqPtr, StoreDataBundle}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -207,6 +207,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val jalr_target = Input(UInt(VAddrBits.W))
     val stIssuePtr = Input(new SqPtr())
     // special ports for load / store rs
+    val enqLsq = if (outer.numReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
     // debug
     val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
@@ -237,6 +238,9 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   })
 
   val dispatch2 = outer.dispatch2.map(_.module)
+
+  // dirty code for ls dp
+  dispatch2.foreach(dp => if (dp.io.enqLsq.isDefined) dp.io.enqLsq.get <> io.extra.enqLsq.get)
 
   io.in <> dispatch2.flatMap(_.io.in)
   val readIntState = dispatch2.flatMap(_.io.readIntState.getOrElse(Seq()))

@@ -45,9 +45,9 @@ object SqPtr {
 class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
-  val needAlloc = Vec(RenameWidth, Input(Bool()))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(RenameWidth, Output(new SqPtr))
+  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
+  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(exuParameters.LsExuCnt, Output(new SqPtr))
 }
 
 // Store Queue
@@ -111,8 +111,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
 
   // ptr
-  require(StoreQueueSize > RenameWidth)
-  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
+  val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
@@ -151,10 +150,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   /**
     * Enqueue at dispatch
     *
-    * Currently, StoreQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
+    * Currently, StoreQueue only allows enqueue when #emptyEntries > EnqWidth
     */
   io.enq.canAccept := allowEnqueue
-  for (i <- 0 until RenameWidth) {
+  for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
@@ -561,7 +560,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
 
-  allowEnqueue := validCount + enqNumber <= (StoreQueueSize - RenameWidth).U
+  allowEnqueue := validCount + enqNumber <= (StoreQueueSize - io.enq.req.length).U
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing
