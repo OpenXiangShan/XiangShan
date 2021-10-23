@@ -336,7 +336,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   switch(wait_state){
     is(wait_idle){
-      when(f2_mmio && !f2_except_af(0) && !f2_except_pf(0)){
+      when(f2_mmio && f2_valid && !f2_except_af(0) && !f2_except_pf(0)){
         wait_state :=  wait_send_mmio
       }.elsewhen(miss_0_except_1){
         wait_state :=  Mux(toMissQueue(0).ready, wait_queue_ready ,wait_idle )
