@@ -258,7 +258,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val resetStepCounter = RegInit(0.U((log2Up(SSITSize)+1).W))
   val resetStepCounterFull = resetStepCounter(log2Up(SSITSize))
   val s_idle :: s_flush :: Nil = Enum(2)
-  val state = RegInit(s_idle)
+  val state = RegInit(s_flush)
 
   switch (state) {
     is(s_idle) {
@@ -270,12 +270,14 @@ class SSIT(implicit p: Parameters) extends XSModule {
     is(s_flush) {
       when(resetStepCounterFull) {
         state := s_idle // reset finished
+        resetStepCounter := 0.U
+      }.otherwise{
+        valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
+        valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
+        valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
+        debug_valid(resetStepCounter) := false.B
+        resetStepCounter := resetStepCounter + 1.U
       }
-
-      valid_sram.io.wen(SSIT_MISC_WRITE_PORT) := true.B
-      valid_sram.io.waddr(SSIT_MISC_WRITE_PORT) := resetStepCounter
-      valid_sram.io.wdata(SSIT_MISC_WRITE_PORT) := false.B
-      debug_valid(resetStepCounter) := false.B
     }
   }
 
