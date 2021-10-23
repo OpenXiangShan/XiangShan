@@ -124,9 +124,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   arb2.io.out.ready := cache.io.req.ready
 
   cache.io.req.valid := arb2.io.out.valid
-  cache.io.req.bits.vpn := arb2.io.out.bits.vpn
-  cache.io.req.bits.source := arb2.io.out.bits.source
-  cache.io.req_isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
+  cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
+  cache.io.req.bits.req_info.source := arb2.io.out.bits.source
+  cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))
@@ -230,7 +230,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info  := Mux(refill_from_mq, mq_mem.refill, fsm.io.refill.req_info)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
-  cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
+  cache.io.refill.bits.addr_low := RegNext(req_addr_low(mem.d.bits.source))
 
   // pmp
   pmp_check(0).req <> fsm.io.pmp.req

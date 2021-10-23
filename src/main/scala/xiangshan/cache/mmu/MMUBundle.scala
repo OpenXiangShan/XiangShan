@@ -289,7 +289,6 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val hit = Output(Bool())
       val ppn = Output(UInt(ppnLen.W))
       val perm = Output(new TlbPermBundle())
-      val hitVec = Output(UInt(nWays.W))
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -304,6 +303,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val entry = new TlbEntry(pageNormal = true, pageSuper = false)
     })))
   }
+  val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
   def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
@@ -311,7 +311,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
@@ -323,20 +323,23 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
+class ReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
+  val sets = Output(UInt(log2Up(nSets).W))
+  val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
+
+  override def cloneType: this.type =new ReplaceAccessBundle(nSets, nWays).asInstanceOf[this.type]
+}
+
 class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
-  val access = Flipped(new Bundle {
-    val sets = Output(Vec(Width, UInt(log2Up(nSets).W)))
-    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nWays).W))))
-  })
+  val access = Vec(Width, Flipped(new ReplaceAccessBundle(nSets, nWays)))
 
   val refillIdx = Output(UInt(log2Up(nWays).W))
   val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
 
   def apply_sep(in: Seq[ReplaceIO], vpn: UInt): Unit = {
     for (i <- 0 until Width) {
-      this.access.sets(i) := in(i).access.sets(0)
-      this.access.touch_ways(i) := in(i).access.touch_ways(0)
-      this.chosen_set := get_idx(vpn, nSets)
+      this.access(i) := in(i).access(0)
+      this.chosen_set := get_set_idx(vpn, nSets)
       in(i).refillIdx := this.refillIdx
     }
   }
@@ -609,9 +612,53 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
 class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   val entries = new PtwEntries(num, tagLen, level, hasPerm)
 
-  private val encBits = eccCode.width(entries.getWidth)
-  private val eccBits = encBits - entries.getWidth
-  val ecc = UInt(eccBits.W)
+  val ecc_block = XLEN
+  val ecc_info = get_ecc_info()
+  val ecc = UInt(ecc_info._1.W)
+
+  def get_ecc_info(): (Int, Int, Int, Int) = {
+    val eccBits_per = eccCode.width(ecc_block) - ecc_block
+
+    val data_length = entries.getWidth
+    val data_align_num = data_length / ecc_block
+    val data_not_align = (data_length % ecc_block) != 0 // ugly code
+    val data_unalign_length = data_length - data_align_num * ecc_block
+    val eccBits_unalign = eccCode.width(data_unalign_length) - data_unalign_length
+
+    val eccBits = eccBits_per * data_align_num + eccBits_unalign
+    (eccBits, eccBits_per, data_align_num, data_unalign_length)
+  }
+
+  def encode() = {
+    val data = entries.asUInt()
+    val ecc_slices = Wire(Vec(ecc_info._3, UInt(ecc_info._2.W)))
+    for (i <- 0 until ecc_info._3) {
+      ecc_slices(i) := eccCode.encode(data((i+1)*ecc_block-1, i*ecc_block)) >> ecc_block
+    }
+    if (ecc_info._4 != 0) {
+      val ecc_unaligned = eccCode.encode(data(data.getWidth-1, ecc_info._3*ecc_block)) >> ecc_info._4
+      ecc := Cat(ecc_unaligned, ecc_slices.asUInt())
+    } else { ecc := ecc_slices.asUInt() }
+  }
+
+  def decode(): Bool = {
+    val data = entries.asUInt()
+    val res = Wire(Vec(ecc_info._3 + 1, Bool()))
+    for (i <- 0 until ecc_info._3) {
+      res(i) := eccCode.decode(Cat(ecc((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error
+    }
+    if (ecc_info._4 != 0) {
+      res(ecc_info._3) := eccCode.decode(
+        Cat(ecc(ecc_info._1-1, ecc_info._2*ecc_info._3), data(data.getWidth-1, ecc_info._3*ecc_block))).error
+    } else { res(ecc_info._3) := false.B }
+
+    Cat(res).orR
+  }
+
+  def gen(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
+    this.entries := entries.genEntries(vpn, asid, data, levelUInt, prefetch)
+    this.encode()
+  }
 
   override def cloneType: this.type = new PTWEntriesWithEcc(eccCode, num, tagLen, level, hasPerm).asInstanceOf[this.type]
 }
