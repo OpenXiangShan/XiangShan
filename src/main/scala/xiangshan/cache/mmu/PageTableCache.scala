@@ -652,7 +652,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val perfEvents = Output(new PerfEventsBundle(8))
   })
   val perfEvents = Seq(
-    ("access           ", second_valid                    ),
+    ("access           ", base_valid_access_0             ),
     ("l1_hit           ", l1Hit                           ),
     ("l2_hit           ", l2Hit                           ),
     ("l3_hit           ", l3Hit                           ),
