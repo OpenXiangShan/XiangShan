@@ -413,7 +413,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
-      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_queue_ready
+      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1 || miss_0_except_1) && wait_state === wait_queue_ready
     toMissQueue(i).bits.addr    := f2_pAddrs(i)
     toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
     toMissQueue(i).bits.waymask := f2_waymask(i)
