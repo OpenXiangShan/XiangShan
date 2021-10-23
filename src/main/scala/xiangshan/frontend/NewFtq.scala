@@ -789,12 +789,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
   val redirectVec = Wire(Vec(3, new RedirectInfo))
-  val robRedirect = Wire(Valid(new Redirect))
-  robRedirect := DontCare
-  robRedirect.valid := robFlush.valid
-  robRedirect.bits.ftqIdx := robFlush.bits.ftqIdx
-  robRedirect.bits.ftqOffset := robFlush.bits.ftqOffset
-  robRedirect.bits.level := RedirectLevel.flush
+  val robRedirect = robFlush
 
   redirectVec.zip(Seq(robRedirect, stage2Redirect, fromIfuRedirect)).map {
     case (ve, r) => ve(r)
@@ -828,14 +823,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset) := c_commited
       // TODO: remove this
       // For instruction fusions, we also update the next instruction
-      when (c.bits.isFused === 1.U) {
+      when (c.bits.commitType === 4.U) {
         commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset + 1.U) := c_commited
-      }.elsewhen(c.bits.isFused === 2.U) {
+      }.elsewhen(c.bits.commitType === 5.U) {
         commitStateQueue(c.bits.ftqIdx.value)(c.bits.ftqOffset + 2.U) := c_commited
-      }.elsewhen(c.bits.isFused === 3.U) {
+      }.elsewhen(c.bits.commitType === 6.U) {
         val index = (c.bits.ftqIdx + 1.U).value
         commitStateQueue(index)(0) := c_commited
-      }.elsewhen(c.bits.isFused === 4.U) {
+      }.elsewhen(c.bits.commitType === 7.U) {
         val index = (c.bits.ftqIdx + 1.U).value
         commitStateQueue(index)(1) := c_commited
       }
@@ -848,7 +843,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.toBpu.redirect <> Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
 
-  val canCommit = commPtr =/= ifuWbPtr &&
+  val may_have_stall_from_bpu = RegInit(false.B)
+  val canCommit = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     Cat(commitStateQueue(commPtr.value).map(s => {
       s === c_invalid || s === c_commited
     })).andR()
@@ -868,22 +864,26 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val commit_ftb_entry = ftb_entry_mem.io.rdata.last
 
   // need one cycle to read mem and srams
-  val do_commit = RegNext(canCommit, init=false.B)
   val do_commit_ptr = RegNext(commPtr)
+  val do_commit = RegNext(canCommit, init=false.B)
   when (canCommit) { commPtr := commPtr + 1.U }
   val commit_state = RegNext(commitStateQueue(commPtr.value))
-  val commit_cfi = WireInit(RegNext(cfiIndex_vec(commPtr.value)))
-  when (commit_state(commit_cfi.bits) =/= c_commited) {
-    commit_cfi.valid := false.B
+  val can_commit_cfi = WireInit(cfiIndex_vec(commPtr.value))
+  when (commitStateQueue(commPtr.value)(can_commit_cfi.bits) =/= c_commited) {
+    can_commit_cfi.valid := false.B
   }
+  val commit_cfi = RegNext(can_commit_cfi)
 
   val commit_mispredict = VecInit((RegNext(mispredict_vec(commPtr.value)) zip commit_state).map {
     case (mis, state) => mis && state === c_commited
   })
-  val commit_hit = RegNext(entry_hit_status(commPtr.value))
+  val can_commit_hit = entry_hit_status(commPtr.value)
+  val commit_hit = RegNext(can_commit_hit)
   val commit_target = RegNext(update_target(commPtr.value))
   val commit_valid = commit_hit === h_hit || commit_cfi.valid // hit or taken
 
+  val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
+  may_have_stall_from_bpu := can_commit_cfi.valid && !to_bpu_hit && !may_have_stall_from_bpu
 
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
@@ -968,6 +968,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   XSPerfAccumulate("to_ifu_stall", io.toIfu.req.valid && !io.toIfu.req.ready)
   XSPerfAccumulate("from_bpu_real_bubble", !enq.valid && enq.ready && allowBpuIn)
+  XSPerfAccumulate("bpu_to_ftq_bubble", bpuPtr === ifuPtr)
 
   val from_bpu = io.fromBpu.resp.bits
   def in_entry_len_map_gen(resp: BranchPredictionBundle)(stage: String) = {

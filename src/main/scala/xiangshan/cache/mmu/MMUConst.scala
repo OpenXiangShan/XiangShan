@@ -62,10 +62,15 @@ case class L2TLBParameters
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
-  // miss queue
-  missQueueSize: Int = 9,
+  // dtlb filter
+  filterSize: Int = 8,
+  // miss queue, add more entries than 'must require'
+  // 0 for easier bug trigger, please set as big as u can, 8 maybe
+  missqueueExtendSize: Int = 0,
   // way size
   blockBytes: Int = 64,
+  // prefetch
+  enablePrefetch: Boolean = true,
   // ecc
   ecc: Option[String] = Some("secded")
 )
@@ -79,11 +84,10 @@ trait HasTlbConst extends HasXSParameter {
   val vpnLen  = VAddrBits - offLen
   val flagLen = 8
   val pteResLen = XLEN - ppnLen - 2 - flagLen
-  val asidLen = 16
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 2000
+  val timeOutThreshold = 5000
 
   def get_idx(vpn: UInt, nSets: Int): UInt = {
     vpn(log2Up(nSets)-1, 0)
@@ -104,10 +108,14 @@ trait HasTlbConst extends HasXSParameter {
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
+  val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
+  val prefetchID = PtwWidth
+  val maxPrefetchNum = l2tlbParams.filterSize
+
   val blockBits = l2tlbParams.blockBytes * 8
 
   val bPtwWidth = log2Up(PtwWidth)
-
+  val bSourceWidth = log2Up(sourceWidth)
   // ptwl1: fully-associated
   val PtwL1TagLen = vpnnLen
 
@@ -136,8 +144,11 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   // super page, including 1GB and 2MB page
   val SPTagLen = vpnnLen * 2
 
-  val MSHRSize = l2tlbParams.missQueueSize
+  // miss queue
+  val MSHRBaseSize = 1 + l2tlbParams.filterSize + l2tlbParams.missqueueExtendSize
+  val MSHRSize =  { if (l2tlbParams.enablePrefetch) (MSHRBaseSize + 1) else MSHRBaseSize }
   val MemReqWidth = MSHRSize + 1
+  val FsmReqID = MSHRSize
   val bMemID = log2Up(MSHRSize + 1)
 
   def genPtwL2Idx(vpn: UInt) = {
@@ -184,8 +195,19 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     vpn(vpnLen - 1, (2 - level) * vpnnLen)
   }
 
+  def get_next_line(vpn: UInt) = {
+    Cat(dropL3SectorBits(vpn) + 1.U, 0.U(PtwL3SectorIdxLen.W))
+  }
+
+  def same_l2entry(vpn1: UInt, vpn2: UInt) = {
+    vpn1(vpnLen-1, vpnnLen) === vpn2(vpnLen-1, vpnnLen)
+  }
+
+  def from_pre(source: UInt) = {
+    (source === prefetchID.U)
+  }
+
   def printVec[T <: Data](x: Seq[T]): Printable = {
     (0 until x.length).map(i => p"(${i.U})${x(i)} ").reduce(_+_)
   }
-
 }

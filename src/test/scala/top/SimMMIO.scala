@@ -51,10 +51,6 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: config.Parameters) extends L
     node.makeIOs()
   }
 
-  def connectToSoC(soc: HaveAXI4PeripheralPort) = {
-    io_axi4 <> soc.peripheral
-  }
-
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle() {
       val uart = new UARTIO

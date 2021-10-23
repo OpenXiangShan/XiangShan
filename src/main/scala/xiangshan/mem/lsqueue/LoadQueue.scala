@@ -84,16 +84,17 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val flush = Input(Bool())
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
-    val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
+    val load_s1 = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO)) // TODO: to be renamed
+    val loadViolationQuery = Vec(LoadPipelineWidth, Flipped(new LoadViolationQueryIO))
     val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-    val dcache = Flipped(ValidIO(new Refill))
+    val dcache = Flipped(ValidIO(new Refill)) // TODO: to be renamed
+    val release = Flipped(ValidIO(new Release))
     val uncache = new DCacheWordIO
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
@@ -110,6 +111,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
+  val released = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // load data has been released by dcache
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
@@ -142,11 +144,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush)) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
+      released(index) := false.B
       miss(index) := false.B
       // listening(index) := false.B
       pending(index) := false.B
@@ -216,6 +219,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.needReplayFromRS(i)
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
       uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
+      // update replayInst (replay from fetch) bit, 
+      // for replayInst may be set to true in load pipeline
+      uop(loadWbIndex).ctrl.replayInst := io.loadIn(i).bits.uop.ctrl.replayInst
     }
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
@@ -378,7 +384,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
 
   /**
-    * Memory violation detection
+    * Store-Load Memory violation detection
     *
     * When store writes back, it searches LoadQueue for younger load instructions
     * with the same load physical address. They loaded wrong data and need re-execution.
@@ -485,8 +491,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   }
   val lastCycleRedirect = RegNext(io.brqRedirect)
   val lastlastCycleRedirect = RegNext(lastCycleRedirect)
-  val lastCycleFlush = RegNext(io.flush)
-  val lastlastCycleFlush = RegNext(lastCycleFlush)
 
   // S2: select rollback (part1) and generate rollback request
   // rollback check
@@ -564,10 +568,67 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
   // io.rollback.bits.pc := DontCare
 
-  io.rollback.valid := rollbackValidVecChecked.asUInt.orR && !lastCycleFlush && !lastlastCycleFlush
+  io.rollback.valid := rollbackValidVecChecked.asUInt.orR
 
   when(io.rollback.valid) {
     // XSDebug("Mem rollback: pc %x robidx %d\n", io.rollback.bits.cfi, io.rollback.bits.robIdx.asUInt)
+  }
+
+  /**
+  * Load-Load Memory violation detection
+  *
+  * When load arrives load_s1, it searches LoadQueue for younger load instructions
+  * with the same load physical address. If younger load has been released (or observed),
+  * the younger load needs to be re-execed.
+  * 
+  * For now, if re-exec it found to be needed in load_s1, we mark the older load as replayInst,
+  * the two loads will be replayed if the older load becomes the head of rob.
+  *
+  * When dcache releases a line, mark all writebacked entrys in load queue with
+  * the same line paddr as released.
+  */
+
+  // Load-Load Memory violation query
+  val deqRightMask = UIntToMask.rightmask(deqPtr, LoadQueueSize)
+  (0 until LoadPipelineWidth).map(i => {
+    dataModule.io.release_violation(i).paddr := io.loadViolationQuery(i).req.bits.paddr
+    io.loadViolationQuery(i).req.ready := true.B
+    io.loadViolationQuery(i).resp.valid := RegNext(io.loadViolationQuery(i).req.fire())
+    // Generate real violation mask
+    // Note that we use UIntToMask.rightmask here
+    val startIndex = io.loadViolationQuery(i).req.bits.uop.lqIdx.value
+    val lqIdxMask = UIntToMask.rightmask(startIndex, LoadQueueSize)
+    val xorMask = lqIdxMask ^ deqRightMask
+    val sameFlag = io.loadViolationQuery(i).req.bits.uop.lqIdx.flag === deqPtrExt.flag
+    val toDeqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
+    val ldld_violation_mask = WireInit(VecInit((0 until LoadQueueSize).map(j => {
+      dataModule.io.release_violation(i).match_mask(j) && // addr match
+      toDeqPtrMask(j) && // the load is younger than current load
+      allocated(j) && // entry is valid
+      released(j) && // cacheline is released
+      (datavalid(j) || miss(j)) // paddr is valid
+    })))
+    dontTouch(ldld_violation_mask)
+    ldld_violation_mask.suggestName("ldldViolationMask_" + i)
+    io.loadViolationQuery(i).resp.bits.have_violation := RegNext(ldld_violation_mask.asUInt.orR)
+  })
+
+  // "released" flag update
+  // 
+  // When io.release.valid, it uses the last ld-ld paddr cam port to
+  // update release flag in 1 cycle
+  when(io.release.valid){
+    // Take over ld-ld paddr cam port
+    dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
+    io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
+    // If a load needs that cam port, replay it from rs
+    (0 until LoadQueueSize).map(i => {
+      when(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && allocated(i) && writebacked(i)){
+        // Note: if a load has missed in dcache and is waiting for refill in load queue,
+        // its released flag still needs to be set as true if addr matches. 
+        released(i) := true.B
+      }
+    })
   }
 
   /**
@@ -652,7 +713,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // invalidate lq term using robIdx
   val needCancel = Wire(Vec(LoadQueueSize, Bool()))
   for (i <- 0 until LoadQueueSize) {
-    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect, io.flush) && allocated(i)
+    needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i)
     when (needCancel(i)) {
         allocated(i) := false.B
     }
@@ -663,8 +724,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     */
   val lastCycleCancelCount = PopCount(RegNext(needCancel))
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !(io.brqRedirect.valid || io.flush), PopCount(io.enq.req.map(_.valid)), 0.U)
-  when (lastCycleRedirect.valid || lastCycleFlush) {
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
+  when (lastCycleRedirect.valid) {
     // we recover the pointers in the next cycle after redirect
     enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
   }.otherwise {

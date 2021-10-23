@@ -51,6 +51,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     // read SSIT, get SSID
     ssit.io.raddr(i) := io.in(i).bits.foldpc
     decoders(i).io.enq.ctrl_flow.storeSetHit := ssit.io.rdata(i).valid
+    decoders(i).io.enq.ctrl_flow.loadWaitStrict := ssit.io.rdata(i).strict
     decoders(i).io.enq.ctrl_flow.ssid := ssit.io.rdata(i).ssid
 
     io.out(i).valid      := io.in(i).valid
@@ -87,7 +88,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
       val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
       val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
       val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
-      out.bits.ctrl.isFused := Mux(cond1, 1.U, Mux(cond2, 2.U, Mux(cond3, 3.U, 4.U)))
+      out.bits.ctrl.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
       XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
     }
   }

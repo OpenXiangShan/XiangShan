@@ -101,8 +101,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           replacer = Some("setplru"),
           nMissEntries = 4,
           nProbeEntries = 4,
-          nReleaseEntries = 4,
-          nStoreReplayEntries = 4,
+          nReleaseEntries = 8,
         )),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
@@ -151,7 +150,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           l3nSets = 4,
           l3nWays = 8,
           spSize = 2,
-          missQueueSize = 8
         ),
         L2CacheParamsOpt = None // remove L2 Cache
       )),
@@ -189,8 +187,7 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         replacer = Some("setplru"),
         nMissEntries = 16,
         nProbeEntries = 16,
-        nReleaseEntries = 16,
-        nStoreReplayEntries = 16
+        nReleaseEntries = 32
       ))
     )))
 })
@@ -245,7 +242,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = upParams.cores.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways + 1)
+          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
         },
         enablePerf = true
       ))
@@ -279,7 +276,7 @@ class DefaultConfig(n: Int = 1) extends Config(
 )
 
 class LargeConfig(n: Int = 1) extends Config(
-  new WithNKBL3(16 * 1024, inclusive = false, banks = 4)
+  new WithNKBL3(10 * 1024, inclusive = false, banks = 4, ways = 10)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 2, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
