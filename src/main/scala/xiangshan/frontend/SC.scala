@@ -223,6 +223,7 @@ object SCThreshold {
 
 
 trait HasSC extends HasSCParameter { this: Tage =>
+  val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   if (EnableSC) {
     val bank_scTables = BankSCTableInfos.zipWithIndex.map {
       case (info, b) =>
@@ -261,7 +262,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
       0.U.asTypeOf(Vec(TageBanks, Bool()))
     val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
       0.U.asTypeOf(Vec(TageBanks, Bool()))
-    val update_on_mispred, update_on_unconf, sc_misp_tage_corr, sc_corr_tage_misp =
+    val sc_misp_tage_corr, sc_corr_tage_misp =
       0.U.asTypeOf(Vec(TageBanks, Bool()))
   
     // for sc ctrs
@@ -383,5 +384,18 @@ trait HasSC extends HasSCParameter { this: Tage =>
     XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
     XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
     XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+    
+  }
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(3))
+  })
+  val perfEvents = Seq(
+    ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid),
+    ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
+    ("sc_update_on_unconf           ", PopCount(update_on_unconf)  ),
+  )
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

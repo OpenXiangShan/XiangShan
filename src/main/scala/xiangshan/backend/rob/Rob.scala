@@ -59,8 +59,8 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
-  val lcommit = Output(UInt(3.W))
-  val scommit = Output(UInt(3.W))
+  val lcommit = Output(UInt(log2Up(CommitWidth + 1).W))
+  val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())
@@ -892,6 +892,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
   }
+  val l1Miss = Wire(Bool())
+  l1Miss := false.B
+  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
+  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
 
 
   //difftest signals
@@ -980,5 +984,32 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+  }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(18))
+  })
+  val perfEvents = Seq(
+    ("rob_interrupt_num       ", io.flushOut.valid && intrEnable                                                                                                   ),
+    ("rob_exception_num       ", io.flushOut.valid && exceptionEnable                                                                                              ),
+    ("rob_flush_pipe_num      ", io.flushOut.valid && isFlushPipe                                                                                                  ),
+    ("rob_replay_inst_num     ", io.flushOut.valid && isFlushPipe && deqHasReplayInst                                                                              ),
+    ("rob_commitUop           ", ifCommit(commitCnt)                                                                                                               ),
+    ("rob_commitInstr         ", ifCommit(trueCommitCnt)                                                                                                           ),
+    ("rob_commitInstrMove     ", ifCommit(PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m }))                                               ),
+    ("rob_commitInstrFused    ", ifCommit(fuseCommitCnt)                                                                                                           ),
+    ("rob_commitInstrLoad     ", ifCommit(PopCount(commitLoadValid))                                                                                               ),
+    ("rob_commitInstrLoad     ", ifCommit(PopCount(commitBranchValid))                                                                                               ),
+    ("rob_commitInstrLoadWait ", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w }))                                           ),
+    ("rob_commitInstrStore    ", ifCommit(PopCount(io.commits.valid.zip(commitIsStore).map{ case (v, t) => v && t }))                                              ),
+    ("rob_walkInstr           ", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U)                                                                           ),
+    ("rob_walkCycle           ", (state === s_walk || state === s_extrawalk)                                                                                       ),
+    ("rob_1/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) < (RobSize.U/4.U))                                                                     ),
+    ("rob_2/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/4.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U/2.U))    ),
+    ("rob_3/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/2.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U*3.U/4.U))),
+    ("rob_4/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U*3.U/4.U))                                                                 ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

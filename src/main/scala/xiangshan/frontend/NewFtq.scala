@@ -19,7 +19,7 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, XSError}
+import utils.{AsyncDataModuleTemplate, CircularQueuePtr, DataModuleTemplate, HasCircularQueuePtrHelper, SRAMTemplate, SyncDataModuleTemplate, XSDebug, XSPerfAccumulate, PerfBundle, PerfEventsBundle, XSError}
 import xiangshan._
 import scala.tools.nsc.doc.model.Val
 import utils.{ParallelPriorityMux, ParallelPriorityEncoder}
@@ -1209,5 +1209,37 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //   val rasRights = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), false.B)
   //   val rasWrongs = rasCheck(commitEntry, commitEntry.metas.map(_.rasAns), true.B)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(22))
+  })
+  val perfEvents = Seq(
+    ("bpu_s2_redirect        ", bpu_s2_redirect                                                             ),
+    ("bpu_s3_redirect        ", bpu_s3_redirect                                                             ),
+    ("bpu_to_ftq_stall       ", enq.valid && ~enq.ready                                                     ),
+    ("mispredictRedirect     ", perf_redirect.valid && RedirectLevel.flushAfter === perf_redirect.bits.level),
+    ("replayRedirect         ", perf_redirect.valid && RedirectLevel.flushItself(perf_redirect.bits.level)  ),
+    ("predecodeRedirect      ", fromIfuRedirect.valid                                                       ),
+    ("to_ifu_bubble          ", io.toIfu.req.ready && !io.toIfu.req.valid                                   ),
+    ("from_bpu_real_bubble   ", !enq.valid && enq.ready && allowBpuIn                                       ),
+    ("BpInstr                ", PopCount(mbpInstrs)                                                         ),
+    ("BpBInstr               ", PopCount(mbpBRights | mbpBWrongs)                                           ),
+    ("BpRight                ", PopCount(mbpRights)                                                         ),
+    ("BpWrong                ", PopCount(mbpWrongs)                                                         ),
+    ("BpBRight               ", PopCount(mbpBRights)                                                        ),
+    ("BpBWrong               ", PopCount(mbpBWrongs)                                                        ),
+    ("BpJRight               ", PopCount(mbpJRights)                                                        ),
+    ("BpJWrong               ", PopCount(mbpJWrongs)                                                        ),
+    ("BpIRight               ", PopCount(mbpIRights)                                                        ),
+    ("BpIWrong               ", PopCount(mbpIWrongs)                                                        ),
+    ("BpCRight               ", PopCount(mbpCRights)                                                        ),
+    ("BpCWrong               ", PopCount(mbpCWrongs)                                                        ),
+    ("BpRRight               ", PopCount(mbpRRights)                                                        ),
+    ("BpRWrong               ", PopCount(mbpRWrongs)                                                        ),
+    ("ftb_false_hit          ", PopCount(ftb_false_hit)                                                     ),
+    ("ftb_hit                ", PopCount(ftb_hit)                                                           ),
+  )
 
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

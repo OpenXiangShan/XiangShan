@@ -464,6 +464,16 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
     XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.phyTag)
     XSDebug("[ICache MSHR %d] (refill)  valid%d ready:%d  data:%x \n",io.id.asUInt,io.data_write.valid,io.data_write.ready,io.data_write.bits.data.asUInt())
     XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+  val perfEvents = Seq(
+    ("icache_miss_cnt         ", io.req.fire()                                ),
+    ("icache_miss_penty       ", BoolStopWatch(start = io.req.fire(), stop = io.resp.fire() || io.flush, startHighPriority = true)                               ),
+  )
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 
 
 }
@@ -533,6 +543,13 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2*2))
+  })
+  val entry_0_perf = entries(0).perfEvents.map(_._1).zip(entries(0).perfinfo.perfEvents.perf_events)
+  val entry_1_perf = entries(1).perfEvents.map(_._1).zip(entries(1).perfinfo.perfEvents.perf_events)
+  val perfEvents = entry_0_perf ++ entry_1_perf
+  perfinfo.perfEvents.perf_events := entries(0).perfinfo.perfEvents.perf_events ++ entries(1).perfinfo.perfEvents.perf_events
 
   (0 until nWays).map{ w =>
     XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)
@@ -613,4 +630,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
   assert(!((dataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid) > 1.U))
 
+  val perfEvents = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2*2))
+  })
+  perfinfo.perfEvents := missQueue.perfinfo.perfEvents
 }

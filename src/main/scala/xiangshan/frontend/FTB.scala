@@ -503,17 +503,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   ftb_entry.display(true.B)
 
-  // XSDebug(u_valid, "Update from ftq\n")
-  // XSDebug(u_valid, "update_pc=%x, tag=%x, pred_cycle=%d\n",
-  //   update.pc, ftbAddr.getTag(update.pc), u_meta.pred_cycle)
-  // XSDebug(RegNext(u_valid), "Write into FTB\n")
-  // XSDebug(RegNext(u_valid), "hit=%d, update_write_way=%d\n",
-  //   ftbBank.io.update_hits.valid, u_meta.writeWay)
-
-
-
-
-
   XSPerfAccumulate("ftb_read_hits", RegNext(io.s0_fire) && s1_hit)
   XSPerfAccumulate("ftb_read_misses", RegNext(io.s0_fire) && !s1_hit)
 
@@ -523,4 +512,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   XSPerfAccumulate("ftb_update_req", io.update.valid)
   XSPerfAccumulate("ftb_update_ignored", io.update.valid && io.update.bits.old_entry)
   XSPerfAccumulate("ftb_updated", u_valid)
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+  val perfEvents = Seq(
+    ("ftb_commit_hits            ", u_valid  &&  update.preds.hit),
+    ("ftb_commit_misses          ", u_valid  && !update.preds.hit),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }
