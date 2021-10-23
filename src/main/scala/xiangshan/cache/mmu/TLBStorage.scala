@@ -134,6 +134,18 @@ class TLBFA(
     XSPerfAccumulate(s"refill${i}", io.w.valid && io.w.bits.wayIdx === i.U)
   }
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+  val perfEvents = Seq(
+    ("tlbstore_access            ", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _)                            ),
+    ("tlbstore_hit               ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt())),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
+
   println(s"tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
