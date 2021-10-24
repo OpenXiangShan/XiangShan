@@ -206,7 +206,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.stIn <> memBlock.io.stIn
   ctrlBlock.io.stOut <> memBlock.io.stOut
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
-  ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
+  exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
   ctrlBlock.io.writeback <> rfWriteback
 
   val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup

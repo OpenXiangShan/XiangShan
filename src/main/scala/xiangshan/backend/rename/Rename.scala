@@ -22,7 +22,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.dispatch.PreDispatchInfo
 import xiangshan.backend.rename.freelist._
 
 class Rename(implicit p: Parameters) extends XSModule {
@@ -38,7 +37,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    val dispatchInfo = Output(new PreDispatchInfo)
   })
 
   // create free list and rat
@@ -208,13 +206,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     }
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
   }
-
-  // calculate lsq space requirement
-  val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
-  val isStore = VecInit(uops.map(uop => FuType.isStoreExu(uop.ctrl.fuType)))
-  val isAMO   = VecInit(uops.map(uop => FuType.isAMO(uop.ctrl.fuType)))
-  io.dispatchInfo.lsqNeedAlloc := VecInit((0 until RenameWidth).map(i =>
-    Mux(isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)))
 
   /**
     * Instructions commit: update freelist and rename table

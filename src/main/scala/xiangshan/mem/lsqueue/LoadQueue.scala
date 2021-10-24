@@ -69,9 +69,9 @@ trait HasLoadHelper { this: XSModule =>
 class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
-  val needAlloc = Vec(RenameWidth, Input(Bool()))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(RenameWidth, Output(new LqPtr))
+  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
+  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
 }
 
 // Load Queue
@@ -120,7 +120,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
 
-  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
+  val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val deqPtrExtNext = Wire(new LqPtr)
   val allowEnqueue = RegInit(true.B)
@@ -136,11 +136,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
     * Enqueue at dispatch
     *
-    * Currently, LoadQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
+    * Currently, LoadQueue only allows enqueue when #emptyEntries > EnqWidth
     */
   io.enq.canAccept := allowEnqueue
 
-  for (i <- 0 until RenameWidth) {
+  for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
@@ -737,7 +737,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
-  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
+  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - io.enq.req.length).U
 
   /**
     * misc

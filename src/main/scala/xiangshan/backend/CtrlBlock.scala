@@ -181,7 +181,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
     val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
     val memoryViolation = Flipped(ValidIO(new Redirect))
-    val enqLsq = Flipped(new LsqEnqIO)
     val jumpPc = Output(UInt(VAddrBits.W))
     val jalr_target = Output(UInt(VAddrBits.W))
     val robio = new Bundle {
@@ -306,11 +305,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   for (i <- 0 until RenameWidth) {
     PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
-  dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
 
   dispatch.io.redirect <> stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
-  dispatch.io.enqLsq <> io.enqLsq
   dispatch.io.toIntDq <> intDq.io.enq
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
