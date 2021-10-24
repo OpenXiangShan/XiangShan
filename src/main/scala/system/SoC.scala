@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.DebugModule
-import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4ToTL, AXI4UserYanker}
+import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4ToTL, AXI4UserYanker}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
@@ -144,9 +144,16 @@ trait HaveAXI4MemPort {
     )
   ))
 
+  def mem_buffN(n: Int) = {
+    val buffers = (0 until n).map(_ => AXI4Buffer())
+    buffers.reduce((l, r) => l := r)
+    (buffers.head, buffers.last)
+  }
   val mem_xbar = TLXbar()
-  mem_xbar :=* TLBuffer() :=* TLCacheCork() :=* bankedNode
-  memAXI4SlaveNode :=
+  mem_xbar :=* TLCacheCork() :=* bankedNode
+  val (buf_l, buf_r) = mem_buffN(5)
+  memAXI4SlaveNode := buf_l
+  buf_r :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
@@ -208,7 +215,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val l3_out = TLTempNode()
   val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
-  l3_in :*= TLBuffer() :*= l3_xbar
+  l3_in :*= l3_xbar
   bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
@@ -220,7 +227,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
-    l3_xbar :=* TLBuffer() :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
+    l3_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
   }
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
