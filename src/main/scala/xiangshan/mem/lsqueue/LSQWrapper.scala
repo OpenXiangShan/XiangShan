@@ -25,6 +25,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
 import xiangshan.cache.mmu.{TlbRequestIO}
 import xiangshan.mem._
+import xiangshan.mem.mdp._
 import xiangshan.backend.rob.RobLsqIO
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
@@ -50,6 +51,7 @@ class LsqEnqIO(implicit p: Parameters) extends XSBundle {
   val needAlloc = Vec(exuParameters.LsExuCnt, Input(UInt(2.W)))
   val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
   val resp = Vec(exuParameters.LsExuCnt, Output(new LSIdx))
+  val lfst = Flipped(new DispatchLFSTIO)
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
@@ -103,6 +105,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
     io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i)
   }
+  io.enq.lfst := DontCare // lfst field is used by LFST in mem block
 
   // load queue wiring
   loadQueue.io.brqRedirect <> io.brqRedirect

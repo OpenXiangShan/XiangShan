@@ -52,7 +52,7 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 
-class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) {
+class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyModuleImp(outer) with HasXSParameter{
   val numIntStateRead = outer.numIntStateRead
   val numFpStateRead = outer.numFpStateRead
 
@@ -211,6 +211,21 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
 
       enqLsq.req(i).valid := in(i).valid && io.in(i).ready
+
+      enqLsq.lfst.req(i).valid := in(i).fire() && in(i).bits.cf.storeSetHit
+      enqLsq.lfst.req(i).bits.isstore := isStore(i)
+      enqLsq.lfst.req(i).bits.ssid := in(i).bits.cf.ssid
+      enqLsq.lfst.req(i).bits.sqIdx := in(i).bits.sqIdx
+      enqLsq.lfst.req(i).bits.robIdx := in(i).bits.robIdx
+
+      // override load delay ctrl signal with store set result
+      if(StoreSetEnable) {
+        in(i).bits.cf.loadWaitBit := enqLsq.lfst.resp(i).bits.shouldWait
+        in(i).bits.cf.waitForSqIdx := enqLsq.lfst.resp(i).bits.sqIdx
+      } else {
+        in(i).bits.cf.loadWaitBit := false.B 
+        in(i).bits.cf.waitForSqIdx := DontCare
+      }
     }
   }
 

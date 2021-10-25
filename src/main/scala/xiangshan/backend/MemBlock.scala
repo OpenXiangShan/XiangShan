@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
+import xiangshan.mem.mdp._
 import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule, PFEvent}
 import utils._
 import xiangshan.backend.exu.StdExeUnit
@@ -293,9 +294,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> RegNext(io.csrCtrl)
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  // TODO: if dcache sbuffer resp needs to ne delayed 
+  // TODO: GegNext dcache sbuffer resp if necessary  
   // sbuffer.io.dcache.pipe_resp.valid := RegNext(dcache.io.lsu.store.pipe_resp.valid)
   // sbuffer.io.dcache.pipe_resp.bits := RegNext(dcache.io.lsu.store.pipe_resp.bits)
+
+  // LFST lookup and update
+  // We look up LFST when sqIdx is generated
+  val lfst = Module(new LFST)
+  lfst.io.redirect <> RegNext(io.redirect)
+  lfst.io.storeIssue <> RegNext(io.stIn)
+  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+  lfst.io.dispatch <> io.enqLsq.lfst
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb

@@ -26,6 +26,7 @@ import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.backend.fu.{PFEvent}
+import xiangshan.mem.mdp.{SSIT, LFST}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
 import difftest._
@@ -208,6 +209,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   val decode = Module(new DecodeStage)
   val rat = Module(new RenameTableWrapper)
+  val ssit = Module(new SSIT)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
@@ -268,11 +270,18 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.frontend.toFtq.stage3Redirect := stage3Redirect
 
   decode.io.in <> io.frontend.cfVec
+  // when decode, send fold pc to mdp
+  for (i <- 0 until DecodeWidth) {
+    // TODO: move it some where else
+    ssit.io.raddr(i) := Mux(
+      rename.io.in(i).valid && rename.io.in(i).ready,
+      rename.io.in(i).bits.cf.foldpc,
+      decode.io.in(i).bits.foldpc
+    )
+  }
   // currently, we only update wait table when isReplay
-  decode.io.memPredUpdate(0) <> RegNext(redirectGen.io.memPredUpdate)
-  decode.io.memPredUpdate(1) := DontCare
-  decode.io.memPredUpdate(1).valid := false.B
-  decode.io.csrCtrl := RegNext(io.csrCtrl)
+  ssit.io.update <> RegNext(redirectGen.io.memPredUpdate)
+  ssit.io.csrCtrl := RegNext(io.csrCtrl)
 
   rat.io.robCommits := rob.io.commits
   for ((r, i) <- rat.io.intReadPorts.zipWithIndex) {
@@ -300,6 +309,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
+  rename.io.ssit <> ssit.io.rdata
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -312,8 +322,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
-  dispatch.io.csrCtrl <> io.csrCtrl
-  dispatch.io.storeIssue <> io.stIn
   dispatch.io.singleStep := false.B
 
   intDq.io.redirect <> stage2Redirect

@@ -22,7 +22,6 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import difftest._
-import xiangshan.backend.decode.{DispatchToLFST, LFST}
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.backend.rob.RobEnqIO
 import xiangshan.mem.LsqEnqIO
@@ -63,29 +62,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
-    // to store set LFST
-    val lfst = Vec(RenameWidth, Valid(new DispatchToLFST))
-    // redirect for LFST
     val redirect = Flipped(ValidIO(new Redirect))
-    // LFST ctrl
-    val csrCtrl = Input(new CustomCSRCtrlIO)
-    // LFST state sync
-    val storeIssue = Vec(StorePipelineWidth, Flipped(Valid(new ExuInput)))
     // singleStep
     val singleStep = Input(Bool())
   })
-
-
-  /**
-    * Store set LFST lookup
-    */
-  // store set LFST lookup may start from rename for better timing
-
-  val lfst = Module(new LFST)
-  lfst.io.redirect <> RegNext(io.redirect)
-  lfst.io.storeIssue <> RegNext(io.storeIssue)
-  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
-  lfst.io.dispatch := io.lfst
 
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
@@ -133,25 +113,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     }.otherwise {
       XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
     }
-    // lookup store set LFST
-    lfst.io.lookup.raddr(i) := updatedUop(i).cf.ssid
-    lfst.io.lookup.ren(i) := updatedUop(i).cf.storeSetHit
-
-    // override load delay ctrl signal with store set result
-    if(StoreSetEnable) {
-      updatedUop(i).cf.loadWaitBit := lfst.io.lookup.rdata(i) && 
-        (!isStore(i) || io.csrCtrl.storeset_wait_store)
-      updatedUop(i).cf.waitForSqIdx := lfst.io.lookup.sqIdx(i)
-    } else {
-      updatedUop(i).cf.loadWaitBit := io.fromRename(i).bits.cf.loadWaitBit && !isStore(i) // wait table does not require store to be delayed
-      updatedUop(i).cf.waitForSqIdx := DontCare
-    }
-    // update store set LFST
-    io.lfst(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit && isStore(i)
-    // or io.fromRename(i).ready && updatedUop(i).cf.storeSetHit && isStore(i), which is much slower
-    io.lfst(i).bits.robIdx := updatedUop(i).robIdx
-    io.lfst(i).bits.sqIdx := updatedUop(i).sqIdx
-    io.lfst(i).bits.ssid := updatedUop(i).cf.ssid
 
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
@@ -186,24 +147,25 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
       //   );
       // }
 
-      val mempred_check = Module(new DifftestRunaheadMemdepPred)
-      mempred_check.io.clock     := clock
-      mempred_check.io.coreid    := hardId.U
-      mempred_check.io.index     := i.U
-      mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
-      mempred_check.io.is_load   := !isStore(i) && isLs(i)
-      mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
-      mempred_check.io.pc        := updatedUop(i).cf.pc 
+      // TODO: move to dispatch2
+      // val mempred_check = Module(new DifftestRunaheadMemdepPred)
+      // mempred_check.io.clock     := clock
+      // mempred_check.io.coreid    := hardId.U
+      // mempred_check.io.index     := i.U
+      // mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
+      // mempred_check.io.is_load   := !isStore(i) && isLs(i)
+      // mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
+      // mempred_check.io.pc        := updatedUop(i).cf.pc 
 
-      when(RegNext(mempred_check.io.valid)){
-        XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
-          RegNext(GTimer()),
-          RegNext(mempred_check.io.pc),
-          RegNext(mempred_check.io.is_load),
-          RegNext(mempred_check.io.need_wait),
-          mempred_check.io.oracle_vaddr 
-        );
-      }
+      // when(RegNext(mempred_check.io.valid)){
+      //   XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
+      //     RegNext(GTimer()),
+      //     RegNext(mempred_check.io.pc),
+      //     RegNext(mempred_check.io.is_load),
+      //     RegNext(mempred_check.io.need_wait),
+      //     mempred_check.io.oracle_vaddr 
+      //   );
+      // }
       updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
   }
@@ -221,22 +183,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && isStore(i)
   )))
-  // XSPerfAccumulate("loadwait_diffmat_sywy", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sywx", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sxwy", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
-  // XSPerfAccumulate("loadwait_diffmat_sxwx", PopCount((0 until RenameWidth).map(i =>
-  //   io.fromRename(i).fire() && !updatedUop(i).cf.loadWaitBit && !io.fromRename(i).bits.cf.loadWaitBit &&
-  //   !isStore(i) && isLs(i)
-  // )))
 
   /**
     * Part 3:
