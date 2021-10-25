@@ -59,8 +59,8 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
-  val lcommit = Output(UInt(3.W))
-  val scommit = Output(UInt(3.W))
+  val lcommit = Output(UInt(log2Up(CommitWidth + 1).W))
+  val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
   val commit = Output(Bool())
@@ -76,9 +76,7 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 
-class RobDispatchData(implicit p: Parameters) extends RobCommitInfo {
-  val crossPageIPFFix = Bool()
-}
+class RobDispatchData(implicit p: Parameters) extends RobCommitInfo
 
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
@@ -164,6 +162,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val flushPipe = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool()
+  val crossPageIPFFix = Bool()
 
   def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst
   // only exceptions are allowed to writeback when enqueue
@@ -440,7 +439,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   io.exception.bits.uop.ctrl.commitType := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.uop.cf.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   io.exception.bits.uop.ctrl.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
-  io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(deqDispatchData.crossPageIPFFix, exceptionHappen)
+  io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
 
   XSDebug(io.flushOut.valid,
@@ -734,9 +733,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     wdata.ftqIdx := req.cf.ftqPtr
     wdata.ftqOffset := req.cf.ftqOffset
     wdata.pc := req.cf.pc
-    wdata.crossPageIPFFix := req.cf.crossPageIPFFix
-    wdata.isFused := req.ctrl.isFused
-    // wdata.exceptionVec := req.cf.exceptionVec
   }
   dispatchData.io.raddr := commitReadAddr_next
 
@@ -750,6 +746,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.enq(i).bits.replayInst := io.enq.req(i).bits.ctrl.replayInst
     assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
+    exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
   }
 
   // TODO: don't hard code these idxes
@@ -778,10 +775,11 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       assert(store_wb_idxes.contains(wb_index))
       selectStore _
     }
-    exceptionGen.io.wb(index).bits.exceptionVec := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
-    exceptionGen.io.wb(index).bits.flushPipe    := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
-    exceptionGen.io.wb(index).bits.replayInst   := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
-    exceptionGen.io.wb(index).bits.singleStep   := false.B
+    exceptionGen.io.wb(index).bits.exceptionVec    := selectFunc(io.exeWbResults(wb_index).bits.uop.cf.exceptionVec, false, true)
+    exceptionGen.io.wb(index).bits.flushPipe       := io.exeWbResults(wb_index).bits.uop.ctrl.flushPipe
+    exceptionGen.io.wb(index).bits.replayInst      := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
+    exceptionGen.io.wb(index).bits.singleStep      := false.B
+    exceptionGen.io.wb(index).bits.crossPageIPFFix := false.B
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
@@ -804,7 +802,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
 
   val instrCnt = RegInit(0.U(64.W))
-  val fuseCommitCnt = PopCount(io.commits.valid.zip(io.commits.info).map{ case (v, i) => v && i.isFused =/= 0.U })
+  val fuseCommitCnt = PopCount(io.commits.valid.zip(io.commits.info).map{ case (v, i) => v && CommitType.isFused(i.commitType) })
   val trueCommitCnt = commitCnt +& fuseCommitCnt
   val retireCounter = Mux(state === s_idle, trueCommitCnt, 0.U)
   instrCnt := instrCnt + retireCounter
@@ -894,6 +892,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
   }
+  val l1Miss = Wire(Bool())
+  l1Miss := false.B
+  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
+  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
 
 
   //difftest signals
@@ -930,7 +932,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
       difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
       difftest.io.instr    := RegNext(uop.cf.instr)
-      difftest.io.special  := RegNext(uop.ctrl.isFused =/= 0.U)
+      difftest.io.special  := RegNext(CommitType.isFused(uop.ctrl.commitType))
       // when committing an eliminated move instruction,
       // we must make sure that skip is properly set to false (output from EXU is random value)
       difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
@@ -982,5 +984,32 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
+  }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(18))
+  })
+  val perfEvents = Seq(
+    ("rob_interrupt_num       ", io.flushOut.valid && intrEnable                                                                                                   ),
+    ("rob_exception_num       ", io.flushOut.valid && exceptionEnable                                                                                              ),
+    ("rob_flush_pipe_num      ", io.flushOut.valid && isFlushPipe                                                                                                  ),
+    ("rob_replay_inst_num     ", io.flushOut.valid && isFlushPipe && deqHasReplayInst                                                                              ),
+    ("rob_commitUop           ", ifCommit(commitCnt)                                                                                                               ),
+    ("rob_commitInstr         ", ifCommit(trueCommitCnt)                                                                                                           ),
+    ("rob_commitInstrMove     ", ifCommit(PopCount(io.commits.valid.zip(commitIsMove).map{ case (v, m) => v && m }))                                               ),
+    ("rob_commitInstrFused    ", ifCommit(fuseCommitCnt)                                                                                                           ),
+    ("rob_commitInstrLoad     ", ifCommit(PopCount(commitLoadValid))                                                                                               ),
+    ("rob_commitInstrLoad     ", ifCommit(PopCount(commitBranchValid))                                                                                               ),
+    ("rob_commitInstrLoadWait ", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map{ case (v, w) => v && w }))                                           ),
+    ("rob_commitInstrStore    ", ifCommit(PopCount(io.commits.valid.zip(commitIsStore).map{ case (v, t) => v && t }))                                              ),
+    ("rob_walkInstr           ", Mux(io.commits.isWalk, PopCount(io.commits.valid), 0.U)                                                                           ),
+    ("rob_walkCycle           ", (state === s_walk || state === s_extrawalk)                                                                                       ),
+    ("rob_1/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) < (RobSize.U/4.U))                                                                     ),
+    ("rob_2/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/4.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U/2.U))    ),
+    ("rob_3/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U/2.U)) & (PopCount((0 until RobSize).map(valid(_))) <= (RobSize.U*3.U/4.U))),
+    ("rob_4/4_valid           ", (PopCount((0 until RobSize).map(valid(_))) > (RobSize.U*3.U/4.U))                                                                 ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

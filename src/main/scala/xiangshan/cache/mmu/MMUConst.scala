@@ -87,9 +87,9 @@ trait HasTlbConst extends HasXSParameter {
 
   val sramSinglePort = true
 
-  val timeOutThreshold = 2000
+  val timeOutThreshold = 5000
 
-  def get_idx(vpn: UInt, nSets: Int): UInt = {
+  def get_set_idx(vpn: UInt, nSets: Int): UInt = {
     vpn(log2Up(nSets)-1, 0)
   }
 

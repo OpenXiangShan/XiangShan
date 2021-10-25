@@ -45,7 +45,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val pd = new PreDecodeInfo
     val pred_taken = Bool()
     val ftqPtr = new FtqPtr
-    val ftqOffset = UInt(log2Ceil(16).W) // TODO: fix it
+    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
@@ -180,4 +180,21 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   QueuePerf(IBufSize, validEntries, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", instrHungry)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("IBuffer_Flushed        ", io.flush                                                                     ),
+    ("IBuffer_hungry         ", instrHungry                                                                  ),
+    ("IBuffer_1/4_valid      ", (validEntries >  (0*(IBufSize/4)).U) & (validEntries < (1*(IBufSize/4)).U)   ),
+    ("IBuffer_2/4_valid      ", (validEntries >= (1*(IBufSize/4)).U) & (validEntries < (2*(IBufSize/4)).U)   ),
+    ("IBuffer_3/4_valid      ", (validEntries >= (2*(IBufSize/4)).U) & (validEntries < (3*(IBufSize/4)).U)   ),
+    ("IBuffer_4/4_valid      ", (validEntries >= (3*(IBufSize/4)).U) & (validEntries < (4*(IBufSize/4)).U)   ),
+    ("IBuffer_full           ",  validEntries.andR                                                           ),
+    ("Front_Bubble           ", PopCount((0 until DecodeWidth).map(i => io.out(i).ready && !io.out(i).valid))),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

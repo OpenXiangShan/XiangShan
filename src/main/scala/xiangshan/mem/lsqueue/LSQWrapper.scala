@@ -47,9 +47,9 @@ class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
 
 class LsqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(RenameWidth, Input(UInt(2.W)))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(RenameWidth, Output(new LSIdx))
+  val needAlloc = Vec(exuParameters.LsExuCnt, Input(UInt(2.W)))
+  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(exuParameters.LsExuCnt, Output(new LSIdx))
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
@@ -59,6 +59,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
@@ -88,14 +89,17 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   io.enq.canAccept := loadQueue.io.enq.canAccept && storeQueue.io.enq.canAccept
   loadQueue.io.enq.sqCanAccept := storeQueue.io.enq.canAccept
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
-  for (i <- 0 until RenameWidth) {
-    loadQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i)(0)
-    loadQueue.io.enq.req(i).valid := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
-    loadQueue.io.enq.req(i).bits  := io.enq.req(i).bits
+  for (i <- io.enq.req.indices) {
+    loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
+    loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
+    loadQueue.io.enq.req(i).bits       := io.enq.req(i).bits
+    loadQueue.io.enq.req(i).bits.sqIdx := storeQueue.io.enq.resp(i)
 
-    storeQueue.io.enq.needAlloc(i) := io.enq.needAlloc(i)(1)
-    storeQueue.io.enq.req(i).valid := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
-    storeQueue.io.enq.req(i).bits  := io.enq.req(i).bits
+    storeQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(1)
+    storeQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
+    storeQueue.io.enq.req(i).bits       := io.enq.req(i).bits
+    storeQueue.io.enq.req(i).bits       := io.enq.req(i).bits
+    storeQueue.io.enq.req(i).bits.lqIdx := loadQueue.io.enq.resp(i)
 
     io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
     io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i)
@@ -119,6 +123,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // storeQueue.io <> DontCare
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeIn <> io.storeIn
+  storeQueue.io.storeInRe <> io.storeInRe
   storeQueue.io.storeDataIn <> io.storeDataIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
@@ -179,4 +184,13 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   io.lqFull := loadQueue.io.lqFull
   io.sqFull := storeQueue.io.sqFull
-}
+
+  val ldq_perf = loadQueue.perfEvents.map(_._1).zip(loadQueue.perfinfo.perfEvents.perf_events)
+  val stq_perf = storeQueue.perfEvents.map(_._1).zip(storeQueue.perfinfo.perfEvents.perf_events)
+  val perfEvents = ldq_perf ++ stq_perf
+  val perf_list = storeQueue.perfinfo.perfEvents.perf_events ++ loadQueue.perfinfo.perfEvents.perf_events
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
+}                          

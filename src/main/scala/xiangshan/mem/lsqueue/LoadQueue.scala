@@ -69,9 +69,9 @@ trait HasLoadHelper { this: XSModule =>
 class LqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
-  val needAlloc = Vec(RenameWidth, Input(Bool()))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(RenameWidth, Output(new LqPtr))
+  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
+  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
 }
 
 // Load Queue
@@ -120,7 +120,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(LoadQueueSize, UInt(PAddrBits.W))) // mmio: inst is an mmio inst
 
-  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
+  val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val deqPtrExtNext = Wire(new LqPtr)
   val allowEnqueue = RegInit(true.B)
@@ -136,11 +136,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
     * Enqueue at dispatch
     *
-    * Currently, LoadQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
+    * Currently, LoadQueue only allows enqueue when #emptyEntries > EnqWidth
     */
   io.enq.canAccept := allowEnqueue
 
-  for (i <- 0 until RenameWidth) {
+  for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
@@ -737,7 +737,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt)
 
-  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - RenameWidth).U
+  allowEnqueue := validCount + enqNumber <= (LoadQueueSize - io.enq.req.length).U
 
   /**
     * misc
@@ -755,6 +755,25 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("writeback_blocked", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready))))
   XSPerfAccumulate("utilization_miss", PopCount((0 until LoadQueueSize).map(i => allocated(i) && miss(i))))
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(10))
+  })
+  val perfEvents = Seq(
+    ("rollback          ", io.rollback.valid                                                               ),
+    ("mmioCycle         ", uncacheState =/= s_idle                                                         ),
+    ("mmio_Cnt          ", io.uncache.req.fire()                                                           ),
+    ("refill            ", io.dcache.valid                                                                 ),
+    ("writeback_success ", PopCount(VecInit(io.ldout.map(i => i.fire())))                                  ),
+    ("writeback_blocked ", PopCount(VecInit(io.ldout.map(i => i.valid && !i.ready)))                       ),
+    ("ltq_1/4_valid     ", (validCount < (LoadQueueSize.U/4.U))                                            ),
+    ("ltq_2/4_valid     ", (validCount > (LoadQueueSize.U/4.U)) & (validCount <= (LoadQueueSize.U/2.U))    ),
+    ("ltq_3/4_valid     ", (validCount > (LoadQueueSize.U/2.U)) & (validCount <= (LoadQueueSize.U*3.U/4.U))),
+    ("ltq_4/4_valid     ", (validCount > (LoadQueueSize.U*3.U/4.U))                                        ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
 

@@ -223,164 +223,179 @@ object SCThreshold {
 
 
 trait HasSC extends HasSCParameter { this: Tage =>
-
-  val bank_scTables = BankSCTableInfos.zipWithIndex.map {
-    case (info, b) =>
-      val tables = info.map {
-        case (nRows, ctrBits, histLen) => {
-          val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen))
-          val req = t.io.req
-          req.valid := io.s0_fire
-          req.bits.pc := s0_pc
-          req.bits.hist := io.in.bits.ghist << b
-          req.bits.phist := DontCare
-          if (!EnableSC) {t.io.update := DontCare}
-          t
+  val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  if (EnableSC) {
+    val bank_scTables = BankSCTableInfos.zipWithIndex.map {
+      case (info, b) =>
+        val tables = info.map {
+          case (nRows, ctrBits, histLen) => {
+            val t = Module(new SCTable(nRows/TageBanks, ctrBits, histLen))
+            val req = t.io.req
+            req.valid := io.s0_fire
+            req.bits.pc := s0_pc
+            req.bits.hist := io.in.bits.ghist << b
+            req.bits.phist := DontCare
+            if (!EnableSC) {t.io.update := DontCare}
+            t
+          }
+        }
+        tables
+    }
+  
+    val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
+    val useThresholds = VecInit(scThresholds map (_.thres))
+    val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
+  
+    val s1_scResps = MixedVecInit(bank_scTables.map(b => VecInit(b.map(t => t.io.resp))))
+  
+    val scUpdateMask = WireInit(0.U.asTypeOf(MixedVec(BankSCNTables.map(Vec(_, Bool())))))
+    val scUpdateTagePreds = Wire(Vec(TageBanks, Bool()))
+    val scUpdateTakens = Wire(Vec(TageBanks, Bool()))
+    val scUpdateOldCtrs = Wire(MixedVec(BankSCNTables.map(Vec(_, SInt(SCCtrBits.W)))))
+    scUpdateTagePreds := DontCare
+    scUpdateTakens := DontCare
+    scUpdateOldCtrs := DontCare
+  
+    val updateSCMetas = VecInit(updateMetas.map(_.scMeta))
+  
+    val s2_sc_used, s2_conf, s2_unconf, s2_agree, s2_disagree =
+      0.U.asTypeOf(Vec(TageBanks, Bool()))
+    val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
+      0.U.asTypeOf(Vec(TageBanks, Bool()))
+    val sc_misp_tage_corr, sc_corr_tage_misp =
+      0.U.asTypeOf(Vec(TageBanks, Bool()))
+  
+    // for sc ctrs
+    def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
+    // for tage ctrs
+    def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext -& 4.S) << 1).asSInt + 1.S) << 3).asSInt
+  
+    for (w <- 0 until TageBanks) {
+      val scMeta = resp_meta(w).scMeta
+      scMeta := DontCare
+      // do summation in s2
+      val s1_scTableSums = VecInit(
+        (0 to 1) map { i =>
+          ParallelSingedExpandingAdd(s1_scResps(w) map (r => getCentered(r.ctr(i)))) // TODO: rewrite with wallace tree
+        }
+      )
+  
+      val providerCtr = s1_providerCtrs(w)
+      val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
+      val s1_totalSums = VecInit(s1_scTableSums.map(_  +& s1_pvdrCtrCentered))
+      val s1_sumAbs = VecInit(s1_totalSums.map(_.abs.asUInt))
+      val s1_sumBelowThresholds = VecInit(s1_sumAbs map (_ <= useThresholds(w)))
+      val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
+  
+      val s2_sumBelowThresholds = RegEnable(s1_sumBelowThresholds, io.s1_fire)
+      val s2_scPreds = RegEnable(s1_scPreds, io.s1_fire)
+      val s2_sumAbs = RegEnable(s1_sumAbs, io.s1_fire)
+  
+      val s2_scCtrs = RegEnable(VecInit(s1_scResps(w).map(r => r.ctr(s1_tageTakens(w).asUInt))), io.s1_fire)
+      val s2_chooseBit = s2_tageTakens(w)
+      scMeta.tageTaken := s2_tageTakens(w)
+      scMeta.scUsed := s2_provideds(w)
+      scMeta.scPred := s2_scPreds(s2_chooseBit)
+      scMeta.ctrs   := s2_scCtrs
+  
+      when (s2_provideds(w)) {
+        s2_sc_used(w) := true.B
+        s2_unconf(w) := s2_sumBelowThresholds(s2_chooseBit)
+        s2_conf(w) := !s2_sumBelowThresholds(s2_chooseBit)
+        // Use prediction from Statistical Corrector
+        XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
+        XSDebug(p"scCtrs:$s2_scCtrs, prdrCtr:${s2_providerCtrs(w)}, sumAbs:$s2_sumAbs, tageTaken:${s2_chooseBit}\n")
+        when (!s2_sumBelowThresholds(s2_chooseBit)) {
+          val pred = s2_scPreds(s2_chooseBit)
+          val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
+          s2_agree(w) := s2_tageTakens(w) === pred
+          s2_disagree(w) := s2_tageTakens(w) =/= pred
+          // fit to always-taken condition
+          io.out.resp.s2.preds.br_taken_mask(w) := pred
+          XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
         }
       }
-      tables
-  }
-
-  val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
-  val useThresholds = VecInit(scThresholds map (_.thres))
-  val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
-
-  val s1_scResps = MixedVecInit(bank_scTables.map(b => VecInit(b.map(t => t.io.resp))))
-
-  val scUpdateMask = WireInit(0.U.asTypeOf(MixedVec(BankSCNTables.map(Vec(_, Bool())))))
-  val scUpdateTagePreds = Wire(Vec(TageBanks, Bool()))
-  val scUpdateTakens = Wire(Vec(TageBanks, Bool()))
-  val scUpdateOldCtrs = Wire(MixedVec(BankSCNTables.map(Vec(_, SInt(SCCtrBits.W)))))
-  scUpdateTagePreds := DontCare
-  scUpdateTakens := DontCare
-  scUpdateOldCtrs := DontCare
-
-  val updateSCMetas = VecInit(updateMetas.map(_.scMeta))
-
-  val s2_sc_used, s2_conf, s2_unconf, s2_agree, s2_disagree =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
-  val update_sc_used, update_conf, update_unconf, update_agree, update_disagree =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
-  val update_on_mispred, update_on_unconf, sc_misp_tage_corr, sc_corr_tage_misp =
-    0.U.asTypeOf(Vec(TageBanks, Bool()))
-
-  // for sc ctrs
-  def getCentered(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
-  // for tage ctrs
-  def getPvdrCentered(ctr: UInt): SInt = ((((ctr.zext -& 4.S) << 1).asSInt + 1.S) << 3).asSInt
-
-  for (w <- 0 until TageBanks) {
-    val scMeta = resp_meta(w).scMeta
-    scMeta := DontCare
-    // do summation in s2
-    val s1_scTableSums = VecInit(
-      (0 to 1) map { i =>
-        ParallelSingedExpandingAdd(s1_scResps(w) map (r => getCentered(r.ctr(i)))) // TODO: rewrite with wallace tree
-      }
-    )
-
-    val providerCtr = s1_providerCtrs(w)
-    val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
-    val s1_totalSums = VecInit(s1_scTableSums.map(_  +& s1_pvdrCtrCentered))
-    val s1_sumAbs = VecInit(s1_totalSums.map(_.abs.asUInt))
-    val s1_sumBelowThresholds = VecInit(s1_sumAbs map (_ <= useThresholds(w)))
-    val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
-
-    val s2_sumBelowThresholds = RegEnable(s1_sumBelowThresholds, io.s1_fire)
-    val s2_scPreds = RegEnable(s1_scPreds, io.s1_fire)
-    val s2_sumAbs = RegEnable(s1_sumAbs, io.s1_fire)
-
-    val s2_scCtrs = RegEnable(VecInit(s1_scResps(w).map(r => r.ctr(s1_tageTakens(w).asUInt))), io.s1_fire)
-    val s2_chooseBit = s2_tageTakens(w)
-    scMeta.tageTaken := s2_tageTakens(w)
-    scMeta.scUsed := s2_provideds(w)
-    scMeta.scPred := s2_scPreds(s2_chooseBit)
-    scMeta.ctrs   := s2_scCtrs
-
-    when (s2_provideds(w)) {
-      s2_sc_used(w) := true.B
-      s2_unconf(w) := s2_sumBelowThresholds(s2_chooseBit)
-      s2_conf(w) := !s2_sumBelowThresholds(s2_chooseBit)
-      // Use prediction from Statistical Corrector
-      XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
-      XSDebug(p"scCtrs:$s2_scCtrs, prdrCtr:${s2_providerCtrs(w)}, sumAbs:$s2_sumAbs, tageTaken:${s2_chooseBit}\n")
-      when (!s2_sumBelowThresholds(s2_chooseBit)) {
-        val pred = s2_scPreds(s2_chooseBit)
-        val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
-        s2_agree(w) := s2_tageTakens(w) === pred
-        s2_disagree(w) := s2_tageTakens(w) =/= pred
-        // fit to always-taken condition
-        io.out.resp.s2.preds.taken_mask(w) := pred
-        XSDebug(p"pc(${Hexadecimal(debug_pc)}) SC(${w.U}) overriden pred to ${pred}\n")
+  
+      val updateSCMeta = updateSCMetas(w)
+      val updateTageMeta = updateMetas(w)
+      when (updateValids(w) && updateSCMeta.scUsed.asBool) {
+        val scPred = updateSCMeta.scPred
+        val tagePred = updateSCMeta.tageTaken
+        val taken = update.preds.br_taken_mask(w)
+        val scOldCtrs = updateSCMeta.ctrs
+        val pvdrCtr = updateTageMeta.providerCtr
+        val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
+        val sumAbs = sum.abs.asUInt
+        scUpdateTagePreds(w) := tagePred
+        scUpdateTakens(w) := taken
+        (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
+  
+        update_sc_used(w) := true.B
+        update_unconf(w) := sumAbs < useThresholds(w)
+        update_conf(w) := sumAbs >= useThresholds(w)
+        update_agree(w) := scPred === tagePred
+        update_disagree(w) := scPred =/= tagePred
+        sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
+        sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
+  
+        val thres = useThresholds(w)
+        when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
+          val newThres = scThresholds(w).update(scPred =/= taken)
+          scThresholds(w) := newThres
+          XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
+        }
+  
+        val updateThres = updateThresholds(w)
+        when (scPred =/= taken || sumAbs < updateThres) {
+          scUpdateMask(w).foreach(_ := true.B)
+          XSDebug(sum < 0.S,
+            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+          )
+          XSDebug(sum >= 0.S,
+            p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
+            p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+          )
+          XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
+          update_on_mispred(w) := scPred =/= taken
+          update_on_unconf(w) := scPred === taken
+        }
       }
     }
-
-    val updateSCMeta = updateSCMetas(w)
-    val updateTageMeta = updateMetas(w)
-    when (updateValids(w) && updateSCMeta.scUsed.asBool) {
-      val scPred = updateSCMeta.scPred
-      val tagePred = updateSCMeta.tageTaken
-      val taken = update.preds.taken_mask(w)
-      val scOldCtrs = updateSCMeta.ctrs
-      val pvdrCtr = updateTageMeta.providerCtr
-      val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
-      val sumAbs = sum.abs.asUInt
-      scUpdateTagePreds(w) := tagePred
-      scUpdateTakens(w) := taken
-      (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
-
-      update_sc_used(w) := true.B
-      update_unconf(w) := sumAbs < useThresholds(w)
-      update_conf(w) := sumAbs >= useThresholds(w)
-      update_agree(w) := scPred === tagePred
-      update_disagree(w) := scPred =/= tagePred
-      sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
-      sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
-
-      val thres = useThresholds(w)
-      when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
-        val newThres = scThresholds(w).update(scPred =/= taken)
-        scThresholds(w) := newThres
-        XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
-      }
-
-      val updateThres = updateThresholds(w)
-      when (scPred =/= taken || sumAbs < updateThres) {
-        scUpdateMask(w).foreach(_ := true.B)
-        XSDebug(sum < 0.S,
-          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-          p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-        )
-        XSDebug(sum >= 0.S,
-          p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-          p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
-        )
-        XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
-        update_on_mispred(w) := scPred =/= taken
-        update_on_unconf(w) := scPred === taken
+  
+    
+    for (b <- 0 until TageBanks) {
+      for (i <- 0 until BankSCNTables(b)) {
+        bank_scTables(b)(i).io.update.mask := RegNext(scUpdateMask(b)(i))
+        bank_scTables(b)(i).io.update.tagePred := RegNext(scUpdateTagePreds(b))
+        bank_scTables(b)(i).io.update.taken    := RegNext(scUpdateTakens(b))
+        bank_scTables(b)(i).io.update.oldCtr   := RegNext(scUpdateOldCtrs(b)(i))
+        bank_scTables(b)(i).io.update.pc := RegNext(update.pc)
+        bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist << b)
       }
     }
+    
+    tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
+    tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
+    tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
+    tage_perf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
+    tage_perf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
+    XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
+    XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
+    XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
+    XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
+    
   }
 
-
-  for (b <- 0 until TageBanks) {
-    for (i <- 0 until BankSCNTables(b)) {
-      bank_scTables(b)(i).io.update.mask := RegNext(scUpdateMask(b)(i))
-      bank_scTables(b)(i).io.update.tagePred := RegNext(scUpdateTagePreds(b))
-      bank_scTables(b)(i).io.update.taken    := RegNext(scUpdateTakens(b))
-      bank_scTables(b)(i).io.update.oldCtr   := RegNext(scUpdateOldCtrs(b)(i))
-      bank_scTables(b)(i).io.update.pc := RegNext(update.pc)
-      bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist << b)
-    }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(3))
+  })
+  val perfEvents = Seq(
+    ("tage_tht_hit                  ", updateMetas(1).provider.valid + updateMetas(0).provider.valid),
+    ("sc_update_on_mispred          ", PopCount(update_on_mispred) ),
+    ("sc_update_on_unconf           ", PopCount(update_on_unconf)  ),
+  )
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
-
-  tage_perf("sc_conf", PopCount(s2_conf), PopCount(update_conf))
-  tage_perf("sc_unconf", PopCount(s2_unconf), PopCount(update_unconf))
-  tage_perf("sc_agree", PopCount(s2_agree), PopCount(update_agree))
-  tage_perf("sc_disagree", PopCount(s2_disagree), PopCount(update_disagree))
-  tage_perf("sc_used", PopCount(s2_sc_used), PopCount(update_sc_used))
-  XSPerfAccumulate("sc_update_on_mispred", PopCount(update_on_mispred))
-  XSPerfAccumulate("sc_update_on_unconf", PopCount(update_on_unconf))
-  XSPerfAccumulate("sc_mispred_but_tage_correct", PopCount(sc_misp_tage_corr))
-  XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
 }
