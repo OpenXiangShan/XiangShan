@@ -597,6 +597,15 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
 
+  when (!io.csrCtrl.svinval_enable) {
+    val base_ii = cs.selImm === SelImm.INVALID_INSTR
+    val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
+    val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
+    val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
+    val svinval_ii = sinval || w_inval || inval_ir
+    cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
+  }
+
   // fix frflags
   //                           fflags    zero csrrs rd    csr
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
