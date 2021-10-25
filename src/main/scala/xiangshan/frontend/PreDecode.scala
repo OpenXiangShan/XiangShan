@@ -144,11 +144,11 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   when(io.in.frontendTrigger.t.valid) {
     tdata(io.in.frontendTrigger.t.bits.addr) := io.in.frontendTrigger.t.bits.tdata
   }
-  io.out.triggered := 0.U.asTypeOf(new TriggerCf)
-  val triggerEnable = RegInit(Vec(4, false.B)) // From CSR, controlled by priv mode, etc.
+  io.out.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
+  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
   triggerEnable := io.in.csrTriggerEnable
   val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
-  val chainMapping = Map(0 -> 0, 1 -> 1, 2 -> 3, 4 -> 4)
+  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
 
   for (i <- 0 until PredictWidth) {
     //TODO: Terrible timing for pc comparing
@@ -185,13 +185,13 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.accessFault(i)      := hasAccessFault
     io.out.crossPageIPF(i)     := (io.out.pc(i) === align(realEndPC, 64) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
 //    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
-    io.out.triggered(i).triggerTiming := true.B
+    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(true.B))
     for (j <- 0 until 4) {
       val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
       io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
       io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
-      io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
+      if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
     }
 
     expander.io.in             := inst

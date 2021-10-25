@@ -188,6 +188,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.req := d
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
+  val tdata = Reg(Vec(6, new MatchTriggerIO))
+  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
+  val en = io.csrCtrl.trigger_enable
+  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
+  when(io.csrCtrl.mem_trigger.t.valid) {
+    tdata(io.csrCtrl.mem_trigger.t.bits.addr) := io.csrCtrl.mem_trigger.t.bits.tdata
+  }
+  val lTriggerMapping = Map(0 -> 4, 1 -> 5, 2 -> 9)
+  val sTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 7)
+  val lChainMapping = Map(0 -> 2)
+  val sChainMapping = Map(0 -> 1)
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -230,15 +241,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // Trigger Regs
     // addr: 0-2 for store, 3-5 for load
-    val tdata = Reg(Vec(6, new MatchTriggerIO))
-    val tEnable = RegInit(Vec(6, false.B))
-    val en = io.csrCtrl.trigger_enable
-    tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
-    when(io.csrCtrl.mem_trigger.t.valid) {
-      tdata(io.csrCtrl.mem_trigger.t.bits.addr) := io.csrCtrl.mem_trigger.t.bits.tdata
-    }
-    val lTriggerMapping = Map(0 -> 4, 1 -> 5, 2 -> 9)
-    val sTriggerMapping = Map(0 -> 2, 0 -> 3, 0 -> 7)
+
 
     // TODO: load trigger, a total of 3
     when(ldExeWbReqs(i).fire()){
@@ -251,9 +254,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       for (j <- 0 until 3) {
         val hit = Mux(tdata(j+3).select, TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)),
           TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)))
-        ldExeWbReqs(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
-        ldExeWbReqs(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
-        ldExeWbReqs(i).bits.uop.cf.trigger.triggerChainVec(lTriggerMapping(j)) := hit && tdata(j+3).chain
+        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
+        io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
+        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
       }
     }
   }
@@ -300,10 +303,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       // TriggerCmp(io.stOut(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
       for (j <- 0 until 3) {
         when(!tdata(j).select) {
-          val hit = TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
+          val hit = TriggerCmp(io.stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
           io.stOut(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
           io.stOut(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
-          io.stOut(i).bits.uop.cf.trigger.triggerChainVec(sTriggerMapping(j)) := hit && tdata(j + 3).chain
+          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
         }
       }
     }
@@ -313,10 +316,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       // TriggerCmp(lsq.io.storeDataIn(i).bits.data(XLEN-1, 0), DontCare, DontCare, DontCare)
       for (j <- 0 until 3) {
         when(tdata(j).select) {
-          val hit = TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
+          val hit = TriggerCmp(lsq.io.storeDataIn(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
           lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
           lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
-          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(sTriggerMapping(j)) := hit && tdata(j + 3).chain
+          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
         }
       }
     }

@@ -162,21 +162,21 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val flushPipe = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool()
-<<<<<<< HEAD
   val crossPageIPFFix = Bool()
   val trigger = new TriggerCf
 
   // make sure chains are fired at same timing
-  def chain_timing_fix(chain: Bool, a: Bool, b: Bool) = Mux(chain, true.B, a === b)
-  def chain_fix(chain: Bool, a: Bool, b: Bool) = Mux(chain, a, a && b)
   def trigger_vec_fix = VecInit(trigger.triggerHitVec.zipWithIndex.map{ case (hit, i) =>
-    val chain = trigger.triggerChainVec(i / 2)
-    if (i % 2 == 0) chain_fix(chain, hit,  trigger.triggerHitVec(i + 1)) && chain_timing_fix(chain, trigger.triggerTiming(i), trigger.triggerTiming(i+1))
-    else chain_fix(chain, hit,  trigger.triggerHitVec(i - 1)) && chain_timing_fix(chain, trigger.triggerTiming(i), trigger.triggerTiming(i-1))
+    def chain = trigger.triggerChainVec(i / 2)
+    if (i % 2 == 0)
+      (chain || hit === trigger.triggerHitVec(i + 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i+1)))
+    else
+      (chain || hit === trigger.triggerHitVec(i - 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i-1)))
+    true.B
   })
 
-  val trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)
-  val trigger_after = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && timing}.reduce(_ | _)
+  def trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)
+  def trigger_after = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && timing}.reduce(_ | _)
 
   def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger_vec_fix.asUInt.orR
   // only exceptions are allowed to writeback when enqueue
@@ -766,6 +766,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
+    exceptionGen.io.enq(i).bits.trigger := io.enq.req(i).bits.cf.trigger
   }
 
   // TODO: don't hard code these idxes
@@ -799,6 +800,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.wb(index).bits.replayInst      := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
     exceptionGen.io.wb(index).bits.singleStep      := false.B
     exceptionGen.io.wb(index).bits.crossPageIPFFix := false.B
+    exceptionGen.io.wb(index).bits.trigger := io.exeWbResults(wb_index).bits.uop.cf.trigger
   }
 
   // 4 fmac + 2 fmisc + 1 i2f

@@ -49,7 +49,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
-    val triggered = Bool()
+    val triggered = new TriggerCf
   }
 
   for(out <- io.out) {
@@ -134,6 +134,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     io.out(i).bits.loadWaitStrict := DontCare
     io.out(i).bits.ssid := DontCare
     io.out(i).bits.replayInst := false.B
+    io.out(i).bits.trigger := outWire.triggered
   }
   val next_head_vec = VecInit(head_vec.map(_ + numDeq))
   ibuf.io.raddr := VecInit(next_head_vec.map(_.value))

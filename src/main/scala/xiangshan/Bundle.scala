@@ -105,13 +105,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
-<<<<<<< HEAD
-  val triggerHitVec = Vec(10, Bool())
-  val triggerTiming = Bool()
-  val triggerChainVec = Vec(5, Bool())
-=======
   val trigger = new TriggerCf
->>>>>>> fbe198f5c... Add some more utils
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -466,8 +460,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 
-  val frontend_trigger = new TdataDistributeIO(2)
-  val mem_trigger = new TdataDistributeIO(3)
+  val frontend_trigger = new FrontendTdataDistributeIO()
+  val mem_trigger = new MemTdataDistributeIO()
   val trigger_enable = Output(Vec(10, Bool()))
 }
 
@@ -505,12 +499,19 @@ class TriggerCf (implicit p: Parameters) extends XSBundle {
   val triggerChainVec = Vec(5, Bool())
 }
 
-class TdataDistributeIO(addrWidth: Int)(implicit p: Parameters)  extends XSBundle {
-    val t = ValidIO(new Bundle {
-      val addr = Output(UInt(addrWidth.W))
+class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+    val t = Valid(new Bundle {
+      val addr = Output(UInt(2.W))
       val tdata = new MatchTriggerIO
     })
   }
+
+class MemTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+  val t = Valid(new Bundle {
+    val addr = Output(UInt(3.W))
+    val tdata = new MatchTriggerIO
+  })
+}
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType = Output(UInt(2.W))

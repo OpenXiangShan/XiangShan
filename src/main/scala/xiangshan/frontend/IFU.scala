@@ -71,8 +71,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
     val req = Valid(new PMPReqBundle())
     val resp = Input(new PMPRespBundle())
   })
-  val frontendTrigger = new TdataDistributeIO(2)
-  val csrTriggerEnable = Vec(4, Bool())
+  val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
+  val csrTriggerEnable = Input(Vec(4, Bool()))
 }
 
 // record the situation in which fallThruAddr falls into
@@ -97,7 +97,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val lastHalfMatch = Bool()
   val oversize      = Bool()
   val mmio = Bool()
-  val frontendTrigger = new TdataDistributeIO(2)
+  val frontendTrigger = new FrontendTdataDistributeIO
   val csrTriggerEnable = Vec(4, Bool())
 }
 
