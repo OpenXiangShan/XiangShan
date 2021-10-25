@@ -78,12 +78,9 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
   XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
 
-  val isSoftPrefetch = Wire(Bool())
-  isSoftPrefetch := s0_uop.ctrl.isORI //it's a ORI but it exists in ldu, which means it's a softprefecth
-  val isSoftPrefetchRead = Wire(Bool())
-  val isSoftPrefetchWrite = Wire(Bool())
-  isSoftPrefetchRead := s0_uop.ctrl.isSoftPrefetchRead
-  isSoftPrefetchWrite := s0_uop.ctrl.isSoftPrefetchWrite
+  val isSoftPrefetch = LSUOpType.isPrefetch(s0_uop.ctrl.fuOpType)
+  val isSoftPrefetchRead = s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r
+  val isSoftPrefetchWrite = s0_uop.ctrl.fuOpType === LSUOpType.prefetch_w
 
   // query DTLB
   io.dtlbReq.valid := io.in.valid
@@ -351,7 +348,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // when exception occurs, set it to not miss and let it write back to rob (via int port)
   if (EnableFastForward) {
     when(io.in.bits.isSoftPrefetch) {
-      io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward && !s2_cache_miss_enter && !isSoftPreExcept && !isSoftPremmio
+      io.out.bits.miss := s2_cache_miss && 
+        !s2_exception && 
+        !s2_forward_fail && 
+        !fullForward && 
+        !s2_cache_miss_enter && 
+        !isSoftPreExcept && 
+        !isSoftPremmio
     }.otherwise {
       io.out.bits.miss := s2_cache_miss && !s2_exception && !s2_forward_fail && !fullForward
     }
