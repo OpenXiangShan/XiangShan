@@ -150,7 +150,6 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val pmpResp = Flipped(new PMPRespBundle)
     val out = Decoupled(new LsPipelineBundle)
-    val lsq = ValidIO(new LsPipelineBundle())
   })
 
   val s2_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
@@ -160,9 +159,6 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   io.out.bits.mmio := (io.in.bits.mmio || io.pmpResp.mmio) && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.st
   io.out.valid := io.in.valid && (!io.out.bits.mmio || s2_exception)
-
-  io.lsq.valid := io.in.valid
-  io.lsq.bits := io.out.bits
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
@@ -195,6 +191,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
+    val lsq_replenish = Output(new LsPipelineBundle())
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
 
@@ -213,11 +210,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.feedbackSlow
+  io.lsq.bits := store_s1.io.out.bits
+  io.lsq.valid := store_s1.io.out.valid
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  store_s2.io.lsq <> io.lsq // send result to sq
   store_s2.io.pmpResp <> io.pmp
+  io.lsq_replenish := store_s2.io.out.bits // mmio and exception
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout
