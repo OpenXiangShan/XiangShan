@@ -184,6 +184,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb.map(_.pmp(0))) {
     p.env.pmp := pmp.io.pmp
+    p.env.pma := pmp.io.pma
     p.env.mode := tlbcsr.priv.dmode
     p.req := d
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -246,6 +247,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
+    stu.io.lsq_replenish <> lsq.io.storeInRe(i)
     // dtlb
     stu.io.tlb          <> dtlb_st(i).requestor(0)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
@@ -350,6 +352,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready
+  atomicsUnit.io.pmpResp := pmp_check(0).resp
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty

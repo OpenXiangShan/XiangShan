@@ -86,6 +86,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   for (p <- pmp_check) {
     p.env.mode := ModeS
     p.env.pmp := pmp.io.pmp
+    p.env.pma := pmp.io.pma
   }
 
   val missQueue = Module(new L2TlbMissQueue)

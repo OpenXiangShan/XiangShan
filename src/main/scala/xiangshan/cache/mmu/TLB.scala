@@ -154,28 +154,18 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+    val fault_valid = vmEnable && hit
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.st := (stPf || stUpdate) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && vmEnable && hit && !af
+    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
+    resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
+    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    // if vmenable, use pre-calcuated pma check result
-    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)) && vmEnable && hit
-    resp(i).bits.excp.af.st := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)) && vmEnable && hit
-    resp(i).bits.excp.af.instr := (af || Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)) && vmEnable && hit
-
-    // if !vmenable, check pma
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
-    when(!vmEnable) {
-      resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
-      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
-      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
-    }
+    resp(i).bits.excp.af.ld := af && TlbCmd.isRead(cmdReg) && fault_valid
+    resp(i).bits.excp.af.st := af && TlbCmd.isWrite(cmdReg) && fault_valid
+    resp(i).bits.excp.af.instr := af && TlbCmd.isExec(cmdReg) && fault_valid
 
     (hit, miss, validReg)
   }

@@ -56,6 +56,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
+    val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write commited store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -214,7 +215,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
       addrvalid(stWbIndex) := true.B//!io.storeIn(i).bits.mmio
-      pending(stWbIndex) := io.storeIn(i).bits.mmio
+      // pending(stWbIndex) := io.storeIn(i).bits.mmio
 
       dataModule.io.mask.waddr(i) := stWbIndex
       dataModule.io.mask.wdata(i) := io.storeIn(i).bits.mask
@@ -232,7 +233,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
 
-      mmio(stWbIndex) := io.storeIn(i).bits.mmio
+      // mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
       XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
@@ -242,6 +243,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
         io.storeIn(i).bits.paddr,
         io.storeIn(i).bits.mmio
       )
+    }
+
+    // re-replinish mmio, for pma/pmp will get mmio one cycle later
+    val storeInFireReg = RegNext(io.storeIn(i).fire())
+    val stWbIndexReg = RegNext(stWbIndex)
+    when (storeInFireReg) {
+      pending(stWbIndexReg) := io.storeInRe(i).mmio
+      mmio(stWbIndexReg) := io.storeInRe(i).mmio
     }
 
     when(vaddrModule.io.wen(i)){
