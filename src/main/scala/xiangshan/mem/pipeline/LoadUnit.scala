@@ -297,7 +297,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // assert(!s2_forward_fail)
   io.dcache_kill := false.B // move pmp resp kill to outside
   io.dcacheResp.ready := true.B
-  val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
+  val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio || s2_is_prefetch)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid)), "DCache response got lost")
 
   // merge forward result
