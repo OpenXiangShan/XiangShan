@@ -143,8 +143,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val isNextLine      = (io.out.pc(i) > nextLinePC)
     val nullInstruction = isNextLine && !isDoubleLine
 
-    val hasPageFault   = validStart(i) && ((io.out.pc(i) < nextLinePC && pageFault(0))   || (io.out.pc(i) > nextLinePC && pageFault(1)))
-    val hasAccessFault = validStart(i) && ((io.out.pc(i) < nextLinePC && accessFault(0)) || (io.out.pc(i) > nextLinePC && accessFault(1)))
+    val hasPageFault   = validStart(i) && ((io.out.pc(i) < nextLinePC && pageFault(0))   || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && pageFault(1)))
+    val hasAccessFault = validStart(i) && ((io.out.pc(i) < nextLinePC && accessFault(0)) || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && accessFault(1)))
     val exception      = hasPageFault || hasAccessFault
     val inst           = Mux(exception || nullInstruction , NOP, WireInit(rawInsts(i)))
     val expander       = Module(new RVCExpander)
