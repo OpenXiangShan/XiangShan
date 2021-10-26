@@ -363,12 +363,12 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
         hasNoSpecExec := true.B
       }
       // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
       {
         doingSvinval := true.B
       }
       // the end instruction of Svinval enqs so clear doingSvinval 
-      when(FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
       {
         doingSvinval := false.B
       }
