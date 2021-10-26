@@ -25,6 +25,7 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
+import xiangshan.backend.fu.{PFEvent}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
 import difftest._
@@ -180,7 +181,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
     val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
     val memoryViolation = Flipped(ValidIO(new Redirect))
-    val enqLsq = Flipped(new LsqEnqIO)
     val jumpPc = Output(UInt(VAddrBits.W))
     val jalr_target = Output(UInt(VAddrBits.W))
     val robio = new Bundle {
@@ -305,11 +305,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   for (i <- 0 until RenameWidth) {
     PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
-  dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
 
   dispatch.io.redirect <> stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
-  dispatch.io.enqLsq <> io.enqLsq
   dispatch.io.toIntDq <> intDq.io.enq
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
@@ -356,4 +354,42 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
+
+  val pfevent = Module(new PFEvent)
+  val csrevents = pfevent.io.hpmevent.slice(8,16)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+    val perfEventsRs      = Input(new PerfEventsBundle(NumRs))
+    val perfEventsEu0     = Input(new PerfEventsBundle(10))
+    val perfEventsEu1     = Input(new PerfEventsBundle(10))
+  })
+
+  if(print_perfcounter){
+    val decode_perf     = decode.perfEvents.map(_._1).zip(decode.perfinfo.perfEvents.perf_events)
+    val rename_perf     = rename.perfEvents.map(_._1).zip(rename.perfinfo.perfEvents.perf_events)
+    val dispat_perf     = dispatch.perfEvents.map(_._1).zip(dispatch.perfinfo.perfEvents.perf_events)
+    val intdq_perf      = intDq.perfEvents.map(_._1).zip(intDq.perfinfo.perfEvents.perf_events)
+    val fpdq_perf       = fpDq.perfEvents.map(_._1).zip(fpDq.perfinfo.perfEvents.perf_events)
+    val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
+    val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
+    val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
+
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"ctrl perf $i: $perf_name")
+    }
+  }
+
+  val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ 
+                  dispatch.perfinfo.perfEvents.perf_events ++ 
+                  intDq.perfinfo.perfEvents.perf_events ++ fpDq.perfinfo.perfEvents.perf_events ++
+                  lsDq.perfinfo.perfEvents.perf_events ++ rob.perfinfo.perfEvents.perf_events ++
+                  perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events ++ 
+                  perfinfo.perfEventsRs.perf_events
+
+  val perf_length = hpmEvents.length
+  val hpm_ctrl = Module(new HPerfmonitor(perf_length,csrevents.length))
+  hpm_ctrl.io.hpm_event := csrevents
+  hpm_ctrl.io.events_sets.perf_events := hpmEvents
+  perfinfo.perfEvents := RegNext(hpm_ctrl.io.events_selected)
+  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
 }

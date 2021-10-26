@@ -19,11 +19,13 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.chiselName
 import xiangshan._
 import utils._
 
+@chiselName
 class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
-  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p, EnableSC)
+  val (components, resp) = getBPDComponents(io.in.bits.resp_in(0), p)
   io.out.resp := resp
 
   var metas = 0.U(1.W)
@@ -72,4 +74,16 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     }
     metas(idx)
   }
+
+  val comp_1_perf = components(1).asInstanceOf[MicroBTB].perfEvents.map(_._1).zip(components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events)
+  val comp_2_perf = components(2).asInstanceOf[Tage_SC].perfEvents.map(_._1).zip(components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events)
+  val comp_3_perf = components(3).asInstanceOf[FTB].perfEvents.map(_._1).zip(components(3).asInstanceOf[FTB].perfinfo.perfEvents.perf_events)
+  val perfEvents = comp_1_perf ++ comp_2_perf ++ comp_3_perf
+  val perf_list = components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events ++
+                  components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events ++
+                  components(3).asInstanceOf[FTB].perfinfo.perfEvents.perf_events
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
 }

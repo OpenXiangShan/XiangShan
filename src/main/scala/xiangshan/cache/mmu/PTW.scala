@@ -86,6 +86,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   for (p <- pmp_check) {
     p.env.mode := ModeS
     p.env.pmp := pmp.io.pmp
+    p.env.pma := pmp.io.pma
   }
 
   val missQueue = Module(new L2TlbMissQueue)
@@ -124,9 +125,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   arb2.io.out.ready := cache.io.req.ready
 
   cache.io.req.valid := arb2.io.out.valid
-  cache.io.req.bits.vpn := arb2.io.out.bits.vpn
-  cache.io.req.bits.source := arb2.io.out.bits.source
-  cache.io.req_isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
+  cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
+  cache.io.req.bits.req_info.source := arb2.io.out.bits.source
+  cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
   cache.io.csr := csr
   cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))
@@ -230,7 +231,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info  := Mux(refill_from_mq, mq_mem.refill, fsm.io.refill.req_info)
   cache.io.refill.bits.level := Mux(refill_from_mq, 2.U, RegEnable(fsm.io.refill.level, init = 0.U, fsm.io.mem.req.fire()))
-  cache.io.refill.bits.addr_low := req_addr_low(RegNext(mem.d.bits.source))
+  cache.io.refill.bits.addr_low := RegNext(req_addr_low(mem.d.bits.source))
 
   // pmp
   pmp_check(0).req <> fsm.io.pmp.req
@@ -322,6 +323,24 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     TimeOutAssert(waiting_resp(i), timeOutThreshold, s"ptw mem resp time out wait_resp${i}")
     TimeOutAssert(flush_latch(i), timeOutThreshold, s"ptw mem resp time out flush_latch${i}")
   }
+
+
+  if(print_perfcounter){
+    val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
+    val cache_perf     = cache.perfEvents.map(_._1).zip(cache.perfinfo.perfEvents.perf_events)
+    val fsm_perf       = fsm.perfEvents.map(_._1).zip(fsm.perfinfo.perfEvents.perf_events)
+    val perfEvents  = missq_perf ++ cache_perf ++ fsm_perf
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"ptw perf $i: $perf_name")
+    }
+  }
+  val perf_list = missQueue.perfinfo.perfEvents.perf_events ++ cache.perfinfo.perfEvents.perf_events ++ fsm.perfinfo.perfEvents.perf_events
+  val perf_length = perf_list.length
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perf_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perf_list
+
 }
 
 class PTEHelper() extends ExtModule {
@@ -370,12 +389,16 @@ class PTWWrapper()(implicit p: Parameters) extends LazyModule with HasXSParamete
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new PtwIO)
-    if (useSoftPTW) {
+    val perfinfo = IO(new Bundle(){
+      val perfEvents = Output(new PerfEventsBundle(ptw.asInstanceOf[PTW].module.perf_length))
+    })
+    if(useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
       io <> fake_ptw.io
     }
     else {
-      io <> ptw.module.io
+        io <> ptw.module.io
+        perfinfo := ptw.asInstanceOf[PTW].module.perfinfo
     }
   }
 }

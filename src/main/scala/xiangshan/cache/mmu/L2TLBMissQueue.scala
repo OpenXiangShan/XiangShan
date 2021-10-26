@@ -179,8 +179,9 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    entries(enq_ptr_reg).af := io.pmp.resp.ld
-    state(enq_ptr_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
+    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+    entries(enq_ptr_reg).af := accessFault
+    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
   }
 
   val flush = io.sfence.valid || io.csr.satp.changed
@@ -223,5 +224,19 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   for (i <- 0 until MSHRSize) {
     TimeOutAssert(state(i) =/= state_idle, timeOutThreshold, s"missqueue time out no out ${i}")
+  }
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(4))
+  })
+  val perfEvents = Seq(
+    ("tlbmissq_incount           ", io.in.fire()               ),
+    ("tlbmissq_inblock           ", io.in.valid && !io.in.ready),
+    ("tlbmissq_memcount          ", io.mem.req.fire()          ),
+    ("tlbmissq_memcycle          ", PopCount(is_waiting)       ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

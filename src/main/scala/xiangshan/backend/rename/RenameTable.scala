@@ -102,16 +102,18 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   intRat.io.debug_rdata <> io.debug_int_rat
   intRat.io.readPorts <> io.intReadPorts.flatten
-  val intDestValid = io.robCommits.info.map(info => info.rfWen && info.ldest =/= 0.U)
+  val intDestValid = io.robCommits.info.map(_.rfWen)
   for ((arch, i) <- intRat.io.archWritePorts.zipWithIndex) {
     arch.wen  := !io.robCommits.isWalk && io.robCommits.valid(i) && intDestValid(i)
     arch.addr := io.robCommits.info(i).ldest
     arch.data := io.robCommits.info(i).pdest
+    XSError(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
     spec.wen  := io.robCommits.isWalk && io.robCommits.valid(i) && intDestValid(i)
     spec.addr := io.robCommits.info(i).ldest
     spec.data := io.robCommits.info(i).old_pdest
+    XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
     when (rename.wen) {

@@ -19,7 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import huancun.{DirtyField, DirtyKey}
 
@@ -317,4 +317,19 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(5))
+  })
+  val perfEvents = Seq(
+    ("dcache_wbq_req          ", io.req.fire()                                                                                                                                                              ),
+    ("dcache_wbq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))                                                                                          ),
+    ("dcache_wbq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))     ),
+    ("dcache_wbq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) ),
+    ("dcache_wbq_4/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U*3.U/4.U))                                                                                      ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

@@ -22,7 +22,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.dispatch.PreDispatchInfo
 import xiangshan.backend.rename.freelist._
 
 class Rename(implicit p: Parameters) extends XSModule {
@@ -38,7 +37,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    val dispatchInfo = Output(new PreDispatchInfo)
   })
 
   // create free list and rat
@@ -47,14 +45,11 @@ class Rename(implicit p: Parameters) extends XSModule {
   val fpFreeList = Module(new StdFreeList(StdFreeListSize))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
-  val isIntDest = io.in.map(in => in.bits.ctrl.rfWen && in.bits.ctrl.ldest =/= 0.U)
-  val isFpDest = io.in.map(_.bits.ctrl.fpWen)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
   def needDestRegCommit[T <: RobCommitInfo](fp: Boolean, x: T): Bool = {
-    // TODO: why this ldest?
-    {if(fp) x.fpWen else x.rfWen && (x.ldest =/= 0.U)}
+    if(fp) x.fpWen else x.rfWen
   }
 
   // connect [redirect + walk] ports for __float point__ & __integer__ free list
@@ -212,13 +207,6 @@ class Rename(implicit p: Parameters) extends XSModule {
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
   }
 
-  // calculate lsq space requirement
-  val isLs    = VecInit(uops.map(uop => FuType.isLoadStore(uop.ctrl.fuType)))
-  val isStore = VecInit(uops.map(uop => FuType.isStoreExu(uop.ctrl.fuType)))
-  val isAMO   = VecInit(uops.map(uop => FuType.isAMO(uop.ctrl.fuType)))
-  io.dispatchInfo.lsqNeedAlloc := VecInit((0 until RenameWidth).map(i =>
-    Mux(isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)))
-
   /**
     * Instructions commit: update freelist and rename table
     */
@@ -297,4 +285,30 @@ class Rename(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
 
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire() && out.bits.ctrl.isMove)))
+
+
+  val intfl_perf     = intFreeList.perfEvents.map(_._1).zip(intFreeList.perfinfo.perfEvents.perf_events)
+  val fpfl_perf      = fpFreeList.perfEvents.map(_._1).zip(fpFreeList.perfinfo.perfEvents.perf_events)
+  val perf_list = Wire(new PerfEventsBundle(6))
+  val perf_seq = Seq(
+    ("rename_in                   ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
+    ("rename_waitinstr            ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
+    ("rename_stall_cycle_dispatch ", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
+    ("rename_stall_cycle_fp       ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk ),
+    ("rename_stall_cycle_int      ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk ),
+    ("rename_stall_cycle_walk     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk ),
+  ) 
+  for (((perf_out,(perf_name,perf)),i) <- perf_list.perf_events.zip(perf_seq).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
+
+  val perfEvents_list = perf_list.perf_events ++
+                        intFreeList.asInstanceOf[freelist.MEFreeList].perfinfo.perfEvents.perf_events ++
+                        fpFreeList.perfinfo.perfEvents.perf_events
+
+  val perfEvents = perf_seq ++ intfl_perf ++ fpfl_perf
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perfEvents_list.length))
+  })
+  perfinfo.perfEvents.perf_events := perfEvents_list
 }

@@ -45,9 +45,9 @@ object SqPtr {
 class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
-  val needAlloc = Vec(RenameWidth, Input(Bool()))
-  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(RenameWidth, Output(new SqPtr))
+  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
+  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(exuParameters.LsExuCnt, Output(new SqPtr))
 }
 
 // Store Queue
@@ -56,6 +56,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
+    val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReqWithVaddr)) // write commited store to sbuffer
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -111,8 +112,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
 
   // ptr
-  require(StoreQueueSize > RenameWidth)
-  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
+  val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
@@ -151,10 +151,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   /**
     * Enqueue at dispatch
     *
-    * Currently, StoreQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
+    * Currently, StoreQueue only allows enqueue when #emptyEntries > EnqWidth
     */
   io.enq.canAccept := allowEnqueue
-  for (i <- 0 until RenameWidth) {
+  for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
@@ -215,7 +215,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
       addrvalid(stWbIndex) := true.B//!io.storeIn(i).bits.mmio
-      pending(stWbIndex) := io.storeIn(i).bits.mmio
+      // pending(stWbIndex) := io.storeIn(i).bits.mmio
 
       dataModule.io.mask.waddr(i) := stWbIndex
       dataModule.io.mask.wdata(i) := io.storeIn(i).bits.mask
@@ -233,7 +233,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
 
-      mmio(stWbIndex) := io.storeIn(i).bits.mmio
+      // mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
       XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
@@ -243,6 +243,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
         io.storeIn(i).bits.paddr,
         io.storeIn(i).bits.mmio
       )
+    }
+
+    // re-replinish mmio, for pma/pmp will get mmio one cycle later
+    val storeInFireReg = RegNext(io.storeIn(i).fire())
+    val stWbIndexReg = RegNext(stWbIndex)
+    when (storeInFireReg) {
+      pending(stWbIndexReg) := io.storeInRe(i).mmio
+      mmio(stWbIndexReg) := io.storeInRe(i).mmio
     }
 
     when(vaddrModule.io.wen(i)){
@@ -451,7 +459,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     * (1) When store commits, mark it as commited.
     * (2) They will not be cancelled and can be sent to lower level.
     */
-  XSError(uncacheState === s_wait && commitCount > 1.U, "should only commit one instruction when there's an MMIO\n")
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
@@ -562,7 +569,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
 
-  allowEnqueue := validCount + enqNumber <= (StoreQueueSize - RenameWidth).U
+  allowEnqueue := validCount + enqNumber <= (StoreQueueSize - io.enq.req.length).U
 
   // io.sqempty will be used by sbuffer
   // We delay it for 1 cycle for better timing
@@ -581,6 +588,23 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   XSPerfAccumulate("cmtEntryCnt", distanceBetween(cmtPtrExt(0), deqPtrExt(0)))
   XSPerfAccumulate("nCmtEntryCnt", distanceBetween(enqPtrExt(0), cmtPtrExt(0)))
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("mmioCycle         ", uncacheState =/= s_idle                                                                                                                             ),
+    ("mmioCnt           ", io.uncache.req.fire()                                                                                                                               ),
+    ("mmio_wb_success   ", io.mmioStout.fire()                                                                                                                                 ),
+    ("mmio_wb_blocked   ", io.mmioStout.valid && !io.mmioStout.ready                                                                                                           ),
+    ("stq_1/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) < (StoreQueueSize.U/4.U))                                                                              ),
+    ("stq_2/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/4.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U/2.U))    ),
+    ("stq_3/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U/2.U)) & (distanceBetween(enqPtrExt(0), deqPtrExt(0)) <= (StoreQueueSize.U*3.U/4.U))),
+    ("stq_4/4_valid     ", (distanceBetween(enqPtrExt(0), deqPtrExt(0)) > (StoreQueueSize.U*3.U/4.U))                                                                          ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
 

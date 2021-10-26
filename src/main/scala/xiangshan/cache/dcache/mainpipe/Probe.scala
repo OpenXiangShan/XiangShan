@@ -22,7 +22,7 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
 
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -180,5 +180,19 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
+  }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(5))
+  })
+  val perfEvents = Seq(
+    ("dcache_probq_req          ", io.pipe_req.fire()                                                                                                                                                                       ),
+    ("dcache_probq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nProbeEntries.U/4.U))                                                                                       ),
+    ("dcache_probq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U/2.U))    ),
+    ("dcache_probq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U*3.U/4.U))),
+    ("dcache_probq_4/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U*3.U/4.U))                                                                                   ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

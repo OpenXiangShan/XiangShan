@@ -22,8 +22,9 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheWordIOWithVaddr, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbRequestIO, TlbCmd}
+import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import difftest._
+import xiangshan.backend.fu.PMPRespBundle
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
@@ -32,6 +33,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val out           = Decoupled(new ExuOutput)
     val dcache        = new DCacheWordIOWithVaddr
     val dtlb          = new TlbRequestIO
+    val pmpResp       = Flipped(new PMPRespBundle())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
@@ -42,7 +44,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
+  val s_invalid :: s_tlb :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
   val state = RegInit(s_invalid)
   val data_valid = RegInit(false.B)
   val in = Reg(new ExuInput())
@@ -140,7 +142,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         io.dtlb.resp.bits.excp.pf.ld ||
         io.dtlb.resp.bits.excp.af.st ||
         io.dtlb.resp.bits.excp.af.ld
-      is_mmio := io.dtlb.resp.bits.mmio
       when (exception) {
         // check for exceptions
         // if there are exceptions, no need to execute it
@@ -148,11 +149,21 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         atom_override_xtval := true.B
       } .otherwise {
         paddr := io.dtlb.resp.bits.paddr
-        state := s_flush_sbuffer_req
+        state := s_pm
       }
     }
   }
 
+  when (state === s_pm) {
+    is_mmio := io.pmpResp.mmio
+    val exception = io.pmpResp.st
+    when (exception) {
+      state := s_finish
+      atom_override_xtval := true.B
+    }.otherwise {
+      state := s_flush_sbuffer_req
+    }
+  }
 
   when (state === s_flush_sbuffer_req) {
     io.flush_sbuffer.valid := true.B

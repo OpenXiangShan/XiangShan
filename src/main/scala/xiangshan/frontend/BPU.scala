@@ -32,14 +32,18 @@ trait HasBPUConst extends HasXSParameter with HasIFUConst {
   val numBr = 2
   val useBPD = true
   val useLHist = true
+  val shareTailSlot = true
+  val numBrSlot = if (shareTailSlot) numBr-1 else numBr
+  val totalSlot = numBrSlot + 1
 
-  def BP_S1 = 1.U(2.W)
-  def BP_S2 = 2.U(2.W)
-  def BP_S3 = 3.U(2.W)
-
-
+  def BP_STAGES = (0 until 3).map(_.U(2.W))
+  def BP_S1 = BP_STAGES(0)
+  def BP_S2 = BP_STAGES(1)
+  def BP_S3 = BP_STAGES(2)
+  val numBpStages = BP_STAGES.length
+  
   val debug = true
-  val resetVector = 0x80000000L//TODO: set reset vec
+  val resetVector = 0x10000000L//TODO: set reset vec
   // TODO: Replace log2Up by log2Ceil
 }
 
@@ -237,7 +241,7 @@ class FakeBPU(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   io.bpu_to_ftq.resp.bits := 0.U.asTypeOf(new BranchPredictionBundle)
   io.bpu_to_ftq.resp.bits.s1.pc := s0_pc
-  io.bpu_to_ftq.resp.bits.s1.ftb_entry.pftAddr := s0_pc + 32.U
+  io.bpu_to_ftq.resp.bits.s1.ftb_entry.pftAddr := s0_pc + (FetchWidth*4).U
 }
 
 @chiselName
@@ -360,13 +364,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   // History manage
   // s1
-  val s1_shift = Mux(resp.s1.preds.hit,
-    Mux(resp.s1.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s1.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s1.real_br_taken_mask.asUInt))),
-    0.U((log2Ceil(numBr)+1).W))
-  val s1_taken = Mux(resp.s1.preds.hit, resp.s1.real_br_taken_mask.asUInt =/= 0.U, false.B)
-  val s1_predicted_ghist = s1_ghist.update(s1_shift, s1_taken)
+  val s1_predicted_ghist = s1_ghist.update(resp.s1.preds.br_valids, resp.s1.real_br_taken_mask())
 
-  XSDebug(p"[hit] ${resp.s1.preds.hit} [s1_real_br_taken_mask] ${Binary(resp.s1.real_br_taken_mask.asUInt)} [s1_shift] ${s1_shift} [s1_taken] ${s1_taken}\n")
+  XSDebug(p"[hit] ${resp.s1.preds.hit} [s1_real_br_taken_mask] ${Binary(resp.s1.real_br_taken_mask.asUInt)}\n")
   XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
 
   when(s1_valid) {
@@ -376,17 +376,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   }
 
   // s2
-  val s2_shift = Mux(resp.s2.preds.hit,
-    Mux(resp.s2.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s2.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s2.real_br_taken_mask.asUInt))),
-    0.U((log2Ceil(numBr)+1).W))
-  val s2_taken = Mux(resp.s2.preds.hit, resp.s2.real_br_taken_mask.asUInt =/= 0.U, false.B)
-  val s2_predicted_ghist = s2_ghist.update(s2_shift, s2_taken)
+  val s2_predicted_ghist = s2_ghist.update(resp.s2.preds.br_valids, resp.s2.real_br_taken_mask())
 
   val s2_correct_s1_ghist = s1_ghist =/= s2_predicted_ghist
   val s2_correct_s0_ghist_reg = s0_ghist_reg =/= s2_predicted_ghist
 
-  val previous_s1_pred_taken = RegEnable(resp.s1.real_taken_mask.asUInt.orR, init=false.B, enable=s1_fire)
-  val s2_pred_taken = resp.s2.real_taken_mask.asUInt.orR
+  val previous_s1_pred_taken = RegEnable(resp.s1.real_slot_taken_mask.asUInt.orR, init=false.B, enable=s1_fire)
+  val s2_pred_taken = resp.s2.real_slot_taken_mask.asUInt.orR
 
   when(s2_fire) {
     when((s1_valid && (s1_pc =/= resp.s2.target || s2_correct_s1_ghist)) ||
@@ -414,22 +410,18 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   XSPerfAccumulate("s2_redirect_target_diff_both_hit",  s2_redirect_target &&  s2_saw_s1_hit &&  resp.s2.preds.hit)
   XSPerfAccumulate("s2_redirect_br_direction_diff",
     s2_redirect_target_both_hit &&
-    RegEnable(PriorityEncoder(resp.s1.preds.taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.taken_mask))
+    RegEnable(PriorityEncoder(resp.s1.preds.br_taken_mask), s1_fire) =/= PriorityEncoder(resp.s2.preds.br_taken_mask))
   XSPerfAccumulate("s2_redirect_because_ghist_diff", s2_fire && s1_valid && s2_correct_s1_ghist)
 
   // s3
-  val s3_shift = Mux(resp.s3.preds.hit,
-    Mux(resp.s3.real_br_taken_mask.asUInt === 0.U, PopCount(resp.s3.ftb_entry.brValids), PopCount(LowerMaskFromLowest(resp.s3.real_br_taken_mask.asUInt))),
-    0.U((log2Ceil(numBr)+1).W))
-  val s3_taken = Mux(resp.s3.preds.hit, resp.s3.real_br_taken_mask.asUInt =/= 0.U, false.B)
-  val s3_predicted_ghist = s3_ghist.update(s3_shift, s3_taken)
+  val s3_predicted_ghist = s3_ghist.update(resp.s3.preds.br_valids, resp.s3.real_br_taken_mask())
 
   val s3_correct_s2_ghist = s2_ghist =/= s3_predicted_ghist
   val s3_correct_s1_ghist = s1_ghist =/= s3_predicted_ghist
   val s3_correct_s0_ghist_reg = s0_ghist_reg =/= s3_predicted_ghist
 
-  val previous_s2_pred_taken = RegEnable(resp.s2.real_taken_mask.asUInt.orR, init=false.B, enable=s2_fire)
-  val s3_pred_taken = resp.s3.real_taken_mask.asUInt.orR
+  val previous_s2_pred_taken = RegEnable(resp.s2.real_slot_taken_mask.asUInt.orR, init=false.B, enable=s2_fire)
+  val s3_pred_taken = resp.s3.real_slot_taken_mask.asUInt.orR
 
   when(s3_fire) {
     when((s2_valid && (s2_pc =/= resp.s3.target || s3_correct_s2_ghist)) ||
@@ -517,5 +509,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
 
   XSPerfAccumulate("s2_redirect", s2_redirect)
   XSPerfAccumulate("s3_redirect", s3_redirect)
+
+  val perfEvents = predictors.asInstanceOf[Composer].perfEvents.map(_._1).zip(predictors.asInstanceOf[Composer].perfinfo.perfEvents.perf_events)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(predictors.asInstanceOf[Composer].perfinfo.perfEvents.perf_events.length))
+  })
+  perfinfo.perfEvents := predictors.asInstanceOf[Composer].perfinfo.perfEvents
 
 }

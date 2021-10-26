@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, LazyModuleImpL
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLTempNode, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLIdentityNode, TLNode, TLTempNode, TLXbar}
 import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
@@ -56,9 +56,15 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   busPMU := l1d_logger
   l1_xbar :=* busPMU
 
+  def bufferN[T <: TLNode](n: Int, sink: T, source: T) = {
+    val buffers = (0 until n).map(_ => TLBuffer())
+    val nodes = sink +: buffers :+ source
+    nodes.reduce((x, y) => x :=* y)
+  }
+
   l2_binder match {
     case Some(binder) =>
-      memory_port :=* binder
+      bufferN(5, memory_port, binder)
     case None =>
       memory_port := l1_xbar
   }
@@ -96,13 +102,20 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (coreParams.dcacheParametersOpt.nonEmpty) {
     misc.l1d_logger := core.memBlock.dcache.clientNode
   }
-  misc.busPMU := core.frontend.icache.clientNode
+  misc.busPMU :=
+    TLLogger(s"L2_L1I_$hardId", !debugOpts.FPGAPlatform) :=
+    TLBuffer() :=
+    core.frontend.icache.clientNode
+
   if (!coreParams.softPTW) {
-    misc.busPMU := core.ptw.node
+    misc.busPMU :=
+      TLLogger(s"L2_PTW_$hardId", !debugOpts.FPGAPlatform) :=
+      TLBuffer() :=
+      core.ptw.node
   }
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2.node :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= misc.l1_xbar
     case None =>
   }
 
@@ -112,16 +125,28 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
+      val reset = Input(Bool())
     })
 
     core.module.io.hartId := io.hartId
+    if(l2cache.isDefined){
+      core.module.io.perfEvents <> l2cache.get.module.io.perfEvents.flatten
+    }
+    else {
+      core.module.io.perfEvents <> DontCare
+    }
 
     misc.module.beu_errors <> core.module.io.beu_errors
 
-    val core_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    core.module.reset := core_reset_gen.io.out
-
-    val l2_reset_gen = Module(new ResetGen(1, !debugOpts.FPGAPlatform))
-    l2cache.foreach( _.module.reset := l2_reset_gen.io.out)
+    // Modules are reset one by one
+    // io_reset ----
+    //             |
+    //             v
+    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
+    val l2cacheMod = if (l2cache.isDefined) Seq(l2cache.get.module) else Seq()
+    val resetChain = Seq(
+      Seq(misc.module, core.module) ++ l2cacheMod
+    )
+    ResetGen(resetChain, reset.asBool || io.reset, !debugOpts.FPGAPlatform)
   }
 }

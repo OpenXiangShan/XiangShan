@@ -26,7 +26,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu.{BTlbPtwIO, PtwResp, TLB, TlbReplace}
 import xiangshan.mem._
-import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule}
+import xiangshan.backend.fu.{FenceToSbuffer, FunctionUnit, HasExceptionNO, PMP, PMPChecker, PMPModule, PFEvent}
 import utils._
 import xiangshan.backend.exu.StdExeUnit
 
@@ -184,6 +184,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb.map(_.pmp(0))) {
     p.env.pmp := pmp.io.pmp
+    p.env.pma := pmp.io.pma
     p.env.mode := tlbcsr.priv.dmode
     p.req := d
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -204,6 +205,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
+    // ld-ld violation check
+    loadUnits(i).io.lsq.loadViolationQuery <> lsq.io.loadViolationQuery(i)
+    loadUnits(i).io.csrCtrl <> io.csrCtrl
     // dtlb
     loadUnits(i).io.tlb           <> dtlb_ld(i).requestor(0)
     // pmp
@@ -243,6 +247,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.issue(exuParameters.LduCnt + i)
     stu.io.lsq          <> lsq.io.storeIn(i)
+    stu.io.lsq_replenish <> lsq.io.storeInRe(i)
     // dtlb
     stu.io.tlb          <> dtlb_st(i).requestor(0)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
@@ -281,6 +286,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // TODO: remove RegNext after fixing refill paddr timing
   // lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
+  lsq.io.release        := dcache.io.lsu.release
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
@@ -346,6 +352,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready
+  atomicsUnit.io.pmpResp := pmp_check(0).resp
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
@@ -387,4 +394,43 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSPerfAccumulate("store_rs_deq_count", stDeqCount)
   XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 1, 2, 1)
   XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  val csrevents = pfevent.io.hpmevent.slice(16,24)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+    val perfEventsPTW     = Input(new PerfEventsBundle(19))
+  })
+  val perfEvents_list = Wire(new PerfEventsBundle(2))
+  val perfEvents = Seq(
+    ("ldDeqCount                   ", ldDeqCount      ),
+    ("stDeqCount                   ", stDeqCount      ),
+  ) 
+  for (((perf_out,(perf_name,perf)),i) <- perfEvents_list.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
+
+  if(print_perfcounter){
+    val ldu0_perf     = loadUnits(0).perfEvents.map(_._1).zip(loadUnits(0).perfinfo.perfEvents.perf_events)
+    val ldu1_perf     = loadUnits(1).perfEvents.map(_._1).zip(loadUnits(1).perfinfo.perfEvents.perf_events)
+    val sbuf_perf     = sbuffer.perfEvents.map(_._1).zip(sbuffer.perfinfo.perfEvents.perf_events)
+    val lsq_perf      = lsq.perfEvents.map(_._1).zip(lsq.perfinfo.perfEvents.perf_events)
+    val dc_perf       = dcache.perfEvents.map(_._1).zip(dcache.perfinfo.perfEvents.perf_events)
+    val mem_perf = perfEvents ++ ldu0_perf ++ ldu1_perf ++ sbuf_perf ++ lsq_perf ++ dc_perf
+    for (((perf_name,perf),i) <- mem_perf.zipWithIndex) {
+      println(s"lsu perf $i: $perf_name")
+    }
+  }
+
+  val hpmEvents = perfEvents_list.perf_events ++ loadUnits(0).perfinfo.perfEvents.perf_events ++ 
+                  loadUnits(1).perfinfo.perfEvents.perf_events ++ sbuffer.perfinfo.perfEvents.perf_events ++ 
+                  lsq.perfinfo.perfEvents.perf_events ++ dcache.perfinfo.perfEvents.perf_events ++ 
+                  perfinfo.perfEventsPTW.perf_events
+  val perf_length = hpmEvents.length
+
+  val hpm_lsu = Module(new HPerfmonitor(perf_length,csrevents.length))
+  hpm_lsu.io.hpm_event := csrevents
+  hpm_lsu.io.events_sets.perf_events := hpmEvents
+  perfinfo.perfEvents := RegNext(hpm_lsu.io.events_selected)
 }

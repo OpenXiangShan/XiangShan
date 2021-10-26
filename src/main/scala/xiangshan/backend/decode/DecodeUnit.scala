@@ -577,21 +577,19 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   cs.isSoftPrefetchRead := false.B
   cs.isSoftPrefetchWrite := false.B
 
-  cs.isFused := 0.U
-
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  cs.isMove := isMove
+  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
 
   // read src1~3 location
-  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
-  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)
-  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)
+  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U, ctrl_flow.instr(RS1_MSB, RS1_LSB))
+  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
+  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
   // read dest location
-  cs.ldest := Mux((cs.fpWen || cs.rfWen) && !(isMove && ctrl_flow.instr(RS1_MSB,RS1_LSB) === ctrl_flow.instr(RD_MSB,RD_LSB)), ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
+  cs.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
 
   // fill in exception vector
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
