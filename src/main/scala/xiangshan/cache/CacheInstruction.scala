@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.frontend._
+import xiangshan.frontend.icache._
 import utils._
 import chipsalliance.rocketchip.config.Parameters
 import xiangshan.backend.fu.util.HasCSRConst
