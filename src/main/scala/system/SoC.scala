@@ -28,7 +28,7 @@ import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParam
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
 import huancun.debug.TLLogger
-import huancun.{CacheParameters, HCCacheParameters}
+import huancun.{CacheParameters, HCCacheParameters, BankedXbar}
 import top.BusPerfMonitor
 
 case object SoCParamsKey extends Field[SoCParameters]
@@ -80,6 +80,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
+  val l3_banked_xbar = BankedXbar(soc.cores.head.L2NBanks)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -215,7 +216,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val l3_out = TLTempNode()
   val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
-  l3_in :*= l3_xbar
+  l3_in :*= l3_banked_xbar
   bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
@@ -227,8 +228,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
-    l3_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
+    l3_banked_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
   }
+  l3_banked_xbar :=* BankBinder(soc.cores.head.L2NBanks, L3BlockSize) :*= l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar

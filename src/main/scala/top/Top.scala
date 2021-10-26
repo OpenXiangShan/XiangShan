@@ -92,7 +92,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= misc.l3_in
+      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
     case None =>
   }
 
