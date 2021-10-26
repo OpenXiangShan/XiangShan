@@ -479,12 +479,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val smblockctl = RegInit(UInt(XLEN.W), "hf".U & StoreBufferThreshold.U)
   csrio.customCtrl.sbuffer_threshold := smblockctl(3, 0)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h1".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
-
-  // for Svinval extension
-  val sinvalctl = RegInit(UInt(XLEN.W), "h1".U)
-  csrio.customCtrl.svinval_enable := sinvalctl(0)
+  csrio.customCtrl.svinval_enable := srnctl(1)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)
@@ -628,7 +625,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Slvpredctl, slvpredctl),
     MaskedRegMap(Smblockctl, smblockctl),
     MaskedRegMap(Srnctl, srnctl),
-    MaskedRegMap(Sinvalctl, sinvalctl),
 
     //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
