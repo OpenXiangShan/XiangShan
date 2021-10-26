@@ -158,22 +158,29 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   val req = Reg(new ICacheProbeReq)
   val req_vidx = get_idx(req.vaddr)
 
-  val meta_read = Wire(new ICacheMetadata)
-  val data_read = Wire(UInt((blockBits).W))
+  val phy_tag = get_phy_tag(req.addr)
+  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid()})
+  val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
+  val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
 
-  meta_read := DontCare
-  data_read := DontCare
+  val probeline_vec_reg  = RegEnable(next = hit_vec.asUInt, enable = RegNext(io.meta_read.fire()) )
+  val probeline_cohs_reg = RegEnable(next = hit_coh, enable = RegNext(io.meta_read.fire()) )
+  val probeline_data_reg = RegEnable(next = hit_data, enable = RegNext(io.data_read.fire()) )
+  val probeline_coh  = Mux(RegNext(io.meta_read.fire()), hit_coh, probeline_cohs_reg)
+  val probeline_data = Mux(RegNext(io.data_read.fire()), hit_data, probeline_data_reg)
 
   io.req.ready := state === s_idle
 
-  val (_, probe_shrink_param, probe_new_coh) = meta_read.coh.onProbe(req.probe_param)
+  val (_, probe_shrink_param, probe_new_coh) = probeline_coh.onProbe(req.probe_param)
 
   io.release_req.valid          := state === s_send_release
   io.release_req.bits.addr      := req.addr
   io.release_req.bits.param     := probe_shrink_param
   io.release_req.bits.voluntary := false.B
   io.release_req.bits.hasData   := true.B
-  io.release_req.bits.data      := data_read
+  io.release_req.bits.data      := probeline_data
+  io.release_req.bits.vaddr     := DontCare
+  io.release_req.bits.waymask   := DontCare
 
   io.meta_read.valid := state === s_read_array
   io.meta_read.bits.isDoubleLine := false.B
@@ -185,13 +192,9 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   io.data_read.bits.vSetIdx(0) := req_vidx
   io.data_read.bits.vSetIdx(1) := DontCare
 
-  val phy_tag = get_phy_tag(req.addr)
-  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid() && io.meta_response.valid(0)(i)})
-  val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
-  val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
 
   io.meta_write.valid := (state === s_write_back)
-  io.meta_write.bits.generate(tag = meta_read.tag, coh = probe_new_coh, idx = get_idx(req.vaddr), waymask = hit_vec.asUInt, bankIdx = req_vidx(0))
+  io.meta_write.bits.generate(tag = phy_tag, coh = probe_new_coh, idx = get_idx(req.vaddr), waymask = probeline_vec_reg, bankIdx = req_vidx(0))
 
   //state change
   switch(state) {
@@ -210,9 +213,6 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
     }
 
     is(s_send_release) {
-      meta_read.tag := phy_tag
-      meta_read.coh := hit_coh
-      data_read     := hit_data
       when(io.release_req.fire()){
         state := s_write_back
       }
@@ -221,6 +221,9 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
     is(s_write_back) {
       state := Mux(io.meta_write.fire() , s_idle, s_write_back)
     }
+  }
 
+  when(RegNext(io.meta_read.fire())){
+    assert(PopCount(hit_vec) === 1.U)
   }
 }
