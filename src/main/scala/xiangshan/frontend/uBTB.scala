@@ -96,9 +96,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.preds.fromFtbEntry(read_entry.entry, s1_pc)
 
   when(!bank.read_hit) {
-    io.out.resp.s1.ftb_entry.pftAddr := s1_pc(instOffsetBits + log2Ceil(PredictWidth), instOffsetBits) ^ (1 << log2Ceil(PredictWidth)).U
-    io.out.resp.s1.ftb_entry.carry := s1_pc(instOffsetBits + log2Ceil(PredictWidth)).asBool
-    io.out.resp.s1.ftb_entry.oversize := false.B
+    io.out.resp.s1.ftb_entry.onNotHit(s1_pc)
   }
 
   outMeta.hit := bank.read_hit
@@ -109,7 +107,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   val u_valid = RegNext(io.update.valid)
   val u_pc = update.pc
   val u_taken = update.preds.taken
-  val u_taken_mask = update.preds.taken_mask
+  val u_br_taken_mask = update.preds.br_taken_mask
   val u_meta = update.meta.asTypeOf(new MicroBTBOutMeta)
 
   val u_tag = ubtbAddr.getTag(u_pc)
@@ -122,12 +120,12 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
   XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
-    io.out.resp.s1.target, io.out.resp.s1.real_taken_mask.asUInt, io.out.resp.s1.preds.taken_mask.asUInt, read_entry.entry.brValids.asUInt, read_entry.entry.jmpValid.asUInt)
+    io.out.resp.s1.target, io.out.resp.s1.real_slot_taken_mask.asUInt, io.out.resp.s1.preds.br_taken_mask.asUInt, read_entry.entry.brValids.asUInt, read_entry.entry.jmpValid.asUInt)
 
   XSDebug(u_valid, "[update]Update from ftq\n")
   XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, ubtbAddr.getTag(u_pc))
   XSDebug(u_valid, "[update]taken_mask=%b, brValids=%b, jmpValid=%b\n",
-    u_taken_mask.asUInt, update.ftb_entry.brValids.asUInt, update.ftb_entry.jmpValid)
+    u_br_taken_mask.asUInt, update.ftb_entry.brValids.asUInt, update.ftb_entry.jmpValid)
 
   XSPerfAccumulate("ubtb_read_hits", RegNext(io.s1_fire) && bank.read_hit)
   XSPerfAccumulate("ubtb_read_misses", RegNext(io.s1_fire) && !bank.read_hit)
@@ -135,5 +133,15 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   XSPerfAccumulate("ubtb_commit_hits", u_valid && u_meta.hit)
   XSPerfAccumulate("ubtb_commit_misses", u_valid && !u_meta.hit)
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+  val perfEvents = Seq(
+    ("ubtb_commit_hits       ", u_valid &&  u_meta.hit),
+    ("ubtb_commit_misse      ", u_valid && !u_meta.hit),
+  )
 
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

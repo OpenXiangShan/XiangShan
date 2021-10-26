@@ -80,7 +80,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val finish = WireInit(false.B)
   val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val accessFault = RegEnable(io.pmp.resp.ld, sent_to_pmp)
+  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
   val pageFault = memPte.isPf(level)
   switch (state) {
     is (s_idle) {
@@ -192,4 +192,21 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
   TimeOutAssert(state =/= s_idle, timeOutThreshold, "page table walker time out")
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(7))
+  })
+  val perfEvents = Seq(
+    ("fsm_count         ", io.req.fire()                                     ),
+    ("fsm_busy          ", state =/= s_idle                                  ),
+    ("fsm_idle          ", state === s_idle                                  ),
+    ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
+    ("mem_count         ", mem.req.fire()                                    ),
+    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
+    ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

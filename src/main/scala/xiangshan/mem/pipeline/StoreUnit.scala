@@ -94,7 +94,6 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val rsFeedback = ValidIO(new RSFeedback)
   })
@@ -106,7 +105,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = io.dtlbResp.bits.mmio || is_mmio_cbo
+  val s1_mmio = is_mmio_cbo
   val s1_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
 
   io.in.ready := true.B
@@ -128,17 +127,16 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.lsq.valid := io.in.valid && !s1_tlb_miss
-  io.lsq.bits := io.in.bits
-  io.lsq.bits.paddr := s1_paddr
-  io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := s1_mmio && !s1_exception
-  io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
-  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
+  io.out.valid := io.in.valid && !s1_tlb_miss
+  io.out.bits := io.in.bits
+  io.out.bits.paddr := s1_paddr
+  io.out.bits.miss := false.B
+  io.out.bits.mmio := s1_mmio
+  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
+  io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp.af.st
 
   // mmio inst with exception will be writebacked immediately
-  io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
-  io.out.bits := io.lsq.bits
+  // io.out.valid := io.in.valid && (!io.out.bits.mmio || s1_exception) && !s1_tlb_miss
 
   XSPerfAccumulate("in_valid", io.in.valid)
   XSPerfAccumulate("in_fire", io.in.fire)
@@ -150,15 +148,17 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
-    val pmpResp = Input(new PMPRespBundle)
+    val pmpResp = Flipped(new PMPRespBundle)
     val out = Decoupled(new LsPipelineBundle)
   })
 
+  val s2_exception = selectStore(io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
+
   io.in.ready := true.B
   io.out.bits := io.in.bits
+  io.out.bits.mmio := (io.in.bits.mmio || io.pmpResp.mmio) && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || io.pmpResp.st
-  io.out.valid := io.in.valid
-
+  io.out.valid := io.in.valid && (!io.out.bits.mmio || s2_exception)
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
@@ -187,10 +187,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
-    val pmp = Input(new PMPRespBundle())
+    val pmp = Flipped(new PMPRespBundle())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
+    val lsq_replenish = Output(new LsPipelineBundle())
     val stout = DecoupledIO(new ExuOutput) // writeback store
   })
 
@@ -206,13 +207,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  store_s1.io.lsq <> io.lsq // send result to sq
+
   store_s1.io.dtlbResp <> io.tlb.resp
   store_s1.io.rsFeedback <> io.feedbackSlow
+  io.lsq.bits := store_s1.io.out.bits
+  io.lsq.valid := store_s1.io.out.valid
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
+  io.lsq_replenish := store_s2.io.out.bits // mmio and exception
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s3.io.stout <> io.stout

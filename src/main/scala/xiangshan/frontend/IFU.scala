@@ -69,7 +69,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val uncacheInter   =  new UncacheInterface
   val pmp             = Vec(2, new Bundle {
     val req = Valid(new PMPReqBundle())
-    val resp = Input(new PMPRespBundle())
+    val resp = Flipped(new PMPRespBundle())
   })
 }
 
@@ -207,10 +207,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   fromITLB.map(_.ready := true.B)
 
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
-  val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
+  val (tlbRespMiss) = (fromITLB.map(port => port.bits.miss && port.valid))
   val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
     fromITLB.map(port => (port.bits.excp.af.instr) && port.valid)) //TODO: Temp treat mmio req as access fault
-
 
   tlbRespAllValid := tlbRespValid(0)  && (tlbRespValid(1) || !f1_doubleLine)
 
@@ -226,7 +225,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   //MMIO
   //MMIO only need 1 instruction
-  val f1_mmio = tlbRespMMIO(0) && f1_valid
+  // val f1_mmio = tlbRespMMIO(0) && f1_valid
 
 
   val replacers       = Seq.fill(2)(ReplacementPolicy.fromString(Some("random"),nWays,nSets/2))
@@ -282,6 +281,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   .elsewhen(f2_fire)              {f2_valid := false.B}
 
   val pmpExcpAF = fromPMP.map(port => port.instr)
+  val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
 
 
   val f2_pAddrs   = RegEnable(next = f1_pAddrs, enable = f1_fire)
@@ -296,12 +296,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_except    = VecInit((0 until 2).map{i => f2_except_pf(i) || f2_except_af(i)})
   val f2_has_except = f2_valid && (f2_except_af.reduce(_||_) || f2_except_pf.reduce(_||_))
   //MMIO
-  val f2_mmio      = RegInit(false.B)
+  val f2_mmio      = DataHoldBypass(Cat(io.pmp.map(_.resp.mmio)).orR, RegNext(f1_fire)).asBool()
 
-  when(f2_flush)                             {f2_mmio := false.B}
-  .elsewhen(f1_fire && f1_mmio && !f1_flush) {f2_mmio := true.B }
-  .elsewhen(f2_fire)                         {f2_mmio := false.B}
-  //
   io.pmp.zipWithIndex.map { case (p, i) =>
     p.req.valid := f2_fire
     p.req.bits.addr := f2_pAddrs(i)
@@ -340,7 +336,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   switch(wait_state){
     is(wait_idle){
-      when(f2_mmio && !f2_except_af(0) && !f2_except_pf(0)){
+      when(f2_mmio && f2_valid && !f2_except_af(0) && !f2_except_pf(0)){
         wait_state :=  wait_send_mmio
       }.elsewhen(miss_0_except_1){
         wait_state :=  Mux(toMissQueue(0).ready, wait_queue_ready ,wait_idle )
@@ -413,7 +409,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   (0 until 2).map { i =>
     if(i == 1) toMissQueue(i).valid := (hit_0_miss_1 || miss_0_miss_1) && wait_state === wait_queue_ready
-      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1) && wait_state === wait_queue_ready
+      else     toMissQueue(i).valid := (only_0_miss || miss_0_hit_1 || miss_0_miss_1 || miss_0_except_1) && wait_state === wait_queue_ready
     toMissQueue(i).bits.addr    := f2_pAddrs(i)
     toMissQueue(i).bits.vSetIdx := f2_vSetIdx(i)
     toMissQueue(i).bits.waymask := f2_waymask(i)
@@ -615,6 +611,31 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val predecodeFlush     = ((preDecoderOut.misOffset.valid || f3_mmio) && f3_valid) 
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(15))
+  })
+
+  val perfEvents = Seq(
+    ("frontendFlush                ", f3_redirect                                ),
+    ("ifu_req                      ", io.toIbuffer.fire()                        ),
+    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_hit             ),
+    ("ifu_req_cacheline_0          ", f3_req_0                                   ),
+    ("ifu_req_cacheline_1          ", f3_req_1                                   ),
+    ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
+    ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
+    ("only_0_hit                   ", f3_only_0_hit       && io.toIbuffer.fire() ),
+    ("only_0_miss                  ", f3_only_0_miss      && io.toIbuffer.fire() ),
+    ("hit_0_hit_1                  ", f3_hit_0_hit_1      && io.toIbuffer.fire() ),
+    ("hit_0_miss_1                 ", f3_hit_0_miss_1     && io.toIbuffer.fire() ),
+    ("miss_0_hit_1                 ", f3_miss_0_hit_1     && io.toIbuffer.fire() ),
+    ("miss_0_miss_1                ", f3_miss_0_miss_1    && io.toIbuffer.fire() ),
+    ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
+    ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 
   f3_redirect := !predecodeFlushReg && predecodeFlush
 
