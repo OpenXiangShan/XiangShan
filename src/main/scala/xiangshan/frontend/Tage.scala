@@ -37,6 +37,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   val TageBanks = numBr
   val UBitPeriod = 256
   val TageCtrBits = 3
+  val uFoldedWidth = 8
 
   val TotalBits = BankTageTableInfos.map { info =>
     info.map{
@@ -310,8 +311,8 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val hi_us  = Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8))
-  val lo_us  = Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8))
+  val hi_us  = Module(new FoldedSRAMTemplate(Bool(), nRows, width=uFoldedWidth, shouldReset=true, holdRead=true))
+  val lo_us  = Module(new FoldedSRAMTemplate(Bool(), nRows, width=uFoldedWidth, shouldReset=true, holdRead=true))
   val table  = Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
 
 
@@ -320,14 +321,16 @@ class TageTable
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
 
-  hi_us.io.raddr(0) := s0_idx
-  lo_us.io.raddr(0) := s0_idx
+  hi_us.io.r.req.valid := io.req.valid
+  hi_us.io.r.req.bits.setIdx := s0_idx
+  lo_us.io.r.req.valid := io.req.valid
+  lo_us.io.r.req.bits.setIdx := s0_idx
 
   val s1_idx = RegEnable(s0_idx, io.req.valid)
   val s1_tag = RegEnable(s0_tag, io.req.valid)
 
-  val hi_us_r = hi_us.io.rdata(0) // s1
-  val lo_us_r = lo_us.io.rdata(0) // s1
+  val hi_us_r = hi_us.io.r.resp.data(0)
+  val lo_us_r = lo_us.io.r.resp.data(0)
 
   val table_r = table.io.r.resp.data(0) // s1
 
@@ -366,16 +369,24 @@ class TageTable
   val update_lo_wdata = Wire(Bool())
 
   val hi_wen = io.update.uMask || doing_clear_u_hi
-
-  hi_us.io.wen := hi_wen
-  hi_us.io.wdata := Mux(doing_clear_u_hi, false.B, update_hi_wdata)
-  hi_us.io.waddr := Mux(doing_clear_u_hi, clear_u_idx, update_idx)
+  val hi_us_wdata = Mux(doing_clear_u_hi, false.B, update_hi_wdata)
+  val hi_us_setIdx = Mux(doing_clear_u_hi, clear_u_idx, update_idx)
+  hi_us.io.w.apply(
+    valid = hi_wen,
+    data = hi_us_wdata,
+    setIdx = hi_us_setIdx,
+    waymask = true.B
+  )
 
   val lo_wen = io.update.uMask || doing_clear_u_lo
-
-  lo_us.io.wen := lo_wen
-  lo_us.io.wdata := Mux(doing_clear_u_lo, false.B, update_lo_wdata)
-  lo_us.io.waddr := Mux(doing_clear_u_lo, clear_u_idx, update_idx)
+  val lo_us_wdata = Mux(doing_clear_u_lo, false.B, update_lo_wdata)
+  val lo_us_setIdx = Mux(doing_clear_u_lo, clear_u_idx, update_idx)
+  lo_us.io.w.apply(
+    valid = lo_wen,
+    data = lo_us_wdata,
+    setIdx = lo_us_setIdx,
+    waymask = true.B
+  )
 
 
   class WrBypass extends XSModule {
@@ -693,7 +704,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
 
     // update base table if used base table to predict
-    when (updateValid) { 
+    when (updateValid) {
       when(updateMeta.provider.valid) {
         when(~up_altpredhit && updateMisPred && (updateMeta.predcnt === 3.U || updateMeta.predcnt === 4.U)) {
         baseupdate(w) := true.B
@@ -710,7 +721,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       baseupdate(w) := false.B
     }
     updatebcnt(w) := updateMeta.basecnt
-  
+
     // if mispredicted and not the case that
     // provider offered correct target but used altpred due to unconfident
     when (updateValid && updateMisPred && ~((updateMeta.predcnt === 3.U && ~isUpdateTaken || updateMeta.predcnt === 4.U && isUpdateTaken) && updateMeta.provider.valid)) {
