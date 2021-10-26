@@ -25,7 +25,8 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
-import xiangshan.backend.mdp._
+import xiangshan.backend.fu.{PFEvent}
+import xiangshan.backend.mdp.{SSIT, LFST}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.LsqEnqIO
 import difftest._
@@ -321,8 +322,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
-  dispatch.io.csrCtrl <> io.csrCtrl
-  dispatch.io.storeIssue <> io.stIn
   dispatch.io.singleStep := false.B
 
   intDq.io.redirect <> stage2Redirect

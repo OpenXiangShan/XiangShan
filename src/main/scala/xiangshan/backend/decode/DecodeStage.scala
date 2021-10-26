@@ -77,15 +77,13 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
   val perfinfo = IO(new Bundle(){
-    val perfEvents = Output(new PerfEventsBundle(6))
+    val perfEvents = Output(new PerfEventsBundle(4))
   })
   val perfEvents = Seq(
     ("decoder_fused_instr          ", PopCount(fusionDecoder.io.out.map(_.fire))                                 ),
     ("decoder_waitInstr            ", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready))),
     ("decoder_stall_cycle          ", hasValid && !io.out(0).ready                                               ),
     ("decoder_utilization          ", PopCount(io.in.map(_.valid))                                               ),
-    ("decoder_loadWaitBitSet       ", loadWaitBitSet                                                             ),
-    ("decoder_storeset_ssit_hit    ", storeSetHit                                                                ),
   )
 
   for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
