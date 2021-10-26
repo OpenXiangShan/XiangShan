@@ -604,6 +604,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
     val svinval_ii = sinval || w_inval || inval_ir
     cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
+    cs.flushPipe := false.B
   }
 
   // fix frflags
