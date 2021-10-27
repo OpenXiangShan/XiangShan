@@ -79,6 +79,11 @@ package object xiangshan {
     def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
     def isAMO(fuType: UInt) = fuType(1)
+    def isFence(fuType: UInt) = fuType === fence
+    def isSvinvalBegin(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && !flush
+    def isSvinval(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.sfence && !flush
+    def isSvinvalEnd(fuType: UInt, func: UInt, flush: Bool) = isFence(fuType) && func === FenceOpType.nofence && flush
+
 
     def jmpCanAccept(fuType: UInt) = !fuType(2)
     def mduCanAccept(fuType: UInt) = fuType(2) && !fuType(1) || fuType(2) && fuType(1) && fuType(0)
@@ -204,6 +209,7 @@ package object xiangshan {
     def fence  = "b10000".U
     def sfence = "b10001".U
     def fencei = "b10010".U
+    def nofence= "b00000".U
   }
 
   object ALUOpType {
@@ -350,34 +356,52 @@ package object xiangshan {
   }
 
   object LSUOpType {
-    // normal load/store
-    // bit(1, 0) are size
-    def lb       = "b000000".U
-    def lh       = "b000001".U
-    def lw       = "b000010".U
-    def ld       = "b000011".U
-    def lbu      = "b000100".U
-    def lhu      = "b000101".U
-    def lwu      = "b000110".U
-    def sb       = "b001000".U
-    def sh       = "b001001".U
-    def sw       = "b001010".U
-    def sd       = "b001011".U
+    // load pipeline
 
-    def cbo_zero  = "b001111".U // l1 cache op
+    // normal load
+    // Note: bit(1, 0) are size, DO NOT CHANGE
+    // bit encoding: | load 0 | is unsigned(1bit) | size(2bit) |
+    def lb       = "b0000".U
+    def lh       = "b0001".U
+    def lw       = "b0010".U
+    def ld       = "b0011".U
+    def lbu      = "b0100".U
+    def lhu      = "b0101".U
+    def lwu      = "b0110".U
 
-    def cbo_clean = "b011111".U // llc op 
-    def cbo_flush = "b101111".U // llc op
-    def cbo_inval = "b111111".U // llc op
+    // Zicbop software prefetch
+    // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
+    def prefetch_i = "b1000".U // TODO
+    def prefetch_r = "b1001".U
+    def prefetch_w = "b1010".U
 
-    def isLoad(op: UInt): Bool = !op(3)
-    def isStore(op: UInt): Bool = op(3)
-    def isCbo(op: UInt): Bool = op(3, 0) === "b1111".U
+    def isPrefetch(op: UInt): Bool = op(3)
+
+    // store pipeline
+    // normal store
+    // bit encoding: | store 00 | size(2bit) |
+    def sb       = "b0000".U
+    def sh       = "b0001".U
+    def sw       = "b0010".U
+    def sd       = "b0011".U
+
+    // l1 cache op
+    // bit encoding: | cbo_zero 01 | size(2bit) 11 |
+    def cbo_zero  = "b0111".U 
+
+    // llc op 
+    // bit encoding: | prefetch 11 | suboptype(2bit) |
+    def cbo_clean = "b1100".U 
+    def cbo_flush = "b1101".U
+    def cbo_inval = "b1110".U
+
+    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U
 
     // atomics
     // bit(1, 0) are size
     // since atomics use a different fu type
     // so we can safely reuse other load/store's encodings
+    // bit encoding: | optype(4bit) | size (2bit) |
     def lr_w      = "b000010".U
     def sc_w      = "b000110".U
     def amoswap_w = "b001010".U

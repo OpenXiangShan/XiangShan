@@ -59,6 +59,7 @@ class XSArgs(object):
         self.max_instr = args.max_instr
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
+        self.diff = args.diff
         self.fork = not args.disable_fork
         # wave dump path
         if args.wave_dump is not None:
@@ -99,6 +100,7 @@ class XSArgs(object):
     def get_emu_args(self):
         emu_args = [
             (self.max_instr, "max-instr"),
+            (self.diff,      "diff"),
             (self.seed,      "seed")
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
@@ -235,6 +237,7 @@ class XiangShan(object):
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
             "ext_intr/amtest-riscv64-xs.bin",
             "cache-alias/aliastest-riscv64-xs.bin",
+            "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
             "asid/asid.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
@@ -306,6 +309,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', nargs='?', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
+    parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     # ci action head sha

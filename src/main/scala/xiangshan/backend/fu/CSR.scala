@@ -458,8 +458,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check := smblockctl(4)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h1".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
+  csrio.customCtrl.svinval_enable := srnctl(1)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)

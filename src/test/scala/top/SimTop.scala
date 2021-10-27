@@ -51,7 +51,6 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.clock := clock.asBool
   soc.io.reset := reset.asBool
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
-  soc.io.osc_clock := false.B
   soc.io.sram_config := 0.U
   soc.io.core_reset.foreach(_ := false.B)
 

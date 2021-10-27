@@ -54,6 +54,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     decoders(i).io.enq.ctrl_flow.loadWaitStrict := ssit.io.rdata(i).strict
     decoders(i).io.enq.ctrl_flow.ssid := ssit.io.rdata(i).ssid
 
+    // csr control
+    decoders(i).io.csrCtrl := io.csrCtrl
+
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
     io.in(i).ready       := io.out(i).ready
