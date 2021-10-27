@@ -261,7 +261,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   XSPerfAccumulate("ifu_bubble_f1_tlb_miss",    f1_valid && !tlbRespAllValid )
 
   //---------------------------------------------
-  //  Fetch Stage 3 :
+  //  Fetch Stage 2 :
   //  * get data from last stage (hit from f1_hit_data/miss from missQueue response)
   //  * if at least one needed cacheline miss, wait for miss queue response (a wait_state machine) THIS IS TOO UGLY!!!
   //  * cut cacheline(s) and send to PreDecode
@@ -367,10 +367,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   }
 
   val missSlot    = Seq.fill(2)(RegInit(0.U.asTypeOf(new MissSlot)))
-  val m_invalid :: m_valid :: m_refilled :: m_flushed :: m_wait_sec_miss :: m_wait_sec_fire ::Nil = Enum(6)
+  val m_invalid :: m_valid :: m_refilled :: m_flushed :: m_wait_sec_miss :: m_check_final ::Nil = Enum(6)
   val missStateQueue = RegInit(VecInit(Seq.fill(2)(m_invalid)) )
-
-  def waitSecondFire(missState: UInt): Bool = (missState === m_wait_sec_miss) || (missState === m_wait_sec_fire)
+  val reservedRefillData = Wire(Vec(2, UInt(blockBits.W)))
 
   f2_miss_available :=  VecInit(missStateQueue.map(entry => entry === m_invalid  || entry === m_wait_sec_miss)).reduce(_ && _)
 
@@ -381,34 +380,37 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   sec_meet_vec := VecInit(Seq(sec_meet_0_miss,sec_meet_1_miss ))
 
 
-  val  only_0_miss      = f2_valid && !f2_hit && !f2_doubleLine && !f2_has_except && !sec_meet_0_miss
-  val  only_0_hit       = f2_valid && f2_hit && !f2_doubleLine
-  val  hit_0_hit_1      = f2_valid && f2_hit && f2_doubleLine
-  val  hit_0_miss_1     = f2_valid && !f2_bank_hit(1) && !sec_meet_1_miss && (f2_bank_hit(0) || sec_meet_0_miss) && f2_doubleLine  && !f2_has_except
-  val  miss_0_hit_1     = f2_valid && !f2_bank_hit(0) && !sec_meet_0_miss && (f2_bank_hit(1) || sec_meet_1_miss) && f2_doubleLine  && !f2_has_except
-  val  miss_0_miss_1    = f2_valid && !f2_bank_hit(0) && !f2_bank_hit(1) && !sec_meet_0_miss && !sec_meet_1_miss && f2_doubleLine  && !f2_has_except
-  val  hit_0_except_1   = f2_valid && f2_doubleLine &&  !f2_except(0) && f2_except(1)  &&  f2_bank_hit(0)
-  val  miss_0_except_1  = f2_valid && f2_doubleLine &&  !f2_except(0) && f2_except(1)  && !f2_bank_hit(0)
-  val  except_0         = f2_valid && f2_except(0)
+  //only raise at the first cycle of f2_valid
+  val  only_0_miss      = RegNext(f1_fire && !f1_flush) && !f2_hit && !f2_doubleLine && !f2_has_except && !sec_meet_0_miss
+  val  only_0_hit       = RegNext(f1_fire && !f1_flush) && f2_hit && !f2_doubleLine
+  val  hit_0_hit_1      = RegNext(f1_fire && !f1_flush) && f2_hit && f2_doubleLine
+  val  hit_0_miss_1     = RegNext(f1_fire && !f1_flush) && !f2_bank_hit(1) && !sec_meet_1_miss && (f2_bank_hit(0) || sec_meet_0_miss) && f2_doubleLine  && !f2_has_except
+  val  miss_0_hit_1     = RegNext(f1_fire && !f1_flush) && !f2_bank_hit(0) && !sec_meet_0_miss && (f2_bank_hit(1) || sec_meet_1_miss) && f2_doubleLine  && !f2_has_except
+  val  miss_0_miss_1    = RegNext(f1_fire && !f1_flush) && !f2_bank_hit(0) && !f2_bank_hit(1) && !sec_meet_0_miss && !sec_meet_1_miss && f2_doubleLine  && !f2_has_except
+  val  hit_0_except_1   = RegNext(f1_fire && !f1_flush) && f2_doubleLine &&  !f2_except(0) && f2_except(1)  &&  f2_bank_hit(0)
+  val  miss_0_except_1  = RegNext(f1_fire && !f1_flush) && f2_doubleLine &&  !f2_except(0) && f2_except(1)  && !f2_bank_hit(0)
+  val  except_0         = RegNext(f1_fire && !f1_flush) && f2_except(0)
 
-  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool = {
+  def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
     val bit = RegInit(false.B)
     when(flush)                   { bit := false.B  }
-    .elsewhen(valid )             { bit := true.B  }
+    .elsewhen(valid && !release)  { bit := true.B  }
     .elsewhen(release)            { bit := false.B}
     bit || valid
   }
 
-  val  miss_0_hit_1_latch     =   holdReleaseLatch(valid = miss_0_hit_1, release = f2_fire,     flush = f2_flush)
-  val  miss_0_miss_1_latch    =   holdReleaseLatch(valid = miss_0_miss_1, release = f2_fire,    flush = f2_flush)
-  val  only_0_miss_latch      =   holdReleaseLatch(valid = only_0_miss, release = f2_fire,      flush = f2_flush)
-  val  hit_0_miss_1_latch     =   holdReleaseLatch(valid = hit_0_miss_1, release = f2_fire,     flush = f2_flush)
-  val  hit_0_except_1_latch   =   holdReleaseLatch(valid = hit_0_except_1, release = f2_fire,     flush = f2_flush)
-  val  miss_0_except_1_latch  =   holdReleaseLatch(valid = miss_0_except_1, release = f2_fire,  flush = f2_flush)
+  val  miss_0_hit_1_latch     =   holdReleaseLatch(valid = miss_0_hit_1,    release = f2_fire,      flush = f2_flush)
+  val  miss_0_miss_1_latch    =   holdReleaseLatch(valid = miss_0_miss_1,   release = f2_fire,      flush = f2_flush)
+  val  only_0_miss_latch      =   holdReleaseLatch(valid = only_0_miss,     release = f2_fire,      flush = f2_flush)
+  val  hit_0_miss_1_latch     =   holdReleaseLatch(valid = hit_0_miss_1,    release = f2_fire,      flush = f2_flush)
+  val  hit_0_except_1_latch   =   holdReleaseLatch(valid = hit_0_except_1,  release = f2_fire,      flush = f2_flush)
+  val  miss_0_except_1_latch  =   holdReleaseLatch(valid = miss_0_except_1, release = f2_fire,      flush = f2_flush)
+
+  def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 
   // deal with secondary miss when f1 enter f2
   def getMissSituat(slotNum : Int, missNum : Int ) :Bool =  {
-    f2_valid && (missSlot(slotNum).m_vSetIdx === f2_vSetIdx(missNum)) && (missSlot(slotNum).m_pTag  === get_phy_tag(f2_pAddrs(missNum))) && !f2_bank_hit(missNum)  && waitSecondFire(missStateQueue(slotNum))
+    RegNext(f1_fire && !f1_flush) && (missSlot(slotNum).m_vSetIdx === f2_vSetIdx(missNum)) && (missSlot(slotNum).m_pTag  === get_phy_tag(f2_pAddrs(missNum))) && !f2_bank_hit(missNum)  && waitSecondComeIn(missStateQueue(slotNum))
   }
 
   val miss_0_f2_0 =   getMissSituat(0, 0)
@@ -416,7 +418,19 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val miss_1_f2_0 =   getMissSituat(1, 0)
   val miss_1_f2_1 =   getMissSituat(1, 1)
 
-  fix_sec_miss   := VecInit(Seq(miss_0_f2_0, miss_0_f2_1, miss_1_f2_0, miss_1_f2_1))
+  val miss_0_f2_0_latch =   holdReleaseLatch(valid = miss_0_f2_0,    release = f2_fire,      flush = f2_flush)
+  val miss_0_f2_1_latch =   holdReleaseLatch(valid = miss_0_f2_1,    release = f2_fire,      flush = f2_flush)
+  val miss_1_f2_0_latch =   holdReleaseLatch(valid = miss_1_f2_0,    release = f2_fire,      flush = f2_flush)
+  val miss_1_f2_1_latch =   holdReleaseLatch(valid = miss_1_f2_1,    release = f2_fire,      flush = f2_flush)
+
+  val slot_0_solve = fix_sec_miss(0) || fix_sec_miss(1)
+  val slot_1_solve = fix_sec_miss(2) || fix_sec_miss(3)
+  val slot_slove   = VecInit(Seq(slot_0_solve, slot_1_solve))
+
+  fix_sec_miss   := VecInit(Seq(miss_0_f2_0_latch, miss_0_f2_1_latch, miss_1_f2_0_latch, miss_1_f2_1_latch))
+
+  reservedRefillData(0) := DataHoldBypass(data = missSlot(0).m_data, valid = miss_0_f2_0 || miss_0_f2_1)
+  reservedRefillData(1) := DataHoldBypass(data = missSlot(1).m_data, valid = miss_1_f2_0 || miss_1_f2_1)
 
   switch(wait_state){
     is(wait_idle){
@@ -521,24 +535,20 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     //only the first cycle to check whether meet the secondary miss
     when(missStateQueue(i) === m_wait_sec_miss){
       //the seondary req has been fix by this slot and another also hit || the secondary req for other cacheline and hit || the secondary req is being flushed
-      when((sec_meet_vec(i) && f2_fire) || (!sec_meet_vec(i) && f2_fire) || (f2_flush && f2_valid)) {
+      when((slot_slove(i) && f2_fire) || (!slot_slove(i) && f2_fire) || (f2_flush && f2_valid)) {
         missStateQueue(i)     := m_invalid
       }
-      //the seondary req has been fix by this slot but another miss || the seondary req for other cacheline and miss
-      .elsewhen((sec_meet_vec(i) && !f2_fire && f2_valid) ||  (f2_valid && !sec_meet_vec(i) && !f2_fire)){
-        missStateQueue(i)     := m_wait_sec_fire
+      //the seondary req has been fix by this slot but another miss/f3 not ready || the seondary req for other cacheline and miss 
+      .elsewhen((slot_slove(i) && !f2_fire && f2_valid) ||  (f2_valid && !slot_slove(i) && !f2_fire) ){
+        missStateQueue(i)     := m_check_final
       }
     }
 
-    //the first cycle to check whether meet the secondary miss
-    when(missStateQueue(i) === m_wait_sec_fire && toMissQueue(i).fire()){
+    when(missStateQueue(i) === m_check_final && toMissQueue(i).fire()){
       missStateQueue(i)     :=  m_valid
       missSlot(i).m_vSetIdx := f2_vSetIdx(i)
       missSlot(i).m_pTag    := get_phy_tag(f2_pAddrs(i))
-    }
-
-    //waiting for another to 
-    when(missStateQueue(i) === m_wait_sec_fire && (f2_fire || f2_flush)){
+    }.elsewhen(missStateQueue(i) === m_check_final) {
       missStateQueue(i)     :=  m_invalid
     }
   }
@@ -562,9 +572,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_hit_datas    = RegEnable(next = f1_hit_data, enable = f1_fire)
   val f2_datas        = Wire(Vec(2, UInt(blockBits.W)))
 
+  // f2_datas.zipWithIndex.map{case(bank,i) =>
+  //   if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(fix_sec_miss(2),reservedRefillData(1), reservedRefillData(0)))
+  //      else    bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(fix_sec_miss(1),reservedRefillData(0), reservedRefillData(1)))
+  // }
   f2_datas.zipWithIndex.map{case(bank,i) =>
-    if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(fix_sec_miss(2),missSlot(1).m_data, missSlot(0).m_data))
-       else    bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(fix_sec_miss(1),missSlot(0).m_data, missSlot(1).m_data))
+    if(i == 0) bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(miss_0_f2_0_latch,reservedRefillData(0), Mux(miss_1_f2_0_latch,reservedRefillData(1), missSlot(0).m_data)))
+       else    bank := Mux(f2_bank_hit(i), f2_hit_datas(i),Mux(miss_0_f2_1_latch,reservedRefillData(0), Mux(miss_1_f2_1_latch,reservedRefillData(1), missSlot(1).m_data)))
   }
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
@@ -593,7 +607,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_predecode_valids     = VecInit(preDecoderOut.pd.map(instr => instr.valid)).asUInt & f2_jump_valids
 
   //---------------------------------------------
-  //  Fetch Stage 4 :
+  //  Fetch Stage 3 :
   //  * get data from last stage (hit from f1_hit_data/miss from missQueue response)
   //  * if at least one needed cacheline miss, wait for miss queue response (a wait_state machine) THIS IS TOO UGLY!!!
   //  * cut cacheline(s) and send to PreDecode

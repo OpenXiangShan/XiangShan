@@ -182,6 +182,17 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
+  val write_count = RegInit(0.U(8.W))
+  val debug_condition = io.write.valid && write.virIdx === "h02".U && write.waymask === "h08".U
+  when(debug_condition){
+    write_count := write_count + 1.U
+  }
+
+  when(debug_condition && write_count === 1.U){
+    assert(debug_condition, "write debug condition appears!!")
+  }
+
+
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
   val validMetas = VecInit((0 until 2).map{ bank =>
