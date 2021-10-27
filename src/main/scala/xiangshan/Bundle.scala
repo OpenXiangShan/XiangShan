@@ -454,6 +454,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
+  // Decode
+  val svinval_enable = Output(Bool())
+
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 }
