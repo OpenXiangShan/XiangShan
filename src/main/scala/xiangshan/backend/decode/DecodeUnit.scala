@@ -574,8 +574,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
   cs.singleStep := false.B
   cs.replayInst := false.B
-  cs.isSoftPrefetchRead := false.B
-  cs.isSoftPrefetchWrite := false.B
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
@@ -619,19 +617,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   //to selectout prefetch.r/prefetch.w
   val isORI = BitPat("b?????????????????110?????0010011") === ctrl_flow.instr
-  cs.isORI := isORI
-  when(cs.isORI) {
+  when(isORI) {
+    // TODO: add CSR based Zicbop config
     when(cs.ldest === 0.U) {
-      when(cs.lsrc(1) === "b00001".U) {
-        cs.isSoftPrefetchRead := true.B
-        cs.isSoftPrefetchWrite := false.B
-      }.otherwise {
-        cs.isSoftPrefetchRead := false.B
-        cs.isSoftPrefetchWrite := true.B
-      }
       cs.selImm := SelImm.IMM_S
       cs.fuType := FuType.ldu
-      cs.fuOpType := LSUOpType.lb
+      when(cs.lsrc(1) === "b00001".U) {
+        cs.fuOpType := LSUOpType.prefetch_r
+      }.otherwise {
+        cs.fuOpType := LSUOpType.prefetch_w
+      }
     }
   }
 
@@ -667,10 +662,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
     io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
     io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d isORI=%x imm=%x\n",
+  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d imm=%x\n",
     io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
     io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
-    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.isORI, io.deq.cf_ctrl.ctrl.imm)
+    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.imm)
   XSDebug("out: excepVec=%b intrVec=%b\n",
     io.deq.cf_ctrl.cf.exceptionVec.asUInt, io.deq.cf_ctrl.cf.intrVec.asUInt)
 }

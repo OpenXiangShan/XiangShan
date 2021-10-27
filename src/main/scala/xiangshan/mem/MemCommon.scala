@@ -51,7 +51,7 @@ object genWdata {
 class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
-  val func = UInt(6.W) //fixme???
+  // val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
@@ -66,13 +66,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
 
-  // For debug usage
-  val isFirstIssue = Bool()
   //softprefetch
   val isSoftPrefetch = Bool() 
-  //softprefetch except
-  val isSoftPreExcept = Bool()
-  val isSoftPremmio = Bool()
+
+  // For debug usage
+  val isFirstIssue = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {
