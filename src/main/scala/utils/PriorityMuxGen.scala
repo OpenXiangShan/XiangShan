@@ -81,3 +81,65 @@ class PriorityMuxGenerator[T <: Data] {
         ppm.out.res
     }
 }
+
+// this module is like PhyPriorityMuxGenerator
+// but you can specify the physical priority
+// by passing in an Int, usually we give
+// the hightest priority to the condition
+// with the largest delay.
+// but their logical priority is still
+// arranged in the order specified in the code
+class PhyPriorityMuxGenerator[T <: Data] {
+    var src: List[(Bool, T, String, Int)] = List()
+    var rev_src: List[(Bool, T, String, Int)] = List()
+    var sorted_src: List[(Bool, T, String, Int)] = List()
+    var num: Int = 0
+    def genPortName(n: Option[String]): String = {
+        num = num + 1
+        n match {
+            case Some(name) => name
+            case None => {
+                "in" + num.toString()
+            }
+        }
+    }
+
+    def register(sel: Bool, in: T, name: Option[String] = None, phyPrio: Int = 0) = {
+        src = (sel, in, genPortName(name), phyPrio) :: src
+    }
+    def register(in: Seq[(Bool, T, Option[String], Int)]) = {
+        src = in.toList.map{ case (b, t, n, p) => (b, t, genPortName(n), p) } ::: src
+    }
+    def register(sel: Seq[Bool], in: Seq[T], name: Seq[Option[String]], phyPrio: Seq[Int]) = {
+        src = sel.zip(in.zip(name.map(genPortName).zip(phyPrio))).map { case (s, (i, (n, p))) =>
+            (s, i, n, p) }.toList ::: src
+    }
+    def apply(): T = {
+        rev_src = src.reverse
+        for (i <- 0 until rev_src.length) {
+            println(rev_src(i)._3)
+            sorted_src = (rev_src(i)._1 && (if (i == rev_src.length-1) true.B else (i+1 until rev_src.length).map(j => !rev_src(j)._1).reduce(_&&_)),
+                rev_src(i)._2, rev_src(i)._3, rev_src(i)._4) :: sorted_src
+        }
+        sorted_src = sorted_src.sortBy(_._4)
+        println(sorted_src)
+        val names = sorted_src.map(_._3)
+        val ins = sorted_src.map(s => (s._1, s._2))
+        // we should use this sample data to get type and width
+        // ugly
+        val sample = ins(0)._2
+        // println(src)
+        // println(sorted_src)
+        // println(ins)
+        // println(names)
+
+        val ppm = Module(new PriorityMuxModule(sample)(names))
+        (ppm.ins zip ins).foreach {
+            case (in, (b, t)) => {
+                in.sel := b
+                in.src := t
+            }
+        }
+        ppm.out.res
+    }
+}
