@@ -214,7 +214,7 @@ class WithNKBL2
           alwaysReleaseData = alwaysReleaseData,
           clientCaches = Seq(CacheParameters(
             "dcache",
-            sets = 2 * p.dcacheParametersOpt.get.nSets,
+            sets = p.dcacheParametersOpt.get.nSets,
             ways = p.dcacheParametersOpt.get.nWays + 2,
             aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
           )),
@@ -242,7 +242,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = upParams.cores.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
+          l2params.copy(sets = l2params.sets, ways = l2params.ways)
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(
