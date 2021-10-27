@@ -224,3 +224,54 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
   }
 }
+
+object PTWRepeater {
+  def apply(
+    tlb: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val repeater = Module(new PTWRepeater(width))
+    repeater.io.tlb <> tlb
+    repeater.io.sfence <> sfence
+    repeater.io.csr <> csr
+
+    repeater
+  }
+
+  def apply(
+    tlb: TlbPtwIO,
+    ptw: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val repeater = Module(new PTWRepeater(width))
+    repeater.io.tlb <> tlb
+    repeater.io.ptw <> ptw
+    repeater.io.sfence <> sfence
+    repeater.io.csr <> csr
+
+    repeater
+  }
+}
+
+object PTWFilter {
+  def apply(
+    tlb: BTlbPtwIO,
+    ptw: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle,
+    size: Int
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val filter = Module(new PTWFilter(width, size))
+    filter.io.tlb <> tlb
+    filter.io.ptw <> ptw
+    filter.io.sfence <> sfence
+    filter.io.csr <> csr
+
+    filter
+  }
+}
