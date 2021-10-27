@@ -90,6 +90,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
+  if(l3cacheOpt.nonEmpty && l3cacheOpt.get.ctlnode.nonEmpty){
+    l3cacheOpt.get.ctlnode.get := misc.peripheralXbar
+  }
+
   l3cacheOpt match {
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= misc.l3_banked_xbar

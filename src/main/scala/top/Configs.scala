@@ -244,7 +244,10 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
           l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
         },
-        enablePerf = true
+        enablePerf = true,
+        ctrl = Some(CacheCtrl(
+          address = 0x39000000
+        ))
       ))
     )
 })
