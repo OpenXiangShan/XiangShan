@@ -246,7 +246,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(
-          address = 0x39000000
+          address = 0x39000000,
+          numCores = upParams.cores.size
         ))
       ))
     )

@@ -75,6 +75,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
+  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
+    LazyModule(new HuanCun()(new Config((_, _, _) => {
+      case HCCacheParamsKey => l3param
+    })))
+  )
+
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
     core_with_l2(i).plic_int_sink := misc.plic.intnode
@@ -84,14 +90,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
   }
 
-  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param
-    })))
-  )
-
-  if(l3cacheOpt.nonEmpty && l3cacheOpt.get.ctlnode.nonEmpty){
-    l3cacheOpt.get.ctlnode.get := misc.peripheralXbar
+  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
+  l3cacheOpt.map(_.rst_nodes.map(nodes => {
+    nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach{
+      case (source, sink) => sink := source
+    }
+  }))
+  if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
+    // tie off core soft reset
+    for(sink <- core_with_l2.map(_.core_reset_sink)){
+      val source = BundleBridgeSource(() => Bool())
+      source.out.head._1 := false.B
+      sink := source
+    }
   }
 
   l3cacheOpt match {
@@ -117,7 +128,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     val io = IO(new Bundle {
       val clock = Input(Bool())
       val reset = Input(Bool())
-      val sram_config = Input(UInt(5.W))
+      val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
       val systemjtag = new Bundle {
         val jtag = Flipped(new JTAGIO(hasTRSTn = false))
@@ -127,7 +138,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
-      val core_reset = Input(Vec(NumCores, Bool()))
     })
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -141,7 +151,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.ext_intrs := io.extIntrs
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
-      core.module.io.reset := io.core_reset(i)
       core.module.io.hartId := i.U
     }
 
