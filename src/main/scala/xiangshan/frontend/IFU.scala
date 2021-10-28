@@ -53,6 +53,9 @@ class ICacheInterface(implicit p: Parameters) extends XSBundle {
   val fromIMeta     = Input(new ICacheMetaRespBundle)
   val fromIData     = Input(new ICacheDataRespBundle)
   val fromMissQueue = Vec(2,Flipped(ValidIO(new ICacheMissResp)))
+
+  val hasRealease   = Output(Vec(2, Bool()))
+  val hasFlush      = Output(Bool())
 }
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
@@ -229,6 +232,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f1_victim_tag   = VecInit(f1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, f1_tags(port))})
   val f1_victim_data  = VecInit(f1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, f1_datas(port))})
   val f1_need_replace = VecInit(f1_victim_coh.zipWithIndex.map{case(coh, port) => coh.isValid() && f1_bank_miss(port)})
+
+  io.icacheInter.hasFlush := f1_flush
+  io.icacheInter.hasRealease.zipWithIndex.map(a => a._1 := !f1_flush && f1_valid && f1_need_replace(a._2) )
 
   assert(PopCount(f1_tag_match_vec(0)) <= 1.U && PopCount(f1_tag_match_vec(1)) <= 1.U )
 
@@ -527,8 +533,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
       missStateQueue(i)     := m_wait_sec_miss
       missSlot(i).m_data    := fromMissQueue(i).bits.data
     }
-
-    when(f2_fire && missStateQueue(i) === m_refilled){
+    
+    when((f2_flush || f2_fire) && missStateQueue(i) === m_refilled){
       missStateQueue(i)     := m_wait_sec_miss
     }
 

@@ -38,9 +38,9 @@ class ICacheMissResp(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICacheMissBundle(implicit p: Parameters) extends ICacheBundle{
-    val req         = Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
-    val resp        = Vec(2,ValidIO(new ICacheMissResp))
-    val flush       = Input(Bool())
+    val req       =   Vec(2, Flipped(DecoupledIO(new ICacheMissReq)))
+    val resp      =   Vec(2,ValidIO(new ICacheMissResp))
+    val flush     =   Input(Bool())
 }
 
 
@@ -133,6 +133,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
   val is_grant = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
 
+  val neddSendAck = RegInit(false.B)
+
   //state change
   switch(state) {
     is(s_idle) {
@@ -158,21 +160,22 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
           grant_param := io.mem_grant.bits.param
           when(readBeatCnt === (refillCycles - 1).U) {
             assert(refill_done, "refill not done!")
-            state := Mux(edge.isRequest(io.mem_grant.bits), s_send_grant_ack, s_write_back)
-          }
+            state := s_write_back
+            neddSendAck := edge.isResponse(io.mem_grant.bits)
         }
       }
     }
 
+    is(s_write_back) {
+      state := Mux(io.meta_write.fire() && io.data_write.fire() ,Mux(neddSendAck, s_send_grant_ack, s_wait_resp), s_write_back)
+    }
+
     is(s_send_grant_ack) {
       when(io.mem_finish.fire()) {
-        state := s_write_back
+        state := s_wait_resp
       }
     }
 
-    is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire(), s_wait_resp, s_write_back)
-    }
 
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt

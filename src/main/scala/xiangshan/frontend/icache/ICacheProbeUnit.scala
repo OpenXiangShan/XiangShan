@@ -19,10 +19,9 @@ package  xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
-
+import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
 import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import xiangshan.ValidUndirectioned
 
 class ProbeReq(implicit p: Parameters) extends ICacheBundle
 {
@@ -53,8 +52,6 @@ class ICacheProbeEntry(implicit p: Parameters) extends ICacheModule {
   io.pipe_req.valid := false.B
   io.pipe_req.bits  := DontCare
 
-//   io.block_addr.valid := state =/= s_invalid
-
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
@@ -76,12 +73,6 @@ class ICacheProbeEntry(implicit p: Parameters) extends ICacheModule {
       state := s_invalid
     }
   }
-
-//  // perfoemance counters
-//  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
-//  XSPerfAccumulate("probe_penalty", state =/= s_invalid)
-//  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr)
-//  XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
 class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with HasTLDump
@@ -114,6 +105,7 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
   } else { // no alias problem
     req.vaddr := io.mem_probe.bits.address
   }
+
   req.param := io.mem_probe.bits.param
   req.needData := io.mem_probe.bits.data(0)
 

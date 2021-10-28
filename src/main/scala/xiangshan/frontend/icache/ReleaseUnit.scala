@@ -123,7 +123,7 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 
     val release_meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
-
+    val probe_slot = Vec(cacheParams.nProbeEntries, Flipped(Valid(new ProbeSlot)))
   })
 
   val req = io.req
@@ -157,9 +157,6 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
 
   io.release_meta_write <> meta_write_arb.io.out
 
-//  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR
-//  val miss_req_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
-//  io.block_miss_req := io.miss_req.valid && miss_req_conflict
   TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
 
 }

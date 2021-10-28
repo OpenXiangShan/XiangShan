@@ -192,6 +192,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     assert(debug_condition, "write debug condition appears!!")
   }
 
+  //XSDebug(io.write.valid,"write ICache Meta: index : %x  || waymask: %x || tag: %x || coh:%x \n", write.virIdx, write.waymask, write.phyTag, write.coh.asUInt)
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -410,6 +411,8 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val missQueue   = new ICacheMissBundle
   val releaseUnit = new ICacheReleaseBundle
   val fencei      = Input(Bool())
+  val hasRelease  = Input(Vec(2,Bool()))
+  val hasReleaseFlush = Input(Bool())
   val csr         = new L1CacheToCsrIO
 }
 
@@ -472,7 +475,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     missQueue.io.req(i)           <> io.missQueue.req(i)
     missQueue.io.resp(i)          <> io.missQueue.resp(i)
   }
-  
+
   bus.b.ready := false.B
   bus.c.valid := false.B
   bus.c.bits  := DontCare
@@ -497,6 +500,19 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
   probe.io.req               <> probeQueue.io.pipe_req
+
+  val releaseFlags = RegInit(VecInit(Seq.fill(2)(false.B)))
+
+  (0 until 2).map{ i =>
+    when(io.hasReleaseFlush){
+      releaseFlags(i) := false.B
+    }.elsewhen(io.hasRelease(i)){
+      releaseFlags(i) := true.B
+    }.elsewhen(bus.c.fire()){
+      releaseFlags(i) := false.B
+    }
+  }
+
 
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B
