@@ -24,11 +24,12 @@ import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4Deinterleaver, AXI4Fragme
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
+import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLRegisterNode, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
 import huancun.debug.TLLogger
-import huancun.{CacheParameters, HCCacheParameters, BankedXbar}
+import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
 
 case object SoCParamsKey extends Field[SoCParameters]
@@ -249,6 +250,14 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   plic.intnode := plicSource.sourceNode
   plic.node := peripheralXbar
 
+  val pll_node = TLRegisterNode(
+    address = Seq(AddressSet(0x3a000000L, 0xfff)),
+    device = new SimpleDevice("pll_ctrl", Seq()),
+    beatBytes = 8,
+    concurrency = 1
+  )
+  pll_node := peripheralXbar
+
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
@@ -259,6 +268,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
+    val pll0_lock = IO(Input(Bool()))
 
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs.asBools
@@ -268,5 +278,22 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val tick = cnt === 0.U
     cnt := Mux(tick, freq.U, cnt - 1.U)
     clint.module.io.rtcTick := tick
+
+    val pll_ctrl_regs = Seq.fill(5){ RegInit(0.U(64.W)) }
+    val pll_lock = RegNext(next = pll0_lock, init = false.B)
+    pll_node.regmap(
+      0x100 -> RegFieldGroup(
+        "Pll", Some("PLL ctrl regs"),
+        pll_ctrl_regs.zipWithIndex.map{
+          case (r, i) => RegField(64, r, RegFieldDesc(
+            s"PLL_ctrl_$i",
+            desc = s"PLL ctrl register #$i"
+          ))
+        } :+ RegField.r(64, Cat(0.U(63.W), pll_lock), RegFieldDesc(
+          "PLL_lock",
+          "PLL lock register"
+        ))
+      )
+    )
   }
 }
