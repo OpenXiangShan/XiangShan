@@ -91,19 +91,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
-  l3cacheOpt.map(_.rst_nodes.map(nodes => {
-    nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach{
-      case (source, sink) => sink := source
-    }
-  }))
-  if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
-    // tie off core soft reset
-    for(sink <- core_with_l2.map(_.core_reset_sink)){
-      val source = BundleBridgeSource(() => Bool())
-      source.out.head._1 := false.B
-      sink := source
-    }
+
+  val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
+    l3cacheOpt.get.rst_nodes.get
+  } else {
+    core_with_l2.map(_ => BundleBridgeSource(() => Bool()))
   }
+
+  core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({
+    case (source, sink) =>  sink := source
+  })
 
   l3cacheOpt match {
     case Some(l3) =>
@@ -158,6 +155,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+    }
+
+    if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
+      // tie off core soft reset
+      for(node <- core_rst_nodes){
+        node.out.head._1 := false.B
+      }
     }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
