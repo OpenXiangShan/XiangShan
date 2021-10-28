@@ -69,7 +69,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
-  val core_with_l2 = soc.cores.map(coreParams =>
+  val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alterPartial({
       case XSCoreParamsKey => coreParams
     })))

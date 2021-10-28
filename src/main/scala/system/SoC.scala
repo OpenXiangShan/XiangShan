@@ -25,7 +25,7 @@ import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams,
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
+import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
 import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLRegisterNode, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
 import huancun.debug.TLLogger
@@ -36,7 +36,6 @@ case object SoCParamsKey extends Field[SoCParameters]
 
 case class SoCParameters
 (
-  cores: List[XSCoreParameters],
   EnableILA: Boolean = false,
   extIntrs: Int = 150,
   L3NBanks: Int = 4,
@@ -47,7 +46,7 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   ))
 ){
-  val PAddrBits = cores.map(_.PAddrBits).reduce((x, y) => if(x > y) x else y)
+  val PAddrBits = 40
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
@@ -60,7 +59,9 @@ trait HasSoCParameter {
 
   val soc = p(SoCParamsKey)
   val debugOpts = p(DebugOptionsKey)
-  val NumCores = soc.cores.size
+  val tiles = p(XSTileKey)
+
+  val NumCores = tiles.size
   val EnableILA = soc.EnableILA
 
   // L3 configurations
@@ -81,7 +82,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
-  val l3_banked_xbar = BankedXbar(soc.cores.head.L2NBanks)
+  val l3_banked_xbar = BankedXbar(tiles.head.L2NBanks)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -231,7 +232,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
   }
-  l3_banked_xbar :=* BankBinder(soc.cores.head.L2NBanks, L3BlockSize) :*= l3_xbar
+  l3_banked_xbar :=* BankBinder(tiles.head.L2NBanks, L3BlockSize) :*= l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
