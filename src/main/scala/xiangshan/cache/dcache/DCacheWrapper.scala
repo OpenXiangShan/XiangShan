@@ -533,8 +533,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
   val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
-  val replaceShouldBeBlocked = // mpStatus.s0_set.valid && replaceSet === mpStatus.s0_set.bits ||
-    Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+  val replaceShouldBeBlocked = mpStatus.s1.valid ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
       s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
     )).orR()
   block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
