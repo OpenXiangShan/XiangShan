@@ -180,7 +180,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), 2))
   mem_arb.io.in(0) <> fsm.io.mem.req
   mem_arb.io.in(1) <> mq_mem.req
-  mem_arb.io.out.ready := mem.a.ready
+  mem_arb.io.out.ready := mem.a.ready && !flush
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
