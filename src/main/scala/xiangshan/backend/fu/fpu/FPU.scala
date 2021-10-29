@@ -36,4 +36,15 @@ object FPU {
     Mux(typeTag === D, x, Cat(~0.U(32.W), x(31, 0)))
   }
 
+  def box(x: UInt, t: FType): UInt = {
+    if(t == f32){
+      Cat(~0.U(32.W), x(31, 0))
+    } else if(t == f64){
+      x(63, 0)
+    } else {
+      assert(cond = false, "Unknown ftype!")
+      0.U
+    }
+  }
+
 }
