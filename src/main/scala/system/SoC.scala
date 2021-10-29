@@ -270,7 +270,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val pll0_lock = IO(Input(Bool()))
-    val pll0_ctrl = IO(Output(Vec(5, UInt(32.W))))
+    val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
 
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs.asBools
@@ -281,13 +281,13 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     cnt := Mux(tick, freq.U, cnt - 1.U)
     clint.module.io.rtcTick := tick
 
-    val pll_ctrl_regs = Seq.fill(5){ RegInit(0.U(32.W)) }
+    val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 
     pll_node.regmap(
-      0x100 -> RegFieldGroup(
+      0x000 -> RegFieldGroup(
         "Pll", Some("PLL ctrl regs"),
         pll_ctrl_regs.zipWithIndex.map{
           case (r, i) => RegField(32, r, RegFieldDesc(

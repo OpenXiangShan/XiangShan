@@ -240,7 +240,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = tiles.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = tiles.size * l2params.sets, ways = l2params.ways)
+          l2params.copy(sets = 2 * l2params.sets, ways = l2params.ways)
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(
