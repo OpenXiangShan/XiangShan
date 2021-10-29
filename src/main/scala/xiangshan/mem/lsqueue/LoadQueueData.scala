@@ -73,7 +73,7 @@ class LQPaddrModule(numEntries: Int, numRead: Int, numWrite: Int)(implicit p: Pa
   }
   for (i <- 0 until LoadPipelineWidth) {
     for (j <- 0 until numEntries) {
-      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheTagOffset) === data(j)(PAddrBits-1, DCacheTagOffset)
+      io.releaseMmask(i)(j) := io.releaseMdata(i)(PAddrBits-1, DCacheIndexOffset) === data(j)(PAddrBits-1, DCacheIndexOffset)
     }
   }
 

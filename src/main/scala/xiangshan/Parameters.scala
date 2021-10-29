@@ -137,7 +137,7 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
-  EnableLdVioCheckAfterReset: Boolean = false,
+  EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
