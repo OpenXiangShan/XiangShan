@@ -113,7 +113,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     val lrsc_locked_block = Input(Valid(UInt()))
   })
 
-  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nProbeEntries))
+  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nProbeEntries, Bool()))

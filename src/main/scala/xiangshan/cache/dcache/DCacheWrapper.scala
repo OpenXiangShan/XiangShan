@@ -508,7 +508,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   replacePipeStatusS0.bits := get_idx(replacePipe.io.req.bits.vaddr)
   val blockMainPipeReqs = Seq(
     refillPipeStatus,
-	replacePipeStatusS0,
+	  replacePipeStatusS0,
     replacePipe.io.status.s1_set,
     replacePipe.io.status.s2_set
   )
