@@ -41,7 +41,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   val io = IO(new Bundle {
     val id = Input(UInt(log2Up(cacheParams.nMMIOs).W))
     // client requests
-    val req = Flipped(DecoupledIO(new InsUncacheReq ))
+    val req = Flipped(DecoupledIO(new InsUncacheReq))
     val resp = DecoupledIO(new InsUncacheResp)
 
     val mmio_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -86,10 +86,11 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
 
 
   when (state === s_refill_req) {
+    val address_aligned = req.addr(req.addr.getWidth - 1, log2Ceil(mmioBusBytes))
     io.mmio_acquire.valid := true.B
-    io.mmio_acquire.bits  :=  edge.Get(
+    io.mmio_acquire.bits  := edge.Get(
           fromSource      = io.id,
-          toAddress       = align(req.addr, mmioBusBytes),
+          toAddress       = Cat(address_aligned, 0.U(log2Ceil(mmioBusBytes).W)),
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 

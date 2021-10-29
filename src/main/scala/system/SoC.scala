@@ -126,8 +126,8 @@ trait HaveSlaveAXI4Port {
 trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
-  // 40-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  // 36-bit physical address
+  val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -152,6 +152,7 @@ trait HaveAXI4MemPort {
   }
   val mem_xbar = TLXbar()
   mem_xbar :=* TLCacheCork() :=* bankedNode
+  mem_xbar := TLBuffer() := TLWidthWidget(8) := TLBuffer() := peripheralXbar
   val (buf_l, buf_r) = mem_buffN(5)
   memAXI4SlaveNode := buf_l
   buf_r :=
