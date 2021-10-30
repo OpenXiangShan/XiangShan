@@ -124,7 +124,9 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
-    when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
+    when(io.dtlb.resp.fire && ){
+      paddr := io.dtlb.resp.bits.paddr
+
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -142,14 +144,17 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
         io.dtlb.resp.bits.excp.pf.ld ||
         io.dtlb.resp.bits.excp.af.st ||
         io.dtlb.resp.bits.excp.af.ld
-      when (exception) {
-        // check for exceptions
-        // if there are exceptions, no need to execute it
-        state := s_finish
-        atom_override_xtval := true.B
-      } .otherwise {
-        paddr := io.dtlb.resp.bits.paddr
-        state := s_pm
+      // NOTE: long latency here that miss and pf are connected here
+      //       if still long latency unacceptable, add one more cycle
+      when (!io.dtlb.resp.bits.miss) {
+        when (exception) {
+          // check for exceptions
+          // if there are exceptions, no need to execute it
+          state := s_finish
+          atom_override_xtval := true.B
+        } .otherwise {
+          state := s_pm
+        }
       }
     }
   }
