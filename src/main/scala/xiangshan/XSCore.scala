@@ -171,8 +171,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
-  AddressSpace.checkMemmap()
-  AddressSpace.printMemmap()
 
   val ctrlBlock = Module(new CtrlBlock)
 

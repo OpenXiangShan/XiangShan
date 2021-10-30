@@ -28,7 +28,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
-  def mmioBusBytes = mmioBusWidth /8
+  def mmioBusBytes = mmioBusWidth / 8
   def maxInstrLen = 32
 }
 
