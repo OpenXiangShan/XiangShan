@@ -28,6 +28,9 @@ import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePr
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 
+
+case object XSTileKey extends Field[Seq[XSCoreParameters]]
+
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
 case class XSCoreParameters
