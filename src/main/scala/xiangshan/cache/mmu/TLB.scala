@@ -118,8 +118,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     val ppn = Mux(normal_hit, normal_ppn, super_ppn)
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
-    val pf = perm.pf && hit
-    val af = perm.af && hit
+    val pf = perm.pf
+    val af = perm.af
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -147,16 +147,16 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val ldUpdate = hit && !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
-    val stUpdate = hit && (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
-    val instrUpdate = hit && !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
+    val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+    val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val fault_valid = vmEnable && hit
+    val fault_valid = vmEnable
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
     resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
