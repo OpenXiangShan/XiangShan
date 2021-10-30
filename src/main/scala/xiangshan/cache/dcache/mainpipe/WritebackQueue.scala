@@ -244,6 +244,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val block_miss_req  = Output(Bool())
   })
 
+  require(cfg.nReleaseEntries > cfg.nMissEntries)
+
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nReleaseEntries, Bool()))
   val merge_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
