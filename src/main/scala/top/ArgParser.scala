@@ -18,7 +18,7 @@ package top
 
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.DebugOptionsKey
+import xiangshan.{DebugOptionsKey, XSTileKey}
 
 import scala.annotation.tailrec
 import scala.sys.exit
@@ -60,9 +60,9 @@ object ArgParser {
           nextOption(getConfigByName(confString), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case SoCParamsKey => up(SoCParamsKey).copy(
-              cores = List.tabulate(value.toInt){ i => up(SoCParamsKey).cores.head.copy(HartId = i) }
-            )
+            case XSTileKey => (0 until value.toInt) map{ i =>
+              up(XSTileKey).head.copy(HartId = i)
+            }
           }), tail)
         case "--dual-core" :: tail =>
           nextOption(config, "--num-cores" :: "2" :: tail)
