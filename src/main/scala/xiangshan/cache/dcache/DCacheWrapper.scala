@@ -37,7 +37,7 @@ case class DCacheParameters
   rowBits: Int = 128,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
-  replacer: Option[String] = Some("random"),
+  replacer: Option[String] = Some("setplru"),
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
