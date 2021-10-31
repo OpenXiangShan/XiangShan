@@ -50,6 +50,15 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(exuParameters.LsExuCnt, Output(new SqPtr))
 }
 
+class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
+  val addr   = UInt(PAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W)
+  val data   = UInt(DataBits.W)
+  val mask   = UInt((DataBits/8).W)
+  val wline = Bool()
+  val sqPtr  = new SqPtr
+}
+
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
@@ -98,6 +107,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     numForward = StorePipelineWidth
   ))
   vaddrModule.io := DontCare
+  val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
   val debug_paddr = Reg(Vec(StoreQueueSize, UInt((PAddrBits).W)))
   val debug_vaddr = Reg(Vec(StoreQueueSize, UInt((VAddrBits).W)))
   val debug_data = Reg(Vec(StoreQueueSize, UInt((XLEN).W)))
@@ -113,6 +123,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
+  val rdataPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val issuePtrExt = RegInit(0.U.asTypeOf(new SqPtr))
@@ -129,9 +140,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val commitCount = RegNext(io.rob.scommit)
 
   // Read dataModule
-  // deqPtrExtNext and deqPtrExtNext+1 entry will be read from dataModule
-  // if !sbuffer.fire(), read the same ptr
-  // if sbuffer.fire(), read next
+  // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
+  val rdataPtrExtNext = WireInit(Mux(dataBuffer.io.enq(1).fire(),
+    VecInit(rdataPtrExt.map(_ + 2.U)),
+    Mux(dataBuffer.io.enq(0).fire() || io.mmioStout.fire(),
+      VecInit(rdataPtrExt.map(_ + 1.U)),
+      rdataPtrExt
+    )
+  ))
+  // deqPtrExtNext traces which inst is about to leave store queue
   val deqPtrExtNext = WireInit(Mux(io.sbuffer(1).fire(),
     VecInit(deqPtrExt.map(_ + 2.U)),
     Mux(io.sbuffer(0).fire() || io.mmioStout.fire(),
@@ -140,9 +157,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     )
   ))
   for (i <- 0 until StorePipelineWidth) {
-    dataModule.io.raddr(i) := deqPtrExtNext(i).value
-    paddrModule.io.raddr(i) := deqPtrExtNext(i).value
-    vaddrModule.io.raddr(i) := deqPtrExtNext(i).value
+    dataModule.io.raddr(i) := rdataPtrExtNext(i).value
+    paddrModule.io.raddr(i) := rdataPtrExtNext(i).value
+    vaddrModule.io.raddr(i) := rdataPtrExtNext(i).value
   }
 
   // no inst will be commited 1 cycle before tval update
@@ -478,25 +495,43 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   // Commited stores will not be cancelled and can be sent to lower level.
   // remove retired insts from sq, add retired store to sbuffer
+
+  // Read data from data module
+  // As store queue grows larger and larger, time needed to read data from data
+  // module keeps growing higher. Now we give data read a whole cycle.
+
+  // For now, data read logic width is hardcoded to 2
+  require(StorePipelineWidth == 2) // TODO: add EnsbufferWidth parameter
+  val mmioStall = mmio(rdataPtrExt(0).value)
   for (i <- 0 until StorePipelineWidth) {
-    // We use RegNext to prepare data for sbuffer
-    val ptr = deqPtrExt(i).value
-    // if !sbuffer.fire(), read the same ptr
-    // if sbuffer.fire(), read next
-    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio(ptr)
+    val ptr = rdataPtrExt(i).value
+    dataBuffer.io.enq(i).valid := allocated(ptr) && commited(ptr) && !mmioStall
     // Note that store data/addr should both be valid after store's commit
-    assert(!io.sbuffer(i).valid || allvalid(ptr))
+    assert(!dataBuffer.io.enq(i).valid || allvalid(ptr))
+    dataBuffer.io.enq(i).bits.addr  := paddrModule.io.rdata(i)
+    dataBuffer.io.enq(i).bits.vaddr := vaddrModule.io.rdata(i)
+    dataBuffer.io.enq(i).bits.data  := dataModule.io.rdata(i).data
+    dataBuffer.io.enq(i).bits.mask  := dataModule.io.rdata(i).mask
+    dataBuffer.io.enq(i).bits.wline := paddrModule.io.rlineflag(i)
+    dataBuffer.io.enq(i).bits.sqPtr := rdataPtrExt(i)
+  }
+
+  // Send data stored in sbufferReqBitsReg to sbuffer
+  for (i <- 0 until StorePipelineWidth) {
+    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid
+    dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
     // Write line request should have all 1 mask
     assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr  := paddrModule.io.rdata(i)
-    io.sbuffer(i).bits.vaddr := vaddrModule.io.rdata(i)
-    io.sbuffer(i).bits.data  := dataModule.io.rdata(i).data
-    io.sbuffer(i).bits.mask  := dataModule.io.rdata(i).mask
-    io.sbuffer(i).bits.wline := paddrModule.io.rlineflag(i)
+    io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
+    io.sbuffer(i).bits.vaddr := dataBuffer.io.deq(i).bits.vaddr
+    io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
+    io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
+    io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
     io.sbuffer(i).bits.id    := DontCare
     io.sbuffer(i).bits.instrtype    := DontCare
 
+    val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
@@ -565,6 +600,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   deqPtrExt := deqPtrExtNext
+  rdataPtrExt := rdataPtrExtNext
 
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
@@ -575,7 +611,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // We delay it for 1 cycle for better timing
   // When sbuffer need to check if it is empty, the pipeline is blocked, which means delay io.sqempty
   // for 1 cycle will also promise that sq is empty in that cycle
-  io.sqempty := RegNext(enqPtrExt(0).value === deqPtrExt(0).value && enqPtrExt(0).flag === deqPtrExt(0).flag)
+  io.sqempty := RegNext(
+    enqPtrExt(0).value === deqPtrExt(0).value && 
+    enqPtrExt(0).flag === deqPtrExt(0).flag
+  )
 
   // perf counter
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
