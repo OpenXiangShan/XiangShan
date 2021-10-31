@@ -108,7 +108,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def reqIdWidth = 64
 
   require(isPow2(cfg.nMissEntries))
-  require(isPow2(cfg.nReleaseEntries))
+  // require(isPow2(cfg.nReleaseEntries))
   val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
   val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
 
