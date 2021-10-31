@@ -54,6 +54,7 @@ package object xiangshan {
     def jmp          = "b0000".U
     def i2f          = "b0001".U
     def csr          = "b0010".U
+    def xscc         = "b0011".U
     def alu          = "b0110".U
     def mul          = "b0100".U
     def div          = "b0101".U
@@ -96,6 +97,7 @@ package object xiangshan {
       jmp.litValue() -> "jmp",
       i2f.litValue() -> "int_to_float",
       csr.litValue() -> "csr",
+      xscc.litValue() -> "xscc",
       alu.litValue() -> "alu",
       mul.litValue() -> "mul",
       div.litValue() -> "div",
@@ -197,6 +199,10 @@ package object xiangshan {
 //    def ret  = "b11_100".U
     def jumpOpisJalr(op: UInt) = op(0)
     def jumpOpisAuipc(op: UInt) = op(1)
+  }
+
+  object XsCCOpType {
+    def xscc = "b00".U
   }
 
   object FenceOpType {
@@ -481,6 +487,7 @@ package object xiangshan {
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new AmoData()(p)
+  def xsccIFGen(p:Parameters) = new XsCCIfInExeUnit()(p)
 
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
@@ -675,7 +682,20 @@ package object xiangshan {
     latency = UncertainLatency(), hasExceptionOut = true
   )
 
-  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
+  val XsCCIFCfg = FuConfig(
+    name = "xscc",
+    fuGen = xsccIFGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.xscc ,
+    fuType = FuType.xscc,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    hasRedirect = true,
+    latency = UncertainLatency()
+  )
+
+  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg, XsCCIFCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)

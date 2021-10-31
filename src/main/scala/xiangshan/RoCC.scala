@@ -140,7 +140,7 @@ class RoccCommandRouter(opcode: OpcodeSet)(implicit p: Parameters) extends XSMod
     "Custom opcode matched for more than one accelerator")
 }
 //wrap rocc module with
-class XsCCIFInExeUnit(implicit p: Parameters) extends FunctionUnit{
+class XsCCIfInExeUnit(implicit p: Parameters) extends FunctionUnit{
   val roccModule = Module(new RoCCModule())
 
   io.in := DontCare
