@@ -34,7 +34,7 @@ abstract trait DecodeConstants {
   def N = BitPat("b0")
   def Y = BitPat("b1")
 
-  def decodeDefault: List[BitPat] = // illegal instruction
+  def decodeDefault: List[BitPat] = { // illegal instruction
     //   srcType(0)     srcType(1)     srcType(2)     fuType      fuOpType    rfWen  
     //   |            |            |            |           |           |  fpWen
     //   |            |            |            |           |           |  |  isXSTrap
@@ -43,7 +43,9 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  flushPipe
     //   |            |            |            |           |           |  |  |  |  |  |  isRVF
     //   |            |            |            |           |           |  |  |  |  |  |  |  selImm
-    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    //   |            |            |            |           |           |  |  |  |  |  |  |  |                    isXsCC
+    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR, N)
+  } // Use SelImm to indicate invalid instr
 
     val table: Array[(BitPat, List[BitPat])]
 }
@@ -106,7 +108,7 @@ object XDecode extends DecodeConstants {
     LHU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lhu, Y, N, N, N, N, N, N, SelImm.IMM_I),
     LB      -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lb, Y, N, N, N, N, N, N, SelImm.IMM_I),
     LBU     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.lbu, Y, N, N, N, N, N, N, SelImm.IMM_I),
-    
+
     SW      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, N, SelImm.IMM_S),
     SH      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sh, N, N, N, N, N, N, N, SelImm.IMM_S),
     SB      -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.stu, LSUOpType.sb, N, N, N, N, N, N, N, SelImm.IMM_S),
@@ -401,6 +403,36 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
+object CustomDecode extends DecodeConstants {
+  val table: Array[(BitPat, List[BitPat])] = Array(
+    CUSTOM0->           List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM0_RS1->       List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM0_RS1_RS2->   List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM0_RD->        List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM0_RD_RS1->    List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM0_RD_RS1_RS2->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1->           List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1_RS1->       List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1_RS1_RS2->   List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1_RD->        List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1_RD_RS1->    List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM1_RD_RS1_RS2->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2->           List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2_RS1->       List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2_RS1_RS2->   List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2_RD->        List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2_RD_RS1->    List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM2_RD_RS1_RS2->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3->           List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3_RS1->       List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3_RS1_RS2->   List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3_RD->        List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3_RD_RS1->    List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+    CUSTOM3_RD_RS1_RS2->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.xscc, XsccOpType.xscc, Y, N, N, N, N, N, N, SelImm.IMM_X, Y),
+   )
+ }
+
+
 //object Imm32Gen {
 //  def apply(sel: UInt, inst: UInt) = {
 //    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
@@ -522,7 +554,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
-  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table
+  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table ++ CustomDecode.table
 
   // output
   cf_ctrl.cf := ctrl_flow

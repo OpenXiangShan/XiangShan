@@ -156,6 +156,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val selImm = SelImm()
+  val isXscc = Bool()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
@@ -170,7 +171,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool()
 
   private def allSignals = srcType ++ Seq(fuType, fuOpType, rfWen, fpWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm, isXscc)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
