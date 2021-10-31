@@ -140,7 +140,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
 
       when (!io.dtlb.resp.bits.miss) {
-        when (addrAligned) {
+        when (!addrAligned) {
           // NOTE: when addrAligned, do not need to wait tlb actually
           // check for miss aligned exceptions, tlb exception are checked next cycle for timing
           // if there are exceptions, no need to execute it
