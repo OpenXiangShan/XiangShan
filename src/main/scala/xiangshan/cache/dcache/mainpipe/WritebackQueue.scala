@@ -256,22 +256,34 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // delay writeback req
   val DelayWritebackReq = true
-  val req = if(DelayWritebackReq){
-    val req_delayed = Wire(Flipped(DecoupledIO(new WritebackReq)))
-    val req_delayed_valid = RegInit(false.B)
-    req_delayed.valid := req_delayed_valid
-    req_delayed.bits := RegEnable(io.req.bits, io.req.fire())
-    when(req_delayed.fire()){
-      req_delayed_valid := false.B
-    }
-    when(io.req.fire()){
-      req_delayed_valid := true.B
-    }
-    io.req.ready := !req_delayed_valid || req_delayed.fire()
-    req_delayed
-  } else {
-    io.req
+  val req_delayed = Wire(Flipped(DecoupledIO(new WritebackReq)))
+  val req_delayed_valid = RegInit(false.B)
+  val req_delayed_bits = Reg(io.req.bits.cloneType)
+  req_delayed.valid := req_delayed_valid
+  req_delayed.bits := req_delayed_bits
+  when(req_delayed.fire()){
+    req_delayed_valid := false.B
   }
+  // We delayed writeback queue enq for 1 cycle, missQ req does not
+  // depend on wbQ enqueue. As a result, missQ req may be blocked in
+  // req_delayed. When grant comes, that req should also be updated.
+  when(
+    req_delayed_valid &&
+    io.release_wakeup.valid &&
+    io.release_wakeup.bits === req_delayed_bits.miss_id
+  ){
+    // TODO: it is dirty
+    req_delayed_bits.delay_release := false.B // update pipe reg
+    req_delayed.bits.delay_release := false.B // update entry write req in current cycle
+  }
+  when(io.req.fire()){
+    req_delayed_valid := true.B
+    req_delayed_bits := io.req.bits
+  }
+  io.req.ready := !req_delayed_valid || req_delayed.fire()
+  dontTouch(req_delayed)
+
+  val req = req_delayed
   val block_conflict = Wire(Bool())
   val accept = merge || allocate && !block_conflict
   req.ready := accept
