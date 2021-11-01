@@ -14,6 +14,8 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+// See LICENSE.SiFive for license details.
+
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
