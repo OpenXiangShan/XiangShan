@@ -124,7 +124,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.isFirstIssue := false.B
 
-    when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
+    when(io.dtlb.resp.fire){
+      paddr := io.dtlb.resp.bits.paddr
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -137,27 +138,28 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
-      val exception = !addrAligned ||
-        io.dtlb.resp.bits.excp.pf.st ||
-        io.dtlb.resp.bits.excp.pf.ld ||
-        io.dtlb.resp.bits.excp.af.st ||
-        io.dtlb.resp.bits.excp.af.ld
-      when (exception) {
-        // check for exceptions
-        // if there are exceptions, no need to execute it
-        state := s_finish
-        atom_override_xtval := true.B
-      } .otherwise {
-        paddr := io.dtlb.resp.bits.paddr
-        state := s_pm
+
+      when (!io.dtlb.resp.bits.miss) {
+        when (!addrAligned) {
+          // NOTE: when addrAligned, do not need to wait tlb actually
+          // check for miss aligned exceptions, tlb exception are checked next cycle for timing
+          // if there are exceptions, no need to execute it
+          state := s_finish
+          atom_override_xtval := true.B
+        } .otherwise {
+          state := s_pm
+        }
       }
     }
   }
 
   when (state === s_pm) {
     is_mmio := io.pmpResp.mmio
-    val exception = io.pmpResp.st
-    when (exception) {
+    // NOTE: only handle load/store exception here, if other exception happens, don't send here
+    val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+    val exception_pa = io.pmpResp.st
+    when (exception_va || exception_pa) {
       state := s_finish
       atom_override_xtval := true.B
     }.otherwise {

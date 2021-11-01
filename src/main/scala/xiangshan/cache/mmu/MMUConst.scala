@@ -31,6 +31,7 @@ case class TLBParameters
   fetchi: Boolean = false, // TODO: remove it
   useDmode: Boolean = true,
   sameCycle: Boolean = false,
+  missSameCycle: Boolean = false,
   normalNSets: Int = 1, // when da or sa
   normalNWays: Int = 8, // when fa or sa
   superNSets: Int = 1,
@@ -90,7 +91,24 @@ trait HasTlbConst extends HasXSParameter {
   val timeOutThreshold = 5000
 
   def get_set_idx(vpn: UInt, nSets: Int): UInt = {
+    require(nSets >= 1)
     vpn(log2Up(nSets)-1, 0)
+  }
+
+  def drop_set_idx(vpn: UInt, nSets: Int): UInt = {
+    require(nSets >= 1)
+    require(vpn.getWidth > log2Ceil(nSets))
+    vpn(vpn.getWidth-1, log2Ceil(nSets))
+  }
+
+  def drop_set_equal(vpn1: UInt, vpn2: UInt, nSets: Int): Bool = {
+    require(nSets >= 1)
+    require(vpn1.getWidth == vpn2.getWidth)
+    if (vpn1.getWidth <= log2Ceil(nSets)) {
+      true.B
+    } else {
+      drop_set_idx(vpn1, nSets) === drop_set_idx(vpn2, nSets)
+    }
   }
 
   def replaceWrapper(v: UInt, lruIdx: UInt): UInt = {

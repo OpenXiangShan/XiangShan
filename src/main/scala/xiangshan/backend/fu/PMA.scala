@@ -43,7 +43,7 @@ trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
       MemMap("h00_3802_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
       MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
-      MemMap("h00_8000_0000", "h1F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
+      MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
     )
    */
 
@@ -61,8 +61,11 @@ trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
     addr := DontCare
     mask := DontCare
 
+    addr(15) := 0x3FFFFFFFEL.U
+    cfg(15).a := 1.U; cfg(15).r := true.B; cfg(15).w := true.B; cfg(15).x := true.B; cfg(15).c := true.B; cfg(14).atomic := true.B
+
     // use tor instead of napot, for napot may be confusing and hard to understand
-    addr(14) := shift_addr( 0x2000000000L)
+    addr(14) := shift_addr(0xFFFFFFFFFL)
     cfg(14).a := 1.U; cfg(14).r := true.B; cfg(14).w := true.B; cfg(14).x := true.B; cfg(14).c := true.B; cfg(14).atomic := true.B
 
     addr(13) := shift_addr(0x80000000L)

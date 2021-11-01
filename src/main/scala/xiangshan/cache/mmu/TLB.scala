@@ -33,7 +33,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
-  if (q.sameCycle) {
+  if (q.sameCycle || q.missSameCycle) {
     require(q.normalAssociative == "fa")
   }
 
@@ -109,16 +109,17 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
-    val (super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
+    val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
+    val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
     assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
+    val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
     val ppn = Mux(normal_hit, normal_ppn, super_ppn)
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
-    val pf = perm.pf && hit
-    val af = perm.af && hit
+    val pf = perm.pf
+    val af = perm.af
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -126,6 +127,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
+    val miss_sameCycle = !hit_sameCycle && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
@@ -137,7 +139,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := miss
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     pmp(i).valid := resp(i).valid
@@ -145,16 +147,16 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val ldUpdate = hit && !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
-    val stUpdate = hit && (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
-    val instrUpdate = hit && !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
+    val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+    val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
     val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
-    val fault_valid = vmEnable && hit
+    val fault_valid = vmEnable
     val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
     resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
     resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
@@ -352,7 +354,14 @@ object TLB {
         tlb.io.requestor(i).req.bits := in(i).req.bits
         in(i).req.ready := !tlb.io.requestor(i).resp.bits.miss && in(i).resp.ready && tlb.io.requestor(i).req.ready
 
-        in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
+        require(q.missSameCycle || q.sameCycle)
+        // NOTE: the resp.valid seems to be useless, it must be true when need
+        //       But don't know what happens when true but not need, so keep it correct value, not just true.B
+        if (q.missSameCycle && !q.sameCycle) {
+          in(i).resp.valid := tlb.io.requestor(i).resp.valid && !RegNext(tlb.io.requestor(i).resp.bits.miss)
+        } else {
+          in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
+        }
         in(i).resp.bits := tlb.io.requestor(i).resp.bits
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }

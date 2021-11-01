@@ -24,19 +24,20 @@ import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4Deinterleaver, AXI4Fragme
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters}
+import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
+import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
+import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLRegisterNode, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
 import huancun.debug.TLLogger
-import huancun.{CacheParameters, HCCacheParameters, BankedXbar}
+import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
 
 case object SoCParamsKey extends Field[SoCParameters]
 
 case class SoCParameters
 (
-  cores: List[XSCoreParameters],
   EnableILA: Boolean = false,
+  PAddrBits: Int = 36,
   extIntrs: Int = 150,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
@@ -46,7 +47,6 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   ))
 ){
-  val PAddrBits = cores.map(_.PAddrBits).reduce((x, y) => if(x > y) x else y)
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
@@ -59,7 +59,9 @@ trait HasSoCParameter {
 
   val soc = p(SoCParamsKey)
   val debugOpts = p(DebugOptionsKey)
-  val NumCores = soc.cores.size
+  val tiles = p(XSTileKey)
+
+  val NumCores = tiles.size
   val EnableILA = soc.EnableILA
 
   // L3 configurations
@@ -80,7 +82,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
-  val l3_banked_xbar = BankedXbar(soc.cores.head.L2NBanks)
+  val l3_banked_xbar = BankedXbar(tiles.head.L2NBanks)
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -126,8 +128,8 @@ trait HaveSlaveAXI4Port {
 trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
-  // 40-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  // 36-bit physical address
+  val memRange = AddressSet(0x00000000L, 0xfffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
@@ -152,6 +154,7 @@ trait HaveAXI4MemPort {
   }
   val mem_xbar = TLXbar()
   mem_xbar :=* TLCacheCork() :=* bankedNode
+  mem_xbar := TLBuffer() := TLWidthWidget(8) := TLBuffer() := peripheralXbar
   val (buf_l, buf_r) = mem_buffN(5)
   memAXI4SlaveNode := buf_l
   buf_r :=
@@ -230,7 +233,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
   }
-  l3_banked_xbar :=* BankBinder(soc.cores.head.L2NBanks, L3BlockSize) :*= l3_xbar
+  l3_banked_xbar :=* BankBinder(tiles.head.L2NBanks, L3BlockSize) :*= l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
@@ -249,6 +252,14 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   plic.intnode := plicSource.sourceNode
   plic.node := peripheralXbar
 
+  val pll_node = TLRegisterNode(
+    address = Seq(AddressSet(0x3a000000L, 0xfff)),
+    device = new SimpleDevice("pll_ctrl", Seq()),
+    beatBytes = 8,
+    concurrency = 1
+  )
+  pll_node := peripheralXbar
+
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
@@ -259,6 +270,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
+    val pll0_lock = IO(Input(Bool()))
+    val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
 
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs.asBools
@@ -268,5 +281,25 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val tick = cnt === 0.U
     cnt := Mux(tick, freq.U, cnt - 1.U)
     clint.module.io.rtcTick := tick
+
+    val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
+    val pll_lock = RegNext(next = pll0_lock, init = false.B)
+
+    pll0_ctrl <> VecInit(pll_ctrl_regs)
+
+    pll_node.regmap(
+      0x000 -> RegFieldGroup(
+        "Pll", Some("PLL ctrl regs"),
+        pll_ctrl_regs.zipWithIndex.map{
+          case (r, i) => RegField(32, r, RegFieldDesc(
+            s"PLL_ctrl_$i",
+            desc = s"PLL ctrl register #$i"
+          ))
+        } :+ RegField.r(32, Cat(0.U(31.W), pll_lock), RegFieldDesc(
+          "PLL_lock",
+          "PLL lock register"
+        ))
+      )
+    )
   }
 }

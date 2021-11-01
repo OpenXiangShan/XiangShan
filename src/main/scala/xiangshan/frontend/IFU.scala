@@ -28,7 +28,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
-  def mmioBusBytes = mmioBusWidth /8
+  def mmioBusBytes = mmioBusWidth / 8
   def maxInstrLen = 32
 }
 
@@ -296,7 +296,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f2_except    = VecInit((0 until 2).map{i => f2_except_pf(i) || f2_except_af(i)})
   val f2_has_except = f2_valid && (f2_except_af.reduce(_||_) || f2_except_pf.reduce(_||_))
   //MMIO
-  val f2_mmio      = DataHoldBypass(Cat(io.pmp.map(_.resp.mmio)).orR, RegNext(f1_fire)).asBool()
+  val f2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !f2_except_af(0) && !f2_except_pf(0), RegNext(f1_fire)).asBool()
 
   io.pmp.zipWithIndex.map { case (p, i) =>
     p.req.valid := f2_fire

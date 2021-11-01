@@ -27,6 +27,9 @@ import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
+import system.SoCParamsKey
+
+case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -42,7 +45,6 @@ case class XSCoreParameters
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
@@ -137,7 +139,7 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
-  EnableLdVioCheckAfterReset: Boolean = false,
+  EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
@@ -234,6 +236,8 @@ trait HasXSParameter {
 
   implicit val p: Parameters
 
+  val PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+
   val coreParams = p(XSCoreParamsKey)
   val env = p(DebugOptionsKey)
 
@@ -250,7 +254,6 @@ trait HasXSParameter {
   val HasDcache = coreParams.HasDCache
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
-  val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
   val AsidLength = coreParams.AsidLength
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
