@@ -214,31 +214,33 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     dataModule.io.mask.wen(i) := false.B
     val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
     when (io.storeIn(i).fire()) {
-      addrvalid(stWbIndex) := true.B//!io.storeIn(i).bits.mmio
+      val addr_valid = !io.storeIn(i).bits.miss
+      addrvalid(stWbIndex) := addr_valid //!io.storeIn(i).bits.mmio
       // pending(stWbIndex) := io.storeIn(i).bits.mmio
 
       dataModule.io.mask.waddr(i) := stWbIndex
       dataModule.io.mask.wdata(i) := io.storeIn(i).bits.mask
-      dataModule.io.mask.wen(i) := true.B
+      dataModule.io.mask.wen(i) := addr_valid
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeIn(i).bits.paddr
       paddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
-      paddrModule.io.wen(i) := true.B
+      paddrModule.io.wen(i) := addr_valid
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
       vaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
-      vaddrModule.io.wen(i) := true.B
+      vaddrModule.io.wen(i) := addr_valid
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
 
       // mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       uop(stWbIndex).debugInfo := io.storeIn(i).bits.uop.debugInfo
-      XSInfo("store addr write to sq idx %d pc 0x%x vaddr %x paddr %x mmio %x\n",
+      XSInfo("store addr write to sq idx %d pc 0x%x miss:%d vaddr %x paddr %x mmio %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
         io.storeIn(i).bits.uop.cf.pc,
+        io.storeIn(i).bits.miss,
         io.storeIn(i).bits.vaddr,
         io.storeIn(i).bits.paddr,
         io.storeIn(i).bits.mmio
@@ -246,7 +248,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
 
     // re-replinish mmio, for pma/pmp will get mmio one cycle later
-    val storeInFireReg = RegNext(io.storeIn(i).fire())
+    val storeInFireReg = RegNext(io.storeIn(i).fire() && !io.storeIn(i).bits.miss)
     val stWbIndexReg = RegNext(stWbIndex)
     when (storeInFireReg) {
       pending(stWbIndexReg) := io.storeInRe(i).mmio
