@@ -45,6 +45,7 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
   val cacheParams = icacheParameters
+  def highestIdxBit = log2Ceil(nSets) - 1
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -162,15 +163,15 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheArray
     //meta connection
     if(bank == 0) {
       tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      tagArray.io.r.req.bits.apply(setIdx=bank_0_idx)
+      tagArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      tagArray.io.r.req.bits.apply(setIdx=bank_1_idx)
+      tagArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=io.write.bits.phyTag, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     tagArray
   }
@@ -292,15 +293,15 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
     if(i == 0) {
       dataArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      dataArray.io.r.req.bits.apply(setIdx=bank_0_idx)
+      dataArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_0
-      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       dataArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      dataArray.io.r.req.bits.apply(setIdx=bank_1_idx)
+      dataArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_1
-      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=io.write.bits.data, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     dataArray
