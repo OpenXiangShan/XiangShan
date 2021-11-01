@@ -482,7 +482,7 @@ class ICacheMissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
       }
 
       is(s_write_back){
-          state := Mux(io.meta_write.fire() && io.data_write.fire(),s_wait_resp,s_write_back)
+          state := s_wait_resp
       }
 
       is(s_wait_resp){

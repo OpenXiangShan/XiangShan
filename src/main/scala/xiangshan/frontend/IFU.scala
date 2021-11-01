@@ -112,6 +112,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   def isLastInCacheline(fallThruAddr: UInt): Bool = fallThruAddr(blockOffBits - 1, 1) === 0.U
 
+    def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
+    Mux(valid, data, RegEnable(data, valid))
+  }
 
   //---------------------------------------------
   //  Fetch Stage 1 :
@@ -215,7 +218,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val f1_pAddrs             = tlbRespPAddr
   val f1_pTags              = VecInit(f1_pAddrs.map(get_phy_tag(_)))
-  val (f1_tags, f1_cacheline_valid, f1_datas)   = (meta_resp.tags, meta_resp.valid, data_resp.datas)
+
+  val f1_tags               = ResultHoldBypass(data = meta_resp.tags, valid = RegNext(toMeta.fire()))
+  val f1_cacheline_valid    = ResultHoldBypass(data = meta_resp.valid, valid = RegNext(toMeta.fire()))
+  val f1_datas              = ResultHoldBypass(data = data_resp.datas, valid = RegNext(toData.fire()))
+
   val bank0_hit_vec         = VecInit(f1_tags(0).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(0)(i) && way_tag ===  f1_pTags(0) })
   val bank1_hit_vec         = VecInit(f1_tags(1).zipWithIndex.map{ case(way_tag,i) => f1_cacheline_valid(1)(i) && way_tag ===  f1_pTags(1) })
   val (bank0_hit,bank1_hit) = (ParallelOR(bank0_hit_vec) && !tlbExcpPF(0) && !tlbExcpAF(0), ParallelOR(bank1_hit_vec) && !tlbExcpPF(1) && !tlbExcpAF(1))
