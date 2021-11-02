@@ -107,10 +107,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
 
-  require(isPow2(cfg.nMissEntries))
+  require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
-  val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
-  val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
+  require(cfg.nMissEntries < cfg.nReleaseEntries)
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
+  val releaseIdBase = cfg.nMissEntries
 
   // banked dcache support
   val DCacheSets = cacheParams.nSets
