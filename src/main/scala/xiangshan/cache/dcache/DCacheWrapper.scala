@@ -497,6 +497,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // probeQueue.io.mem_probe <> bus.b
   block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
+  probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
   //----------------------------------------
   // mainPipe
