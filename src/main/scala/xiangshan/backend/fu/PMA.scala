@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
+import utils.ParallelPriorityMux
 import xiangshan.{HasXSParameter, XSModule}
 import xiangshan.backend.fu.util.HasCSRConst
 import xiangshan.cache.mmu.TlbCmd
@@ -120,11 +121,12 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     // like amo and cached, it is the attribute not protection
     // so it must have initialization.
     require(!pmaEntries.isEmpty)
-    val default = if (pmaEntries.isEmpty) true.B else (mode > ModeS)
-    val pmpMinuxOne = WireInit(0.U.asTypeOf(new PMPEntry()))
 
-    val res = pmaEntries.zip(pmpMinuxOne +: pmaEntries.take(num-1)).zipWithIndex
-      .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pma, last_pma), i)) =>
+    val pmaDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
+    val match_vec = Wire(Vec(num+1, Bool()))
+    val cfg_vec = Wire(Vec(num+1, new PMPEntry()))
+
+    pmaEntries.zip(pmaDefault +: pmaEntries.take(num-1)).zipWithIndex.foreach{ case ((pma, last_pma), i) =>
       val is_match = pma.is_match(addr, size, lgMaxSize, last_pma)
       val aligned = pma.aligned(addr, size, lgMaxSize, last_pma)
 
@@ -135,8 +137,13 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
       cur.cfg.atomic := aligned && pma.cfg.atomic
       cur.cfg.c := aligned && pma.cfg.c
 
-      Mux(is_match, cur, prev)
+      match_vec(i) := is_match
+      cfg_vec(i) := cur
     }
-    res
+
+    match_vec(num) := true.B
+    cfg_vec(num) := pmaDefault
+
+    ParallelPriorityMux(match_vec, cfg_vec)
   }
 }
