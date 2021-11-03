@@ -940,7 +940,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
-  mipWire.e.s := csrio.externalInterrupt.meip
+  mipWire.e.s := csrio.externalInterrupt.seip
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
