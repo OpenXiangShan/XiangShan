@@ -527,7 +527,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val mmio_state = RegInit(mmio_idle)
 
   val f3_req_is_mmio     = f3_mmio && f3_valid && !f2_except_af(0)
-  val mmio_has_commited = VecInit(io.rob_commits.map(_.valid)).asUInt.orR
+  val mmio_has_commited = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx.value === f3_ftq_req.ftqIdx.value &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === mmio_w_commit && mmio_has_commited
    
   val f3_mmio_to_commit =  f3_req_is_mmio && mmio_state === mmio_w_commit
