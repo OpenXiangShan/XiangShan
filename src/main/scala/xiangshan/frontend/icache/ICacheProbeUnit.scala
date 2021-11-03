@@ -141,7 +141,7 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
-    val release_req = DecoupledIO(new RealeaseReq)
+    val release_req = DecoupledIO(new ReleaseReq)
   })
 
   val s_idle :: s_read_array :: s_send_release :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
@@ -171,7 +171,6 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   io.release_req.bits.voluntary := false.B
   io.release_req.bits.hasData   := true.B
   io.release_req.bits.data      := probeline_data
-  io.release_req.bits.vaddr     := DontCare
   io.release_req.bits.waymask   := DontCare
 
   io.meta_read.valid := state === s_read_array

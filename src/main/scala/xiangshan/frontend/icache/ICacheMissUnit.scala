@@ -26,6 +26,7 @@ class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
     val vaddr      = UInt(VAddrBits.W)
     val waymask   = UInt(nWays.W)
     val coh       = new ClientMetadata
+    val release   = ValidUndirectioned(new ReleaseReq)
 
     def getVirSetIdx = get_idx(vaddr)
     def getPhyTag    = get_phy_tag(paddr)
@@ -61,18 +62,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write = DecoupledIO(new ICacheDataWriteBundle)
 
-  })
+    val release    = DecoupledIO(new ReleaseReq)
 
-  def generateStateReg(enable: Bool, release: Bool): Bool = {
-    val stateReg = RegInit(false.B)
-    when(enable) {
-      stateReg := true.B
-    }
-    .elsewhen(release && stateReg) {
-      stateReg := false.B
-    }
-    stateReg
-  }
+  })
 
   /** default value for control signals */
   io.resp := DontCare
@@ -81,7 +73,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
-  val s_idle :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
+  val s_idle :: s_send_mem_aquire :: s_wait_mem_grant :: s_write_back :: s_send_grant_ack :: s_send_release :: s_wait_resp :: Nil = Enum(7)
   val state = RegInit(s_idle)
 
   /** control logic transformation */
@@ -93,9 +85,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
-  //flush register
-//  val has_flushed = generateStateReg(enable = io.flush && (state =/= s_idle) && (state =/= s_wait_resp), release = (state === s_wait_resp))
-//  val flush = io.flush || has_flushed
 
   //cacheline register
   //refullCycles: 8 for 64-bit bus bus and 2 for 256-bit
@@ -109,22 +98,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.meta_write.bits := DontCare
   io.data_write.bits := DontCare
 
-  def shoud_direct_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
-    req_valid && (req_idx === new_req.getVirSetIdx) && (req_tag === new_req.getPhyTag) && state === s_wait_resp
-  }
-
-  //WARNING: directly response may be timing critical
-  def should_merge_before_resp(new_req: ICacheMissReq, req_valid: Bool): Bool = {
-    req_valid && (req_idx === new_req.getVirSetIdx) && (req_tag === new_req.getPhyTag) && state =/= s_idle && state =/= s_wait_resp
-  }
-
-  val req_should_merge = should_merge_before_resp(new_req = io.req.bits, req_valid = io.req.valid)
-  val has_merged = generateStateReg(enable = req_should_merge, release = io.resp.fire())
-  val req_should_direct_resp = shoud_direct_resp(new_req = io.req.bits, req_valid = io.req.valid)
-
-  when(req_should_merge) {
-    req.waymask := io.req.bits.waymask
-  }
 
   io.req.ready := (state === s_idle)
   io.mem_acquire.valid := (state === s_send_mem_aquire) //&& !io.flush
@@ -162,24 +135,30 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
             assert(refill_done, "refill not done!")
             state := s_write_back
             neddSendAck := edge.isResponse(io.mem_grant.bits)
+          }
         }
       }
     }
 
     is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire() ,Mux(neddSendAck, s_send_grant_ack, s_wait_resp), s_write_back)
+      state := Mux(io.meta_write.fire() && io.data_write.fire(), Mux(neddSendAck, s_send_grant_ack, s_wait_resp), s_write_back)
     }
 
     is(s_send_grant_ack) {
       when(io.mem_finish.fire()) {
+        state := Mux(req.release.valid, s_send_release,  s_wait_resp)
+      }
+    }
+
+    is(s_send_release){
+      when(io.release.fire()){
         state := s_wait_resp
       }
     }
 
-
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt
-      when(io.resp.fire() ) {
+      when(io.resp.fire()) {
         state := s_idle
       }
     }
@@ -202,6 +181,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.data_write.valid := (state === s_write_back)
   io.data_write.bits.generate(data = respDataReg.asUInt, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
 
+  io.release.valid := req.release.valid && (state === s_send_release)
+  io.release.bits  := req.release.bits
+
   /** Tilelink request for next level cache/memory */
   val grow_param = req.coh.onAccess(M_XRD)._2
   val acquireBlock = edge.AcquireBlock(
@@ -220,7 +202,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   io.mem_finish.bits := grantack
 
   //resp to ifu
-  io.resp.valid := state === s_wait_resp || req_should_direct_resp || (has_merged && state === s_wait_resp)
+  io.resp.valid := state === s_wait_resp
 
   XSPerfAccumulate(
     "entryPenalty" + Integer.toString(id, 10),
@@ -247,13 +229,14 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val meta_write  = DecoupledIO(new ICacheMetaWriteBundle)
     val data_write  = DecoupledIO(new ICacheDataWriteBundle)
 
+    val release     = DecoupledIO(new ReleaseReq)
   })
-
   // assign default values to output signals
   io.mem_grant.ready := false.B
 
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  cacheParams.nMissEntries))
-  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  cacheParams.nMissEntries))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  PortNumber))
+  val refill_arb     = Module(new Arbiter(new ICacheDataWriteBundle,  PortNumber))
+  val release_arb    = Module(new Arbiter(new ReleaseReq,  PortNumber))
 
   io.mem_grant.ready := true.B
 
@@ -270,6 +253,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     // entry resp
     meta_write_arb.io.in(i)     <>  entry.io.meta_write
     refill_arb.io.in(i)         <>  entry.io.data_write
+    release_arb.io.in(i)        <>  entry.io.release
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
@@ -296,6 +280,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
+  io.release        <> release_arb.io.out
 
   (0 until nWays).map{ w =>
     XSPerfAccumulate("line_0_refill_way_" + Integer.toString(w, 10),  entries(0).io.meta_write.valid && OHToUInt(entries(0).io.meta_write.bits.waymask)  === w.U)
