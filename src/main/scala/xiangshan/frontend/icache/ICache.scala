@@ -27,6 +27,7 @@ import xiangshan._
 import xiangshan.frontend._
 import xiangshan.cache._
 import utils._
+import xiangshan.cache.mmu.BlockTlbRequestIO
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -59,6 +60,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   val dataCodeUnit = 8
   val dataUnitNum  = blockBits/dataCodeUnit
 
+  def highestIdxBit = log2Ceil(nSets) - 1
   def dataCodeBits  = cacheParams.dataCode.width(dataCodeUnit)
   def dataEntryBits = dataCodeBits * dataUnitNum
 
@@ -75,6 +77,8 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def ProbeKey = 0
   def FetchKey = 1
   def ReleaseKey = 2
+
+  def PortNumber = 2
 
   def nMissEntries = cacheParams.nMissEntries
 
@@ -154,15 +158,15 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     //meta connection
     if(bank == 0) {
       tagArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      tagArray.io.r.req.bits.apply(setIdx=bank_0_idx)
+      tagArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_0
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       tagArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      tagArray.io.r.req.bits.apply(setIdx=bank_1_idx)
+      tagArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       tagArray.io.w.req.valid := write_bank_1
-      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     tagArray
@@ -183,16 +187,22 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
   val write_count = RegInit(0.U(8.W))
-  val debug_condition = io.write.valid && write.virIdx === "h02".U && write.waymask === "h08".U
-  when(debug_condition){
-    write_count := write_count + 1.U
-  }
+  val debug_condition = io.write.valid && write.virIdx === "h02".U
+  // when(debug_condition){
+  //   write_count := write_count + 1.U
+  //   printf("[time:%d ]", GTimer().asUInt)
+  // }
 
-  when(debug_condition && write_count === 1.U){
-    assert(debug_condition, "write debug condition appears!!")
-  }
+  // when(debug_condition && write_count === 1.U){
+  //   printf("[time:%d ]", GTimer().asUInt)
+  // } 
 
-  //XSDebug(io.write.valid,"write ICache Meta: index : %x  || waymask: %x || tag: %x || coh:%x \n", write.virIdx, write.waymask, write.phyTag, write.coh.asUInt)
+  // when(debug_condition && write_count === 2.U){
+  //   printf("[time:%d ]", GTimer().asUInt)
+  // }  
+  when(io.write.valid){
+      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
+  }
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -311,15 +321,15 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
     if(i == 0) {
       dataArray.io.r.req.valid := port_0_read_0 || port_1_read_0
-      dataArray.io.r.req.bits.apply(setIdx=bank_0_idx)
+      dataArray.io.r.req.bits.apply(setIdx=bank_0_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_0
-      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
     else {
       dataArray.io.r.req.valid := port_0_read_1 || port_1_read_1
-      dataArray.io.r.req.bits.apply(setIdx=bank_1_idx)
+      dataArray.io.r.req.bits.apply(setIdx=bank_1_idx(highestIdxBit,1))
       dataArray.io.w.req.valid := write_bank_1
-      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+      dataArray.io.w.req.bits.apply(data=write_data_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
     }
 
     dataArray
@@ -406,14 +416,12 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val metaRead    = new ICacheCommonReadBundle(isMeta = true)
-  val dataRead    = new ICacheCommonReadBundle(isMeta = false)
-  val missQueue   = new ICacheMissBundle
-  val releaseUnit = new ICacheReleaseBundle
   val fencei      = Input(Bool())
-  val hasRelease  = Input(Vec(2,Bool()))
-  val hasReleaseFlush = Input(Bool())
+  val stop        = Input(Bool())
   val csr         = new L1CacheToCsrIO
+  val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
+  val pmp         = Vec(PortNumber, new ICachePMPBundle)
+  val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -439,41 +447,50 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val metaArray      = Module(new ICacheMetaArray)
   val dataArray      = Module(new ICacheDataArray)
-  val missQueue      = Module(new ICacheMissUnit(edge))
+  val mainpipe       = Module(new ICacheMainPipe)
+  val missUnit      = Module(new ICacheMissUnit(edge))
   val releaseUnit    = Module(new ReleaseUnit(edge))
   val probe          = Module(new ICacheProbe)
   val probeQueue     = Module(new ICacheProbeQueue(edge))
 
+
   val meta_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
   val data_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 + 1))
-  val release_arb    = Module(new Arbiter(new RealeaseReq, 2))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
+  val release_arb    = Module(new Arbiter(new ReleaseReq, 2))
 
-  meta_read_arb.io.in(ProbeKey) <> probe.io.meta_read
-  meta_read_arb.io.in(FetchKey) <> io.metaRead.req
-  metaArray.io.read      <> meta_read_arb.io.out
-  metaArray.io.readResp  <> probe.io.meta_response
-  metaArray.io.readResp  <> io.metaRead.resp
+  meta_read_arb.io.in(ProbeKey)   <> probe.io.meta_read
+  meta_read_arb.io.in(FetchKey)   <> mainpipe.io.metaArray.toIMeta
+  metaArray.io.read               <> meta_read_arb.io.out
+  probe.io.meta_response          <> metaArray.io.readResp
+  mainpipe.io.metaArray.fromIMeta <> metaArray.io.readResp
 
   data_read_arb.io.in(ProbeKey) <> probe.io.data_read
-  data_read_arb.io.in(FetchKey) <> io.dataRead.req
+  data_read_arb.io.in(FetchKey) <> mainpipe.io.dataArray.toIData
   dataArray.io.read      <> data_read_arb.io.out
-  dataArray.io.readResp  <> probe.io.data_response
-  dataArray.io.readResp  <> io.dataRead.resp
+  probe.io.data_response          <> dataArray.io.readResp
+  mainpipe.io.dataArray.fromIData <> dataArray.io.readResp
 
-  meta_write_arb.io.in(FetchKey) <> missQueue.io.meta_write
+  mainpipe.io.respStall := io.stop
+
+  meta_write_arb.io.in(FetchKey) <> missUnit.io.meta_write
   meta_write_arb.io.in(ProbeKey) <> probe.io.meta_write
-  meta_write_arb.io.in(ReleaseKey) <> releaseUnit.io.release_meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
-  dataArray.io.write <> missQueue.io.data_write
+  dataArray.io.write <> missUnit.io.data_write
+
 
   release_arb.io.in(ProbeKey) <> probe.io.release_req
-  release_arb.io.in(FetchKey) <> io.releaseUnit.req(0)
+  release_arb.io.in(FetchKey) <> missUnit.io.release
 
-  for(i <- 0 until 2){
-    missQueue.io.req(i)           <> io.missQueue.req(i)
-    missQueue.io.resp(i)          <> io.missQueue.resp(i)
+  for(i <- 0 until PortNumber){
+    io.itlb           <>    mainpipe.io.itlb
+    io.pmp            <>    mainpipe.io.pmp
+    io.fetch          <>    mainpipe.io.fetch
+
+    missUnit.io.req(i)           <>   mainpipe.io.mshr(i).toMSHR
+    mainpipe.io.mshr(i).fromMSHR <>   missUnit.io.resp(i)
+
   }
 
   bus.b.ready := false.B
@@ -483,16 +500,16 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e.bits  := DontCare
 
   metaArray.io.fencei := io.fencei
-  bus.a <> missQueue.io.mem_acquire
-  bus.e <> missQueue.io.mem_finish
+  bus.a <> missUnit.io.mem_acquire
+  bus.e <> missUnit.io.mem_finish
 
   releaseUnit.io.req(0)  <>  release_arb.io.out
-  releaseUnit.io.req(1)  <>  io.releaseUnit.req(1)
+  releaseUnit.io.req(1)  <>  DontCare   //TODO: only one release
   bus.c <> releaseUnit.io.mem_release
 
   // connect bus d
-  missQueue.io.mem_grant.valid := false.B
-  missQueue.io.mem_grant.bits  := DontCare
+  missUnit.io.mem_grant.valid := false.B
+  missUnit.io.mem_grant.bits  := DontCare
 
   releaseUnit.io.mem_grant.valid := false.B
   releaseUnit.io.mem_grant.bits  := DontCare
@@ -501,23 +518,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   probeQueue.io.mem_probe    <> bus.b
   probe.io.req               <> probeQueue.io.pipe_req
 
-  val releaseFlags = RegInit(VecInit(Seq.fill(2)(false.B)))
-
-  (0 until 2).map{ i =>
-    when(io.hasReleaseFlush){
-      releaseFlags(i) := false.B
-    }.elsewhen(io.hasRelease(i)){
-      releaseFlags(i) := true.B
-    }.elsewhen(bus.c.fire()){
-      releaseFlags(i) := false.B
-    }
-  }
-
-
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B
   when ( bus.d.bits.opcode === TLMessages.GrantData) {
-    missQueue.io.mem_grant <> bus.d
+    missUnit.io.mem_grant <> bus.d
   } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
     releaseUnit.io.mem_grant <> bus.d
   } .otherwise {
