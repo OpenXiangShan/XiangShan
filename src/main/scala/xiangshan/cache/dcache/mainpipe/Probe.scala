@@ -81,8 +81,10 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   }
 
   when (state === s_pipe_req) {
+    // Note that probe req will be blocked in the next cycle if a lr updates lrsc_locked_block addr
+    // in this way, we can RegNext(lrsc_blocked) for better timing
     val lrsc_blocked = io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr
-    io.pipe_req.valid := !lrsc_blocked
+    io.pipe_req.valid := !RegNext(lrsc_blocked)
 
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
@@ -111,9 +113,10 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
+    val update_resv_set = Input(Bool())
   })
 
-  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nProbeEntries))
+  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nProbeEntries, Bool()))
@@ -158,6 +161,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   io.pipe_req <> pipe_req_arb.io.out
+  // When we update update_resv_set, block all probe req in the next cycle
+  // It should give Probe reservation set addr compare an independent cycle,
+  // which will lead to better timing
+  when(RegNext(io.update_resv_set)){
+    io.pipe_req.valid := false.B
+    pipe_req_arb.io.out.ready := false.B
+  }
 
   // print all input/output requests for debug purpose
   when (io.mem_probe.valid) {
