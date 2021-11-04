@@ -24,7 +24,7 @@ class ResetGen extends Module {
     val out = Output(Bool())
   })
 
-  io.out := RegNext(reset.asBool)
+  io.out := RegNext(RegNext(reset.asBool))
 }
 
 object ResetGen {

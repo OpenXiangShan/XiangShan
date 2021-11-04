@@ -318,11 +318,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   //                  v          v            v           v           v
   //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
   val resetChain = Seq(
-    Seq(ptw),
     Seq(memBlock, dtlbRepeater),
+    Seq(exuBlocks.head),
     // Note: arbiters don't actually have reset ports
-    exuBlocks ++ Seq(outer.wbArbiter.module),
+    exuBlocks.tail ++ Seq(outer.wbArbiter.module),
     Seq(ctrlBlock),
+    Seq(ptw),
     Seq(frontend, itlbRepeater1, itlbRepeater2)
   )
   ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
