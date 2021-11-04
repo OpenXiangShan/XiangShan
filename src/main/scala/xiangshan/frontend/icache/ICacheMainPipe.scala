@@ -78,6 +78,11 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
   val respStall   = Input(Bool())
+  val toReleaseUnit = Vec(2, Decoupled(new ReleaseReq))
+  val victimInfor = new Bundle() {
+    val s1 = Vec(2, Output(new ICacheVictimInfor()))
+    val s2 = Vec(2, Output(new ICacheVictimInfor()))
+  }
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -149,7 +154,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_only_fisrt  = RegEnable(next = s0_only_fisrt, enable = s0_fire)
   val s1_double_line = RegEnable(next = s0_double_line, enable = s0_fire)
 
-  s1_ready := s2_ready && tlbRespAllValid || !s1_valid
+  s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready
 
   toITLB(0).valid         := s1_valid
@@ -194,11 +199,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** choose victim cacheline */
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
-  val s1_victim_oh    = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))})
+  val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(toMeta.fire()))
+
   val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
   val s1_victim_tag   = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_meta_ptags(port))})
   val s1_victim_data  = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_data_cacheline(port))})
   val s1_need_replace = VecInit(s1_victim_coh.zipWithIndex.map{case(coh, port) => coh.isValid() && s1_bank_miss(port)})
+
+  (0 until PortNumber).map{ i =>
+    io.victimInfor.s1(i).valid := s1_valid && s1_need_replace(i)
+    io.victimInfor.s1(i).ptag  := s1_victim_tag(i)
+    io.victimInfor.s1(i).vidx  := get_idx(s1_req_vaddr(i))
+  }
+
 
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
 
@@ -266,9 +279,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_victim_data  = RegEnable(next = s1_victim_data,  enable = s1_fire)
   val s2_need_replace = RegEnable(next = s1_need_replace,  enable = s1_fire)
   val s2_has_replace  = s2_need_replace.asUInt.orR
-
-  val release_idle :: release_ready :: release_send_req ::Nil = Enum(3)
-  val release_state = RegInit(release_idle)
 
   /*** exception and pmp logic ***/
   //exception information
@@ -432,13 +442,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMSHR(i).bits.waymask  := s2_waymask(i)
     toMSHR(i).bits.coh      := s2_victim_coh(i)
 
-    toMSHR(i).bits.release.valid          := s2_valid && s2_need_replace(i)
-    toMSHR(i).bits.release.bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))))
-    toMSHR(i).bits.release.bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
-    toMSHR(i).bits.release.bits.voluntary := true.B
-    toMSHR(i).bits.release.bits.hasData   := false.B
-    toMSHR(i).bits.release.bits.data      := DontCare
-    toMSHR(i).bits.release.bits.waymask   := s2_waymask(i)
+//    toMSHR(i).bits.release.valid          := s2_valid && s2_need_replace(i)
+//    toMSHR(i).bits.release.bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))))
+//    toMSHR(i).bits.release.bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
+//    toMSHR(i).bits.release.bits.voluntary := true.B
+//    toMSHR(i).bits.release.bits.hasData   := false.B
+//    toMSHR(i).bits.release.bits.data      := s2_victim_data(i)
+//    toMSHR(i).bits.release.bits.waymask   := s2_waymask(i)
 
 
     when(toMSHR(i).fire() && missStateQueue(i) === m_invalid){
@@ -478,7 +488,54 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  val miss_all_fix       = (wait_state === wait_finish)
+  
+   val release_idle :: release_ready :: release_send_req ::Nil = Enum(3)
+   val release_state = RegInit(release_idle)
+ //  val probeMerge = RegInit(0.U.asTypeOf(new ICacheVictimInfor))
+   val toRealseUnit = io.toReleaseUnit
+
+   val need_release_0 = s2_need_replace(0) && (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch)
+   val need_release_1 = s2_need_replace(1) && (hit_0_miss_1_latch || miss_0_miss_1_latch)
+   val s2_need_release = VecInit(Seq(need_release_0, need_release_1 ))
+
+   switch(release_state){
+     is(release_idle){
+       when(need_release_0 && !need_release_1){
+         release_state := Mux(toRealseUnit(0).ready, release_ready ,release_idle )
+       }.elsewhen(!need_release_0 && need_release_1){
+         release_state := Mux(toRealseUnit(1).ready, release_ready ,release_idle )
+       }.elsewhen(need_release_0 && need_release_1){
+         release_state := Mux(toRealseUnit(0).ready && toRealseUnit(1).ready, release_ready ,release_idle )
+       }
+     }
+
+     is(release_ready){
+       release_state := release_send_req
+     }
+
+     is(release_send_req){
+       when(s2_fire){ release_state := release_idle}
+     }
+   }
+
+  (0 until 2).map{ i =>
+    toRealseUnit(i).valid          := s2_valid && s2_need_release(i) && (release_state === release_ready)
+    toRealseUnit(i).bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))) )
+    toRealseUnit(i).bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
+    toRealseUnit(i).bits.voluntary := true.B
+    toRealseUnit(i).bits.hasData   := false.B
+    toRealseUnit(i).bits.data      := s2_victim_data(i)
+    toRealseUnit(i).bits.waymask   := s2_waymask(i)
+    toRealseUnit(i).bits.vidx      := s2_req_vsetIdx(i)
+  }
+
+  (0 until PortNumber).map{ i =>
+    io.victimInfor.s2(i).valid := s2_valid && s2_need_release(i)
+    io.victimInfor.s2(i).ptag  := s2_victim_tag(i)
+    io.victimInfor.s2(i).vidx  := get_idx(s2_req_vaddr(i))
+  }
+
+  val miss_all_fix       = (wait_state === wait_finish) && (!s2_need_release.asUInt.orR || (release_state === release_send_req))
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch)
 
   XSPerfAccumulate("ifu_bubble_s2_miss",    s2_valid && !s2_fetch_finish )

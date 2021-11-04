@@ -456,7 +456,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val meta_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
   val data_read_arb = Module(new Arbiter(new ICacheReadBundle,  2))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 ))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle(),  2 + 1))
   val release_arb    = Module(new Arbiter(new ReleaseReq, 2))
 
   meta_read_arb.io.in(ProbeKey)   <> probe.io.meta_read
@@ -475,13 +475,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   meta_write_arb.io.in(FetchKey) <> missUnit.io.meta_write
   meta_write_arb.io.in(ProbeKey) <> probe.io.meta_write
+  meta_write_arb.io.in(ReleaseKey) <> releaseUnit.io.release_meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
 
 
   release_arb.io.in(ProbeKey) <> probe.io.release_req
-  release_arb.io.in(FetchKey) <> missUnit.io.release
+  release_arb.io.in(FetchKey) <> mainpipe.io.toReleaseUnit(0)//probe.io.release_req
 
   for(i <- 0 until PortNumber){
     io.itlb           <>    mainpipe.io.itlb
@@ -504,7 +505,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   bus.e <> missUnit.io.mem_finish
 
   releaseUnit.io.req(0)  <>  release_arb.io.out
-  releaseUnit.io.req(1)  <>  DontCare   //TODO: only one release
+  releaseUnit.io.req(1)  <>  mainpipe.io.toReleaseUnit(1)
   bus.c <> releaseUnit.io.mem_release
 
   // connect bus d
@@ -517,6 +518,41 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
   probe.io.req               <> probeQueue.io.pipe_req
+
+  val hasVictim = VecInit(Seq(
+    mainpipe.io.victimInfor.s1(0).valid,
+    mainpipe.io.victimInfor.s1(1).valid,
+    mainpipe.io.victimInfor.s2(0).valid,
+    mainpipe.io.victimInfor.s2(1).valid
+  ))
+
+  val victimSetSeq = Seq(
+    mainpipe.io.victimInfor.s1(0).vidx,
+    mainpipe.io.victimInfor.s1(1).vidx,
+    mainpipe.io.victimInfor.s2(0).vidx,
+    mainpipe.io.victimInfor.s2(1).vidx
+  )
+
+  val victimTagSeq = Seq(
+    mainpipe.io.victimInfor.s1(0).ptag,
+    mainpipe.io.victimInfor.s1(1).ptag,
+    mainpipe.io.victimInfor.s2(0).ptag,
+    mainpipe.io.victimInfor.s2(1).ptag
+  )
+
+  val probeReqValid = probe.io.req.valid
+  val probeReqPtag  = get_phy_tag(probe.io.req.bits.addr)
+  val probeReqVidx  = get_idx(probe.io.req.bits.vaddr)
+
+  //send to probe state machine and cancel the probe
+  val probe_need_merge = VecInit(hasVictim.zip(victimSetSeq).zip(victimTagSeq).map{case((valid, idx), tag) =>  valid && probeReqValid && idx === probeReqVidx && tag === probeReqPtag}).reduce(_||_)
+  probe.io.probe_should_merge := RegNext(probe_need_merge)
+
+  //raise a flag to inform the MissUnit you have a merged Probe
+  releaseUnit.io.probeMerge.valid := probe_need_merge
+  releaseUnit.io.probeMerge.bits.valid := DontCare
+  releaseUnit.io.probeMerge.bits.ptag  := probeReqPtag
+  releaseUnit.io.probeMerge.bits.vidx  := probeReqVidx
 
   // in L1ICache, we only expect GrantData and ReleaseAck
   bus.d.ready := false.B

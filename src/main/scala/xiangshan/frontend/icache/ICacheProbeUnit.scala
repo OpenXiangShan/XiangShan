@@ -142,15 +142,21 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
     val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
 
     val release_req = DecoupledIO(new ReleaseReq)
+
+    val probe_should_merge = Input(Bool())
   })
 
   val s_idle :: s_read_array :: s_send_release :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
+  // val notSendRelease = RegInit(false.B)
+  // when(state === s_read_array &&  io.probe_should_merge)   { notSendRelease := true.B}
+  // .elsewhen(state === s_send_release && notSendRelease)    { notSendRelease := false.B}
+
   val req = Reg(new ICacheProbeReq)
   val req_vidx = get_idx(req.vaddr)
-
   val phy_tag = get_phy_tag(req.addr)
+
   val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid()})
   val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
   val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
@@ -165,13 +171,14 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
 
   val (_, probe_shrink_param, probe_new_coh) = probeline_coh.onProbe(req.probe_param)
 
-  io.release_req.valid          := state === s_send_release
+  io.release_req.valid          := state === s_send_release //d&& !notSendRelease
   io.release_req.bits.addr      := req.addr
   io.release_req.bits.param     := probe_shrink_param
   io.release_req.bits.voluntary := false.B
   io.release_req.bits.hasData   := true.B
   io.release_req.bits.data      := probeline_data
   io.release_req.bits.waymask   := DontCare
+  io.release_req.bits.vidx      := DontCare
 
   io.meta_read.valid := state === s_read_array
   io.meta_read.bits.isDoubleLine := false.B
@@ -204,7 +211,7 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
     }
 
     is(s_send_release) {
-      when(io.release_req.fire()){
+      when(io.release_req.fire()){ //|| notSendRelease){
         state := s_write_back
       }
     }
