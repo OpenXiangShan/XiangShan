@@ -526,19 +526,26 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_w_commit :: Nil = Enum(6)
   val mmio_state = RegInit(mmio_idle)
 
-  val f3_req_is_mmio     = f3_mmio && f3_valid && !f2_except_af(0)
-  val mmio_has_commited = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx.value === f3_ftq_req.ftqIdx.value &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
+  val f3_req_is_mmio     = f3_mmio && f3_valid && !f3_except_af(0)
+  val mmio_has_commited = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === mmio_w_commit && mmio_has_commited
    
   val f3_mmio_to_commit =  f3_req_is_mmio && mmio_state === mmio_w_commit
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  when(f3_flush)                  {f3_valid := false.B}
-  .elsewhen(f2_fire && !f2_flush) {f3_valid := true.B }
+  when(f3_flush && !f3_req_is_mmio)                  {f3_valid := false.B}
+  .elsewhen(f2_fire && !f2_flush)                    {f3_valid := true.B }
   .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)  {f3_valid := false.B}
   .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}    {f3_valid := false.B}
 
+  val f3_mmio_use_seq_pc = RegInit(false.B)
+
+  val (redirect_ftqIdx, redirect_ftqOffset)  = (fromFtq.redirect.bits.ftqIdx,fromFtq.redirect.bits.ftqOffset)
+  val redirect_mmio_req = fromFtq.redirect.valid && redirect_ftqIdx === f3_ftq_req.ftqIdx && redirect_ftqOffset === 0.U
+
+  when(RegNext(f2_fire && !f2_flush) && f3_req_is_mmio)        { f3_mmio_use_seq_pc := true.B  }
+  .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
 
   f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
 
@@ -636,7 +643,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   f3_mmio_missOffset.valid := f3_req_is_mmio
   f3_mmio_missOffset.bits  := 0.U
 
-  toFtq.pdWb.valid           := (!finishFetchMaskReg && f3_valid && !f3_req_is_mmio) || f3_mmio_req_commit
+  toFtq.pdWb.valid           := (!finishFetchMaskReg && f3_valid && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
   toFtq.pdWb.bits.pc         := preDecoderOut.pc
   toFtq.pdWb.bits.pd         := preDecoderOut.pd
   toFtq.pdWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  Mux(f3_req_is_mmio, f3_mmio_range(i), f3_predecode_range(i))}
@@ -677,7 +684,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
     perf_out.incr_step := RegNext(perf)
   }
 
-  f3_redirect := (!predecodeFlushReg && predecodeFlush) || (f3_mmio_req_commit)
+  f3_redirect := (!predecodeFlushReg && predecodeFlush && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
 
   XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
   XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
