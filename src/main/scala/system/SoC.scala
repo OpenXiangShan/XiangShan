@@ -20,14 +20,13 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.DebugModule
-import freechips.rocketchip.amba.axi4.{AXI4Buffer, AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4ToTL, AXI4UserYanker}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, L1BusErrors}
-import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOFixer, TLRegisterNode, TLTempNode, TLToAXI4, TLWidthWidget, TLXbar}
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.tilelink._
 import huancun.debug.TLLogger
 import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
@@ -88,7 +87,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 // We adapt the following three traits from rocket-chip.
 // Source: rocket-chip/src/main/scala/subsystem/Ports.scala
 trait HaveSlaveAXI4Port {
-  this: BaseSoC =>
+  this: BaseSoC with HaveAXI4MemPort =>
 
   val idBits = 14
 
@@ -107,18 +106,27 @@ trait HaveSlaveAXI4Port {
   ))
   private val error_xbar = TLXbar()
 
+  private val spliter = AXI4Spilter()
+  private val dma_to_l3 = AXI4IdentityNode()
+  private val dma_to_ddr = AXI4IdentityNode()
+
+  spliter := l3FrontendAXI4Node
+  dma_to_ddr := spliter
+  dma_to_l3 := spliter
+
   error_xbar :=
     TLFIFOFixer() :=
-    TLWidthWidget(16) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
     AXI4IdIndexer(1) :=
-    l3FrontendAXI4Node
+    dma_to_l3
   errorDevice.node := error_xbar
   l3_xbar :=
     TLBuffer() :=
     error_xbar
+
+  mem_xbar := AXI4Fragmenter() := AXI4Buffer() := dma_to_ddr
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
@@ -152,17 +160,28 @@ trait HaveAXI4MemPort {
     buffers.reduce((l, r) => l := r)
     (buffers.head, buffers.last)
   }
-  val mem_xbar = TLXbar()
-  mem_xbar :=* TLCacheCork() :=* bankedNode
-  mem_xbar := TLBuffer() := TLWidthWidget(8) := TLBuffer() := peripheralXbar
   val (buf_l, buf_r) = mem_buffN(5)
-  memAXI4SlaveNode := buf_l
-  buf_r :=
+
+  val mem_xbar = AXI4Xbar() //TLXbar()
+
+  memAXI4SlaveNode := mem_xbar
+
+  mem_xbar :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
+    buf_l
+  buf_r :=
     TLToAXI4() :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
-    mem_xbar
+    TLXbar() :=* TLCacheCork() :=* bankedNode
+
+  mem_xbar :=
+    AXI4UserYanker() :=
+    AXI4Deinterleaver(8) :=
+    TLToAXI4() :=
+    TLWidthWidget(8) :=
+    TLBuffer() :=
+    peripheralXbar
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
