@@ -199,6 +199,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     realTakens(i)       := takens(i) && instRange(i)
   }
 
+  //TODO:
+  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B
+
   val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
   val jumpOffset              =  PriorityEncoder(jumpOH)
   val rvcOH                   =  VecInit(io.out.pd.map(inst => inst.isRVC))
@@ -206,7 +209,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val jumpIsRVC               =  rvcOH(jumpOffset)
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
-  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
+  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize || beyondFetch)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
   val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC || (pcStart + (FetchWidth * 4).U) === nextLinePC) && !isDoubleLine
   val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
@@ -214,9 +217,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
   realEndPC               :=  Mux(hasFalseHit, Mux(hasJump && ((jumpNextPC < boundPC) || (jumpNextPC === boundPC) ), jumpNextPC, boundPC), pcEnd)
 
-  val validLastOffset     = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
-  io.out.misOffset.valid  := ParallelOR(realMissPred)
-  io.out.misOffset.bits   := Mux(pcEndError,validLastOffset,PriorityEncoder(realMissPred))
+  val validLastOffset      = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
+
+  io.out.misOffset.valid  := ParallelOR(realMissPred) || beyondFetch
+  io.out.misOffset.bits   := Mux(beyondFetch, PredictWidth.U, Mux(pcEndError,validLastOffset,PriorityEncoder(realMissPred)))
   io.out.instrRange.zipWithIndex.map{case (bit,i) => bit := instRange(i).asBool()}
 
   io.out.cfiOffset.valid  := ParallelOR(realTakens)

@@ -507,6 +507,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f3_hit            = RegEnable(next = f2_hit   , enable = f2_fire)
   val f3_mmio           = RegEnable(next = f2_mmio   , enable = f2_fire)
 
+  assert((f3_ftq_req.startAddr + 34.U) >= f3_ftq_req.fallThruAddr, "Fall through address exceeds the limit")
+
   val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
   val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
