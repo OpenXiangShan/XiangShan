@@ -226,7 +226,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   io.out.cfiOffset.valid  := ParallelOR(realTakens)
   io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
 
-  io.out.target           := Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC)
+  io.out.target           := Mux(beyondFetch,io.out.pc.last + 2.U ,Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC))
   io.out.takens           := realTakens
 
   io.out.jalTarget        :=  targets(jumpOffset)
