@@ -159,13 +159,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   toITLB(0).valid         := s1_valid
   toITLB(0).bits.size     := 3.U // TODO: fix the size
-  toITLB(0).bits.vaddr    := addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
-  toITLB(0).bits.debug.pc := addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
+  toITLB(0).bits.vaddr    := s1_req_vaddr(0)//addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
+  toITLB(0).bits.debug.pc := s1_req_vaddr(0)//addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
 
   toITLB(1).valid         := s1_valid && s1_double_line
   toITLB(1).bits.size     := 3.U // TODO: fix the size
-  toITLB(1).bits.vaddr    := addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
-  toITLB(1).bits.debug.pc := addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
+  toITLB(1).bits.vaddr    := s1_req_vaddr(1)//addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
+  toITLB(1).bits.debug.pc := s1_req_vaddr(1)//addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
@@ -322,12 +322,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   sec_meet_vec := VecInit(Seq(sec_meet_0_miss,sec_meet_1_miss ))
   
   //only raise at the first cycle of s2_valid
-  val  only_0_miss      = RegNext(s1_fire) && !s2_hit && !s2_double_line && !s2_has_except && !sec_meet_0_miss
-  val  only_0_hit       = RegNext(s1_fire) && s2_hit && !s2_double_line
-  val  hit_0_hit_1      = RegNext(s1_fire) && s2_hit && s2_double_line
-  val  hit_0_miss_1     = RegNext(s1_fire) && !s2_port_hit(1) && !sec_meet_1_miss && (s2_port_hit(0) || sec_meet_0_miss) && s2_double_line  && !s2_has_except
-  val  miss_0_hit_1     = RegNext(s1_fire) && !s2_port_hit(0) && !sec_meet_0_miss && (s2_port_hit(1) || sec_meet_1_miss) && s2_double_line  && !s2_has_except
-  val  miss_0_miss_1    = RegNext(s1_fire) && !s2_port_hit(0) && !s2_port_hit(1) && !sec_meet_0_miss && !sec_meet_1_miss && s2_double_line  && !s2_has_except
+  val  only_0_miss      = RegNext(s1_fire) && !s2_hit && !s2_double_line && !s2_has_except && !sec_meet_0_miss && !s2_mmio
+  val  only_0_hit       = RegNext(s1_fire) && s2_hit && !s2_double_line && !s2_mmio
+  val  hit_0_hit_1      = RegNext(s1_fire) && s2_hit && s2_double_line && !s2_mmio
+  val  hit_0_miss_1     = RegNext(s1_fire) && !s2_port_hit(1) && !sec_meet_1_miss && (s2_port_hit(0) || sec_meet_0_miss) && s2_double_line  && !s2_has_except && !s2_mmio
+  val  miss_0_hit_1     = RegNext(s1_fire) && !s2_port_hit(0) && !sec_meet_0_miss && (s2_port_hit(1) || sec_meet_1_miss) && s2_double_line  && !s2_has_except && !s2_mmio
+  val  miss_0_miss_1    = RegNext(s1_fire) && !s2_port_hit(0) && !s2_port_hit(1) && !sec_meet_0_miss && !sec_meet_1_miss && s2_double_line  && !s2_has_except && !s2_mmio
 
   val  hit_0_except_1   = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  &&  s2_port_hit(0)
   val  miss_0_except_1  = RegNext(s1_fire) && s2_double_line &&  !s2_except(0) && s2_except(1)  && !s2_port_hit(0)
@@ -353,7 +353,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   // deal with secondary miss when s1 enter f2
   def getMissSituat(slotNum : Int, missNum : Int ) :Bool =  {
-    RegNext(s1_fire) && (missSlot(slotNum).m_vSetIdx === s2_req_vsetIdx(missNum)) && (missSlot(slotNum).m_pTag  === s2_req_ptags(missNum)) && !s2_port_hit(missNum)  && waitSecondComeIn(missStateQueue(slotNum))
+    RegNext(s1_fire) && (missSlot(slotNum).m_vSetIdx === s2_req_vsetIdx(missNum)) && (missSlot(slotNum).m_pTag  === s2_req_ptags(missNum)) && !s2_port_hit(missNum)  && waitSecondComeIn(missStateQueue(slotNum)) && !s2_mmio
   }
 
   val miss_0_s2_0 =   getMissSituat(slotNum = 0, missNum = 0)
@@ -438,8 +438,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   (0 until 2).map { i =>
-    if(i == 1) toMSHR(i).valid   := (hit_0_miss_1_latch || miss_0_miss_1_latch) && wait_state === wait_queue_ready
-        else     toMSHR(i).valid := (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch) && wait_state === wait_queue_ready
+    if(i == 1) toMSHR(i).valid   := (hit_0_miss_1_latch || miss_0_miss_1_latch) && wait_state === wait_queue_ready && !s2_mmio
+        else     toMSHR(i).valid := (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch) && wait_state === wait_queue_ready && !s2_mmio
     toMSHR(i).bits.paddr    := s2_req_paddr(i)
     toMSHR(i).bits.vaddr    := s2_req_vaddr(i)
     toMSHR(i).bits.waymask  := s2_waymask(i)
@@ -491,7 +491,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  
+
    val release_idle :: release_ready :: release_send_req ::Nil = Enum(3)
    val release_state = RegInit(release_idle)
  //  val probeMerge = RegInit(0.U.asTypeOf(new ICacheVictimInfor))
@@ -522,7 +522,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    }
 
   (0 until 2).map{ i =>
-    toRealseUnit(i).valid          := s2_valid && s2_need_release(i) && (release_state === release_ready)
+    toRealseUnit(i).valid          := s2_valid && s2_need_release(i) && (release_state === release_ready) && !s2_mmio
     toRealseUnit(i).bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))) )
     toRealseUnit(i).bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
     toRealseUnit(i).bits.voluntary := true.B
@@ -539,7 +539,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   val miss_all_fix       = (wait_state === wait_finish) && (!s2_need_release.asUInt.orR || (release_state === release_send_req))
-  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch)
+  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio)
 
   XSPerfAccumulate("ifu_bubble_s2_miss",    s2_valid && !s2_fetch_finish )
 

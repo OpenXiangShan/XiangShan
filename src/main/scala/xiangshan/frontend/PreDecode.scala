@@ -185,9 +185,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
                        //An not-CFI instruction is predicted taken
     val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken)
                        //A jal instruction is predicted not taken
-    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isJal)
                        //A ret instruction is predicted not taken
-    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet)
+    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isRet)
                        //An invalid instruction is predicted taken
     val invalidInsFault  = (!validStart(i)  && i.U === bbOffset && bbTaken)
 
@@ -208,7 +208,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
   val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
-  val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC) && !isDoubleLine
+  val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC || (pcStart + (FetchWidth * 4).U) === nextLinePC) && !isDoubleLine
   val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
 
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))

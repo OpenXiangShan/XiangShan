@@ -102,7 +102,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   when (state === s_release_resp) {
     io.mem_grant.ready := true.B
     when (io.mem_grant.fire()) {
-      state := s_invalid//Mux(req.voluntary,s_meta_write,s_invalid)
+      state := Mux(req.voluntary,s_meta_write,s_invalid)
     }
   }
 
@@ -114,17 +114,17 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 
   io.probeMergeFix := needMergeProbe && io.mem_release.fire()
 
-  io.release_meta_write <> DontCare
+//  io.release_meta_write <> DontCare
 
-//  when(state === s_meta_write) {
-//    when(io.release_meta_write.fire()){
-//      state := s_invalid
-//    }
-//  }
-//
-//
-//  io.release_meta_write.valid := false.B//(state === s_meta_write) && req.voluntary
-//  io.release_meta_write.bits.generate(tag = get_phy_tag(req.addr), coh = ClientMetadata.onReset, idx = req.vidx, waymask = req.waymask, bankIdx = req.vidx(0))
+  when(state === s_meta_write) {
+    when(io.release_meta_write.fire()){
+      state := s_invalid
+    }
+  }
+
+
+  io.release_meta_write.valid := (state === s_meta_write) && req.voluntary
+  io.release_meta_write.bits.generate(tag = get_phy_tag(req.addr), coh = ClientMetadata.onReset, idx = req.vidx, waymask = req.waymask, bankIdx = req.vidx(0))
 
 
 }

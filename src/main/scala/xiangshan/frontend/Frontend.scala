@@ -120,6 +120,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
+  ifu.io.rob_commits <> io.backend.toFtq.rob_commits
+
   ibuffer.io.flush := needFlush
   io.backend.cfVec <> ibuffer.io.out
 

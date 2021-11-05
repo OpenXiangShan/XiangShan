@@ -14,6 +14,8 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+// See LICENSE.SiFive for license details.
+
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
@@ -370,13 +372,15 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     require(num == NumPMP)
 
     val passThrough = if (pmpEntries.isEmpty) true.B else (mode > ModeS)
-    val pmpMinuxOne = WireInit(0.U.asTypeOf(new PMPEntry()))
-    pmpMinuxOne.cfg.r := passThrough
-    pmpMinuxOne.cfg.w := passThrough
-    pmpMinuxOne.cfg.x := passThrough
+    val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
+    pmpDefault.cfg.r := passThrough
+    pmpDefault.cfg.w := passThrough
+    pmpDefault.cfg.x := passThrough
 
-    val res = pmpEntries.zip(pmpMinuxOne +: pmpEntries.take(num-1)).zipWithIndex
-      .reverse.foldLeft(pmpMinuxOne) { case (prev, ((pmp, last_pmp), i)) =>
+    val match_vec = Wire(Vec(num+1, Bool()))
+    val cfg_vec = Wire(Vec(num+1, new PMPEntry()))
+
+    pmpEntries.zip(pmpDefault +: pmpEntries.take(num-1)).zipWithIndex.foreach{ case ((pmp, last_pmp), i) =>
       val is_match = pmp.is_match(addr, size, lgMaxSize, last_pmp)
       val ignore = passThrough && !pmp.cfg.l
       val aligned = pmp.aligned(addr, size, lgMaxSize, last_pmp)
@@ -386,9 +390,16 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
       cur.cfg.w := aligned && (pmp.cfg.w || ignore)
       cur.cfg.x := aligned && (pmp.cfg.x || ignore)
 
-      Mux(is_match, cur, prev)
+//      Mux(is_match, cur, prev)
+      match_vec(i) := is_match
+      cfg_vec(i) := cur
     }
-    res
+
+    // default value
+    match_vec(num) := true.B
+    cfg_vec(num) := pmpDefault
+
+    ParallelPriorityMux(match_vec, cfg_vec)
   }
 }
 

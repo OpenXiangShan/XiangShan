@@ -129,6 +129,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     encWord(encWordBits - 1, wordBits)
   }
 
+  val ReduceReadlineConflict = false
+
   io.write.ready := true.B
 
   // wrap data rows of 8 ways
@@ -250,8 +252,16 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val row_error = Wire(Vec(DCacheBanks, Bool()))
   dontTouch(row_error)
   val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
-  val rrl_bank_conflict_0 = io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
-  val rrl_bank_conflict_1 = io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+  val rrl_bank_conflict_0 = Wire(Bool())
+  val rrl_bank_conflict_1 = Wire(Bool())
+  if (ReduceReadlineConflict) {
+    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
+    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+  } else {
+    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid
+    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid
+  }
+  
   val rw_bank_conflict_0 = io.read(0).valid && rwhazard
   val rw_bank_conflict_1 = io.read(1).valid && rwhazard
   val perf_multi_read = io.read(0).valid && io.read(1).valid
@@ -288,7 +298,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
       bank_addrs(i) === bank_index.U && io.read(i).valid
     })))
-    val readline_match = io.readline.valid && io.readline.bits.rmask(bank_index)
+    val readline_match = Wire(Bool())
+    if (ReduceReadlineConflict) {
+      readline_match := io.readline.valid && io.readline.bits.rmask(bank_index)
+    } else {
+      readline_match := io.readline.valid
+    }
     val bank_way_en = Mux(readline_match,
       io.readline.bits.way_en,
       Mux(bank_addr_matchs(0), way_en(0), way_en(1))
