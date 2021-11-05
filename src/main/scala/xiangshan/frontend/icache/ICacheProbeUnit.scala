@@ -98,7 +98,7 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
   if(ICacheAboveIndexOffset > ICacheTagOffset) {
     // have alias problem, extra alias bits needed for index
     req.vaddr := Cat(
-      io.mem_probe.bits.address(VAddrBits - 1, ICacheAboveIndexOffset), // dontcare
+      io.mem_probe.bits.address(PAddrBits - 1, ICacheAboveIndexOffset), // dontcare
       alias_addr_frag(ICacheAboveIndexOffset - ICacheTagOffset - 1, 0), // index
       io.mem_probe.bits.address(ICacheTagOffset - 1, 0)                 // index & others
     )

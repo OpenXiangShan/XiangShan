@@ -176,7 +176,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   fromITLB.map(_.ready := true.B)
 
   val (tlbRespValid, tlbRespPAddr) = (fromITLB.map(_.valid), VecInit(fromITLB.map(_.bits.paddr)))
-  val (tlbRespMiss,  tlbRespMMIO)  = (fromITLB.map(port => port.bits.miss && port.valid), fromITLB.map(port => port.bits.mmio && port.valid))
+  val (tlbRespMiss)  = fromITLB.map(port => port.bits.miss && port.valid)
   val (tlbExcpPF,    tlbExcpAF)    = (fromITLB.map(port => port.bits.excp.pf.instr && port.valid),
                                         fromITLB.map(port => (port.bits.excp.af.instr) && port.valid))
 
@@ -201,9 +201,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
   val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(toMeta.fire()))
 
-  val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
-  val s1_victim_tag   = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_meta_ptags(port))})
-  val s1_victim_data  = VecInit(s1_victim_oh.zipWithIndex.map{case(oh, port) => Mux1H(oh, s1_data_cacheline(port))})
+  val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
+  val s1_victim_tag   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_ptags(port))})
+  val s1_victim_data  = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_data_cacheline(port))})
   val s1_need_replace = VecInit(s1_victim_coh.zipWithIndex.map{case(coh, port) => coh.isValid() && s1_bank_miss(port)})
 
   (0 until PortNumber).map{ i =>
@@ -259,6 +259,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
 
   val pmpExcpAF = fromPMP.map(port => port.instr)
+  val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
 
   val (s2_req_paddr , s2_req_vaddr)   = (RegEnable(next = s1_req_paddr, enable = s1_fire), RegEnable(next = s1_req_vaddr, enable = s1_fire))
   val s2_req_vsetIdx  = RegEnable(next = s1_req_vsetIdx, enable = s1_fire)
@@ -286,6 +287,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_except_af = VecInit(RegEnable(next = VecInit(tlbExcpAF), enable = s1_fire).zip(pmpExcpAF).map(a => a._1 || DataHoldBypass(a._2, RegNext(s1_fire)).asBool))
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_af(i)})
   val s2_has_except = s2_valid && (s2_except_af.reduce(_||_) || s2_except_pf.reduce(_||_))
+  //MMIO
+  val s2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !s2_except_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool()
 
   io.pmp.zipWithIndex.map { case (p, i) =>
     p.req.valid := s2_fire
@@ -567,7 +570,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_af(i)
-    toIFU(i).bits.tlbExcp.mmio          := DontCare
+    toIFU(i).bits.tlbExcp.mmio          := s2_mmio
   }
 
 }

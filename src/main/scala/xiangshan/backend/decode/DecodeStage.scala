@@ -54,6 +54,9 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     decoders(i).io.enq.ctrl_flow.loadWaitStrict := ssit.io.rdata(i).strict
     decoders(i).io.enq.ctrl_flow.ssid := ssit.io.rdata(i).ssid
 
+    // csr control
+    decoders(i).io.csrCtrl := io.csrCtrl
+
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
     io.in(i).ready       := io.out(i).ready
@@ -88,7 +91,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
       val cond2 = sameFtqPtr && ftqOffsetDiff === 2.U
       val cond3 = !sameFtqPtr && ftqOffset1 === 0.U
       val cond4 = !sameFtqPtr && ftqOffset1 === 1.U
-      out.bits.ctrl.isFused := Mux(cond1, 1.U, Mux(cond2, 2.U, Mux(cond3, 3.U, 4.U)))
+      out.bits.ctrl.commitType := Mux(cond1, 4.U, Mux(cond2, 5.U, Mux(cond3, 6.U, 7.U)))
       XSError(!cond1 && !cond2 && !cond3 && !cond4, p"new condition $sameFtqPtr $ftqOffset0 $ftqOffset1\n")
     }
   }
@@ -107,4 +110,19 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
   XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
   XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(6))
+  })
+  val perfEvents = Seq(
+    ("decoder_fused_instr          ", PopCount(fusionDecoder.io.out.map(_.fire))                                 ),
+    ("decoder_waitInstr            ", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready))),
+    ("decoder_stall_cycle          ", hasValid && !io.out(0).ready                                               ),
+    ("decoder_utilization          ", PopCount(io.in.map(_.valid))                                               ),
+    ("decoder_loadWaitBitSet       ", loadWaitBitSet                                                             ),
+    ("decoder_storeset_ssit_hit    ", storeSetHit                                                                ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

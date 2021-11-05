@@ -118,7 +118,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val pageFault     = io.in.pageFault
   val accessFault   = io.in.accessFault
 
-
   val validStart        = Wire(Vec(PredictWidth, Bool()))
   dontTouch(validStart)
   val validEnd          = Wire(Vec(PredictWidth, Bool()))
@@ -143,8 +142,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val isNextLine      = (io.out.pc(i) > nextLinePC)
     val nullInstruction = isNextLine && !isDoubleLine
 
-    val hasPageFault   = validStart(i) && ((io.out.pc(i) < nextLinePC && pageFault(0))   || (io.out.pc(i) > nextLinePC && pageFault(1)))
-    val hasAccessFault = validStart(i) && ((io.out.pc(i) < nextLinePC && accessFault(0)) || (io.out.pc(i) > nextLinePC && accessFault(1)))
+    val hasPageFault   = ((io.out.pc(i) < nextLinePC && pageFault(0))   || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && pageFault(1)))
+    val hasAccessFault = ((io.out.pc(i) < nextLinePC && accessFault(0)) || ((io.out.pc(i) > nextLinePC || io.out.pc(i) === nextLinePC) && accessFault(1)))
     val exception      = hasPageFault || hasAccessFault
     val inst           = Mux(exception || nullInstruction , NOP, WireInit(rawInsts(i)))
     val expander       = Module(new RVCExpander)
@@ -169,9 +168,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pd(i).isCall        := isCall
     io.out.pd(i).isRet         := isRet
     io.out.pc(i)               := currentPC
-    io.out.pageFault(i)        := hasPageFault
-    io.out.accessFault(i)      := hasAccessFault
     io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
+    io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i) 
+    io.out.accessFault(i)      := hasAccessFault
+
 
     expander.io.in             := inst
     io.out.instrs(i)           := expander.io.out.bits

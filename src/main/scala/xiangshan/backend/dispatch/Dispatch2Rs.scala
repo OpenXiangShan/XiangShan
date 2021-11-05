@@ -24,6 +24,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.rename.BusyTableReadIO
+import xiangshan.mem.LsqEnqIO
 
 class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) extends LazyModule with HasXSParameter {
   val numIn = dpParams.IntDqDeqWidth
@@ -46,6 +47,8 @@ class Dispatch2Rs(val configs: Seq[Seq[ExuConfig]])(implicit p: Parameters) exte
   val numIntStateRead = if (isLessExu) numIntSrc.max * numIn else numIntSrc.sum
   val numFpStateRead = if (isLessExu) numFpSrc.max * numIn else numFpSrc.sum
 
+  val hasLoadStore = configs.exists(cfgs => cfgs.contains(LdExeUnitCfg) || cfgs.contains(StaExeUnitCfg))
+
   lazy val module = Dispatch2RsImp(this, supportedDpMode.zipWithIndex.filter(_._1).head._2)
 }
 
@@ -58,6 +61,7 @@ class Dispatch2RsImp(outer: Dispatch2Rs)(implicit p: Parameters) extends LazyMod
     val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
     val readFpState = if (numFpStateRead > 0) Some(Vec(numFpStateRead, Flipped(new BusyTableReadIO))) else None
     val out = Vec(outer.numOut, DecoupledIO(new MicroOp))
+    val enqLsq = if (outer.hasLoadStore) Some(Flipped(new LsqEnqIO)) else None
   })
 
   val numInFire = PopCount(io.in.map(_.fire()))
@@ -167,16 +171,58 @@ class Dispatch2RsLessExuImp(outer: Dispatch2Rs)(implicit p: Parameters) extends 
 }
 
 class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends Dispatch2RsImp(outer) {
-  io.in.foreach(_.ready := false.B)
+  // in: to deal with lsq
+  // in.valid: can leave dispatch queue (not blocked by lsq)
+  // in.ready: can enter rs
+  val in = WireInit(io.in)
+  in.foreach(_.ready := false.B)
+  io.in.zip(in).foreach(x => x._1.ready := x._2.ready)
+
+  // dirty code for lsq enq
+  if (io.enqLsq.isDefined) {
+    val enqLsq = io.enqLsq.get
+    val fuType = io.in.map(_.bits.ctrl.fuType)
+    val isLs = fuType.map(f => FuType.isLoadStore(f))
+    val isStore = fuType.map(f => FuType.isStoreExu(f))
+    val isAMO = fuType.map(f => FuType.isAMO(f))
+
+    def isBlocked(index: Int): Bool = {
+      if (index >= 2) {
+        val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
+        println(pairs)
+        val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
+        val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
+        Mux(isStore(index), VecInit(foundStore).asUInt.orR, VecInit(foundLoad).asUInt.orR) || isBlocked(index - 1)
+      }
+      else {
+        false.B
+      }
+    }
+    for (i <- io.in.indices) {
+      // if at least two load/store is found in previous instructions,
+      // the instruction is blocked.
+      val blocked = isBlocked(i)
+      in(i).valid := io.in(i).valid && !blocked && enqLsq.canAccept
+      io.in(i).ready := in(i).ready && !blocked && enqLsq.canAccept
+
+      enqLsq.needAlloc(i) := Mux(in(i).valid && isLs(i), Mux(isStore(i) && !isAMO(i), 2.U, 1.U), 0.U)
+      enqLsq.req(i).bits := io.in(i).bits
+      in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
+      in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
+
+      enqLsq.req(i).valid := in(i).valid && io.in(i).ready
+    }
+  }
+
   for ((config, i) <- outer.exuConfigCases) {
     val outIndices = outer.exuConfigTypes.zipWithIndex.filter(_._1 == i).map(_._2)
     val numOfThisExu = outIndices.length
-    val canAccept = io.in.map(in => in.valid && config.map(_.canAccept(in.bits.ctrl.fuType)).reduce(_ || _))
+    val canAccept = in.map(in => in.valid && config.map(_.canAccept(in.bits.ctrl.fuType)).reduce(_ || _))
     val select = SelectOne("naive", canAccept, numOfThisExu)
     for ((idx, j) <- outIndices.zipWithIndex) {
       val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
       io.out(idx).valid := selectValid
-      io.out(idx).bits := Mux1H(selectIdxOH, io.in.map(_.bits))
+      io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
         println(s"std: $idx")
@@ -185,13 +231,13 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
         sta.valid := selectValid && io.out(idx).ready
         io.out(idx).bits.ctrl.srcType(0) := Mux1H(selectIdxOH, io.in.map(_.bits.ctrl.srcType(1)))
         io.out(idx).bits.psrc(0) := Mux1H(selectIdxOH, io.in.map(_.bits.psrc(1)))
-        io.in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready && sta.ready }}
+        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready && sta.ready }}
         XSPerfAccumulate(s"st_rs_not_ready_$idx", selectValid && (!sta.ready || !io.out(idx).ready))
         XSPerfAccumulate(s"sta_rs_not_ready_$idx", selectValid && !sta.ready && io.out(idx).ready)
         XSPerfAccumulate(s"std_rs_not_ready_$idx", selectValid && sta.ready && !io.out(idx).ready)
       }
       else {
-        io.in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready }}
+        in.zip(selectIdxOH).foreach{ case (in, v) => when (v) { in.ready := io.out(idx).ready }}
       }
     }
   }
@@ -217,4 +263,12 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     }
   }
 
+  // dispatch is allowed when lsq and rs can accept all the instructions
+  // TODO: better algorithm here?
+  if (io.enqLsq.isDefined) {
+    when (!VecInit(io.out.map(_.ready)).asUInt.andR) {
+      in.foreach(_.ready := false.B)
+      io.out.foreach(_.valid := false.B)
+    }
+  }
 }

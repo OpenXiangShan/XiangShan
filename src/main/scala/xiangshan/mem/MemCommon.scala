@@ -51,7 +51,7 @@ object genWdata {
 class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
-  val func = UInt(6.W) //fixme???
+  // val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt((XLEN+1).W)
   val uop = new MicroOp
@@ -66,13 +66,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle {
   val forwardMask = Vec(8, Bool())
   val forwardData = Vec(8, UInt(8.W))
 
-  // For debug usage
-  val isFirstIssue = Bool()
   //softprefetch
   val isSoftPrefetch = Bool() 
-  //softprefetch except
-  val isSoftPreExcept = Bool()
-  val isSoftPremmio = Bool()
+
+  // For debug usage
+  val isFirstIssue = Bool()
 }
 
 class StoreDataBundle(implicit p: Parameters) extends XSBundle {
@@ -121,7 +119,29 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   val dataInvalidSqIdx = Input(UInt(log2Up(StoreQueueSize).W)) // resp to load_s2, sqIdx value
 }
 
-// // Bundle for load / store wait waking up
+// Query load queue for ld-ld violation
+// 
+// Req should be send in load_s1
+// Resp will be generated 1 cycle later
+//
+// Note that query req may be !ready, as dcache is releasing a block
+// If it happens, a replay from rs is needed.
+
+class LoadViolationQueryReq(implicit p: Parameters) extends XSBundle {
+  val paddr = UInt(PAddrBits.W)
+  val uop = new MicroOp // provide lqIdx
+}
+
+class LoadViolationQueryResp(implicit p: Parameters) extends XSBundle {
+  val have_violation = Bool()
+}
+
+class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
+  val req = Decoupled(new LoadViolationQueryReq)
+  val resp = Flipped(Valid(new LoadViolationQueryResp))
+}
+
+// Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
   val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))

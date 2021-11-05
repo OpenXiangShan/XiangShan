@@ -181,3 +181,57 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
   XSPerfHistogram("in_count", PopCount(io.in.map(_.valid)), true.B, 0, outer.numInPorts, 1)
   XSPerfHistogram("out_count", PopCount(io.out.map(_.valid)), true.B, 0, outer.numInPorts, 1)
 }
+
+class WbArbiterWrapper(
+  exuConfigs: Seq[ExuConfig],
+  numIntOut: Int,
+  numFpOut: Int
+)(implicit p: Parameters) extends LazyModule {
+  val numInPorts = exuConfigs.length
+
+  val intConfigs = exuConfigs.filter(_.writeIntRf)
+  val intArbiter = LazyModule(new WbArbiter(intConfigs, numIntOut, isFp = false))
+  val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
+  val numIntWbPorts = intWbPorts.length
+  val intConnections = intArbiter.allConnections
+
+  val fpConfigs = exuConfigs.filter(_.writeFpRf)
+  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, numFpOut, isFp = true))
+  val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
+  val numFpWbPorts = fpWbPorts.length
+  val fpConnections = fpArbiter.allConnections
+
+  val numOutPorts = intArbiter.numOutPorts + fpArbiter.numOutPorts
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle() {
+      val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
+      val out = Vec(numOutPorts, ValidIO(new ExuOutput))
+    })
+
+    // ready is set to true.B as default (to be override later)
+    io.in.foreach(_.ready := true.B)
+
+    val intWriteback = io.in.zip(exuConfigs).filter(_._2.writeIntRf)
+    intArbiter.module.io.in.zip(intWriteback).foreach { case (arb, (wb, cfg)) =>
+      // When the function unit does not write fp regfile, we don't need to check fpWen
+      arb.valid := wb.valid && (!cfg.writeFpRf.B || !wb.bits.uop.ctrl.fpWen)
+      arb.bits := wb.bits
+      when (arb.valid) {
+        wb.ready := arb.ready
+      }
+    }
+
+    val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
+    fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
+      // When the function unit does not write fp regfile, we don't need to check fpWen
+      arb.valid := wb.valid && (!cfg.writeIntRf.B || wb.bits.uop.ctrl.fpWen)
+      arb.bits := wb.bits
+      when (arb.valid) {
+        wb.ready := arb.ready
+      }
+    }
+
+    io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
+  }
+}

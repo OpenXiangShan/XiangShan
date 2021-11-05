@@ -325,6 +325,14 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   }
   payloadArray.io.read(params.numDeq).addr := oldestSel.bits
 
+  // For better timing, we add one more read port to data array when oldestFirst is enabled,
+  // and select data after the arbiter decides which one to issue.
+  // In this way, selection and data read happen simultaneously.
+  for (i <- 0 until params.numDeq) {
+    dataArray.io.read(i).addr := select.io.grant(i).bits
+  }
+  dataArray.io.read.last.addr := oldestSel.bits
+
   /**
     * S1: read uop and data
     */
@@ -455,23 +463,35 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   /**
     * S1: read data from regfile
     */
-  // For better timing, we add one more read port to data array when oldestFirst is enabled,
-  // and select data after the arbiter decides which one to issue.
-  // In this way, selection and data read happen simultaneously.
-  for (i <- 0 until params.numDeq) {
-    dataArray.io.read(i).addr := select.io.grant(i).bits
-  }
-  dataArray.io.read.last.addr := oldestSel.bits
   // Do the read data arbitration
-  s1_out.foreach(_.bits.src := DontCare)
-  for ((doOverride, i) <- oldestOverride.zipWithIndex) {
-    for (j <- 0 until params.numSrc) {
-      s1_out(i).bits.src(j) := Mux(doOverride, dataArray.io.read.last.data(j), dataArray.io.read(i).data(j))
+  class DataSelect(implicit p: Parameters) extends XSModule {
+    val io = IO(new Bundle {
+      // one for override data, the others for original data
+      val doOverride = Vec(params.numDeq, Input(Bool()))
+      val readData = Vec(dataArray.io.read.length, Vec(params.numSrc, Input(UInt(params.dataBits.W))))
+      // for enq data
+      val enqBypass = Vec(params.numDeq, Vec(params.numEnq, Input(Bool())))
+      val enqData = Vec(params.numEnq, Vec(params.numSrc, Flipped(ValidIO(UInt(params.dataBits.W)))))
+      // deq data
+      val deqData = Vec(params.numDeq, Vec(params.numSrc, Output(UInt(params.dataBits.W))))
+    })
+
+    for ((deq, i) <- io.deqData.zipWithIndex) {
+      // default deq data is selected from data array
+      deq := Mux(io.doOverride(i), io.readData.last, io.readData(i))
+      // when instructions are selected for dequeue after enq, we need to bypass data.
+      val bypassData = Mux1H(io.enqBypass(i), io.enqData)
+      bypassData.zip(io.deqData(i)).foreach{ case (byData, deq) =>
+        when (byData.valid && io.enqBypass(i).asUInt.orR) {
+          deq := byData.bits
+        }
+      }
     }
   }
 
   // for read-before-issue, we need to bypass the enqueue data here
   // for read-after-issue, we need to bypass the imm here
+  s1_out.foreach(_.bits.src := DontCare)
   // check enq data bypass (another form of broadcast except that we know where it hits) here
   val s1_allocate_index = select.io.allocate.map(a => RegNext(OHToUInt(a.bits)))
   val s1_issue_index = issueVec.map(iss => OHToUInt(iss.bits))
@@ -479,21 +499,21 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   for ((bypass, i) <- s1_select_bypass_s0.zipWithIndex) {
     // bypass: Vec(config.numEnq, Bool())
     bypass := s1_do_enqueue.zip(s1_allocate_index).map{ case (enq, idx) => enq && idx === s1_issue_index(i) }
-    // enqSrcStateReg: Vec(config.numEnq, Vec(config.numSrc, Bool()))
-    // [i][j]: i-th enqueue, j-th source state
-    val enqSrcStateReg = RegNext(VecInit(statusArray.io.update.map(_.data.srcState)))
-    // enqBypassValid: Vec(config.numEnq, Vec(config.numSrc, Bool()))
-    val enqBypassValid = enqSrcStateReg.zip(bypass).map { case (state, sel) => VecInit(state.map(_ && sel)) }
+  }
 
-    // bypass data for config.numDeq
-    val deqBypassValid = Mux1H(bypass, enqBypassValid)
-    val deqBypassData = Mux1H(bypass, immBypassedData)
-
-    // dequeue data should be bypassed
-    deqBypassValid.zip(deqBypassData).zip(s1_out(i).bits.src).foreach{ case ((byValid, byData), o) =>
-      when (byValid) {
-        o := byData
-      }
+  val dataSelect = Module(new DataSelect)
+  dataSelect.io.doOverride := oldestOverride
+  dataSelect.io.readData := dataArray.io.read.map(_.data)
+  dataSelect.io.enqBypass := s1_select_bypass_s0
+  for ((enq, i) <- dataSelect.io.enqData.zipWithIndex) {
+    for (j <- 0 until params.numSrc) {
+      enq(j).valid := RegNext(statusArray.io.update(i).data.srcState(j))
+      enq(j).bits := immBypassedData(i)(j)
+    }
+  }
+  for (i <- 0 until params.numDeq) {
+    for (j <- 0 until params.numSrc) {
+      s1_out(i).bits.src(j) := dataSelect.io.deqData(i)(j)
     }
   }
 

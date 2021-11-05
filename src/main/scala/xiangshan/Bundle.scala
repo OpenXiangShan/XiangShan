@@ -53,12 +53,13 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(2.W)
-  val mshrFull = 1.U(2.W)
-  val dataInvalid = 2.U(2.W)
-  val bankConflict = 3.U(2.W)
+  val tlbMiss = 0.U(3.W)
+  val mshrFull = 1.U(3.W)
+  val dataInvalid = 2.U(3.W)
+  val bankConflict = 3.U(3.W)
+  val ldVioCheckRedo = 4.U(3.W)
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(3.W)
 }
 
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
@@ -161,10 +162,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
-  val isFused = UInt(3.W)
-  val isORI = Bool() //for softprefetch
-  val isSoftPrefetchRead = Bool() //for softprefetch
-  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
@@ -332,7 +329,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
@@ -452,8 +448,12 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
+  // Decode
+  val svinval_enable = Output(Bool())
+
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
 }

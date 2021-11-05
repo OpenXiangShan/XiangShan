@@ -77,6 +77,11 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   scheduler.io.fastUopIn <> io.fastUopIn
   scheduler.io.extra <> io.scheExtra
 
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(scheduler.perfinfo.perfEvents.length))
+  })
+  scheduler.perfinfo <> perfinfo
+
   // the scheduler issues instructions to function units
   scheduler.io.issue <> fuBlock.io.issue ++ io.issue.getOrElse(Seq())
   if (scheduler.io.fmaMid.isDefined) {
