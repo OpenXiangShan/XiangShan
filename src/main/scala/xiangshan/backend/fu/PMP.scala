@@ -403,6 +403,32 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
   }
 }
 
+class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
+  val mode = UInt(2.W)
+  val pmp = Vec(NumPMP, new PMPEntry())
+  val pma = Vec(NumPMA, new PMPEntry())
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+    this.mode := mode
+    this.pmp := pmp
+    this.pma := pma
+  }
+}
+
+class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
+  val check_env = Input(new PMPCheckerEnv())
+  val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
+  val resp = new PMPRespBundle()
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(mode, pmp, pma)
+    this.req := req
+    resp
+  }
+
+  override def cloneType: this.type = (new PMPCheckIO(lgMaxSize)).asInstanceOf[this.type]
+}
+
 @chiselName
 class PMPChecker
 (
@@ -413,20 +439,12 @@ class PMPChecker
   with PMPCheckMethod
   with PMACheckMethod
 {
-  val io = IO(new Bundle{
-    val env = Input(new Bundle {
-      val mode = Input(UInt(2.W))
-      val pmp = Input(Vec(NumPMP, new PMPEntry()))
-      val pma = Input(Vec(NumPMA, new PMPEntry()))
-    })
-    val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
-    val resp = new PMPRespBundle()
-  })
+  val io = IO(new PMPCheckIO(lgMaxSize))
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(req.addr, req.size, io.env.pmp, io.env.mode, lgMaxSize)
-  val res_pma = pma_match_res(req.addr, req.size, io.env.pma, io.env.mode, lgMaxSize)
+  val res_pmp = pmp_match_res(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val res_pma = pma_match_res(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)

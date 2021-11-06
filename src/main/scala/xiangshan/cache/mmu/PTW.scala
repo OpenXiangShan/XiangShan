@@ -83,11 +83,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
-  for (p <- pmp_check) {
-    p.env.mode := ModeS
-    p.env.pmp := pmp.io.pmp
-    p.env.pma := pmp.io.pma
-  }
+  pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
 
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache)

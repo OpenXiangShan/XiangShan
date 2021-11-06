@@ -73,10 +73,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
-    pmp_check(i).env.pmp  := pmp.io.pmp
-    pmp_check(i).env.pma  := pmp.io.pma
-    pmp_check(i).env.mode := tlbCsr.priv.imode
-    pmp_check(i).req <> ifu.io.pmp(i).req
+    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, ifu.io.pmp(i).req)
     ifu.io.pmp(i).resp <> pmp_check(i).resp
   }
 
