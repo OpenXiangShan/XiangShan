@@ -120,6 +120,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
+  val willSendDcacheReq = Wire(Bool())
+
   /*
        idle --[flush]   --> drain   --[buf empty]--> idle
             --[buf full]--> replace --[dcache resp]--> idle
@@ -171,7 +173,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
-  val (missqReplayTimeOutIdx, missqReplayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
+  val (missqReplayTimeOutIdx, missqReplayMayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
+  val missqReplayHasTimeOut = RegNext(missqReplayMayHasTimeOut) && !RegNext(willSendDcacheReq)
+  val missqReplayTimeOutIdxReg = RegEnable(missqReplayTimeOutIdx, missqReplayMayHasTimeOut)
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
   val drainIdx = PriorityEncoder(activeMask)
@@ -234,7 +238,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   def wordReqToBufLine(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateVec(insertIdx).state_valid := true.B
     cohCount(insertIdx) := 0.U
-    missqReplayCount(insertIdx) := 0.U
+    // missqReplayCount(insertIdx) := 0.U
     ptag(insertIdx) := reqptag
     vtag(insertIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
     when(flushMask){
@@ -254,7 +258,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
     cohCount(mergeIdx) := 0.U
-    missqReplayCount(mergeIdx) := 0.U
+    // missqReplayCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         mask(mergeIdx)(wordOffset)(i) := true.B
@@ -369,7 +373,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(missqReplayHasTimeOut,
-    missqReplayTimeOutIdx,
+    missqReplayTimeOutIdxReg,
     Mux(need_drain,
       drainIdx,
       Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
@@ -386,7 +390,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
   // when willSendDcacheReq, read dcache req data and store them in a pipeline reg 
-  val willSendDcacheReq = prepareValid && canSendDcacheReq
+  willSendDcacheReq := prepareValid && canSendDcacheReq
   when(io.dcache.req.fire()){
     prepareValidReg := false.B
   }
