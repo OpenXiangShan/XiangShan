@@ -19,17 +19,21 @@ case class BinaryArbiterNode
   override def resolveStar(iKnown: Int, oKnown: Int, iStars: Int, oStars: Int): (Int, Int) = {
     println(iKnown, oKnown, iStars, oStars)
     require(iStars == 0 && oKnown == 0 && oStars == 1)
-    require(2 * (iKnown / 2) == iKnown)
     if(iKnown < 4) {
       (0, 1)
     } else {
+      require(2 * (iKnown / 2) == iKnown)
       (0, 2)
     }
   }
 
   override def mapParamsD(n: Int, p: Seq[TLClientPortParameters]): Seq[TLClientPortParameters] = {
-    require(n == 2)
-    p.grouped(2).toList.transpose.map(grp => clientFn(grp))
+    if(n == 1){
+      Seq(clientFn(p))
+    } else {
+      require(n == 2)
+      p.grouped(2).toList.transpose.map(grp => clientFn(grp))
+    }
   }
 
   override def mapParamsU(n: Int, p: Seq[TLManagerPortParameters]): Seq[TLManagerPortParameters] = {
