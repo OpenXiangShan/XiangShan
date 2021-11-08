@@ -228,8 +228,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     firstCanInsert,
     Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
   )
-  val need_uarch_drain = WireInit(false.B)
-  val do_uarch_drain = RegNext(need_uarch_drain)
+  val forward_need_uarch_drain = WireInit(false.B)
+  val merge_need_uarch_drain = WireInit(false.B)
+  val do_uarch_drain = RegNext(forward_need_uarch_drain) || RegNext(RegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
@@ -256,7 +257,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     }
   }
 
-  def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
+  def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx: UInt, wordOffset: UInt): Unit = {
     cohCount(mergeIdx) := 0.U
     // missqReplayCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
@@ -273,7 +274,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         vtag(mergeIdx) << OffsetWidth,
         ptag(mergeIdx) << OffsetWidth
       )
-      need_uarch_drain := true.B
+      merge_need_uarch_drain := true.B
     }
   }
 
@@ -533,7 +534,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         RegNext(forward.vaddr),
         RegNext(forward.paddr)
       )
-      do_uarch_drain := true.B
+      forward_need_uarch_drain := true.B
     }
     val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
