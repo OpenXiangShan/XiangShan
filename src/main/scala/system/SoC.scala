@@ -27,8 +27,6 @@ import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDes
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
-import huancun.debug.TLLogger
-import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
 
 case object SoCParamsKey extends Field[SoCParameters]
@@ -106,13 +104,13 @@ trait HaveSlaveAXI4Port {
   ))
   private val error_xbar = TLXbar()
 
-  private val spliter = AXI4Spilter()
+  val spliter = AXI4Spilter()
   private val dma_to_l3 = AXI4IdentityNode()
   private val dma_to_ddr = AXI4IdentityNode()
 
-  spliter := l3FrontendAXI4Node
-  dma_to_ddr := spliter
-  dma_to_l3 := spliter
+  spliter.node := l3FrontendAXI4Node
+  dma_to_ddr := spliter.node
+  dma_to_l3 := spliter.node
 
   error_xbar :=
     TLFIFOFixer() :=
@@ -284,6 +282,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
+
+  // from HaveSlaveAXI4Port's spliter
+  spliter.pmaNode := peripheralXbar
 
   lazy val module = new LazyModuleImp(this){
 

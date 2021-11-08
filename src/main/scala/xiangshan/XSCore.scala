@@ -25,7 +25,7 @@ import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -70,6 +70,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
+  val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts

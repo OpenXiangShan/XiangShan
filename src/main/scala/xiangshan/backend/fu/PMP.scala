@@ -341,6 +341,16 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
   val cmd = Output(TlbCmd())
 
+  def apply(addr: UInt, size: UInt, cmd: UInt) {
+    this.addr := addr
+    this.size := size
+    this.cmd := cmd
+  }
+
+  def apply(addr: UInt) { // req minimal permission and req align size
+    apply(addr, lgMaxSize.U, TlbCmd.read)
+  }
+
   override def cloneType = (new PMPReqBundle(lgMaxSize)).asInstanceOf[this.type]
 }
 
@@ -426,6 +436,16 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     resp
   }
 
+  def req_apply(valid: Bool, addr: UInt): Unit = {
+    this.req.valid := valid
+    this.req.bits.apply(addr)
+  }
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(mode, pmp, pma)
+    req_apply(valid, addr)
+    resp
+  }
   override def cloneType: this.type = (new PMPCheckIO(lgMaxSize)).asInstanceOf[this.type]
 }
 

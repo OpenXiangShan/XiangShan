@@ -20,12 +20,152 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.internal.naming.chiselName
 import chisel3.util._
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, SimpleDevice}
+import freechips.rocketchip.diplomaticobjectmodel.model.OMRegFieldGroup
+import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup, RegReadFn, RegWriteFn}
+import freechips.rocketchip.tilelink.{TLAdapterNode, TLRegisterNode}
+import system.AXI4Spliter
 import utils.ParallelPriorityMux
-import xiangshan.{HasXSParameter, XSModule}
+import xiangshan.{DistributedCSRIO, HasXSParameter, XSModule}
 import xiangshan.backend.fu.util.HasCSRConst
 import xiangshan.cache.mmu.TlbCmd
+/*
+class TLPMA()(implicit p: Parameters)
+  extends LazyModule with HasXSParameter
+{
+  val pmaNode = TLRegisterNode(
+    address = Seq(AddressSet(/*TODO*/, 0xffff)),
+    device = new SimpleDevice("tl-pma", Nil),
+    concurrency = 1,
+    beatBytes = 8
+  )
+  lazy val module = new PMAImp(this)
+}
+*/
+class PMAImp(wrapper: TLRegisterNode)(implicit p: Parameters) extends XSModule with PMAMethod with PMACheckMethod {
+  val io = IO(new Bundle {
+    val requestor = Vec(2/*Param*/, new Bundle {
+      val req = Flipped(Valid(new PMPReqBundle())) // usage: assign the valid to fire signal
+      val resp = new PMPRespBundle()
 
-trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
+      def req_apply(valid: Bool, addr: UInt): Unit = {
+        this.req.valid := valid
+        this.req.bits.apply(addr)
+      }
+    })
+  })
+
+  val pmaNode = wrapper
+
+  val num = NumPMA
+  val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
+  val pmaCfgPerCSR = XLEN / new PMPConfig().getWidth
+  def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmaCfgPerCSR)
+
+  val pmacfgBase = 0x0000
+  val pmaaddrBase = pmacfgBase + (num / 4) * (XLEN / 8)
+  // PMA just doesn't care about "PMP aligned if XLEN is 8/4"
+
+  val pma = Wire(Vec(num, new PMPEntry))
+
+  /* pma init value */
+  val init_value = pma_init()
+
+  val pmaCfgMerged = RegInit(init_value._1)
+  val addr = RegInit(init_value._2)
+  val mask = RegInit(init_value._3)
+  val cfg = WireInit(pmaCfgMerged).asTypeOf(Vec(num, new PMPConfig()))
+//  pmaMask are implicit regs that just used for timing optimization
+  for (i <- pma.indices) {
+    pma(i).gen(cfg(i), addr(i), mask(i))
+  }
+
+  /* pma write */
+  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
+    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
+    for (i <- cfgVec.indices) {
+      val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_w_m_tmp
+      cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
+      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
+      when (cfgVec(i).na4_napot) {
+        mask(index + i) := new PMPEntry().match_mask(cfgVec(i), addr(index + i))
+      }
+    }
+    cfgVec.asUInt
+  }
+
+  def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
+    val G = PlatformGrain - PMPOffBits
+    require(G >= 0)
+    if (G == 0) {
+      addr
+    } else if (G >= 2) {
+      Mux(cfg.na4_napot, set_low_bits(addr, G-1), clear_low_bits(addr, G))
+    } else { // G is 1
+      Mux(cfg.off_tor, clear_low_bits(addr, G), addr)
+    }
+  }
+
+  def set_low_bits(data: UInt, num: Int): UInt = {
+    require(num >= 0)
+    data | ((1 << num)-1).U
+  }
+
+  /** mask the data's low num bits (lsb) */
+  def clear_low_bits(data: UInt, num: Int): UInt = {
+    require(num >= 0)
+    // use Cat instead of & with mask to avoid "Signal Width" problem
+    if (num == 0) { data }
+    else { Cat(data(data.getWidth-1, num), 0.U(num.W)) }
+  }
+
+  val blankCfg = XLEN == 32
+  val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % 2 == 0)))
+  val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
+    RegField.apply(n = XLEN, r = RegReadFn((ivalid, oready) =>
+      if (notempty) { (true.B, ivalid, pmaCfgMerged(i)) }
+      else { (true.B, ivalid, 0.U) }
+    ), w = RegWriteFn((valid, data) => {
+      if (notempty) { when (valid) { pmaCfgMerged(i) := write_cfg_vec(mask, addr, i)(data) } }
+      true.B
+    }), desc = RegFieldDesc(s"TLPMA_config_${i}", s"pma config register #${i}"))
+  }}
+
+  val addr_map = (0 until num).map{ i => {
+    RegField(n = XLEN, r = read_addr(cfg(i))(addr(i)), w = RegWriteFn((valid, data) => {
+      when (valid && !cfg(i).l) { addr := data }
+      true.B
+    }), desc = RegFieldDesc(s"TLPMA_addr_${i}", s"pma addr register #${i}"))
+  }}
+
+  pmaNode.regmap(
+    0x0000 -> RegFieldGroup(
+      "TLPMA Config Register", Some("TL PMA configuation register"),
+      cfg_map
+    ),
+    0x0100 -> RegFieldGroup(
+      "TLPMA Address Register", Some("TL PMA Address register"),
+      addr_map
+    )
+  )
+
+  /* pma check */
+  for (i <- 0 until 2/* Param */) {
+    val sameCycle = true
+    val r = io.requestor(i).req.bits
+    val res = pma_match_res(r.addr, r.size, pma, 3.U, 3)
+    val check = pma_check(r.cmd, res.cfg)
+
+    if (sameCycle) {
+      io.requestor(i).resp := check
+    } else {
+      io.requestor(i).resp := RegEnable(check, io.requestor(i).req.valid)
+    }
+  }
+}
+
+trait PMAMethod extends HasXSParameter with PMPConst {
   /**
   def SimpleMemMapList = List(
       //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
@@ -37,7 +177,7 @@ trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
       MemMap("h00_3005_0000", "h00_3006_FFFF",   "h0", "USB/SDMMC",   "RW"),
       MemMap("h00_3007_0000", "h00_30FF_FFFF",   "h0", "Reserved",    "RW"),
       MemMap("h00_3100_0000", "h00_3111_FFFF",   "h0", "MMIO",        "RW"),
-      MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"),
+      MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"), // NOTE: partly used by TLPMA
       MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
       MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
       MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule",    "RWX"),
@@ -104,7 +244,7 @@ trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
   }
 }
 
-trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker =>
+trait PMACheckMethod extends HasXSParameter with HasCSRConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAtom(cmd) && !cfg.r

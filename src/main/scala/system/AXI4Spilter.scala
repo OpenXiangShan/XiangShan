@@ -4,9 +4,10 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Arbiter, AXI4Imp, AXI4MasterPortParameters, AXI4NexusNode, AXI4SlavePortParameters, AXI4Xbar}
-import freechips.rocketchip.diplomacy.{CustomNode, LazyModule, LazyModuleImp, ValName}
-import freechips.rocketchip.tilelink.TLArbiter
+import freechips.rocketchip.diplomacy.{AddressSet, CustomNode, LazyModule, LazyModuleImp, SimpleDevice, ValName}
+import freechips.rocketchip.tilelink.{TLArbiter, TLRegisterNode}
 import freechips.rocketchip.util.BundleField
+import xiangshan.backend.fu.{PMAImp}
 
 case class AXI4SpliterNode()(implicit valName: ValName) extends CustomNode(AXI4Imp) {
 
@@ -72,20 +73,36 @@ class AXI4Spliter
 )(implicit p: Parameters) extends LazyModule {
 
   val node = AXI4SpliterNode()
+  // NOTE: register node, may only instantiation with different address?
+  val pmaNode = TLRegisterNode(
+    address = Seq(AddressSet(0x31120000/*TODO*/, 0xffff)),
+    device = new SimpleDevice("tl-pma", Nil),
+    concurrency = 1,
+    beatBytes = 8
+  )
 
   lazy val module = new LazyModuleImp(this){
-    val cache = RegInit(false.B)
-    cache := !cache
+
+    val pmaModule = Module(new PMAImp(pmaNode))
 
     val (in, edgeIn) = node.in.head
     val (out_ports, out_edges) = node.out.unzip
 
-    val select = Seq(!cache, cache)
+    val pmaarPort = 0
+    val pmaawPort = 1
+    val pma_check = pmaModule.io.requestor
+    pma_check(pmaarPort).req_apply(in.ar.valid, in.aw.bits.addr)
+    pma_check(pmaawPort).req_apply(in.aw.valid, in.aw.bits.addr)
 
     val in_aw = WireInit(in.aw)
 
-    out_ports.map(_.ar).zip(AXI4Xbar.fanout(in.ar, select)).foreach(x => AXI4Arbiter(policy)(x._1, x._2))
-    out_ports.map(_.aw).zip(AXI4Xbar.fanout(in_aw, select)).foreach(x => AXI4Arbiter(policy)(x._1, x._2))
+    val ar_mmio = pma_check(pmaarPort).resp.mmio
+    val aw_mmio = pma_check(pmaawPort).resp.mmio
+
+    val ar_select = Seq(ar_mmio, !ar_mmio)
+    val aw_select = Seq(aw_mmio, !aw_mmio)
+    out_ports.map(_.ar).zip(AXI4Xbar.fanout(in.ar, ar_select)).foreach(x => AXI4Arbiter(policy)(x._1, x._2))
+    out_ports.map(_.aw).zip(AXI4Xbar.fanout(in_aw, aw_select)).foreach(x => AXI4Arbiter(policy)(x._1, x._2))
 
 //    for(((out, edgeOut), i) <- node.out.zipWithIndex){
 //      when(out.ar.fire()){
@@ -98,7 +115,7 @@ class AXI4Spliter
 
     val aw_fifo = Module(new Queue(Bool(), entries))
     aw_fifo.io.enq.valid := in.aw.fire
-    aw_fifo.io.enq.bits := cache
+    aw_fifo.io.enq.bits := aw_mmio
 
     in_aw.valid := in.aw.valid && aw_fifo.io.enq.ready
     in_aw.bits := in.aw.bits
@@ -106,7 +123,7 @@ class AXI4Spliter
 
     aw_fifo.io.deq.ready := in.w.fire && in.w.bits.last
 
-    val w_sel = Seq(!aw_fifo.io.deq.bits, aw_fifo.io.deq.bits)
+    val w_sel = Seq(aw_fifo.io.deq.bits, !aw_fifo.io.deq.bits)
     for((w, i) <- out_ports.map(_.w).zipWithIndex){
       w.valid := in.w.valid && w_sel(i)
       w.bits := in.w.bits
@@ -127,7 +144,7 @@ object AXI4Spilter {
     entries: Int = 16
   )(implicit p: Parameters) = {
     val spliter = LazyModule(new AXI4Spliter(policy, entries))
-    spliter.node
+    spliter
   }
 }
 
