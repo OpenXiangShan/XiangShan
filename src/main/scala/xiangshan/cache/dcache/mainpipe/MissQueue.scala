@@ -472,6 +472,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // In this situation, the coming req should be merged by mshr_0
 //  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
 
+  def arbiter[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    out <> arb.io.out
+  }
+
   def rrArbiter[T <: Bundle](
     in: Seq[DecoupledIO[T]],
     out: DecoupledIO[T],
@@ -482,6 +494,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       a <> req
     }
     out <> arb.io.out
+  }
+
+  def select_valid_one[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+
+    if (name.nonEmpty) { out.suggestName(s"${name.get}_select") }
+    out.valid := Cat(in.map(_.valid)).orR
+    out.bits := ParallelMux(in.map(_.valid) zip in.map(_.bits))
+    in.map(_.ready := out.ready) 
+    assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
   io.mem_grant.ready := false.B
@@ -511,9 +535,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  rrArbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
-  rrArbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
-  rrArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
+  arbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
+  arbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
+  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
