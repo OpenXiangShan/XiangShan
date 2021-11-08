@@ -12,7 +12,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.ResetGen
+import utils.{ResetGen, TLEdgeBuffer}
 
 class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val paddr = Valid(UInt(soc.PAddrBits.W))
@@ -56,15 +56,9 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   busPMU := l1d_logger
   l1_xbar :=* busPMU
 
-  def bufferN[T <: TLNode](n: Int, sink: T, source: T) = {
-    val buffers = (0 until n).map(_ => TLBuffer())
-    val nodes = sink +: buffers :+ source
-    nodes.reduce((x, y) => x :=* y)
-  }
-
   l2_binder match {
     case Some(binder) =>
-      bufferN(5, memory_port, binder)
+      memory_port :=* TLEdgeBuffer(_ => true, Some("l2_to_l3_buffer")) :=* binder
     case None =>
       memory_port := l1_xbar
   }
@@ -106,11 +100,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.busPMU :=
     TLLogger(s"L2_L1I_$hardId", !debugOpts.FPGAPlatform) :=
     TLBuffer() :=
+    TLBuffer() :=
     core.frontend.icache.clientNode
 
   if (!coreParams.softPTW) {
     misc.busPMU :=
       TLLogger(s"L2_PTW_$hardId", !debugOpts.FPGAPlatform) :=
+      TLBuffer() :=
       TLBuffer() :=
       core.ptw.node
   }
