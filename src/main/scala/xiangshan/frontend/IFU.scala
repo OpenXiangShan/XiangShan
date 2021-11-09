@@ -507,6 +507,8 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f3_hit            = RegEnable(next = f2_hit   , enable = f2_fire)
   val f3_mmio           = RegEnable(next = f2_mmio   , enable = f2_fire)
 
+  //assert((f3_ftq_req.startAddr + 34.U) >= f3_ftq_req.fallThruAddr, "Fall through address exceeds the limit")
+
   val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
   val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
@@ -517,10 +519,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   val f3_data = if(HasCExtension) Wire(Vec(PredictWidth + 1, UInt(16.W))) else Wire(Vec(PredictWidth, UInt(32.W)))
   f3_data       :=  f3_cut_data
-  when(f3_mmio && f3_valid && !f3_except_af(0) && !f3_except_pf(0)){
-    f3_data(0) := f3_mmio_data(15, 0)
-    f3_data(1) := f3_mmio_data(31, 16)
-  }
 
   //performance counter
   val f3_only_0_hit     = RegEnable(next = only_0_hit, enable = f2_fire)
@@ -533,7 +531,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_w_commit :: Nil = Enum(6)
   val mmio_state = RegInit(mmio_idle)
 
-  val f3_req_is_mmio     = f3_mmio && f3_valid && !f3_except_af(0)
+  val f3_req_is_mmio     = f3_mmio && f3_valid
   val mmio_has_commited = VecInit(io.rob_commits.map{commit => commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx &&  commit.bits.ftqOffset === 0.U}).asUInt.orR
   val f3_mmio_req_commit = f3_req_is_mmio && mmio_state === mmio_w_commit && mmio_has_commited
    
@@ -541,7 +539,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  when(f3_flush && !f3_req_is_mmio)                  {f3_valid := false.B}
+  val f3_ftq_flush_self    = fromFtq.redirect.valid && RedirectLevel.flushItself(fromFtq.redirect.bits.level)
+
+  val f3_need_not_flush = f3_req_is_mmio && fromFtq.redirect.valid && !f3_ftq_flush_self
+
+  when(f3_flush && !f3_need_not_flush)               {f3_valid := false.B}
   .elsewhen(f2_fire && !f2_flush)                    {f3_valid := true.B }
   .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)  {f3_valid := false.B}
   .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}    {f3_valid := false.B}
@@ -556,12 +558,17 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
 
   f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
 
+  when(f3_req_is_mmio){
+    f3_data(0) := f3_mmio_data(15, 0)
+    f3_data(1) := f3_mmio_data(31, 16)
+  }
+
   when(fromUncache.fire())    {f3_mmio_data   :=  fromUncache.bits.data}
 
 
   switch(mmio_state){
     is(mmio_idle){
-      when(f3_mmio && f3_valid && !f3_except_af(0) && !f3_except_pf(0)){
+      when(f3_req_is_mmio){
         mmio_state :=  mmio_send_req
       }
     }
@@ -592,6 +599,11 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters
           mmio_state  :=  mmio_idle
       }
     }  
+  }
+
+  when(f3_ftq_flush_self)  {
+    mmio_state := mmio_idle 
+    f3_mmio_data := 0.U
   }
 
   toUncache.valid     :=  ((mmio_state === mmio_send_req) || (mmio_state === mmio_resend)) && f3_req_is_mmio
