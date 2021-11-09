@@ -59,8 +59,13 @@ class TLBFA(
 
     resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
     resp.bits.hit := Cat(hitVecReg).orR
-    resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(vpn_reg)))
-    resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+    if (nWays == 1) {
+      resp.bits.ppn := entries(0).genPPN(vpn_reg)
+      resp.bits.perm := entries(0).perm
+    } else {
+      resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(vpn_reg)))
+      resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+    }
     io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
@@ -191,8 +196,13 @@ class TLBSA(
     val data = entries.io.r.resp.data
     val hitVec = VecInit(data.zip(vidx).map { case (e, vi) => e.hit(vpn_reg, io.csr.satp.asid, nSets) && vi })
     resp.bits.hit := Cat(hitVec).orR && RegNext(req.ready, init = false.B)
-    resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
-    resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
+    if (nWays == 1) {
+      resp.bits.ppn := data(0).genPPN(vpn_reg)
+      resp.bits.perm := data(0).perm
+    } else {
+      resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
+      resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
+    }
     io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := {
