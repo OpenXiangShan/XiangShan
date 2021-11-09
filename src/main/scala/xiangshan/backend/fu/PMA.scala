@@ -111,8 +111,12 @@ trait PMAMethod extends HasXSParameter with PMPConst {
       MemMap("h00_3112_0000", "h00_37FF_FFFF",   "h0", "Reserved",    "RW"), // NOTE: partly used by TLPMA
       MemMap("h00_3800_0000", "h00_3800_FFFF",   "h0", "CLINT",       "RW"),
       MemMap("h00_3801_0000", "h00_3801_FFFF",   "h0", "BEU",         "RW"),
-      MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule",    "RWX"),
-      MemMap("h00_3802_1000", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3802_0000", "h00_3802_0FFF",   "h0", "DebugModule", "RWX"),
+      MemMap("h00_3802_1000", "h00_3900_0FFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3900_1000", "h00_3900_101F",   "h0", "Core_reset",  "RW"),
+      MemMap("h00_3900_1020", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3A00_0000", "h00_3A00_0020",   "h0", "PLL0",        "RW),
+      MemMap('h00_3A00_0020", "h00_3BFF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3C00_0000", "h00_3FFF_FFFF",   "h0", "PLIC",        "RW"),
       MemMap("h00_4000_0000", "h00_7FFF_FFFF",   "h0", "PCIe",        "RW"),
       MemMap("h00_8000_0000", "h0F_FFFF_FFFF",   "h0", "DDR",         "RWXIDSA"),
@@ -133,41 +137,92 @@ trait PMAMethod extends HasXSParameter with PMPConst {
     addr := DontCare
     mask := DontCare
 
-    addr(15) := 0x3FFFFFFFEL.U
-    cfg(15).a := 1.U; cfg(15).r := true.B; cfg(15).w := true.B; cfg(15).x := true.B; cfg(15).c := true.B; cfg(14).atomic := true.B
+    var idx = num-1
 
+    // TODO: turn to napot to save entries
     // use tor instead of napot, for napot may be confusing and hard to understand
-    addr(14) := shift_addr(0xFFFFFFFFFL)
-    cfg(14).a := 1.U; cfg(14).r := true.B; cfg(14).w := true.B; cfg(14).x := true.B; cfg(14).c := true.B; cfg(14).atomic := true.B
+    // NOTE: all the addr space are default set to DDR, RWXCA
+    idx = idx - 1
+    addr(idx) := shift_addr(0xFFFFFFFFFL) // all the addr are default ddr, whicn means rwxca
+    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B; cfg(idx).c := true.B; cfg(idx).atomic := true.B
+    mask(idx) := match_mask(addr(idx), cfg(idx))
+    idx = idx - 1
 
-    addr(13) := shift_addr(0x80000000L)
-    cfg(13).a := 1.U; cfg(13).r := true.B; cfg(13).w := true.B
+    // NOTE: (0x0_0000_0000L, 0x0_8000_0000L) are default set to MMIO, only RW
+    addr(idx) := get_napot(0x00000000L, 0x80000000L)
+    cfg(idx).a := 3.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    mask(idx) := match_mask(addr(idx), cfg(idx))
+    idx = idx - 1
 
-    addr(12) := shift_addr(0x3C000000)
-    cfg(12).a := 1.U
+    addr(idx) := shift_addr(0x3C000000)
+    cfg(idx).a := 1.U
+    idx = idx - 1
 
-    addr(11) := shift_addr(0x38021000)
-    cfg(11).a := 1.U; cfg(11).r := true.B; cfg(11).w := true.B; cfg(11).x := true.B
+    addr(idx) := shift_addr(0x3A000020)
+    cfg(idx).a := 1.U; cfg(idx).r := 1.U; cfg(idx).w := 1.U
+    idx = idx - 1
 
-    addr(10) := shift_addr(0x38020000)
-    cfg(10).a := 1.U; cfg(10).r := true.B; cfg(10).w := true.B
+    addr(idx) := shift_addr(0x3A000000)
+    cfg(idx).a := 1.U
+    idx = idx - 1
 
-    addr(9) := shift_addr( 0x30050000)
-    cfg(9).a := 1.U; cfg(9).r := true.B; cfg(9).w := true.B; cfg(8).c := true.B
+    addr(idx) := shift_addr(0x39001020)
+    cfg(idx).a := 1.U; cfg(idx).r := 1.U; cfg(idx).w := 1.U
+    idx = idx - 1
 
-    addr(8) := shift_addr( 0x30010000)
-    cfg(8).a := 1.U; cfg(8).r := true.B; cfg(8).w := true.B
+    addr(idx) := shift_addr(0x39001000)
+    cfg(idx).a := 1.U
+    idx = idx - 1
 
-    addr(7) := shift_addr( 0x20000000)
-    cfg(7).a := 1.U; cfg(7).r := true.B; cfg(7).w := true.B; cfg(7).x := true.B
+    addr(idx) := shift_addr(0x38021000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
+    idx = idx - 1
 
-    addr(6) := shift_addr( 0x10000000)
-    cfg(6).a := 1.U; cfg(6).r := true.B; cfg(6).w := true.B
+    addr(idx) := shift_addr(0x38020000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
 
-    addr(5) := shift_addr(0)
+    addr(idx) := shift_addr( 0x30050000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).c := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr( 0x30010000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr( 0x20000000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B; cfg(idx).x := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr( 0x10000000)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
+    idx = idx - 1
+
+    addr(idx) := shift_addr(0)
+
+    require(idx >= 0)
 
     val cfgInitMerge = cfg.asTypeOf(Vec(num/8, UInt(XLEN.W)))
     (cfgInitMerge, addr, mask)
+  }
+
+  def get_napot(base: BigInt, range: BigInt) = {
+    val PlatformGrainBytes = (1 << PlatformGrain)
+    if ((base % PlatformGrainBytes) != 0) {
+      println("base:%x", base)
+    }
+    if ((range % PlatformGrainBytes) != 0) {
+      println("range: %x", range)
+    }
+    require((base % PlatformGrainBytes) == 0)
+    require((range % PlatformGrainBytes) == 0)
+
+    ((base + (range/2 - 1)) >> PMPOffBits).U
+  }
+
+  def match_mask(paddr: UInt, cfg: PMPConfig) = {
+    val match_mask_addr: UInt = Cat(paddr, cfg.a(0)).asUInt() | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    Cat(match_mask_addr & ~(match_mask_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
   def shift_addr(addr: BigInt) = {

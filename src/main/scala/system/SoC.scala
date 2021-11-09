@@ -24,6 +24,7 @@ import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams,
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
+import utils.{BinaryArbiter, TLEdgeBuffer}
 import huancun._
 import huancun.debug._
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
@@ -126,7 +127,7 @@ trait HaveSlaveAXI4Port {
     TLBuffer() :=
     error_xbar
 
-  mem_xbar := AXI4Fragmenter() := AXI4Buffer() := dma_to_ddr
+  mem_axi_xbar := AXI4Fragmenter() := AXI4Buffer() := dma_to_ddr
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
@@ -155,33 +156,31 @@ trait HaveAXI4MemPort {
     )
   ))
 
-  def mem_buffN(n: Int) = {
-    val buffers = (0 until n).map(_ => AXI4Buffer())
-    buffers.reduce((l, r) => l := r)
-    (buffers.head, buffers.last)
-  }
-  val (buf_l, buf_r) = mem_buffN(5)
-
-  val mem_xbar = AXI4Xbar() //TLXbar()
-
-  memAXI4SlaveNode := mem_xbar
+  val mem_xbar = TLXbar()
+  mem_xbar :=*
+    TLXbar() :=*
+    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_1")) :=*
+    BinaryArbiter() :=*
+    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_0")) :=*
+    TLCacheCork() :=*
+    bankedNode
 
   mem_xbar :=
+    TLWidthWidget(8) :=
+    TLBuffer.chainNode(5, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
+    peripheralXbar
+
+  val mem_axi_xbar = AXI4Xbar()
+
+  mem_axi_xbar :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
-    buf_l
-  buf_r :=
     TLToAXI4() :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
-    TLXbar() :=* TLCacheCork() :=* bankedNode
+    TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
+    mem_xbar
 
-  mem_xbar :=
-    AXI4UserYanker() :=
-    AXI4Deinterleaver(8) :=
-    TLToAXI4() :=
-    TLWidthWidget(8) :=
-    TLBuffer() :=
-    peripheralXbar
+  memAXI4SlaveNode := mem_axi_xbar
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
@@ -238,7 +237,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val l3_out = TLTempNode()
   val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
-  l3_in :*= l3_banked_xbar
+  l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar
   bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
@@ -250,7 +249,22 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
-    l3_banked_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
+    l3_banked_xbar :=*
+      TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
+      TLEdgeBuffer(idx => {
+        /*
+                  Core0     Core1
+            _____________________________
+           | L3   B0, B2     B1,B3      |
+            -----------------------------
+
+            Core(i)          0         1
+            Port(idx)      0   1     0  1
+            Buffer?        N   Y     Y  N
+         */
+        val insert_buffer = (i % 2) != (idx % 2)
+        insert_buffer
+      }, Some(s"core_${i}_to_l3_buffer")) :=* core_out
   }
   l3_banked_xbar :=* BankBinder(tiles.head.L2NBanks, L3BlockSize) :*= l3_xbar
 

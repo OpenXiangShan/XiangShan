@@ -185,9 +185,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
                        //An not-CFI instruction is predicted taken
     val notCFIFault    = (validStart(i)  && i.U === bbOffset && io.out.pd(i).notCFI && bbTaken)
                        //A jal instruction is predicted not taken
-    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal)
+    val jalFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isJal) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isJal)
                        //A ret instruction is predicted not taken
-    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet)
+    val retFault       = (validStart(i)  && !bbTaken && io.out.pd(i).isRet) || (validStart(i) && bbTaken && i.U < bbOffset && io.out.pd(i).isRet)
                        //An invalid instruction is predicted taken
     val invalidInsFault  = (!validStart(i)  && i.U === bbOffset && bbTaken)
 
@@ -199,6 +199,9 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     realTakens(i)       := takens(i) && instRange(i)
   }
 
+  //TODO:
+  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B
+
   val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
   val jumpOffset              =  PriorityEncoder(jumpOH)
   val rvcOH                   =  VecInit(io.out.pd.map(inst => inst.isRVC))
@@ -206,23 +209,24 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val jumpIsRVC               =  rvcOH(jumpOffset)
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
-  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
+  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize || beyondFetch)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
-  val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC) && !isDoubleLine
+  val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC || (pcStart + (FetchWidth * 4).U) === nextLinePC) && !isDoubleLine
   val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)
 
   instRange               :=  VecInit((0 until PredictWidth).map(i => endRange(i) &&  takeRange(i)))
   realEndPC               :=  Mux(hasFalseHit, Mux(hasJump && ((jumpNextPC < boundPC) || (jumpNextPC === boundPC) ), jumpNextPC, boundPC), pcEnd)
 
-  val validLastOffset     = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
-  io.out.misOffset.valid  := ParallelOR(realMissPred)
-  io.out.misOffset.bits   := Mux(pcEndError,validLastOffset,PriorityEncoder(realMissPred))
+  val validLastOffset      = Mux(io.out.pd((PredictWidth - 1).U).valid, (PredictWidth - 1).U, (PredictWidth - 2).U)
+
+  io.out.misOffset.valid  := ParallelOR(realMissPred) || beyondFetch
+  io.out.misOffset.bits   := Mux(beyondFetch, PredictWidth.U, Mux(pcEndError,validLastOffset,PriorityEncoder(realMissPred)))
   io.out.instrRange.zipWithIndex.map{case (bit,i) => bit := instRange(i).asBool()}
 
   io.out.cfiOffset.valid  := ParallelOR(realTakens)
   io.out.cfiOffset.bits   := PriorityEncoder(realTakens)
 
-  io.out.target           := Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC)
+  io.out.target           := Mux(beyondFetch,io.out.pc.last + 2.U ,Mux(io.out.cfiOffset.valid, targets(io.out.cfiOffset.bits), realEndPC))
   io.out.takens           := realTakens
 
   io.out.jalTarget        :=  targets(jumpOffset)
