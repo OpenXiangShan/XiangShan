@@ -294,8 +294,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
 
+    val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
+    val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
+    ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
-    plicSource.module.in := ext_intrs.asBools
+    plicSource.module.in := ext_intrs_wire.asBools
 
     val freq = 100
     val cnt = RegInit(freq.U)
