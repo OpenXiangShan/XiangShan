@@ -87,16 +87,16 @@ trait PMAMethod extends HasXSParameter with PMPConst { this: XSModule =>
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x3A000020)
-    cfg(idx).a := 1.U; cfg(idx).r := 1.U; cfg(idx).w := 1.U
+    addr(idx) := shift_addr(0x3A000040)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr(0x3A000000)
     cfg(idx).a := 1.U
     idx = idx - 1
 
-    addr(idx) := shift_addr(0x39001020)
-    cfg(idx).a := 1.U; cfg(idx).r := 1.U; cfg(idx).w := 1.U
+    addr(idx) := shift_addr(0x39001040)
+    cfg(idx).a := 1.U; cfg(idx).r := true.B; cfg(idx).w := true.B
     idx = idx - 1
 
     addr(idx) := shift_addr(0x39001000)
