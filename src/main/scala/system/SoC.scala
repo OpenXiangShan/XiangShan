@@ -106,7 +106,7 @@ trait HaveSlaveAXI4Port {
   ))
   private val error_xbar = TLXbar()
 
-  val spliter = AXI4Spilter()
+  val spliter = AXI4Spliter()
   private val dma_to_l3 = AXI4IdentityNode()
   private val dma_to_ddr = AXI4IdentityNode()
 

@@ -42,127 +42,58 @@ class TLPMA()(implicit p: Parameters)
   lazy val module = new PMAImp(this)
 }
 */
-class PMAImp(wrapper: TLRegisterNode)(implicit p: Parameters) extends XSModule with PMAMethod with PMACheckMethod {
-  val io = IO(new Bundle {
-    val requestor = Vec(2/*Param*/, new Bundle {
-      val req = Flipped(Valid(new PMPReqBundle())) // usage: assign the valid to fire signal
-      val resp = new PMPRespBundle()
 
-      def req_apply(valid: Bool, addr: UInt): Unit = {
-        this.req.valid := valid
-        this.req.bits.apply(addr)
-      }
-    })
-  })
+case class TLPMAConfig
+(
+  address: BigInt,
+  lgMaxSize: Int,
+  sameCycle: Boolean,
+  num: Int
+)
 
-  val pmaNode = wrapper
+trait PMAConst extends PMPConst
 
-  val num = NumPMA
-  val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
-  val pmaCfgPerCSR = XLEN / new PMPConfig().getWidth
-  def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmaCfgPerCSR)
+trait TLPMAMethod extends HasXSParameter with PMPConst with PMAMethod with PMPReadWriteMethodBare {
+  def gen_tlpma_mapping(num: Int) = {
+    val pmaCfgPerCSR = XLEN / new PMPConfig().getWidth
+    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmaCfgPerCSR)
 
-  val pmacfgBase = 0x0000
-  val pmaaddrBase = pmacfgBase + (num / 4) * (XLEN / 8)
-  // PMA just doesn't care about "PMP aligned if XLEN is 8/4"
+    val pma = Wire(Vec(num, new PMPEntry))
 
-  val pma = Wire(Vec(num, new PMPEntry))
+    /* pma init value */
+    val init_value = pma_init()
 
-  /* pma init value */
-  val init_value = pma_init()
-
-  val pmaCfgMerged = RegInit(init_value._1)
-  val addr = RegInit(init_value._2)
-  val mask = RegInit(init_value._3)
-  val cfg = WireInit(pmaCfgMerged).asTypeOf(Vec(num, new PMPConfig()))
-//  pmaMask are implicit regs that just used for timing optimization
-  for (i <- pma.indices) {
-    pma(i).gen(cfg(i), addr(i), mask(i))
-  }
-
-  /* pma write */
-  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
-    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
-    for (i <- cfgVec.indices) {
-      val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := cfg_w_m_tmp
-      cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
-      when (cfgVec(i).na4_napot) {
-        mask(index + i) := new PMPEntry().match_mask(cfgVec(i), addr(index + i))
-      }
+    val pmaCfgMerged = RegInit(init_value._1)
+    val addr = RegInit(init_value._2)
+    val mask = RegInit(init_value._3)
+    val cfg = WireInit(pmaCfgMerged).asTypeOf(Vec(num, new PMPConfig()))
+    //  pmaMask are implicit regs that just used for timing optimization
+    for (i <- pma.indices) {
+      pma(i).gen(cfg(i), addr(i), mask(i))
     }
-    cfgVec.asUInt
+
+    val blankCfg = XLEN == 32
+    val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % 2 == 0)))
+    val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
+      RegField.apply(n = XLEN, r = RegReadFn((ivalid, oready) =>
+        if (notempty) { (true.B, ivalid, pmaCfgMerged(i)) }
+        else { (true.B, ivalid, 0.U) }
+      ), w = RegWriteFn((valid, data) => {
+        if (notempty) { when (valid) { pmaCfgMerged(i) := write_cfg_vec(mask, addr, i)(data) } }
+        true.B
+      }), desc = RegFieldDesc(s"TLPMA_config_${i}", s"pma config register #${i}"))
+    }}
+
+    val addr_map = (0 until num).map{ i => {
+      RegField(n = XLEN, r = read_addr(cfg(i))(addr(i)), w = RegWriteFn((valid, data) => {
+        when (valid && !cfg(i).l) { addr := data }
+        true.B
+      }), desc = RegFieldDesc(s"TLPMA_addr_${i}", s"pma addr register #${i}"))
+    }}
+
+    (cfg_map, addr_map, pma)
   }
 
-  def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
-    val G = PlatformGrain - PMPOffBits
-    require(G >= 0)
-    if (G == 0) {
-      addr
-    } else if (G >= 2) {
-      Mux(cfg.na4_napot, set_low_bits(addr, G-1), clear_low_bits(addr, G))
-    } else { // G is 1
-      Mux(cfg.off_tor, clear_low_bits(addr, G), addr)
-    }
-  }
-
-  def set_low_bits(data: UInt, num: Int): UInt = {
-    require(num >= 0)
-    data | ((1 << num)-1).U
-  }
-
-  /** mask the data's low num bits (lsb) */
-  def clear_low_bits(data: UInt, num: Int): UInt = {
-    require(num >= 0)
-    // use Cat instead of & with mask to avoid "Signal Width" problem
-    if (num == 0) { data }
-    else { Cat(data(data.getWidth-1, num), 0.U(num.W)) }
-  }
-
-  val blankCfg = XLEN == 32
-  val cfg_index_wrapper = (0 until num by 4).zip((0 until num by 4).map(a => blankCfg || (a % 2 == 0)))
-  val cfg_map = (cfg_index_wrapper).map{ case(i, notempty) => {
-    RegField.apply(n = XLEN, r = RegReadFn((ivalid, oready) =>
-      if (notempty) { (true.B, ivalid, pmaCfgMerged(i)) }
-      else { (true.B, ivalid, 0.U) }
-    ), w = RegWriteFn((valid, data) => {
-      if (notempty) { when (valid) { pmaCfgMerged(i) := write_cfg_vec(mask, addr, i)(data) } }
-      true.B
-    }), desc = RegFieldDesc(s"TLPMA_config_${i}", s"pma config register #${i}"))
-  }}
-
-  val addr_map = (0 until num).map{ i => {
-    RegField(n = XLEN, r = read_addr(cfg(i))(addr(i)), w = RegWriteFn((valid, data) => {
-      when (valid && !cfg(i).l) { addr := data }
-      true.B
-    }), desc = RegFieldDesc(s"TLPMA_addr_${i}", s"pma addr register #${i}"))
-  }}
-
-  pmaNode.regmap(
-    0x0000 -> RegFieldGroup(
-      "TLPMA Config Register", Some("TL PMA configuation register"),
-      cfg_map
-    ),
-    0x0100 -> RegFieldGroup(
-      "TLPMA Address Register", Some("TL PMA Address register"),
-      addr_map
-    )
-  )
-
-  /* pma check */
-  for (i <- 0 until 2/* Param */) {
-    val sameCycle = true
-    val r = io.requestor(i).req.bits
-    val res = pma_match_res(r.addr, r.size, pma, 3.U, 3)
-    val check = pma_check(r.cmd, res.cfg)
-
-    if (sameCycle) {
-      io.requestor(i).resp := check
-    } else {
-      io.requestor(i).resp := RegEnable(check, io.requestor(i).req.valid)
-    }
-  }
 }
 
 trait PMAMethod extends HasXSParameter with PMPConst {

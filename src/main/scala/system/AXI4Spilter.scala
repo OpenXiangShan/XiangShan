@@ -5,9 +5,11 @@ import chisel3.util._
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Arbiter, AXI4Imp, AXI4MasterPortParameters, AXI4NexusNode, AXI4SlavePortParameters, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, CustomNode, LazyModule, LazyModuleImp, SimpleDevice, ValName}
+import freechips.rocketchip.regmapper.RegFieldGroup
 import freechips.rocketchip.tilelink.{TLArbiter, TLRegisterNode}
 import freechips.rocketchip.util.BundleField
-import xiangshan.backend.fu.{PMAImp}
+import xiangshan.{HasXSParameter, XSCoreParamsKey}
+import xiangshan.backend.fu.{PMAConst, PMPChecker, TLPMAConfig, TLPMAMethod}
 
 case class AXI4SpliterNode()(implicit valName: ValName) extends CustomNode(AXI4Imp) {
 
@@ -75,22 +77,34 @@ class AXI4Spliter
   val node = AXI4SpliterNode()
   // NOTE: register node, may only instantiation with different address?
   val pmaNode = TLRegisterNode(
-    address = Seq(AddressSet(0x31120000/*TODO*/, 0xffff)),
+    address = Seq(AddressSet(0x31120000/*pmaParam.address*/, 0xffff)),
     device = new SimpleDevice("tl-pma", Nil),
     concurrency = 1,
     beatBytes = 8
   )
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new LazyModuleImp(this) with HasXSParameter with PMAConst with TLPMAMethod{
 
-    val pmaModule = Module(new PMAImp(pmaNode))
 
     val (in, edgeIn) = node.in.head
     val (out_ports, out_edges) = node.out.unzip
 
+    val (cfg_map, addr_map, pma) = gen_tlpma_mapping(NumPMA)
+    pmaNode.regmap(
+      0x0000 -> RegFieldGroup(
+        "TLPMA Config Register", Some("TL PMA configuation register"),
+        cfg_map
+      ),
+      0x0100 -> RegFieldGroup(
+        "TLPMA Address Register", Some("TL PMA Address register"),
+        addr_map
+      )
+    )
+
     val pmaarPort = 0
     val pmaawPort = 1
-    val pma_check = pmaModule.io.requestor
+    val pma_check = Vec(2/*pmaParam*/, Module(new PMPChecker(3/*pmaParam.lgMaxSize*/, true/* pmaParam.sameCycle*/, false)).io)
+    pma_check.map(_.check_env.apply(3.U, pma/*placeHolde*/, pma))
     pma_check(pmaarPort).req_apply(in.ar.valid, in.aw.bits.addr)
     pma_check(pmaawPort).req_apply(in.aw.valid, in.aw.bits.addr)
 
@@ -137,7 +151,7 @@ class AXI4Spliter
 
 }
 
-object AXI4Spilter {
+object AXI4Spliter {
   def apply
   (
     policy: TLArbiter.Policy = TLArbiter.roundRobin,

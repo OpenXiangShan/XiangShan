@@ -23,11 +23,13 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import huancun.{CacheParameters, HCCacheParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
-import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, ITTage, MicroBTB, RAS, Tage, Tage_SC}
+import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
+import xiangshan.backend.fu.TLPMAConfig
+import huancun._
+import huancun.debug._
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -183,6 +185,12 @@ case class XSCoreParameters
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPMP: Int = 16, // 0 or 16 or 64
   NumPMA: Int = 16,
+  tlpma: TLPMAConfig = TLPMAConfig(
+    address = 0x31120000,
+    lgMaxSize = 0x3,
+    sameCycle = true,
+    num = 2
+  ),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -328,6 +336,7 @@ trait HasXSParameter {
   val NumPMP = coreParams.NumPMP
   val NumPMA = coreParams.NumPMA
   val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
+  val tlpma = coreParams.tlpma
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 

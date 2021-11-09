@@ -28,13 +28,12 @@ import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
 
-trait PMPConst {
+trait PMPConst extends HasXSParameter {
   val PMPOffBits = 2 // minimal 4bytes
-}
-
-abstract class PMPBundle(implicit p: Parameters) extends XSBundle with PMPConst {
   val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
 }
+
+abstract class PMPBundle(implicit p: Parameters) extends XSBundle with PMPConst
 
 abstract class PMPModule(implicit p: Parameters) extends XSModule with PMPConst with HasCSRConst
 
@@ -61,18 +60,7 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
 }
 
-trait PMPReadWriteMethod extends PMPConst { this: PMPBase =>
-  def write_cfg_vec(cfgs: UInt): UInt = {
-    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
-    for (i <- cfgVec.indices) {
-      val cfg_w_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := cfg_w_tmp
-      cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
-      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
-    }
-    cfgVec.asUInt
-  }
-
+trait PMPReadWriteMethodBare extends PMPConst {
   def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
@@ -87,15 +75,6 @@ trait PMPReadWriteMethod extends PMPConst { this: PMPBase =>
     cfgVec.asUInt
   }
 
-  /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
-   * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
-   * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
-   * The low OffBits is dropped
-   */
-  def read_addr(): UInt = {
-    read_addr(cfg)(addr)
-  }
-
   def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
     val G = PlatformGrain - PMPOffBits
     require(G >= 0)
@@ -107,15 +86,9 @@ trait PMPReadWriteMethod extends PMPConst { this: PMPBase =>
       Mux(cfg.off_tor, clear_low_bits(addr, G), addr)
     }
   }
-  /** addr for inside addr, drop OffBits with.
-   * compare_addr for inside addr for comparing.
-   * paddr for outside addr.
-   */
-  def write_addr(next: PMPBase)(paddr: UInt) = {
-    Mux(!cfg.addr_locked(next.cfg), paddr, addr)
-  }
-  def write_addr(paddr: UInt) = {
-    Mux(!cfg.addr_locked, paddr, addr)
+
+  def write_addr(next: PMPConfig)(paddr: UInt, cfg: PMPConfig, addr: UInt): UInt = {
+    Mux(!cfg.addr_locked(next), paddr, addr)
   }
 
   def set_low_bits(data: UInt, num: Int): UInt = {
@@ -129,6 +102,39 @@ trait PMPReadWriteMethod extends PMPConst { this: PMPBase =>
     // use Cat instead of & with mask to avoid "Signal Width" problem
     if (num == 0) { data }
     else { Cat(data(data.getWidth-1, num), 0.U(num.W)) }
+  }
+}
+
+trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
+  def write_cfg_vec(cfgs: UInt): UInt = {
+    val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
+    for (i <- cfgVec.indices) {
+      val cfg_w_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_w_tmp
+      cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
+      if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
+    }
+    cfgVec.asUInt
+  }
+
+  /** In general, the PMP grain is 2**{G+2} bytes. when G >= 1, na4 is not selectable.
+   * When G >= 2 and cfg.a(1) is set(then the mode is napot), the bits addr(G-2, 0) read as zeros.
+   * When G >= 1 and cfg.a(1) is clear(the mode is off or tor), the addr(G-1, 0) read as zeros.
+   * The low OffBits is dropped
+   */
+  def read_addr(): UInt = {
+    read_addr(cfg)(addr)
+  }
+
+  /** addr for inside addr, drop OffBits with.
+   * compare_addr for inside addr for comparing.
+   * paddr for outside addr.
+   */
+  def write_addr(next: PMPConfig)(paddr: UInt): UInt = {
+    Mux(!cfg.addr_locked(next), paddr, addr)
+  }
+  def write_addr(paddr: UInt): UInt = {
+    Mux(!cfg.addr_locked, paddr, addr)
   }
 }
 
@@ -235,9 +241,9 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
 class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
   val mask = UInt(PAddrBits.W) // help to match in napot
 
-  def write_addr(next: PMPBase, mask: UInt)(paddr: UInt) = {
-    mask := Mux(!cfg.addr_locked(next.cfg), match_mask(paddr), mask)
-    Mux(!cfg.addr_locked(next.cfg), paddr, addr)
+  def write_addr(next: PMPConfig, mask: UInt)(paddr: UInt) = {
+    mask := Mux(!cfg.addr_locked(next), match_mask(paddr), mask)
+    Mux(!cfg.addr_locked(next), paddr, addr)
   }
 
   def write_addr(mask: UInt)(paddr: UInt) = {
@@ -253,7 +259,7 @@ class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
   }
 }
 
-trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
+trait PMPMethod extends HasXSParameter with PMPConst {
   def pmp_init() : (Vec[UInt], Vec[UInt], Vec[UInt])= {
     val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(XLEN.W))))
     val addr = Wire(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
@@ -284,8 +290,6 @@ trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
       entries(i).gen(cfgs(i), addr(i), mask(i))
     }
 
-
-
     val cfg_mapping = (0 until num by pmpCfgPerCSR).map(i => {Map(
       MaskedRegMap(
         addr = cfgBase + pmpCfgIndex(i),
@@ -300,13 +304,11 @@ trait PMPMethod extends HasXSParameter with PMPConst { this: XSModule =>
         addr = addrBase + i,
         reg = addr(i),
         wmask = WritableMask,
-        wfn = { if (i != num-1) entries(i).write_addr(entries(i+1), mask(i)) else entries(i).write_addr(mask(i)) },
+        wfn = { if (i != num-1) entries(i).write_addr(entries(i+1).cfg, mask(i)) else entries(i).write_addr(mask(i)) },
         rmask = WritableMask,
         rfn = new PMPBase().read_addr(entries(i).cfg)
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
-
-
 
     cfg_mapping ++ addr_mapping
   }
@@ -453,7 +455,8 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
 class PMPChecker
 (
   lgMaxSize: Int = 3,
-  sameCycle: Boolean = false
+  sameCycle: Boolean = false,
+  pmpUsed: Boolean = true
 )(implicit p: Parameters)
   extends PMPModule
   with PMPCheckMethod
@@ -468,7 +471,7 @@ class PMPChecker
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
-  val resp = resp_pmp | resp_pma
+  val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
 
   if (sameCycle) {
     io.resp := resp
