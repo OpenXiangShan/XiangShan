@@ -88,3 +88,8 @@ class ICacheVictimInfor(implicit p: Parameters) extends ICacheBundle {
   val ptag  = UInt(tagBits.W)
   val vidx  = UInt(idxBits.W)
 }
+
+class ICacheSetInfor(implicit p: Parameters) extends ICacheBundle {
+  val valid = Bool()
+  val vidx  = UInt(idxBits.W)
+}

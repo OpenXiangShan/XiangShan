@@ -83,6 +83,10 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
     val s1 = Vec(2, Output(new ICacheVictimInfor()))
     val s2 = Vec(2, Output(new ICacheVictimInfor()))
   }
+  val setInfor    = new Bundle(){
+    val s1 = Vec(2, Output(new ICacheSetInfor()))
+    val s2 = Vec(2, Output(new ICacheSetInfor()))
+  }
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -212,6 +216,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.victimInfor.s1(i).vidx  := get_idx(s1_req_vaddr(i))
   }
 
+  (0 until PortNumber).map{ i =>
+    io.setInfor.s1(i).valid := s1_bank_miss(i) 
+    io.setInfor.s1(i).vidx  := s1_req_vsetIdx(i)
+  }
+
 
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
 
@@ -268,6 +277,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_double_line  = RegEnable(next = s1_double_line, enable = s1_fire)
   val s2_hit          = RegEnable(next = s1_hit   , enable = s1_fire)
   val s2_port_hit     = RegEnable(next = s1_port_hit, enable = s1_fire)
+  val s2_bank_miss    = RegEnable(next = s1_bank_miss, enable = s1_fire)
 
   val sec_meet_vec = Wire(Vec(2, Bool()))
   val s2_fixed_hit_vec = VecInit((0 until 2).map(i => s2_port_hit(i) || sec_meet_vec(i)))
@@ -445,14 +455,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toMSHR(i).bits.waymask  := s2_waymask(i)
     toMSHR(i).bits.coh      := s2_victim_coh(i)
 
-//    toMSHR(i).bits.release.valid          := s2_valid && s2_need_replace(i)
-//    toMSHR(i).bits.release.bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))))
-//    toMSHR(i).bits.release.bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
-//    toMSHR(i).bits.release.bits.voluntary := true.B
-//    toMSHR(i).bits.release.bits.hasData   := false.B
-//    toMSHR(i).bits.release.bits.data      := s2_victim_data(i)
-//    toMSHR(i).bits.release.bits.waymask   := s2_waymask(i)
-
 
     when(toMSHR(i).fire() && missStateQueue(i) === m_invalid){
       missStateQueue(i)     := m_valid
@@ -492,37 +494,27 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
 
-   val release_idle :: release_ready :: release_send_req ::Nil = Enum(3)
-   val release_state = RegInit(release_idle)
- //  val probeMerge = RegInit(0.U.asTypeOf(new ICacheVictimInfor))
+   val release_idle  :: release_wait_fire ::Nil = Enum(2)
+   val release_state = RegInit(VecInit(Seq.fill(2)(release_idle)) )
+   val s2_need_release =  VecInit((0 until PortNumber).map(i =>s2_valid && s2_need_replace(i) && !s2_mmio && !s2_except_af(i) && !s2_except_pf(i)))
+
    val toRealseUnit = io.toReleaseUnit
+  
 
-   val need_release_0 = s2_need_replace(0) && (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch)
-   val need_release_1 = s2_need_replace(1) && (hit_0_miss_1_latch || miss_0_miss_1_latch)
-   val s2_need_release = VecInit(Seq(need_release_0, need_release_1 ))
-
-   switch(release_state){
+  (0 until 2).map{ i =>
+    switch(release_state(i)){
      is(release_idle){
-       when(need_release_0 && !need_release_1){
-         release_state := Mux(toRealseUnit(0).ready, release_ready ,release_idle )
-       }.elsewhen(!need_release_0 && need_release_1){
-         release_state := Mux(toRealseUnit(1).ready, release_ready ,release_idle )
-       }.elsewhen(need_release_0 && need_release_1){
-         release_state := Mux(toRealseUnit(0).ready && toRealseUnit(1).ready, release_ready ,release_idle )
+       when(s2_need_release(i)){
+         release_state(i) := Mux(toRealseUnit(i).fire() , release_wait_fire ,release_idle )
        }
      }
 
-     is(release_ready){
-       release_state := release_send_req
-     }
-
-     is(release_send_req){
-       when(s2_fire){ release_state := release_idle}
+     is(release_wait_fire){
+       when(s2_fire){ release_state(i) := release_idle}
      }
    }
 
-  (0 until 2).map{ i =>
-    toRealseUnit(i).valid          := s2_valid && s2_need_release(i) && (release_state === release_ready) && !s2_mmio
+    toRealseUnit(i).valid          := s2_valid && s2_need_release(i) && (release_state(i) === release_idle)
     toRealseUnit(i).bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))) )
     toRealseUnit(i).bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
     toRealseUnit(i).bits.voluntary := true.B
@@ -538,8 +530,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.victimInfor.s2(i).vidx  := get_idx(s2_req_vaddr(i))
   }
 
-  val miss_all_fix       = (wait_state === wait_finish) && (!s2_need_release.asUInt.orR || (release_state === release_send_req))
-  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio)
+  (0 until PortNumber).map{ i =>
+    io.setInfor.s2(i).valid := s2_bank_miss(i) && s2_valid
+    io.setInfor.s2(i).vidx  := s1_req_vsetIdx(i)
+  }
+
+  val miss_all_fix       =  wait_state === wait_finish
+  val release_all_fix    =  VecInit((0 until PortNumber).map(i => !s2_need_release(i) || release_state(i) === release_wait_fire))
+  s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch || s2_mmio) && release_all_fix.reduce(_&&_)
 
   XSPerfAccumulate("ifu_bubble_s2_miss",    s2_valid && !s2_fetch_finish )
 
