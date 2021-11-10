@@ -517,18 +517,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
-  // Emu perfcnt
-  val hasEmuPerfCnt = !env.FPGAPlatform
-  val nrEmuPerfCnts = if (hasEmuPerfCnt) 0x80 else 0x3
-
-  val emuPerfCnts    = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
-  val emuPerfCntCond = List.fill(nrEmuPerfCnts)(WireInit(false.B))
-  (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
-
-  val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
-  val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
-  println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
-
   //val perfEventscounten = List.fill(nrPerfCnts)(RegInit(false(Bool())))
   // Perf Counter
   val nrPerfCnts = 29  // 3...31
@@ -746,8 +734,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                 perfCntMapping ++
                 pmpMapping ++
                 pmaMapping ++
-                emuPerfCntsLoMapping ++
-                (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
                 (if (HasFPU) fcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
@@ -1094,7 +1080,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1103,7 +1089,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1127,6 +1113,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.medeleg := medeleg
   }
 }
+
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

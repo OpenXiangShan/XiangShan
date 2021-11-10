@@ -31,9 +31,10 @@ object ArgParser {
       |--xs-help                  print this help message
       |--config <ConfigClassName>
       |--num-cores <Int>
-      |--dual-core                same as '--num-cores 2'
       |--with-dramsim3
-      |--disable-log
+      |--fpga-platform
+      |--enable-difftest
+      |--enable-log
       |--disable-perf
       |""".stripMargin
 
@@ -45,7 +46,7 @@ object ArgParser {
     val c = Class.forName(prefix + confString).getConstructor(Integer.TYPE)
     c.newInstance(1.asInstanceOf[Object]).asInstanceOf[Parameters]
   }
-  def parse(args: Array[String], fpga: Boolean = true): (Parameters, Array[String]) = {
+  def parse(args: Array[String]): (Parameters, Array[String]) = {
     val default = new DefaultConfig(1)
     var firrtlOpts = Array[String]()
     @tailrec
@@ -64,15 +65,21 @@ object ArgParser {
               up(XSTileKey).head.copy(HartId = i)
             }
           }), tail)
-        case "--dual-core" :: tail =>
-          nextOption(config, "--num-cores" :: "2" :: tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
           }), tail)
-        case "--disable-log" :: tail =>
+        case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDebug = false)
+            case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+          }), tail)
+        case "--enable-difftest" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
+          }), tail)
+        case "--enable-log" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDebug = true)
           }), tail)
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -85,11 +92,6 @@ object ArgParser {
       }
     }
     var config = nextOption(default, args.toList)
-    if(!fpga){
-      config = config.alter((site, here, up) => {
-        case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = false)
-      })
-    }
     (config, firrtlOpts)
   }
 }
