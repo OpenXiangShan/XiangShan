@@ -19,7 +19,7 @@ package  xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
+import freechips.rocketchip.tilelink.{ClientMetadata,TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
 import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
 import xiangshan.ValidUndirectioned
 
@@ -168,6 +168,8 @@ class ICacheProbe(implicit p: Parameters) extends ICacheModule{
   val probeline_data = Mux(RegNext(io.data_read.fire()), hit_data, probeline_data_reg)
 
   io.req.ready := state === s_idle
+
+  //val probeline_coh = Mux(hit_vec.reduce(_||_),probeline_hit_coh,  ClientMetadata.onReset)
 
   val (_, probe_shrink_param, probe_new_coh) = probeline_coh.onProbe(req.probe_param)
 

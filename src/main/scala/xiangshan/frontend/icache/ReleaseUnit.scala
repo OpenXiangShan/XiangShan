@@ -114,16 +114,14 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 
   io.probeMergeFix := needMergeProbe && io.mem_release.fire()
 
-//  io.release_meta_write <> DontCare
-
   when(state === s_meta_write) {
-    when(io.release_meta_write.fire()){
+   // when(io.release_meta_write.fire()){
       state := s_invalid
-    }
+    //}
   }
 
 
-  io.release_meta_write.valid := (state === s_meta_write) && req.voluntary
+  io.release_meta_write.valid := false.B //(state === s_meta_write) && req.voluntary
   io.release_meta_write.bits.generate(tag = get_phy_tag(req.addr), coh = ClientMetadata.onReset, idx = req.vidx, waymask = req.waymask, bankIdx = req.vidx(0))
 
 
@@ -150,15 +148,15 @@ class ReleaseUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule
   val probeMergeFix = VecInit(Seq.fill(2)(WireInit(false.B)))
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWriteBundle,  cacheParams.nReleaseEntries))
 
-  // when(io.probeMerge.valid){
-  //   probeMerge.ptag   := io.probeMerge.bits.ptag
-  //   probeMerge.vidx   := io.probeMerge.bits.vidx
-  //   probeMerge.valid  := true.B
-  // }
+   when(io.probeMerge.valid){
+     probeMerge.ptag   := io.probeMerge.bits.ptag
+     probeMerge.vidx   := io.probeMerge.bits.vidx
+     probeMerge.valid  := true.B
+   }
 
-  // when(probeMergeFix.reduce(_||_)){
-  //   probeMerge.valid := false.B
-  // }
+   when(probeMergeFix.reduce(_||_)){
+     probeMerge.valid := false.B
+   }
 
   val entries = (0 until cacheParams.nReleaseEntries) map { i =>
     val entry = Module(new RealeaseEntry(edge))
