@@ -279,7 +279,7 @@ class MediumConfig(n: Int = 1) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(10 * 1024, inclusive = false, banks = 4, ways = 10)
+  new WithNKBL3(8 * 1024, inclusive = false, banks = 4, ways = 8)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 2, alwaysReleaseData = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
