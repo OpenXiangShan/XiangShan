@@ -547,7 +547,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       io.commits.info(i).ldest
     )
   }
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
@@ -905,11 +905,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
   }
-  val l1Miss = Wire(Bool())
-  l1Miss := false.B
-  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
-  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
-
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
@@ -931,7 +926,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
@@ -957,8 +952,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.wdata    := RegNext(exuData)
       difftest.io.wdest    := RegNext(uop.ctrl.ldest)
 
-      // XSDebug(p"[difftest-instr-commit]valid:${difftest.io.valid},pc:${difftest.io.pc},instr:${difftest.io.instr},skip:${difftest.io.skip},isRVC:${difftest.io.isRVC},scFailed:${difftest.io.scFailed},wen:${difftest.io.wen},wdata:${difftest.io.wdata},wdest:${difftest.io.wdest}\n")
-
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       runahead_commit.io.clock := clock
@@ -971,7 +964,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestLoadEvent)
       difftest.io.clock  := clock
@@ -988,7 +981,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestTrapEvent)
     difftest.io.clock    := clock
     difftest.io.coreid   := hardId.U
@@ -998,6 +991,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
   }
+
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(18))
   })

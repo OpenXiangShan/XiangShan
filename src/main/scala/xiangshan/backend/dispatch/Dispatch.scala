@@ -156,7 +156,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
 
-    if (!env.FPGAPlatform) {
+    if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
       if(i == 0){

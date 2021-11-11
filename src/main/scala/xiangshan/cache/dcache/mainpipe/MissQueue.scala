@@ -518,7 +518,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
