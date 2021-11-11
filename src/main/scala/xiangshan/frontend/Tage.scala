@@ -49,6 +49,7 @@ trait TageParams extends HasXSParameter with HasBPUParameter {
   val BankTableInfos = (0 until numBr).map(i =>
     TableInfo.map{ case (s, h, t) => (s/(1 << i), h, t) }
   )
+  // println(BankTableInfos)
   val BankTageNTables = BankTableInfos.map(_.size) // Number of tage tables
   val UBitPeriod = 256
   val TageBanks = numBr
@@ -260,7 +261,10 @@ class TageTable
     val resp = Output(Valid(new TageResp))
     val update = Input(new TageUpdate)
   })
-
+  // val folded_hist = Wire(new FoldedHistory(histLen, log2Ceil(nRows), numBr))
+  // // val folded_tag_hist = Wire(new FoldedHistory(histLen, tagLen, numBr))
+  // def zeros = VecInit(false.B, false.B)
+  // folded_hist.update(zeros, zeros, 0.U(64.W), 0.U(6.W))
   // bypass entries for tage update
   val wrBypassEntries = 8
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength

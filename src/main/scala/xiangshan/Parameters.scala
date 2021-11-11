@@ -58,7 +58,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 64,
+  HistoryLength: Int = 128,
   PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
