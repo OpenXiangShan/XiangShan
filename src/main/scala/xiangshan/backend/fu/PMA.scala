@@ -169,7 +169,13 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     resp
   }
 
-  def pma_match_res(addr: UInt, size: UInt, pmaEntries: Vec[PMPEntry], mode: UInt, lgMaxSize: Int) = {
+  def pma_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
+    addr: UInt,
+    size: UInt,
+    pmaEntries: Vec[PMPEntry],
+    mode: UInt,
+    lgMaxSize: Int
+  ) = {
     val num = pmaEntries.size
     require(num == NumPMA)
     // pma should always be checked, could not be ignored
@@ -198,7 +204,10 @@ trait PMACheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
 
     match_vec(num) := true.B
     cfg_vec(num) := pmaDefault
-
-    ParallelPriorityMux(match_vec, cfg_vec)
+    if (leaveHitMux) {
+      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+    } else {
+      ParallelPriorityMux(match_vec, cfg_vec)
+    }
   }
 }
