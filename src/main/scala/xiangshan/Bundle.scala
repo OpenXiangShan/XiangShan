@@ -324,7 +324,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
-  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr

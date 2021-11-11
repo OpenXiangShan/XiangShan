@@ -1080,7 +1080,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
-  if (env.EnableDifftest) {
+  // Always instantiate basic difftest modules.
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1089,7 +1090,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
-  if (env.EnableDifftest) {
+  // Always instantiate basic difftest modules.
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
