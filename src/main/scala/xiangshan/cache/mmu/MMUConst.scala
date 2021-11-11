@@ -42,7 +42,8 @@ case class TLBParameters
   superAssociative: String = "fa", // must be fa
   normalAsVictim: Boolean = false, // when get replace from fa, store it into sram
   outReplace: Boolean = false,
-  shouldBlock: Boolean = false // only for perf, not support for io
+  shouldBlock: Boolean = false, // only for perf, not support for io
+  saveLevel: Boolean = false
 )
 
 case class L2TLBParameters

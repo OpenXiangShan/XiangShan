@@ -367,7 +367,13 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     resp
   }
 
-  def pmp_match_res(addr: UInt, size: UInt, pmpEntries: Vec[PMPEntry], mode: UInt, lgMaxSize: Int) = {
+  def pmp_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
+    addr: UInt,
+    size: UInt,
+    pmpEntries: Vec[PMPEntry],
+    mode: UInt,
+    lgMaxSize: Int
+  ) = {
     val num = pmpEntries.size
     require(num == NumPMP)
 
@@ -399,7 +405,11 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     match_vec(num) := true.B
     cfg_vec(num) := pmpDefault
 
-    ParallelPriorityMux(match_vec, cfg_vec)
+    if (leaveHitMux) {
+      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+    } else {
+      ParallelPriorityMux(match_vec, cfg_vec)
+    }
   }
 }
 
@@ -407,7 +417,8 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
 class PMPChecker
 (
   lgMaxSize: Int = 3,
-  sameCycle: Boolean = false
+  sameCycle: Boolean = false,
+  leaveHitMux: Boolean = false
 )(implicit p: Parameters)
   extends PMPModule
   with PMPCheckMethod
@@ -422,17 +433,18 @@ class PMPChecker
     val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
     val resp = new PMPRespBundle()
   })
+  require(!(leaveHitMux && sameCycle))
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(req.addr, req.size, io.env.pmp, io.env.mode, lgMaxSize)
-  val res_pma = pma_match_res(req.addr, req.size, io.env.pma, io.env.mode, lgMaxSize)
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.env.pmp, io.env.mode, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.env.pma, io.env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp = resp_pmp | resp_pma
 
-  if (sameCycle) {
+  if (sameCycle || leaveHitMux) {
     io.resp := resp
   } else {
     io.resp := RegEnable(resp, io.req.valid)
