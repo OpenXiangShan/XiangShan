@@ -52,14 +52,6 @@ trait NeedImpl {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-case class EnviromentParameters
-(
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = true,
-  DualCore: Boolean = false
-)
-
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbMappingHelper
 {

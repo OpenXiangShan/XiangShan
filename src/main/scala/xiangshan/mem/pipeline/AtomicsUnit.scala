@@ -290,7 +290,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     atom_override_xtval := false.B
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
     difftest.io.coreid     := hardId.U

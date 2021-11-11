@@ -485,7 +485,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
   // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     // hit resp
     io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
       val difftest = Module(new DifftestSbufferEvent)

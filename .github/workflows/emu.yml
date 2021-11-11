@@ -31,10 +31,10 @@ jobs:
       - name: check verilog
         run:
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
-      - name: build MinimalConfig emu
+      - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --disable-log --threads 4 --config MinimalConfig
+            --threads 4 --config MinimalConfig --release
       - name: run MinimalConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
@@ -59,7 +59,7 @@ jobs:
           mkdir -p /bigdata/xs-wave/${HEAD_SHA}
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --disable-log --threads 8
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
@@ -107,7 +107,7 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /home/ci-runner/xsenv/DRAMsim3            \
-            --disable-log --with-dramsim3 --threads 16
+            --with-dramsim3 --threads 16
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log

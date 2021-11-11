@@ -556,7 +556,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until StorePipelineWidth) {
       val storeCommit = io.sbuffer(i).fire()
       val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
