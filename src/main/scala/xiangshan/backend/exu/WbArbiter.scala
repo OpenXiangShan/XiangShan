@@ -62,6 +62,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 
   if (hasFastUopOut) {
+    println("ssss:",fastVec)
     io.out.valid := RegNext(ctrl_arb.io.out.valid)
     // When hasFastUopOut, only uop comes at the same cycle with valid.
     // Other bits like data, fflags come at the next cycle after valid,
