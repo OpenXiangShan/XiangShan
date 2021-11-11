@@ -511,12 +511,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
     val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
     val line_offset_reg = RegNext(line_offset_mask)
+    val forward_data_candidate_reg = RegEnable(
+      VecInit(data.map(entry => entry(getWordOffset(forward.paddr)))),
+      forward.valid
+    )
 
     val selectedValidMask = Mux1H(line_offset_reg, Mux1H(valid_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-    val selectedValidData = Mux1H(line_offset_reg, Mux1H(valid_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
+    val selectedValidData = Mux1H(valid_tag_match_reg, forward_data_candidate_reg)
+    selectedValidData.suggestName("selectedValidData_"+i)
 
     val selectedInflightMask = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-    val selectedInflightData = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
+    val selectedInflightData = Mux1H(inflight_tag_match_reg, forward_data_candidate_reg)
+    selectedInflightData.suggestName("selectedInflightData_"+i)
 
     val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
     val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
