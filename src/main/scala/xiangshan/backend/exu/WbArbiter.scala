@@ -23,7 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 
-class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
+class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
     val out = DecoupledIO(new ExuOutput)
@@ -60,6 +60,18 @@ class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
   }
   io.out.valid := ctrl_arb.io.out.valid
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
+
+  if (hasFastUopOut) {
+    io.out.valid := RegNext(ctrl_arb.io.out.valid)
+    // When hasFastUopOut, only uop comes at the same cycle with valid.
+    // Other bits like data, fflags come at the next cycle after valid,
+    // and they need to be selected with the fireVec.
+    val dataVec = VecInit(io.in.map(_.bits).zip(fastVec).map{ case (d, f) => if (f) d else RegNext(d) })
+    val sel = VecInit(io.in.map(_.fire)).asUInt
+    io.out.bits := Mux1H(RegNext(sel), dataVec)
+    // uop comes at the same cycle with valid and only RegNext is needed.
+    io.out.bits.uop := RegNext(ctrl_arb.io.out.bits.uop)
+  }
 }
 
 class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
@@ -155,22 +167,11 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val out = io.out(exclusiveIn.size + i)
     val shared = outer.sharedConnections(i).map(io.in(_))
     val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
-    val arb = Module(new ExuWbArbiter(shared.size))
+    val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
+    val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
-    if (hasFastUopOut) {
-      out.valid := RegNext(arb.io.out.valid)
-      // When hasFastUopOut, only uop comes at the same cycle with valid.
-      // Other bits like data, fflags come at the next cycle after valid,
-      // and they need to be selected with the fireVec.
-      val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
-      val dataVec = VecInit(shared.map(_.bits).zip(fastVec).map{ case (d, f) => if (f) d else RegNext(d) })
-      val sel = VecInit(arb.io.in.map(_.fire)).asUInt
-      out.bits := Mux1H(RegNext(sel), dataVec)
-      // uop comes at the same cycle with valid and only RegNext is needed.
-      out.bits.uop := RegNext(arb.io.out.bits.uop)
-    }
     arb.io.out.ready := true.B
   }
 

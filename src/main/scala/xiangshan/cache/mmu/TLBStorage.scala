@@ -31,9 +31,11 @@ class TLBFA(
   nSets: Int,
   nWays: Int,
   sramSinglePort: Boolean,
+  saveLevel: Boolean = false,
   normalPage: Boolean,
   superPage: Boolean
 )(implicit p: Parameters) extends TlbModule{
+  require(!(sameCycle && saveLevel))
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports))
   io.r.req.map(_.ready := true.B)
@@ -49,6 +51,7 @@ class TLBFA(
 
     val vpn = req.bits.vpn
     val vpn_reg = if (sameCycle) vpn else RegEnable(vpn, req.fire())
+    val vpn_gen_ppn = if(sameCycle || saveLevel) vpn else vpn_reg
 
     val refill_mask = if (sameCycle) 0.U(nWays.W) else Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
@@ -59,8 +62,13 @@ class TLBFA(
 
     resp.valid := { if (sameCycle) req.valid else RegNext(req.valid) }
     resp.bits.hit := Cat(hitVecReg).orR
-    resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(vpn_reg)))
-    resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+    if (nWays == 1) {
+      resp.bits.ppn := entries(0).genPPN(saveLevel, req.valid)(vpn_gen_ppn)
+      resp.bits.perm := entries(0).perm
+    } else {
+      resp.bits.ppn := ParallelMux(hitVecReg zip entries.map(_.genPPN(saveLevel, req.valid)(vpn_gen_ppn)))
+      resp.bits.perm := ParallelMux(hitVecReg zip entries.map(_.perm))
+    }
     io.r.resp_hit_sameCycle(i) := Cat(hitVec).orR
 
     access.sets := get_set_idx(vpn_reg, nSets) // no use
@@ -191,8 +199,13 @@ class TLBSA(
     val data = entries.io.r.resp.data
     val hitVec = VecInit(data.zip(vidx).map { case (e, vi) => e.hit(vpn_reg, io.csr.satp.asid, nSets) && vi })
     resp.bits.hit := Cat(hitVec).orR && RegNext(req.ready, init = false.B)
-    resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN(vpn_reg)))
-    resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
+    if (nWays == 1) {
+      resp.bits.ppn := data(0).genPPN()(vpn_reg)
+      resp.bits.perm := data(0).perm
+    } else {
+      resp.bits.ppn := ParallelMux(hitVec zip data.map(_.genPPN()(vpn_reg)))
+      resp.bits.perm := ParallelMux(hitVec zip data.map(_.perm))
+    }
     io.r.resp_hit_sameCycle(i) := DontCare
 
     resp.valid := {
@@ -290,11 +303,12 @@ object TlbStorage {
     nSets: Int,
     nWays: Int,
     sramSinglePort: Boolean,
+    saveLevel: Boolean = false,
     normalPage: Boolean,
     superPage: Boolean
   )(implicit p: Parameters) = {
     if (associative == "fa") {
-       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, normalPage, superPage))
+       val storage = Module(new TLBFA(sameCycle, ports, nSets, nWays, sramSinglePort, saveLevel, normalPage, superPage))
        storage.suggestName(s"tlb_${name}_fa")
        storage.io
     } else {

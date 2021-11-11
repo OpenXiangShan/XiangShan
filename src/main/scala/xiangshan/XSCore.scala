@@ -52,14 +52,6 @@ trait NeedImpl {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-case class EnviromentParameters
-(
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = true,
-  DualCore: Boolean = false
-)
-
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbMappingHelper
 {
@@ -318,11 +310,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   //                  v          v            v           v           v
   //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
   val resetChain = Seq(
-    Seq(ptw),
     Seq(memBlock, dtlbRepeater),
+    Seq(exuBlocks.head),
     // Note: arbiters don't actually have reset ports
-    exuBlocks ++ Seq(outer.wbArbiter.module),
+    exuBlocks.tail ++ Seq(outer.wbArbiter.module),
     Seq(ctrlBlock),
+    Seq(ptw),
     Seq(frontend, itlbRepeater1, itlbRepeater2)
   )
   ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)

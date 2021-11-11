@@ -468,7 +468,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     }
   })
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     // hit resp
     io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
       val difftest = Module(new DifftestSbufferEvent)

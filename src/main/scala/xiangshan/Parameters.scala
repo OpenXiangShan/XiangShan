@@ -161,7 +161,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -171,7 +172,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -226,8 +228,9 @@ case object DebugOptionsKey extends Field[DebugOptions]
 
 case class DebugOptions
 (
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = true,
+  FPGAPlatform: Boolean = false,
+  EnableDifftest: Boolean = false,
+  EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false
 )

@@ -48,11 +48,12 @@ class XSArgs(object):
         for (arg_in, env, default, set_func) in all_path:
             set_func(self.__extract_path(arg_in, env, default))
         # Chisel arguments
-        self.disable_log = args.disable_log
+        self.enable_log = args.enable_log
         self.num_cores = args.num_cores
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
+        self.is_release = 1 if args.release else None
         self.trace = 1 if args.trace or not args.disable_fork  else None
         self.config = args.config
         # emu arguments
@@ -79,7 +80,7 @@ class XSArgs(object):
 
     def get_chisel_args(self, prefix=None):
         chisel_args = [
-            (self.disable_log, "disable-log")
+            (self.enable_log, "enable-log")
         ]
         args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
         if prefix is not None:
@@ -90,6 +91,7 @@ class XSArgs(object):
         makefile_args = [
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
+            (self.is_release,    "RELEASE"),
             (self.trace,         "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES")
@@ -300,9 +302,10 @@ if __name__ == "__main__":
     parser.add_argument('--rvtest', nargs='?', type=str, help='path to riscv-tests')
     parser.add_argument('--wave-dump', nargs='?', type=str , help='path to dump wave')
     # chisel arguments
-    parser.add_argument('--disable-log', action='store_true', help='disable log')
+    parser.add_argument('--enable-log', action='store_true', help='enable log')
     parser.add_argument('--num-cores', type=int, help='number of cores')
     # makefile arguments
+    parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
