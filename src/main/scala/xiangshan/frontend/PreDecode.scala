@@ -200,7 +200,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   }
 
   //TODO:
-  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B
+  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B && !io.out.cfiOffset.valid
 
   val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
   val jumpOffset              =  PriorityEncoder(jumpOH)
