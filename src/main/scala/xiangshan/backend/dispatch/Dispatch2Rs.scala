@@ -209,6 +209,7 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       enqLsq.req(i).bits := io.in(i).bits
       in(i).bits.lqIdx := enqLsq.resp(i).lqIdx
       in(i).bits.sqIdx := enqLsq.resp(i).sqIdx
+      assert(RegNext(io.in(i).bits.sqIdx === enqLsq.resp(i).sqIdx))
 
       enqLsq.req(i).valid := in(i).valid && io.in(i).ready
     }

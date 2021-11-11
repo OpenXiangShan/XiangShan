@@ -28,7 +28,7 @@ import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.backend.fu.{PFEvent}
 import xiangshan.mem.mdp.{SSIT, LFST, WaitTable}
 import xiangshan.frontend.{FtqPtr, FtqRead}
-import xiangshan.mem.LsqEnqIO
+import xiangshan.mem.{LsqEnqIO, SpeculativeSqIdxUpdateIO}
 import difftest._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -182,6 +182,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
     val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
     val memoryViolation = Flipped(ValidIO(new Redirect))
+    val speculativeSqIdxUpdate = Flipped(new SpeculativeSqIdxUpdateIO)
     val jumpPc = Output(UInt(VAddrBits.W))
     val jalr_target = Output(UInt(VAddrBits.W))
     val robio = new Bundle {
@@ -324,6 +325,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   rename.io.robCommits <> rob.io.commits
   rename.io.ssit <> ssit.io.rdata
   rename.io.waittable <> RegNext(waittable.io.rdata)
+  rename.io.speculativeSqIdxUpdate <> io.speculativeSqIdxUpdate
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {

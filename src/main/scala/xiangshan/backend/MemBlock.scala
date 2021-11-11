@@ -78,6 +78,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
     val enqLsq = new LsqEnqIO
+    val speculativeSqIdxUpdate = new SpeculativeSqIdxUpdateIO
     val memPredUpdate = Vec(exuParameters.StuCnt, Input(new MemPredUpdateReq))
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
@@ -285,6 +286,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.dcache         <> dcache.io.lsu.lsq
   lsq.io.dcache         := RegNext(dcache.io.lsu.lsq)
   lsq.io.release        := dcache.io.lsu.release
+  lsq.io.speculativeSqIdxUpdate <> io.speculativeSqIdxUpdate
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in

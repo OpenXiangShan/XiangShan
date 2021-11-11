@@ -24,6 +24,7 @@ import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
+import xiangshan.mem.{SpeculativeSqIdxUpdateIO, SqPtr}
 
 class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -35,6 +36,8 @@ class Rename(implicit p: Parameters) extends XSModule {
     val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
     // waittable read result
     val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
+    // from memblock
+    val speculativeSqIdxUpdate = Flipped(new SpeculativeSqIdxUpdateIO)
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
@@ -83,6 +86,20 @@ class Rename(implicit p: Parameters) extends XSModule {
                          Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
                       /* default */  robIdxHead))) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
+
+  // speculatively assign the instruction with an sqIdx
+  val sqIdxHead = RegInit(0.U.asTypeOf(new SqPtr))
+  val storeValidCount = PopCount(io.in.map(i => i.valid && FuType.isStoreExu(i.bits.ctrl.fuType))) 
+  val lastCycleRedirect = io.speculativeSqIdxUpdate.lastCycleRedirect
+  val lastCycleCancelCount = io.speculativeSqIdxUpdate.lastCycleCancelCount
+  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
+  val sqIdxHeadNext = Mux(io.redirect.valid, sqIdxHead, // redirect: wait for sqIdx cancel count: stick to old
+        Mux(lastCycleRedirect, sqIdxHead - lastCycleCancelCount, // mis-predict: 
+                        Mux(canOut, sqIdxHead + storeValidCount, // instructions successfully entered next stage: increase robIdx
+                    /* default */  sqIdxHead))) // no instructions passed by this cycle: stick to old value
+  sqIdxHead := sqIdxHeadNext
+
+  // val speculativeSqIdx = Wire(Vec(RenameWidth, new SqPtr))
 
   /**
     * Rename: allocate free physical register and update rename table
@@ -134,6 +151,7 @@ class Rename(implicit p: Parameters) extends XSModule {
     io.in(i).ready := !hasValid || canOut
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.take(i).map(_.valid))
+    uops(i).sqIdx := sqIdxHead + PopCount(io.in.take(i).map(_.valid && FuType.isStoreExu(uops(i).ctrl.fuType)))
 
     val intPhySrcVec = io.intReadPorts(i).take(2)
     val intOldPdest = io.intReadPorts(i).last
