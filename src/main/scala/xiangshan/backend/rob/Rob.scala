@@ -1010,7 +1010,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   }
 
   // Always instantiate basic difftest modules.
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
+  if (env.EnableDifftest) {
     val dt_isXSTrap = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
@@ -1027,6 +1027,22 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.valid    := hitTrap
     difftest.io.code     := trapCode
     difftest.io.pc       := trapPC
+    difftest.io.cycleCnt := timer
+    difftest.io.instrCnt := instrCnt
+  }
+  else if (env.AlwaysBasicDiff) {
+    val dt_isXSTrap = Mem(RobSize, Bool())
+    for (i <- 0 until RenameWidth) {
+      when (canEnqueue(i)) {
+        dt_isXSTrap(enqPtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
+      }
+    }
+    val trapVec = io.commits.valid.zip(deqPtrVec).map{ case (v, d) => state === s_idle && v && dt_isXSTrap(d.value) }
+    val hitTrap = trapVec.reduce(_||_)
+    val difftest = Module(new DifftestBasicTrapEvent)
+    difftest.io.clock    := clock
+    difftest.io.coreid   := hardId.U
+    difftest.io.valid    := hitTrap
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
   }
