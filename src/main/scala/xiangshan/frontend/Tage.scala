@@ -29,33 +29,16 @@ import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
 import scala.util.matching.Regex
+import os.followLink
 
-trait TageParams extends HasXSParameter with HasBPUParameter {
-  //                      Sets  Hist   Tag
-  val TableInfo =  Seq(( 128*8,    2,    7),
-                       ( 128*8,    4,    7),
-                       ( 256*8,    8,    8),
-                       ( 256*8,   16,    8),
-                       ( 128*8,   32,    9),
-                       ( 128*8,   64,    9))
-                       // (  64,   64,   11),
-                       // (  64,  101,   12),
-                       // (  64,  160,   12),
-                       // (  64,  254,   13),
-                       // (  32,  403,   14),
-                       // (  32,  640,   15))
-
-  //                      Sets  Hist   Tag
-  val BankTableInfos = (0 until numBr).map(i =>
-    TableInfo.map{ case (s, h, t) => (s/(1 << i), h, t) }
-  )
-  // println(BankTableInfos)
-  val BankTageNTables = BankTableInfos.map(_.size) // Number of tage tables
-  val UBitPeriod = 256
+trait TageParams extends HasBPUConst with HasXSParameter {
+  // println(BankTageTableInfos)
+  val BankTageNTables = BankTageTableInfos.map(_.size) // Number of tage tables
   val TageBanks = numBr
+  val UBitPeriod = 256
   val TageCtrBits = 3
 
-  val TotalBits = BankTableInfos.map { info =>
+  val TotalBits = BankTageTableInfos.map { info =>
     info.map{
       case (s, h, t) => {
         s * (1+t+TageCtrBits)
@@ -92,6 +75,7 @@ abstract class TageModule(implicit p: Parameters)
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
 }
 
@@ -103,6 +87,7 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
   // update tag and ctr
   val mask = Bool()
@@ -115,7 +100,7 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
 }
 
 class TageMeta(val bank: Int)(implicit p: Parameters)
-  extends XSBundle with TageParams with HasSCParameter
+  extends TageBundle with HasSCParameter
 {
   val provider = ValidUndirectioned(UInt(log2Ceil(BankTageNTables(bank)).W))
   val prednum = ValidUndirectioned(UInt(log2Ceil(BankTageNTables(bank)).W))
@@ -149,8 +134,7 @@ trait TBTParams extends HasXSParameter {
 }
 
 @chiselName
-class TageBTable
-(val numBr: Int)(implicit p: Parameters) extends XSModule with TBTParams{
+class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
     val s0_pc   = Input(UInt(VAddrBits.W))
@@ -269,26 +253,43 @@ class TageTable
   val wrBypassEntries = 8
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
-  def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
-    def F(phist: UInt, len: Int) = {
-      val lenMask = Fill(len, 1.U(1.W))
-      val rowMask = Fill(log2Ceil(nRows), 1.U(1.W))
-      val masked = phist & lenMask
-      val a1 = masked & rowMask
-      val a2 = masked >> log2Ceil(nRows)
-      val a3 = ((a2 << tableIdx) & rowMask) + (a2 >> (log2Ceil(nRows) - tableIdx))
-      val a4 = a1 ^ a3
-      val res = ((a3 << tableIdx) & rowMask) + (a3 >> (log2Ceil(nRows) - tableIdx))
-      res
-    }
-    val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
-    val idx_phist = F(phist, (if (PathHistoryLength > histLen) histLen else PathHistoryLength))
-    // val idx = (unhashed_idx ^ (unhashed_idx >> (log2Ceil(nRows)-tableIdx+1)) ^ idx_history ^ idx_phist)(log2Ceil(nRows) - 1, 0)
-    val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
-    val tag_history = compute_folded_ghist(hist, tagLen)
-    val alt_tag_history = compute_folded_ghist(hist, tagLen-1)
-    // Use another part of pc to make tags
-    val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history ^ (alt_tag_history << 1)) (tagLen - 1, 0)
+  // def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
+  //   def F(phist: UInt, len: Int) = {
+  //     val lenMask = Fill(len, 1.U(1.W))
+  //     val rowMask = Fill(log2Ceil(nRows), 1.U(1.W))
+  //     val masked = phist & lenMask
+  //     val a1 = masked & rowMask
+  //     val a2 = masked >> log2Ceil(nRows)
+  //     val a3 = ((a2 << tableIdx) & rowMask) + (a2 >> (log2Ceil(nRows) - tableIdx))
+  //     val a4 = a1 ^ a3
+  //     val res = ((a3 << tableIdx) & rowMask) + (a3 >> (log2Ceil(nRows) - tableIdx))
+  //     res
+  //   }
+  //   val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
+  //   val idx_phist = F(phist, (if (PathHistoryLength > histLen) histLen else PathHistoryLength))
+  //   // val idx = (unhashed_idx ^ (unhashed_idx >> (log2Ceil(nRows)-tableIdx+1)) ^ idx_history ^ idx_phist)(log2Ceil(nRows) - 1, 0)
+  //   val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
+  //   val tag_history = compute_folded_ghist(hist, tagLen)
+  //   val alt_tag_history = compute_folded_ghist(hist, tagLen-1)
+  //   // Use another part of pc to make tags
+  //   val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history ^ (alt_tag_history << 1)) (tagLen - 1, 0)
+  //   (idx, tag)
+  // }
+
+  
+  val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
+  val tagFhInfo = (histLen, min(histLen, tagLen))
+  val altTagFhInfo = (histLen, min(histLen, tagLen-1))
+  val allFhInfos = Seq(idxFhInfo, tagFhInfo, altTagFhInfo)
+  
+  def getFoldedHistoryInfo = allFhInfos.filter(_._1 >0).toSet
+  def compute_tag_and_hash(unhashed_idx: UInt, allFh: AllFoldedHistories) = {
+    val idx_fh = allFh.getHistWithInfo(idxFhInfo).folded_hist
+    val tag_fh = allFh.getHistWithInfo(tagFhInfo).folded_hist
+    val alt_tag_fh = allFh.getHistWithInfo(altTagFhInfo).folded_hist
+    // require(idx_fh.getWidth == log2Ceil(nRows))
+    val idx = (unhashed_idx ^ idx_fh)(log2Ceil(nRows)-1, 0)
+    val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_fh ^ (alt_tag_fh << 1)) (tagLen - 1, 0)
     (idx, tag)
   }
 
@@ -316,7 +317,14 @@ class TageTable
   val table  = Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
 
 
-  val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
+  // val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
+  val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
+  // TODO: remove this checking code
+  val idx_history = compute_folded_ghist(io.req.bits.hist, log2Ceil(nRows))
+
+  val idx_fh = io.req.bits.folded_hist.getHistWithInfo(idxFhInfo)
+  assert(idx_history === idx_fh.folded_hist)
+  ////////////////////////////////////////
 
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
@@ -352,7 +360,15 @@ class TageTable
   // Use fetchpc to compute hash
   val update_wdata = Wire(new TageEntry)
 
-  val (update_idx, update_tag) =  compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
+  // val (update_idx, update_tag) =  compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
+  val (update_idx, update_tag) =  compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
+
+  // TODO: remove this checking code
+  val update_idx_history = compute_folded_ghist(io.update.hist, log2Ceil(nRows))
+  val update_idx_info = (histLen, min(log2Ceil(nRows), histLen))
+  val update_idx_fh = io.update.folded_hist.getHistWithInfo(update_idx_info)
+  assert(update_idx_history === update_idx_fh.folded_hist || !io.update.mask)
+  ////////////////////////////////////////
 
   table.io.w.apply(
     valid = io.update.mask,
@@ -444,43 +460,41 @@ class TageTable
 
 
 
-  if (BPUDebug && debug) {
-    XSPerfAccumulate(f"tage_table_wrbypass_hit", io.update.mask && wrbypass.io.hit)
-    XSPerfAccumulate(f"tage_table_wrbypass_enq", io.update.mask && !wrbypass.io.hit)
+  XSPerfAccumulate(f"tage_table_wrbypass_hit", io.update.mask && wrbypass.io.hit)
+  XSPerfAccumulate(f"tage_table_wrbypass_enq", io.update.mask && !wrbypass.io.hit)
 
 
-    XSPerfAccumulate("tage_table_hits", PopCount(io.resp.valid))
+  XSPerfAccumulate("tage_table_hits", PopCount(io.resp.valid))
 
-    val u = io.update
-    val b = PriorityEncoder(u.mask)
-    val ub = PriorityEncoder(u.uMask)
-    XSDebug(io.req.valid,
-      p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-      p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$s0_idx, " +
-      p"tag=$s0_tag\n")
-    XSDebug(RegNext(io.req.valid) && req_rhit,
-      p"TageTableResp: idx=$s1_idx, hit:$req_rhit, " +
-      p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}\n")
-    XSDebug(io.update.mask,
-      p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
-      p"taken:${u.taken}, alloc:${u.alloc}, oldCtr:${u.oldCtr}\n")
-    XSDebug(io.update.mask,
-      p"update Table: writing tag:$update_tag, " +
-      p"ctr: ${update_wdata.ctr} in idx ${update_idx}\n")
-    val hitCtr = wrbypass.io.ctr
-    XSDebug(wrbypass.io.hit && io.update.mask,
-      // p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
-      p"ctr:$hitCtr, newCtr:${update_wdata.ctr}")
+  val u = io.update
+  val b = PriorityEncoder(u.mask)
+  val ub = PriorityEncoder(u.uMask)
+  XSDebug(io.req.valid,
+    p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+    p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$s0_idx, " +
+    p"tag=$s0_tag\n")
+  XSDebug(RegNext(io.req.valid) && req_rhit,
+    p"TageTableResp: idx=$s1_idx, hit:$req_rhit, " +
+    p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}\n")
+  XSDebug(io.update.mask,
+    p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+    p"taken:${u.taken}, alloc:${u.alloc}, oldCtr:${u.oldCtr}\n")
+  XSDebug(io.update.mask,
+    p"update Table: writing tag:$update_tag, " +
+    p"ctr: ${update_wdata.ctr} in idx ${update_idx}\n")
+  val hitCtr = wrbypass.io.ctr
+  XSDebug(wrbypass.io.hit && io.update.mask,
+    // p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
+    p"ctr:$hitCtr, newCtr:${update_wdata.ctr}")
 
-    XSDebug(RegNext(io.req.valid) && !req_rhit, "TageTableResp: not hit!\n")
+  XSDebug(RegNext(io.req.valid) && !req_rhit, "TageTableResp: not hit!\n")
 
-    // ------------------------------Debug-------------------------------------
-    val valids = Reg(Vec(nRows, Bool()))
-    when (reset.asBool) { valids.foreach(r => r := false.B) }
-    when (io.update.mask) { valids(update_idx) := true.B }
-    XSDebug("Table usage:------------------------\n")
-    XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
-  }
+  // ------------------------------Debug-------------------------------------
+  val valids = Reg(Vec(nRows, Bool()))
+  when (reset.asBool) { valids.foreach(r => r := false.B) }
+  when (io.update.mask) { valids(update_idx) := true.B }
+  XSDebug("Table usage:------------------------\n")
+  XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
 
 }
 
@@ -501,26 +515,28 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val resp_meta = Wire(MixedVec((0 until TageBanks).map(new TageMeta(_))))
   override val meta_size = resp_meta.getWidth
-  val bank_tables = BankTableInfos.zipWithIndex.map {
+  val bank_tables = BankTageTableInfos.zipWithIndex.map {
     case (info, b) =>
       val tables = info.zipWithIndex.map {
         case ((nRows, histLen, tagLen), i) =>
           val t = Module(new TageTable(nRows, histLen, tagLen, UBitPeriod, i))
           t.io.req.valid := io.s0_fire
           t.io.req.bits.pc := s0_pc
-          t.io.req.bits.hist := io.in.bits.ghist << b
+          t.io.req.bits.folded_hist := io.in.bits.folded_hist
+          t.io.req.bits.hist := io.in.bits.ghist
           t.io.req.bits.phist := io.in.bits.phist
           t
       }
       tables
   }
-  val bt = Module (new TageBTable(numBr))
+  val bt = Module (new TageBTable)
   bt.io.s0_fire := io.s0_fire
   bt.io.s0_pc   := s0_pc
   bt.io.update := io.update
 
+  val tage_fh_info = bank_tables.flatMap(_.map(_.getFoldedHistoryInfo).reduce(_++_)).toSet
+  override def getFoldedHistoryInfo = Some(tage_fh_info)
   // Keep the table responses to process in s3
-
 
   val s1_resps = MixedVecInit(bank_tables.map(b => VecInit(b.map(t => t.io.resp))))
 
@@ -577,6 +593,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
       !(PriorityEncoder(update.preds.br_taken_mask) < w.U)))
   val updateHist = update.ghist
   val updatePhist = update.phist
+  val updateFHist = update.folded_hist
 
   val updateMetas = update.meta.asTypeOf(MixedVec((0 until TageBanks).map(new TageMeta(_))))
 
@@ -758,7 +775,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
       bank_tables(w)(i).io.update.u := RegNext(updateU(w)(i))
       bank_tables(w)(i).io.update.pc := RegNext(update.pc)
       // use fetch pc instead of instruction pc
-      bank_tables(w)(i).io.update.hist := RegNext(updateHist.predHist << w)
+      bank_tables(w)(i).io.update.folded_hist := RegNext(updateFHist)
+      bank_tables(w)(i).io.update.hist := RegNext(updateHist.predHist)
       bank_tables(w)(i).io.update.phist := RegNext(updatePhist)
     }
   }

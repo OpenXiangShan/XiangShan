@@ -146,6 +146,7 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   val rasEntry = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))
   // val ghist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val phNewBit = UInt(1.W)
@@ -155,6 +156,7 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasEntry := resp.rasTop
     this.specCnt := resp.specCnt
     // this.ghist := resp.ghist
+    this.folded_hist := resp.folded_hist
     this.histPtr := resp.histPtr
     this.phist := resp.phist
     this.phNewBit := resp.pc(instOffsetBits)

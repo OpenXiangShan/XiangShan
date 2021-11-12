@@ -155,23 +155,23 @@ class CircularGlobalHistory(implicit p: Parameters) extends GlobalHistory {
   }
 }
 
-class FoldedHistory(val len: Int, val folded_len: Int, val max_update_num: Int)(implicit p: Parameters)
+class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(implicit p: Parameters)
   extends XSBundle with HasBPUConst {
-  require(folded_len >= 1)
+  require(compLen >= 1)
   require(len > 0)
   // require(folded_len <= len)
-  require(folded_len >= max_update_num)
-  def compLen = len.min(folded_len)
-  require(max_update_num <= compLen)
-  val folded_hist = UInt(compLen.W) // TODO: min(len, folded_len)
+  require(compLen >= max_update_num)
+  val folded_hist = UInt(compLen.W)
+
+  def info = (len, compLen)
   def oldest_bit_to_get_from_ghr = (0 until max_update_num).map(len - _ - 1)
   def oldest_bit_pos_in_folded = oldest_bit_to_get_from_ghr map (_ % compLen)
   def oldest_bit_wrap_around = oldest_bit_to_get_from_ghr map (_ / compLen > 0)
   def oldest_bit_start = oldest_bit_pos_in_folded.head
 
-  def get_oldest_bits_from_ghr(ghr: UInt, histPtr: UInt) = {
+  def get_oldest_bits_from_ghr(ghr: Vec[Bool], histPtr: CGHPtr) = {
     // TODO: wrap inc for histPtr value
-    oldest_bit_to_get_from_ghr.map(i => ghr(histPtr + i.U))
+    oldest_bit_to_get_from_ghr.map(i => ghr((histPtr + (i+1).U).value))
   }
 
   def circular_shift_left(max_shift_value: Int)(src: UInt, shamt: UInt) = {
@@ -184,7 +184,7 @@ class FoldedHistory(val len: Int, val folded_len: Int, val max_update_num: Int)(
   }
 
 
-  def update_folded_hist(num: UInt, taken: Bool, oldest_bits: Seq[Bool]): FoldedHistory = {
+  def update(ghr: Vec[Bool], histPtr: CGHPtr, num: UInt, taken: Bool): FoldedHistory = {
     // do xors for several bitsets at specified bits
     def bitsets_xor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]]) = {
       val res = Wire(Vec(len, Bool()))
@@ -202,16 +202,16 @@ class FoldedHistory(val len: Int, val folded_len: Int, val max_update_num: Int)(
         // println(f"bit[$i], ${resArr(i).mkString}")
         if (resArr(i).length > 2) {
           println(f"[warning] update logic of foldest history has two or more levels of xor gates! " +
-            f"histlen:${this.len}, foldedLen:$folded_len")
+            f"histlen:${this.len}, compLen:$compLen")
         }
         if (resArr(i).length == 0) {
-          println(f"[error] bits $i is not assigned in folded hist update logic! histlen:${this.len}, foldedLen:$folded_len")
+          println(f"[error] bits $i is not assigned in folded hist update logic! histlen:${this.len}, compLen:$compLen")
         }
         res(i) := resArr(i).foldLeft(false.B)(_^_)
       }
       res.asUInt
     }
-
+    val oldest_bits = get_oldest_bits_from_ghr(ghr, histPtr)
 
     // mask off bits that do not update
     val oldest_bits_masked = oldest_bits.zipWithIndex.map{
@@ -237,8 +237,8 @@ class FoldedHistory(val len: Int, val folded_len: Int, val max_update_num: Int)(
     
     // histLen too short to wrap around
     val new_folded_hist =
-      if (len <= folded_len) {
-        (Cat(folded_hist, newest_bits_masked) << num)(compLen-1,0)
+      if (len <= compLen) {
+        ((folded_hist << num) | taken)(compLen-1,0)
         // circular_shift_left(max_update_num)(Cat(Reverse(newest_bits_masked), folded_hist(compLen-max_update_num-1,0)), num)
       } else {
         // do xor then shift
@@ -250,23 +250,22 @@ class FoldedHistory(val len: Int, val folded_len: Int, val max_update_num: Int)(
     fh
   }
 
-  def update(valids: Vec[Bool], takens: Vec[Bool], ghr: UInt, histPtr: UInt): FoldedHistory = {
-    val fh = WireInit(this)
-    require(valids.length == max_update_num)
-    require(takens.length == max_update_num)
-    val last_valid_idx = PriorityMux(
-      valids.reverse :+ true.B,
-      (max_update_num to 0 by -1).map(_.U(log2Ceil(max_update_num+1).W))
-      )
-    val first_taken_idx = PriorityEncoder(false.B +: takens)
-    val smaller = Mux(last_valid_idx < first_taken_idx,
-      last_valid_idx,
-      first_taken_idx
-    )
-    val oldest_bits = get_oldest_bits_from_ghr(ghr, histPtr)
-    // update folded_hist
-    fh.update_folded_hist(smaller, takens.reduce(_||_), oldest_bits)
-  }
+  // def update(ghr: Vec[Bool], histPtr: CGHPtr, valids: Vec[Bool], takens: Vec[Bool]): FoldedHistory = {
+  //   val fh = WireInit(this)
+  //   require(valids.length == max_update_num)
+  //   require(takens.length == max_update_num)
+  //   val last_valid_idx = PriorityMux(
+  //     valids.reverse :+ true.B,
+  //     (max_update_num to 0 by -1).map(_.U(log2Ceil(max_update_num+1).W))
+  //     )
+  //   val first_taken_idx = PriorityEncoder(false.B +: takens)
+  //   val smaller = Mux(last_valid_idx < first_taken_idx,
+  //     last_valid_idx,
+  //     first_taken_idx
+  //   )
+  //   // update folded_hist
+  //   fh.update(ghr, histPtr, smaller, takens.reduce(_||_))
+  // }
   // println(f"folded hist original length: ${len}, folded len: ${folded_len} " +
   //   f"oldest bits' pos in folded: ${oldest_bit_pos_in_folded}")
 
@@ -365,6 +364,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   val preds = new BranchPrediction
 
   // val ghist = new ShiftingGlobalHistory()
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val rasSp = UInt(log2Ceil(RasSize).W)
@@ -437,6 +437,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
     // XSDebug(cond, p"[ghist] ${Binary(ghist.predHist)}\n")
+    folded_hist.display(cond)
     preds.display(cond)
     ftb_entry.display(cond)
   }
@@ -491,6 +492,7 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // ghist := entry.ghist
+    folded_hist := entry.folded_hist
     histPtr := entry.histPtr
     phist := entry.phist
     rasSp := entry.rasSp
