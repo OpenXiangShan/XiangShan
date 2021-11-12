@@ -219,7 +219,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // distributed csr w
 }
 
-class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPConst with HasTriggerConst
+class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPMethod with PMAMethod with HasTriggerConst
 {
   val csrio = IO(new CSRFileIO)
 
@@ -500,41 +500,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
   // PMP Mapping
-  val pmp = Wire(Vec(NumPMP, new PMPBase()))
-  val pmpMapping = if (NumPMP > 0) { // TODO: remove duplicate codes
-    val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
-    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
+  val pmp = Wire(Vec(NumPMP, new PMPEntry())) // just used for method parameter
+  val pma = Wire(Vec(NumPMA, new PMPEntry())) // just used for method parameter
+  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
+  val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
 
-    /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
-    val cfgMerged = RegInit(VecInit(Seq.fill(NumPMP / pmpCfgPerCSR)(0.U(XLEN.W))))
-    val cfgs = WireInit(cfgMerged).asTypeOf(Vec(NumPMP, new PMPConfig()))
-    val addr = Reg(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
-    for (i <- pmp.indices) {
-      pmp(i).gen(cfgs(i), addr(i))
-    }
-
-    val cfg_mapping = (0 until NumPMP by pmpCfgPerCSR).map(i => {Map(
-      MaskedRegMap(
-        addr = PmpcfgBase + pmpCfgIndex(i),
-        reg = cfgMerged(i/pmpCfgPerCSR),
-        wmask = WritableMask,
-        wfn = new PMPConfig().write_cfg_vec
-      ))
-    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
-    val addr_mapping = (0 until NumPMP).map(i => {Map(
-      MaskedRegMap(
-        addr = PmpaddrBase + i,
-        reg = addr(i),
-        wmask = WritableMask,
-        wfn = { if (i != NumPMP-1) pmp(i).write_addr(pmp(i+1)) else pmp(i).write_addr },
-        rmask = WritableMask,
-        rfn = new PMPBase().read_addr(pmp(i).cfg)
-      ))
-    }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes.
-    cfg_mapping ++ addr_mapping
-  } else {
-    Map()
-  }
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
@@ -603,8 +573,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // bits 4: enable load load violation check
   csrio.customCtrl.ldld_vio_check := smblockctl(4)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h1".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h3".U)
   csrio.customCtrl.move_elim_enable := srnctl(0)
+  csrio.customCtrl.svinval_enable := srnctl(1)
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp.apply(satp)
@@ -660,18 +631,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
-
-  // Emu perfcnt
-  val hasEmuPerfCnt = !env.FPGAPlatform
-  val nrEmuPerfCnts = if (hasEmuPerfCnt) 0x80 else 0x3
-
-  val emuPerfCnts    = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
-  val emuPerfCntCond = List.fill(nrEmuPerfCnts)(WireInit(false.B))
-  (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
-
-  val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
-  val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
-  println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
 
   //val perfEventscounten = List.fill(nrPerfCnts)(RegInit(false(Bool())))
   // Perf Counter
@@ -896,8 +855,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mapping = basicPrivMapping ++
                 perfCntMapping ++
                 pmpMapping ++
-                emuPerfCntsLoMapping ++
-                (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
+                pmaMapping ++
                 (if (HasFPU) fcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
@@ -1257,7 +1215,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1266,7 +1224,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1290,6 +1248,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.medeleg := medeleg
   }
 }
+
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

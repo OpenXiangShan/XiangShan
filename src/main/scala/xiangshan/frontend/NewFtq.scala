@@ -848,8 +848,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   // only the valid bit is actually needed
-  io.toIfu.redirect := DontCare
-  io.toIfu.redirect.valid := stage2Flush
+  io.toIfu.redirect.bits    := Mux(robFlush.valid, robFlush.bits, stage2Redirect.bits)
+  io.toIfu.redirect.valid   := stage2Flush
 
   // commit
   for (c <- io.fromBackend.rob_commits) {

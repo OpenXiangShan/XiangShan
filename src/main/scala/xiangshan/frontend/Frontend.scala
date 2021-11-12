@@ -80,6 +80,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   pmp.io.distribute_csr := io.csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
     pmp_check(i).env.pmp  := pmp.io.pmp
+    pmp_check(i).env.pma  := pmp.io.pma
     pmp_check(i).env.mode := tlbCsr.priv.imode
     pmp_check(i).req <> ifu.io.pmp(i).req
     ifu.io.pmp(i).resp <> pmp_check(i).resp
@@ -118,7 +119,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   }
 
   icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
-  
+
   icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
   icache.io.csr.update <> io.csrUpdate
 
@@ -128,6 +129,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
+
+  ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
   ibuffer.io.flush := needFlush
   io.backend.cfVec <> ibuffer.io.out

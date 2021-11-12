@@ -128,6 +128,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     // lrsc locked block should block probe
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
     val invalid_resv_set = Input(Bool())
+    val update_resv_set = Output(Bool())
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -377,6 +378,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   io.lrsc_locked_block.valid := lrsc_valid
   io.lrsc_locked_block.bits  := lrsc_addr
+
+  // When we update update_resv_set, block all probe req in the next cycle
+  // It should give Probe reservation set addr compare an independent cycle,
+  // which will lead to better timing
+  io.update_resv_set := s3_valid && s3_lr && s3_can_do_amo
 
   // when we release this block,
   // we invalidate this reservation set

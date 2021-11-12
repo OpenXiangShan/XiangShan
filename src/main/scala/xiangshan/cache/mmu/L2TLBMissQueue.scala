@@ -179,8 +179,9 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
     !(mem_arb.io.out.fire && dup(entries(enq_ptr_reg).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    entries(enq_ptr_reg).af := io.pmp.resp.ld
-    state(enq_ptr_reg) := Mux(io.pmp.resp.ld, state_mem_out, state_mem_req)
+    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+    entries(enq_ptr_reg).af := accessFault
+    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
   }
 
   val flush = io.sfence.valid || io.csr.satp.changed

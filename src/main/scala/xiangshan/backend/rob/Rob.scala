@@ -169,10 +169,13 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   def trigger_vec_fix = VecInit(trigger.triggerHitVec.zipWithIndex.map{ case (hit, i) =>
     def chain = trigger.triggerChainVec(i / 2)
     if (i % 2 == 0)
-      (chain || hit === trigger.triggerHitVec(i + 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i+1)))
+      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i + 1)), trigger.triggerHitVec(i))
+    //  (chain || hit === trigger.triggerHitVec(i + 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i+1)))
     else
-      (chain || hit === trigger.triggerHitVec(i - 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i-1)))
-    true.B
+    //  (chain || hit === trigger.triggerHitVec(i - 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i-1)))
+//    true.B
+      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i - 1)), trigger.triggerHitVec(i))
+    false.B
   })
 
   def trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)
@@ -349,6 +352,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
+  val doingSvinval = RegInit(false.B)
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
@@ -375,6 +379,18 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       when (io.enq.req(i).bits.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        doingSvinval := true.B
+      }
+      // the end instruction of Svinval enqs so clear doingSvinval 
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        doingSvinval := false.B
+      }
+      // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
+      assert( !doingSvinval || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe)))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
@@ -553,7 +569,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       io.commits.info(i).ldest
     )
   }
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
@@ -913,11 +929,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
   }
-  val l1Miss = Wire(Bool())
-  l1Miss := false.B
-  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
-  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
-
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
@@ -939,7 +950,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
@@ -965,8 +976,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.wdata    := RegNext(exuData)
       difftest.io.wdest    := RegNext(uop.ctrl.ldest)
 
-      // XSDebug(p"[difftest-instr-commit]valid:${difftest.io.valid},pc:${difftest.io.pc},instr:${difftest.io.instr},skip:${difftest.io.skip},isRVC:${difftest.io.isRVC},scFailed:${difftest.io.scFailed},wen:${difftest.io.wen},wdata:${difftest.io.wdata},wdest:${difftest.io.wdest}\n")
-
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       runahead_commit.io.clock := clock
@@ -979,7 +988,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestLoadEvent)
       difftest.io.clock  := clock
@@ -996,7 +1005,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestTrapEvent)
     difftest.io.clock    := clock
     difftest.io.coreid   := hardId.U
@@ -1006,6 +1015,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
   }
+
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(18))
   })

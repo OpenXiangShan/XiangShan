@@ -30,12 +30,6 @@ import xiangshan.backend.fu.PMPReqBundle
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
-
-
-// case class ITLBKey
-// case class LDTLBKey
-// case class STTLBKey
-
 class VaBundle(implicit p: Parameters) extends TlbBundle {
   val vpn  = UInt(vpnLen.W)
   val off  = UInt(offLen.W)
@@ -67,13 +61,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  // pma perm (hardwired)
-  val pr = Bool() //readable
-  val pw = Bool() //writeable
-  val pe = Bool() //executable
-  val pa = Bool() //atom op permitted
-  val pi = Bool() //icacheable
-  val pd = Bool() //dcacheable
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
@@ -163,15 +150,6 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
 
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
     this
   }
 
@@ -196,9 +174,12 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
             else UInt(ppnLen.W)
   val perm = new TlbPermBundle
 
-  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false): Bool = {
+  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    if (!pageSuper) asid_hit && vpn === tag
+
+    // NOTE: for timing, dont care low set index bits at hit check
+    //       do not need store the low bits actually
+    if (!pageSuper) asid_hit && drop_set_equal(vpn, tag, nSets)
     else if (!pageNormal) asid_hit && MuxLookup(level.get, false.B, Seq(
       0.U -> (tag(vpnnLen*2-1, vpnnLen) === vpn(vpnLen-1, vpnnLen*2)),
       1.U -> (tag === vpn(vpnLen-1, vpnnLen)),
@@ -206,7 +187,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     else asid_hit && MuxLookup(level.get, false.B, Seq(
       0.U -> (tag(vpnLen-1, vpnnLen*2) === vpn(vpnLen-1, vpnnLen*2)),
       1.U -> (tag(vpnLen-1, vpnnLen) === vpn(vpnLen-1, vpnnLen)),
-      2.U -> (tag === vpn) // if pageNormal is false, this will always be false
+      2.U -> drop_set_equal(tag, vpn, nSets) // if pageNormal is false, this will always be false
     ))
   }
 
@@ -230,20 +211,11 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
 
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(item.entry.ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
     this
   }
 
-  def genPPN(vpn: UInt) : UInt = {
-    if (!pageSuper) ppn
+  def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
+    val ppn_res = if (!pageSuper) ppn
     else if (!pageNormal) MuxLookup(level.get, 0.U, Seq(
       0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen*2-1, 0)),
       1.U -> Cat(ppn, vpn(vpnnLen-1, 0))
@@ -253,6 +225,10 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
       2.U -> ppn
     ))
+
+    val static_part_length = ppn_res.getWidth - vpnnLen*2
+    if (saveLevel) Cat(ppn(ppn.getWidth-1, ppn.getWidth-static_part_length), RegEnable(ppn_res(vpnnLen*2-1, 0), valid))
+    else ppn_res
   }
 
   override def toPrintable: Printable = {
@@ -290,6 +266,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val ppn = Output(UInt(ppnLen.W))
       val perm = Output(new TlbPermBundle())
     }))
+    val resp_hit_sameCycle = Output(Vec(ports, Bool())) // req hit or not same cycle with req
   }
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
@@ -311,7 +288,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
+    (this.r.resp_hit_sameCycle(i), this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
@@ -359,13 +336,13 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
-  val vaddr = UInt(VAddrBits.W)
-  val cmd = TlbCmd()
-  val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
-  val robIdx = new RobPtr
+  val vaddr = Output(UInt(VAddrBits.W))
+  val cmd = Output(TlbCmd())
+  val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
+  val robIdx = Output(new RobPtr)
   val debug = new Bundle {
-    val pc = UInt(XLEN.W)
-    val isFirstIssue = Bool()
+    val pc = Output(UInt(XLEN.W))
+    val isFirstIssue = Output(Bool())
   }
 
   override def toPrintable: Printable = {
@@ -380,14 +357,13 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbResp(implicit p: Parameters) extends TlbBundle {
-  val paddr = UInt(PAddrBits.W)
-  val miss = Bool()
-  val mmio = Bool()
+  val paddr = Output(UInt(PAddrBits.W))
+  val miss = Output(Bool())
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
   }
-  val ptwBack = Bool() // when ptw back, wake up replay rs's state
+  val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
 
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
