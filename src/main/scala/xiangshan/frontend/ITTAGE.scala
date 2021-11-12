@@ -32,21 +32,8 @@ import scala.util.matching.Regex
 import firrtl.passes.wiring.Wiring
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
-  //                   Sets  Hist   Tag
-  val TableInfo = Seq(( 512,    0,    0),
-                      ( 512,    2,    7),
-                      ( 512,    4,    7),
-                      ( 512,    8,    8),
-                      ( 512,   16,    8),
-                      ( 512,   32,    9),
-                      ( 512,   64,    9))
-  // (  64,   64,   11),
-  // (  64,  101,   12),
-  // (  64,  160,   12),
-  // (  64,  254,   13),
-  // (  32,  403,   14),
-  // (  32,  640,   15))
-  val ITTageNTables = TableInfo.size // Number of tage tables
+
+  val ITTageNTables = ITTageTableInfos.size // Number of tage tables
   val UBitPeriod = 2048
   val ITTageCtrBits = 2
   def ctr_null(ctr: UInt, ctrBits: Int = ITTageCtrBits) = {
@@ -57,7 +44,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
   }
   val UAONA_bits = 4
 
-  val TotalBits = TableInfo.map {
+  val TotalBits = ITTageTableInfos.map {
     case (s, h, t) => {
       s * (1+t+ITTageCtrBits+VAddrBits)
     }
@@ -91,7 +78,7 @@ abstract class ITTageModule(implicit p: Parameters)
 
 class ITTageReq(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
 }
 
@@ -103,7 +90,7 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
   // update tag and ctr
   val valid = Bool()
@@ -169,19 +156,43 @@ class ITTageTable
   val wrBypassEntries = 4
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
 
-  def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
-    val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
-    // val idx = (unhashed_idx ^ (unhashed_idx >> (log2Ceil(nRows)-tableIdx+1)) ^ idx_history ^ idx_phist)(log2Ceil(nRows) - 1, 0)
-    val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
-    val tag_history = compute_folded_ghist(hist, tagLen)
-    val alt_tag_history = compute_folded_ghist(hist, tagLen-1)
-    // Use another part of pc to make tags
-    val tag = (
-      if (tagLen > 1)
-        ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history ^ (alt_tag_history << 1)) (tagLen - 1, 0)
-      else 0.U
-    )
-    (idx, tag)
+  // def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt, phist: UInt) = {
+  //   val idx_history = compute_folded_ghist(hist, log2Ceil(nRows))
+  //   // val idx = (unhashed_idx ^ (unhashed_idx >> (log2Ceil(nRows)-tableIdx+1)) ^ idx_history ^ idx_phist)(log2Ceil(nRows) - 1, 0)
+  //   val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows) - 1, 0)
+  //   val tag_history = compute_folded_ghist(hist, tagLen)
+  //   val alt_tag_history = compute_folded_ghist(hist, tagLen-1)
+  //   // Use another part of pc to make tags
+  //   val tag = (
+  //     if (tagLen > 1)
+  //       ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history ^ (alt_tag_history << 1)) (tagLen - 1, 0)
+  //     else 0.U
+  //   )
+  //   (idx, tag)
+  // }
+  
+  require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
+  val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
+  val tagFhInfo = (histLen, min(histLen, tagLen))
+  val altTagFhInfo = (histLen, min(histLen, tagLen-1))
+  val allFhInfos = Seq(idxFhInfo, tagFhInfo, altTagFhInfo)
+
+  def getFoldedHistoryInfo = allFhInfos.filter(_._1 >0).toSet
+
+  def compute_tag_and_hash(unhashed_idx: UInt, allFh: AllFoldedHistories) = {
+    if (histLen > 0) {
+      val idx_fh = allFh.getHistWithInfo(idxFhInfo).folded_hist
+      val tag_fh = allFh.getHistWithInfo(tagFhInfo).folded_hist
+      val alt_tag_fh = allFh.getHistWithInfo(altTagFhInfo).folded_hist
+      // require(idx_fh.getWidth == log2Ceil(nRows))
+      val idx = (unhashed_idx ^ idx_fh)(log2Ceil(nRows)-1, 0)
+      val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_fh ^ (alt_tag_fh << 1)) (tagLen - 1, 0)
+      (idx, tag)
+    }
+    else {
+      require(tagLen == 0)
+      (unhashed_idx(log2Ceil(nRows)-1, 0), 0.U)
+    }
   }
 
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, ITTageCtrBits, taken)
@@ -203,7 +214,8 @@ class ITTageTable
   val s0_pc = io.req.bits.pc
   val s0_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
+  // val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
+  val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.valid), RegEnable(s0_tag, io.req.valid))
 
   val hi_us   = Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8))
@@ -243,7 +255,8 @@ class ITTageTable
   val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
 
   // Use fetchpc to compute hash
-  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
+  // val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
   val update_target = io.update.target
 
   val update_wdata = Wire(new ITTageEntry)
@@ -345,13 +358,12 @@ class ITTageTable
     val tag = s0_tag
     XSDebug(io.req.valid,
       p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-      p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$idx, " +
-      p"tag=$tag\n")
+      p"idx=$idx, tag=$tag\n")
     XSDebug(RegNext(io.req.valid) && s1_req_rhit,
       p"ITTageTableResp: idx=$s1_idx, hit:${s1_req_rhit}, " +
       p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target)}\n")
     XSDebug(io.update.valid,
-      p"update ITTAGE Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+      p"update ITTAGE Table: pc:${Hexadecimal(u.pc)}}, " +
       p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCtr}, " +
       p"target:${Hexadecimal(u.target)}, old_target:${Hexadecimal(u.old_target)}\n")
     XSDebug(io.update.valid,
@@ -415,7 +427,7 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
 class ITTage(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
-  val tables = TableInfo.zipWithIndex.map {
+  val tables = ITTageTableInfos.zipWithIndex.map {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
@@ -426,10 +438,11 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
       t.io.req.valid := io.s0_fire
       t.io.req.bits.pc := s0_pc
-      t.io.req.bits.hist := io.in.bits.ghist
+      t.io.req.bits.folded_hist := io.in.bits.folded_hist
       t.io.req.bits.phist := io.in.bits.phist
       t
   }
+  override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
 
 
   val useAltOnNa = RegInit((1 << (UAONA_bits-1)).U(UAONA_bits.W))
@@ -447,10 +460,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
   val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
-
-  val debug_hist_s0 = io.in.bits.ghist
-  val debug_hist_s1 = RegEnable(debug_hist_s0, enable=io.s0_fire)
-  val debug_hist_s2 = RegEnable(debug_hist_s1, enable=io.s1_fire)
 
   val s1_tageTaken         = Wire(Bool())
   val s1_tageTarget        = Wire(UInt(VAddrBits.W))
@@ -494,8 +503,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val updateValid =
     update.ftb_entry.isJalr && u_valid && update.ftb_entry.jmpValid &&
     !(update.real_br_taken_mask().reduce(_||_))
-  val updateHist = update.ghist
   val updatePhist = update.phist
+  val updateFhist = update.folded_hist
 
   // meta is splited by composer
   val updateMeta = update.meta.asTypeOf(new ITTageMeta)
@@ -690,8 +699,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.u := RegNext(updateU(i))
     tables(i).io.update.pc := RegNext(update.pc)
     // use fetch pc instead of instruction pc
-    tables(i).io.update.hist := RegNext(updateHist.predHist)
     tables(i).io.update.phist := RegNext(updatePhist)
+    tables(i).io.update.folded_hist := RegNext(updateFhist)
   }
 
   // Debug and perf info
@@ -756,10 +765,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     //   )
     // }
     val s2_resps = RegEnable(s1_resps, io.s1_fire)
-    XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s0_fire, s0_pc, io.in.bits.ghist)
-    XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
-    XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hit=%b, taken=%b\n",
-      debug_pc_s2, io.out.resp.s2.target, debug_hist_s2, s2_provided, s2_tageTaken)
+    XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
+    XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
+    XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b, taken=%b\n",
+      debug_pc_s2, io.out.resp.s2.target, s2_provided, s2_tageTaken)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
         i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,
