@@ -49,7 +49,6 @@ class SCResp(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 
 class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val mask = Bool()
   val oldCtr = SInt(ctrBits.W)
@@ -182,12 +181,12 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val u = io.update
   XSDebug(io.req.valid,
     p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-    p"s0_idx=${s0_idx}, hist=${Hexadecimal(io.req.bits.hist)}\n")
+    p"s0_idx=${s0_idx}\n")
   XSDebug(RegNext(io.req.valid),
     p"scTableResp: s1_idx=${s1_idx}," +
     p"ctr:${io.resp.ctr}\n")
   XSDebug(io.update.mask,
-    p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+    p"update Table: pc:${Hexadecimal(u.pc)}, " +
     p"tageTaken:${u.tagePred}, taken:${u.taken}, oldCtr:${u.oldCtr}\n")
   val updateCtrPos = io.update.tagePred
   val hitCtr = wrbypass.io.ctrs(updateCtrPos).bits
@@ -241,7 +240,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
             val req = t.io.req
             req.valid := io.s0_fire
             req.bits.pc := s0_pc
-            req.bits.hist := io.in.bits.ghist
             req.bits.folded_hist := io.in.bits.folded_hist
             req.bits.phist := DontCare
             if (!EnableSC) {t.io.update := DontCare}
@@ -381,7 +379,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
         bank_scTables(b)(i).io.update.taken    := RegNext(scUpdateTakens(b))
         bank_scTables(b)(i).io.update.oldCtr   := RegNext(scUpdateOldCtrs(b)(i))
         bank_scTables(b)(i).io.update.pc := RegNext(update.pc)
-        bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist)
         bank_scTables(b)(i).io.update.folded_hist := RegNext(updateFHist)
       }
     }

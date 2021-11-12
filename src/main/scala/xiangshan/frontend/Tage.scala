@@ -74,7 +74,6 @@ abstract class TageModule(implicit p: Parameters)
 
 class TageReq(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
 }
@@ -86,7 +85,6 @@ class TageResp(implicit p: Parameters) extends TageBundle {
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val phist = UInt(PathHistoryLength.W)
   // update tag and ctr
@@ -317,14 +315,7 @@ class TageTable
   val table  = Module(new SRAMTemplate(new TageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
 
 
-  // val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)
-  // TODO: remove this checking code
-  val idx_history = compute_folded_ghist(io.req.bits.hist, log2Ceil(nRows))
-
-  val idx_fh = io.req.bits.folded_hist.getHistWithInfo(idxFhInfo)
-  assert(idx_history === idx_fh.folded_hist)
-  ////////////////////////////////////////
 
   table.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
@@ -362,13 +353,6 @@ class TageTable
 
   // val (update_idx, update_tag) =  compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
   val (update_idx, update_tag) =  compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
-
-  // TODO: remove this checking code
-  val update_idx_history = compute_folded_ghist(io.update.hist, log2Ceil(nRows))
-  val update_idx_info = (histLen, min(log2Ceil(nRows), histLen))
-  val update_idx_fh = io.update.folded_hist.getHistWithInfo(update_idx_info)
-  assert(update_idx_history === update_idx_fh.folded_hist || !io.update.mask)
-  ////////////////////////////////////////
 
   table.io.w.apply(
     valid = io.update.mask,
@@ -471,13 +455,12 @@ class TageTable
   val ub = PriorityEncoder(u.uMask)
   XSDebug(io.req.valid,
     p"tableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-    p"hist=${Hexadecimal(io.req.bits.hist)}, idx=$s0_idx, " +
-    p"tag=$s0_tag\n")
+    p"idx=$s0_idx, tag=$s0_tag\n")
   XSDebug(RegNext(io.req.valid) && req_rhit,
     p"TageTableResp: idx=$s1_idx, hit:$req_rhit, " +
     p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}\n")
   XSDebug(io.update.mask,
-    p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
+    p"update Table: pc:${Hexadecimal(u.pc)}}, " +
     p"taken:${u.taken}, alloc:${u.alloc}, oldCtr:${u.oldCtr}\n")
   XSDebug(io.update.mask,
     p"update Table: writing tag:$update_tag, " +
@@ -523,7 +506,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
           t.io.req.valid := io.s0_fire
           t.io.req.bits.pc := s0_pc
           t.io.req.bits.folded_hist := io.in.bits.folded_hist
-          t.io.req.bits.hist := io.in.bits.ghist
           t.io.req.bits.phist := io.in.bits.phist
           t
       }
@@ -547,10 +529,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
   val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
-
-  val debug_hist_s0 = io.in.bits.ghist
-  val debug_hist_s1 = RegEnable(debug_hist_s0, enable=io.s0_fire)
-  val debug_hist_s2 = RegEnable(debug_hist_s1, enable=io.s1_fire)
 
   val s1_tageTakens    = Wire(Vec(TageBanks, Bool()))
   val s1_provideds     = Wire(Vec(TageBanks, Bool()))
@@ -591,7 +569,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.preds.br_taken_mask) < w.U)))
-  val updateHist = update.ghist
   val updatePhist = update.phist
   val updateFHist = update.folded_hist
 
@@ -776,7 +753,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
       bank_tables(w)(i).io.update.pc := RegNext(update.pc)
       // use fetch pc instead of instruction pc
       bank_tables(w)(i).io.update.folded_hist := RegNext(updateFHist)
-      bank_tables(w)(i).io.update.hist := RegNext(updateHist.predHist)
       bank_tables(w)(i).io.update.phist := RegNext(updatePhist)
     }
   }
@@ -826,16 +802,16 @@ class Tage(implicit p: Parameters) extends BaseTage {
   for (b <- 0 until TageBanks) {
     val m = updateMetas(b)
     // val bri = u.metas(b)
-    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-      b.U, update.pc, 0.U, updateHist.predHist, update.preds.br_taken_mask(b), update.mispred_mask(b),
+    XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+      b.U, update.pc, 0.U, update.preds.br_taken_mask(b), update.mispred_mask(b),
       0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
     )
   }
   val s2_resps = RegEnable(s1_resps, io.s1_fire)
-  XSDebug("req: v=%d, pc=0x%x, hist=%b\n", io.s0_fire, s0_pc, io.in.bits.ghist)
-  XSDebug("s1_fire:%d, resp: pc=%x, hist=%b\n", io.s1_fire, debug_pc_s1, debug_hist_s1)
-  XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hist=%b, hits=%b, takens=%b\n",
-    debug_pc_s2, io.out.resp.s2.target, debug_hist_s2, s2_provideds.asUInt, s2_tageTakens.asUInt)
+  XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire, s0_pc)
+  XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire, debug_pc_s1)
+  XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hits=%b, takens=%b\n",
+    debug_pc_s2, io.out.resp.s2.target, s2_provideds.asUInt, s2_tageTakens.asUInt)
 
   for (b <- 0 until TageBanks) {
     for (i <- 0 until BankTageNTables(b)) {

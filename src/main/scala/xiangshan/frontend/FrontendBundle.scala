@@ -363,7 +363,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   // val hit = Bool()
   val preds = new BranchPrediction
 
-  // val ghist = new ShiftingGlobalHistory()
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
@@ -425,18 +424,8 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
     cfiIndex
   }
 
-
-  // override def toPrintable: Printable = {
-  //   p"-----------BranchPredictionBundle----------- " +
-  //     p"[pc] ${Hexadecimal(pc)} " +
-  //     p"[ghist] ${Binary(ghist.predHist)}  " +
-  //     preds.toPrintable +
-  //     ftb_entry.toPrintable
-  // }
-
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    // XSDebug(cond, p"[ghist] ${Binary(ghist.predHist)}\n")
     folded_hist.display(cond)
     preds.display(cond)
     ftb_entry.display(cond)
@@ -488,10 +477,8 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
   val old_entry = Bool()
   val meta = UInt(MaxMetaLength.W)
   val full_target = UInt(VAddrBits.W)
-  val ghist = new ShiftingGlobalHistory() // TODO: remove this
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    // ghist := entry.ghist
     folded_hist := entry.folded_hist
     histPtr := entry.histPtr
     phist := entry.phist
@@ -500,13 +487,6 @@ class BranchPredictionUpdate(implicit p: Parameters) extends BranchPredictionBun
     specCnt := entry.specCnt
     this
   }
-  // override def toPrintable: Printable = {
-  //   p"-----------BranchPredictionUpdate----------- " +
-  //     p"[mispred_mask] ${Binary(mispred_mask.asUInt)} [false_hit] ${Binary(false_hit)} " +
-  //     p"[new_br_insert_pos] ${Binary(new_br_insert_pos.asUInt)} " +
-  //     super.toPrintable +
-  //     p"\n"
-  // }
 
   override def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
