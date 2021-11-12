@@ -54,6 +54,8 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     csr.csrio <> csrio.get
     disableSfence := csr.csrio.disableSfence
     csr_frm := csr.csrio.fpu.frm
+    // setup skip for hpm CSR read
+    io.out.bits.debug.isPerfCnt := RegNext(csr.csrio.isPerfCnt) // TODO: this is dirty
   }
 
   if (config.fuConfigs.contains(fenceCfg)) {

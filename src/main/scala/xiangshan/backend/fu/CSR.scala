@@ -190,12 +190,12 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // Debug Mode
   val singleStep = Output(Bool())
   val debugMode = Output(Bool())
-  // Custom microarchiture ctrl signal
-  val customCtrl = Output(new CustomCSRCtrlIO)
-  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
-  // distributed csr w
+  // Custom microarchiture ctrl signal
+  val customCtrl = Output(new CustomCSRCtrlIO)
+  // distributed csr write
+  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPMethod with PMAMethod
@@ -517,18 +517,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
-  // Emu perfcnt
-  val hasEmuPerfCnt = !env.FPGAPlatform
-  val nrEmuPerfCnts = if (hasEmuPerfCnt) 0x80 else 0x3
-
-  val emuPerfCnts    = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
-  val emuPerfCntCond = List.fill(nrEmuPerfCnts)(WireInit(false.B))
-  (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
-
-  val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
-  val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
-  println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
-
   //val perfEventscounten = List.fill(nrPerfCnts)(RegInit(false(Bool())))
   // Perf Counter
   val nrPerfCnts = 29  // 3...31
@@ -746,8 +734,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                 perfCntMapping ++
                 pmpMapping ++
                 pmaMapping ++
-                emuPerfCntsLoMapping ++
-                (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
                 (if (HasFPU) fcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
@@ -763,8 +749,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
-  csrio.isPerfCnt := addrInPerfCnt
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
+    (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U)
+  csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
@@ -780,8 +767,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
-  // Writeable check is ingored.
-  // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
   io.out.bits.data := rdata
   io.out.bits.uop := io.in.bits.uop
@@ -1094,7 +1079,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1103,7 +1088,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1127,6 +1112,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.medeleg := medeleg
   }
 }
+
 class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())

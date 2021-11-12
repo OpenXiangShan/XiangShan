@@ -31,6 +31,7 @@ import freechips.rocketchip.tilelink.{BankBinder, TLBuffer, TLCacheCork, TLFIFOF
 import huancun.debug.TLLogger
 import huancun.{BankedXbar, CacheParameters, HCCacheParameters}
 import top.BusPerfMonitor
+import utils.{BinaryArbiter, TLEdgeBuffer}
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -38,7 +39,7 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 36,
-  extIntrs: Int = 150,
+  extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l3",
@@ -147,21 +148,26 @@ trait HaveAXI4MemPort {
     )
   ))
 
-  def mem_buffN(n: Int) = {
-    val buffers = (0 until n).map(_ => AXI4Buffer())
-    buffers.reduce((l, r) => l := r)
-    (buffers.head, buffers.last)
-  }
   val mem_xbar = TLXbar()
-  mem_xbar :=* TLCacheCork() :=* bankedNode
-  mem_xbar := TLBuffer() := TLWidthWidget(8) := TLBuffer() := peripheralXbar
-  val (buf_l, buf_r) = mem_buffN(5)
-  memAXI4SlaveNode := buf_l
-  buf_r :=
+  mem_xbar :=*
+    TLXbar() :=*
+    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_1")) :=*
+    BinaryArbiter() :=*
+    TLEdgeBuffer(i => i == 0, Some("L3EdgeBuffer_0")) :=*
+    TLCacheCork() :=*
+    bankedNode
+
+  mem_xbar :=
+    TLWidthWidget(8) :=
+    TLBuffer.chainNode(5, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
+    peripheralXbar
+
+  memAXI4SlaveNode :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
     TLWidthWidget(L3OuterBusWidth / 8) :=
+    TLEdgeBuffer(_ => true, Some("MemXbar_to_DDR_buffer")) :=
     mem_xbar
 
   val memory = InModuleBody {
@@ -219,7 +225,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val l3_out = TLTempNode()
   val l3_mem_pmu = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
 
-  l3_in :*= l3_banked_xbar
+  l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar
   bankedNode :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform) :*= l3_mem_pmu :*= l3_out
 
   if(soc.L3CacheParamsOpt.isEmpty){
@@ -231,7 +237,22 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
-    l3_banked_xbar :=* TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=* core_out
+    l3_banked_xbar :=*
+      TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
+      TLEdgeBuffer(idx => {
+        /*
+                  Core0     Core1
+            _____________________________
+           | L3   B0, B2     B1,B3      |
+            -----------------------------
+
+            Core(i)          0         1
+            Port(idx)      0   1     0  1
+            Buffer?        N   Y     Y  N
+         */
+        val insert_buffer = (i % 2) != (idx % 2)
+        insert_buffer
+      }, Some(s"core_${i}_to_l3_buffer")) :=* core_out
   }
   l3_banked_xbar :=* BankBinder(tiles.head.L2NBanks, L3BlockSize) :*= l3_xbar
 
@@ -273,8 +294,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
 
+    val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
+    val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
+    ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
-    plicSource.module.in := ext_intrs.asBools
+    plicSource.module.in := ext_intrs_wire.asBools
 
     val freq = 100
     val cnt = RegInit(freq.U)

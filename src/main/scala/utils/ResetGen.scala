@@ -24,11 +24,11 @@ class ResetGen extends Module {
     val out = Output(Bool())
   })
 
-  io.out := RegNext(reset.asBool)
+  io.out := RegNext(RegNext(reset.asBool))
 }
 
 object ResetGen {
-  def apply(resetChain: Seq[Seq[Module]], reset: Bool, sim: Boolean): Seq[Bool] = {
+  def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Bool, sim: Boolean): Seq[Bool] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Bool()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
