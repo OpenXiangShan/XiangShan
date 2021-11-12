@@ -187,8 +187,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
       val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
       io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
-      hit.suggestName("predecode_trigger_hit"+j)
-      dontTouch(hit)
       io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
       if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
     }

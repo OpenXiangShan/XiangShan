@@ -170,12 +170,8 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
     def chain = trigger.triggerChainVec(i / 2)
     if (i % 2 == 0)
       Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i + 1)), trigger.triggerHitVec(i))
-    //  (chain || hit === trigger.triggerHitVec(i + 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i+1)))
     else
-    //  (chain || hit === trigger.triggerHitVec(i - 1)) && (chain && (trigger.triggerTiming(i) || trigger.triggerTiming(i-1)))
-//    true.B
       Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i - 1)), trigger.triggerHitVec(i))
-    false.B
   })
 
   def trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)
