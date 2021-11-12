@@ -940,8 +940,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
         uop.ctrl.fuType === FuType.mou &&
         (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
       difftest.io.wen      := RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)
-      difftest.io.wdest    := RegNext(uop.ctrl.ldest)
-      difftest.io.wdata    := RegNext(exuData)
+      difftest.io.wpdest   := RegNext(io.commits.info(i).pdest)
+      difftest.io.wdest    := RegNext(io.commits.info(i)ldest)
 
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
@@ -988,6 +988,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.skip    := RegNext(Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
       difftest.io.isRVC   := RegNext(isRVC)
       difftest.io.wen     := RegNext(io.commits.valid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U)
+      difftest.io.wpdest  := RegNext(commitInfo.pdest)
       difftest.io.wdest   := RegNext(commitInfo.ldest)
     }
   }
