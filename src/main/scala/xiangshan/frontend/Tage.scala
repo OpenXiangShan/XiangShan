@@ -34,7 +34,6 @@ import os.followLink
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)
   val BankTageNTables = BankTageTableInfos.map(_.size) // Number of tage tables
-  val TageBanks = numBr
   val UBitPeriod = 256
   val TageCtrBits = 3
 

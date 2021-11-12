@@ -59,7 +59,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 128,
+  HistoryLength: Int = 256,
   PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -76,6 +76,7 @@ case class XSCoreParameters
         ( 256*8,   16,    8),
         ( 128*8,   32,    9),
         ( 128*8,   65,    9)),
+  TageBanks: Int = 2,
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
     Seq(( 512,    0,    0),
@@ -310,6 +311,7 @@ trait HasXSParameter {
   val BankTageTableInfos = (0 until numBr).map(i =>
     TageTableInfos.map{ case (s, h, t) => (s/(1 << i), h, t) }
   )
+  val TageBanks = coreParams.TageBanks
   val SCNRows = coreParams.SCNRows
   val SCCtrBits = coreParams.SCCtrBits
   val BankSCHistLens = BankTageTableInfos.map(info => 0 :: info.map{ case (_,h,_) => h}.toList)
@@ -330,7 +332,7 @@ trait HasXSParameter {
     }.reduce(_++_)).toSet ++
     BankSCTableInfos.flatMap(_.map{ case (nRows, _, h) =>
       if (h > 0)
-        Set((h, min(log2Ceil(nRows), h)))
+        Set((h, min(log2Ceil(nRows/TageBanks), h)))
       else
         Set[FoldedHistoryInfo]()
     }.reduce(_++_)).toSet ++
