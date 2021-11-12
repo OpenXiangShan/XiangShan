@@ -211,12 +211,12 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // Debug Mode
   val singleStep = Output(Bool())
   val debugMode = Output(Bool())
-  // Custom microarchiture ctrl signal
-  val customCtrl = Output(new CustomCSRCtrlIO)
-  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
   // to Fence to disable sfence
   val disableSfence = Output(Bool())
-  // distributed csr w
+  // Custom microarchiture ctrl signal
+  val customCtrl = Output(new CustomCSRCtrlIO)
+  // distributed csr write
+  val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPMethod with PMAMethod with HasTriggerConst
@@ -871,8 +871,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
-  csrio.isPerfCnt := addrInPerfCnt
+  val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
+    (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U)
+  csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
@@ -890,8 +891,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
-  // Writeable check is ingored.
-  // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
   io.out.bits.data := rdata
   io.out.bits.uop := io.in.bits.uop
@@ -1059,7 +1058,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   mipWire.t.m := csrio.externalInterrupt.mtip
   mipWire.s.m := csrio.externalInterrupt.msip
   mipWire.e.m := csrio.externalInterrupt.meip
-  mipWire.e.s := csrio.externalInterrupt.meip
+  mipWire.e.s := csrio.externalInterrupt.seip
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
@@ -1215,7 +1214,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
 
-  if (env.EnableDifftest) {
+  // Always instantiate basic difftest modules.
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
@@ -1224,7 +1224,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
   }
 
-  if (env.EnableDifftest) {
+  // Always instantiate basic difftest modules.
+  if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U

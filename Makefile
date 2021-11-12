@@ -40,6 +40,8 @@ RELEASE_ARGS = --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   = --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
+else
+override SIM_ARGS += $(DEBUG_ARGS)
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
@@ -78,7 +80,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
 		--repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --infer-rw  \
 		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
-		$(DEBUG_ARGS) $(SIM_ARGS)
+		$(SIM_ARGS)
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__

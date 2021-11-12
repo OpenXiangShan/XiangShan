@@ -142,7 +142,6 @@ trait HasCSRConst {
   val Mhpmcounter30 = 0xB1E
   val Mhpmcounter31 = 0xB1F
 
-  // Machine Counter Setup (not implemented)
   val Mcountinhibit = 0x320
   val Mhpmevent3    = 0x323
   val Mhpmevent4    = 0x324
