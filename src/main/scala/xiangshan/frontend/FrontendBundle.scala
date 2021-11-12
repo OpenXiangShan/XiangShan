@@ -225,7 +225,7 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
     // only the last bit could be 1, as we have at most one taken branch at a time
     val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && (i+1).U === num)).asUInt
     // if a bit does not wrap around, newest bits should not be xored onto it either
-    val newest_bits_set = (0 until max_update_num).filter(oldest_bit_wrap_around).map(i => (compLen-1-i, newest_bits_masked(i)))
+    val newest_bits_set = (0 until max_update_num).map(i => (compLen-1-i, newest_bits_masked(i)))
 
     // println(f"new bits set ${newest_bits_set.map(_._1)}")
     //
