@@ -117,21 +117,21 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
 
     is (s_check_pte) {
-      when (io.resp.valid) {
+      when (io.resp.valid) { // find pte already or accessFault (mentioned below)
         when (io.resp.fire()) {
           state := s_idle
         }
         finish := true.B
-      }.otherwise {
-        when (io.pmp.resp.ld) {
-          // do nothing
-        }.elsewhen (io.mq.valid) {
-          when (io.mq.fire()) {
-            state := s_idle
-          }
-          finish := true.B
-        }.otherwise { // when level is 1.U, finish
-          assert(level =/= 2.U)
+      }.elsewhen(io.mq.valid) { // the next level is pte, go to miss queue
+        when (io.mq.fire()) {
+          state := s_idle
+        }
+        finish := true.B
+      } otherwise { // go to next level, access the memory, need pmp check first
+        when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
+          // do nothing, RegNext the pmp check result and do it later (mentioned above)
+        }.otherwise { // go to next level.
+          assert(level === 0.U)
           level := levelNext
           state := s_mem_req
         }
