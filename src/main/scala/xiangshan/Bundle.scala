@@ -307,6 +307,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val seip = Input(Bool())
   val debug = Input(Bool())
 }
 
@@ -330,7 +331,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
-  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr

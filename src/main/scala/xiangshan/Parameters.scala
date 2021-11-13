@@ -252,6 +252,7 @@ case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
   EnableDifftest: Boolean = false,
+  AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false

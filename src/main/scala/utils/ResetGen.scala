@@ -28,7 +28,7 @@ class ResetGen extends Module {
 }
 
 object ResetGen {
-  def apply(resetChain: Seq[Seq[Module]], reset: Bool, sim: Boolean): Seq[Bool] = {
+  def apply(resetChain: Seq[Seq[MultiIOModule]], reset: Bool, sim: Boolean): Seq[Bool] = {
     val resetReg = Wire(Vec(resetChain.length + 1, Bool()))
     resetReg.foreach(_ := reset)
     for ((resetLevel, i) <- resetChain.zipWithIndex) {
