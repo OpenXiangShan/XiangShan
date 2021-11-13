@@ -28,14 +28,14 @@ import xiangshan.backend.fu.util.HasCSRConst
 import utils._
 import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
 
-trait PMPConst extends HasXSParameter {
+trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
   val CoarserGrain: Boolean = PlatformGrain > PMPOffBits
 }
 
-abstract class PMPBundle(implicit p: Parameters) extends XSBundle with PMPConst
-
-abstract class PMPModule(implicit p: Parameters) extends XSModule with PMPConst with HasCSRConst
+abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPConst
+abstract class PMPModule(implicit val p: Parameters) extends Module with PMPConst
+abstract class PMPXSModule(implicit p: Parameters) extends XSModule with PMPConst
 
 @chiselName
 class PMPConfig(implicit p: Parameters) extends PMPBundle {
@@ -61,7 +61,12 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
 }
 
 trait PMPReadWriteMethodBare extends PMPConst {
-  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
+  def match_mask(cfg: PMPConfig, paddr: UInt) = {
+    val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
+    Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+  }
+
+    def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
       val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
@@ -69,7 +74,7 @@ trait PMPReadWriteMethodBare extends PMPConst {
       cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
       if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
       when (cfgVec(i).na4_napot) {
-        mask(index + i) := new PMPEntry().match_mask(cfgVec(i), addr(index + i))
+        mask(index + i) := match_mask(cfgVec(i), addr(index + i))
       }
     }
     cfgVec.asUInt
@@ -87,8 +92,10 @@ trait PMPReadWriteMethodBare extends PMPConst {
     }
   }
 
-  def write_addr(next: PMPConfig)(paddr: UInt, cfg: PMPConfig, addr: UInt): UInt = {
-    Mux(!cfg.addr_locked(next), paddr, addr)
+  def write_addr(next: PMPConfig, mask: UInt)(paddr: UInt, cfg: PMPConfig, addr: UInt): UInt = {
+    val locked = cfg.addr_locked(next)
+    mask := Mux(!locked, match_mask(cfg, paddr), mask)
+    Mux(!locked, paddr, addr)
   }
 
   def set_low_bits(data: UInt, num: Int): UInt = {
@@ -144,7 +151,7 @@ trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
 @chiselName
 class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod {
   val cfg = new PMPConfig
-  val addr = UInt((PAddrBits - PMPOffBits).W)
+  val addr = UInt((PMPAddrBits - PMPOffBits).W)
 
   def gen(cfg: PMPConfig, addr: UInt) = {
     require(addr.getWidth == this.addr.getWidth)
@@ -155,13 +162,13 @@ class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod 
 
 trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   /** compare_addr is used to compare with input addr */
-  def compare_addr: UInt = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PAddrBits.W))).asUInt
+  def compare_addr: UInt = ((addr << PMPOffBits) & ~(((1 << PlatformGrain) - 1).U(PMPAddrBits.W))).asUInt
 
   /** size and maxSize are all log2 Size
-   * for dtlb, the maxSize is bXLEN which is 8
+   * for dtlb, the maxSize is bPMXLEN which is 8
    * for itlb and ptw, the maxSize is log2(512) ?
    * but we may only need the 64 bytes? how to prevent the bugs?
-   * TODO: handle the special case that itlb & ptw & dcache access wider size than XLEN
+   * TODO: handle the special case that itlb & ptw & dcache access wider size than PMXLEN
    */
   def is_match(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last_pmp: PMPEntry): Bool = {
     Mux(cfg.na4_napot, napotMatch(paddr, lgSize, lgMaxSize),
@@ -169,14 +176,8 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   }
 
   /** generate match mask to help match in napot mode */
-  def match_mask(paddr: UInt) = {
-    val match_mask_addr: UInt = Cat(paddr, cfg.a(0)).asUInt() | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
-    Cat(match_mask_addr & ~(match_mask_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
-  }
-
-  def match_mask(cfg: PMPConfig, paddr: UInt) = {
-    val match_mask_c_addr = Cat(paddr, cfg.a(0)) | (((1 << PlatformGrain) - 1) >> PMPOffBits).U((paddr.getWidth + 1).W)
-    Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
+  def match_mask(paddr: UInt): UInt = {
+    match_mask(cfg, paddr)
   }
 
   def boundMatch(paddr: UInt, lgSize: UInt, lgMaxSize: Int): Bool = {
@@ -239,7 +240,7 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
   */
 @chiselName
 class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
-  val mask = UInt(PAddrBits.W) // help to match in napot
+  val mask = UInt(PMPAddrBits.W) // help to match in napot
 
   def write_addr(next: PMPConfig, mask: UInt)(paddr: UInt) = {
     mask := Mux(!cfg.addr_locked(next), match_mask(paddr), mask)
@@ -259,11 +260,11 @@ class PMPEntry(implicit p: Parameters) extends PMPBase with PMPMatchMethod {
   }
 }
 
-trait PMPMethod extends HasXSParameter with PMPConst {
+trait PMPMethod extends PMPConst {
   def pmp_init() : (Vec[UInt], Vec[UInt], Vec[UInt])= {
-    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(XLEN.W))))
-    val addr = Wire(Vec(NumPMP, UInt((PAddrBits-PMPOffBits).W)))
-    val mask = Wire(Vec(NumPMP, UInt(PAddrBits.W)))
+    val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(PMXLEN.W))))
+    val addr = Wire(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W)))
+    val mask = Wire(Vec(NumPMP, UInt(PMPAddrBits.W)))
     addr := DontCare
     mask := DontCare
     (cfg, addr, mask)
@@ -277,14 +278,14 @@ trait PMPMethod extends HasXSParameter with PMPConst {
     addrBase: Int,
     entries: Vec[PMPEntry]
   ) = {
-    val pmpCfgPerCSR = XLEN / new PMPConfig().getWidth
-    def pmpCfgIndex(i: Int) = (XLEN / 32) * (i / pmpCfgPerCSR)
+    val pmpCfgPerCSR = PMXLEN / new PMPConfig().getWidth
+    def pmpCfgIndex(i: Int) = (PMXLEN / 32) * (i / pmpCfgPerCSR)
     val init_value = init()
     /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
-    val cfgMerged = RegInit(init_value._1) //(Vec(num / pmpCfgPerCSR, UInt(XLEN.W))) // RegInit(VecInit(Seq.fill(num / pmpCfgPerCSR)(0.U(XLEN.W))))
+    val cfgMerged = RegInit(init_value._1) //(Vec(num / pmpCfgPerCSR, UInt(PMXLEN.W))) // RegInit(VecInit(Seq.fill(num / pmpCfgPerCSR)(0.U(PMXLEN.W))))
     val cfgs = WireInit(cfgMerged).asTypeOf(Vec(num, new PMPConfig()))
-    val addr = RegInit(init_value._2) // (Vec(num, UInt((PAddrBits-PMPOffBits).W)))
-    val mask = RegInit(init_value._3) // (Vec(num, UInt(PAddrBits.W)))
+    val addr = RegInit(init_value._2) // (Vec(num, UInt((PMPAddrBits-PMPOffBits).W)))
+    val mask = RegInit(init_value._3) // (Vec(num, UInt(PMPAddrBits.W)))
 
     for (i <- entries.indices) {
       entries(i).gen(cfgs(i), addr(i), mask(i))
@@ -315,7 +316,7 @@ trait PMPMethod extends HasXSParameter with PMPConst {
 }
 
 @chiselName
-class PMP(implicit p: Parameters) extends PMPModule with PMPMethod with PMAMethod {
+class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
     val distribute_csr = Flipped(new DistributedCSRIO())
     val pmp = Output(Vec(NumPMP, new PMPEntry()))
@@ -331,7 +332,7 @@ class PMP(implicit p: Parameters) extends PMPModule with PMPMethod with PMAMetho
   val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
   val mapping = pmpMapping ++ pmaMapping
 
-  val rdata = Wire(UInt(XLEN.W))
+  val rdata = Wire(UInt(PMXLEN.W))
   MaskedRegMap.generate(mapping, w.bits.addr, rdata, w.valid, w.bits.data)
 
   io.pmp := pmp
@@ -339,7 +340,7 @@ class PMP(implicit p: Parameters) extends PMPModule with PMPMethod with PMAMetho
 }
 
 class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle {
-  val addr = Output(UInt(PAddrBits.W))
+  val addr = Output(UInt(PMPAddrBits.W))
   val size = Output(UInt(log2Ceil(lgMaxSize+1).W))
   val cmd = Output(TlbCmd())
 
@@ -356,7 +357,10 @@ class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle
   override def cloneType = (new PMPReqBundle(lgMaxSize)).asInstanceOf[this.type]
 }
 
-class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle {
+class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
+  val ld = Output(Bool())
+  val st = Output(Bool())
+  val instr = Output(Bool())
   val mmio = Output(Bool())
 
   def |(resp: PMPRespBundle): PMPRespBundle = {
@@ -369,8 +373,8 @@ class PMPRespBundle(implicit p: Parameters) extends TlbExceptionBundle {
   }
 }
 
-trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker =>
-  def pmp_check(cmd: UInt, cfg: PMPConfig)(implicit p: Parameters) = {
+trait PMPCheckMethod extends PMPConst {
+  def pmp_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAtom(cmd) && !cfg.r
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAtom(cmd)) && !cfg.w
@@ -383,7 +387,7 @@ trait PMPCheckMethod extends HasXSParameter with HasCSRConst { this: PMPChecker 
     val num = pmpEntries.size
     require(num == NumPMP)
 
-    val passThrough = if (pmpEntries.isEmpty) true.B else (mode > ModeS)
+    val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
     pmpDefault.cfg.r := passThrough
     pmpDefault.cfg.w := passThrough
@@ -457,8 +461,7 @@ class PMPChecker
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
   pmpUsed: Boolean = true
-)(implicit p: Parameters)
-  extends PMPModule
+)(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
 {

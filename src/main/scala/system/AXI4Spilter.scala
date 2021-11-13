@@ -8,8 +8,8 @@ import freechips.rocketchip.diplomacy.{AddressSet, CustomNode, LazyModule, LazyM
 import freechips.rocketchip.regmapper.RegFieldGroup
 import freechips.rocketchip.tilelink.{TLArbiter, TLRegisterNode}
 import freechips.rocketchip.util.BundleField
-import xiangshan.{HasXSParameter, XSCoreParamsKey}
-import xiangshan.backend.fu.{PMAConst, PMPChecker, TLPMAConfig, TLPMAMethod}
+import xiangshan.{XSCoreParamsKey, PMParameKey, HasPMParameters}
+import xiangshan.backend.fu.{PMAConst, PMPChecker, MMPMAMethod}
 
 case class AXI4SpliterNode()(implicit valName: ValName) extends CustomNode(AXI4Imp) {
 
@@ -72,38 +72,45 @@ class AXI4Spliter
 (
   policy: TLArbiter.Policy,
   entries: Int = 16
-)(implicit p: Parameters) extends LazyModule {
+)(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAMethod {
 
   val node = AXI4SpliterNode()
   // NOTE: register node, may only instantiation with different address?
   val pmaNode = TLRegisterNode(
-    address = Seq(AddressSet(0x31120000/*pmaParam.address*/, 0xffff)),
-    device = new SimpleDevice("tl-pma", Nil),
+    address = Seq(AddressSet(mmpma.address/*pmaParam.address*/, mmpma.mask)),
+    device = new SimpleDevice("mmpma", Nil),
     concurrency = 1,
     beatBytes = 8
   )
 
-  lazy val module = new LazyModuleImp(this) with HasXSParameter with PMAConst with TLPMAMethod{
+  lazy val module = new LazyModuleImp(this) {
 
 
     val (in, edgeIn) = node.in.head
     val (out_ports, out_edges) = node.out.unzip
 
-    val (cfg_map, addr_map, pma) = gen_tlpma_mapping(NumPMA)
+    val (cfg_map, addr_map, pma) = gen_mmpma_mapping(NumPMA)
     pmaNode.regmap(
       0x0000 -> RegFieldGroup(
-        "TLPMA Config Register", Some("TL PMA configuation register"),
-        cfg_map
+        "MMPMA_Config_Register", desc = Some("MMPMA configuation register"),
+        regs = cfg_map
       ),
+      // still blank space here, fix it
       0x0100 -> RegFieldGroup(
-        "TLPMA Address Register", Some("TL PMA Address register"),
-        addr_map
+        "MMPMA_Address_Register", desc = Some("MMPMA Address register"),
+        regs = addr_map
       )
     )
 
     val pmaarPort = 0
     val pmaawPort = 1
-    val pma_check = Vec(2/*pmaParam*/, Module(new PMPChecker(3/*pmaParam.lgMaxSize*/, true/* pmaParam.sameCycle*/, false)).io)
+    val pma_check = VecInit(Seq.fill(2/*pmaParam*/)(
+      Module(new PMPChecker(
+        mmpma.lgMaxSize/*pmaParam.lgMaxSize*/,
+        mmpma.sameCycle/* pmaParam.sameCycle*/,
+        false)).io
+      )
+    )
     pma_check.map(_.check_env.apply(3.U, pma/*placeHolde*/, pma))
     pma_check(pmaarPort).req_apply(in.ar.valid, in.aw.bits.addr)
     pma_check(pmaawPort).req_apply(in.aw.valid, in.aw.bits.addr)

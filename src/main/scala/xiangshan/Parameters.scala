@@ -27,7 +27,6 @@ import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePr
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
-import xiangshan.backend.fu.TLPMAConfig
 import huancun._
 import huancun.debug._
 
@@ -183,14 +182,6 @@ case class XSCoreParameters
     superNWays = 4,
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
-  NumPMP: Int = 16, // 0 or 16 or 64
-  NumPMA: Int = 16,
-  tlpma: TLPMAConfig = TLPMAConfig(
-    address = 0x31120000,
-    lgMaxSize = 0x3,
-    sameCycle = true,
-    num = 2
-  ),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -333,10 +324,6 @@ trait HasXSParameter {
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
-  val NumPMP = coreParams.NumPMP
-  val NumPMA = coreParams.NumPMA
-  val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
-  val tlpma = coreParams.tlpma
   val NumPerfCounters = coreParams.NumPerfCounters
 
   val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 
