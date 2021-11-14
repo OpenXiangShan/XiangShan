@@ -26,14 +26,6 @@ import chisel3.experimental.chiselName
 import scala.math.min
 
 trait HasSCParameter extends TageParams {
-  val BankSCHistLens = BankTableInfos.map(info => 0 :: info.map{ case (_,h,_) => h}.toList)
-  val BankSCNTables = List(6, 6)
-  val SCCtrBits = 6
-  val SCNRows = 1024
-  val BankSCTableInfos = (BankSCNTables zip BankSCHistLens).map {
-    case (ntable, histlens) =>
-      Seq.fill(ntable)((SCNRows, SCCtrBits)) zip histlens map {case ((n, cb), h) => (n, cb, h)}
-  }
 }
 
 class SCReq(implicit p: Parameters) extends TageReq
@@ -57,7 +49,7 @@ class SCResp(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 
 class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val mask = Bool()
   val oldCtr = SInt(ctrBits.W)
   val tagePred = Bool()
@@ -79,13 +71,29 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2, shouldReset=true, holdRead=true, singlePort=false))
 
   val phistLen = PathHistoryLength
-  def getIdx(hist: UInt, pc: UInt) = {
-    (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
+  // def getIdx(hist: UInt, pc: UInt) = {
+  //   (compute_folded_ghist(hist, log2Ceil(nRows)) ^ (pc >> instOffsetBits))(log2Ceil(nRows)-1,0)
+  // }
+
+
+  val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
+
+  def getFoldedHistoryInfo = Set(idxFhInfo).filter(_._1 > 0)
+
+  def getIdx(pc: UInt, allFh: AllFoldedHistories) = {
+    if (histLen > 0) {
+      val idx_fh = allFh.getHistWithInfo(idxFhInfo).folded_hist
+      // require(idx_fh.getWidth == log2Ceil(nRows))
+      ((pc >> instOffsetBits) ^ idx_fh)(log2Ceil(nRows)-1,0)
+    }
+    else {
+      pc(log2Ceil(nRows)-1,0)
+    }
   }
 
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
-  val s0_idx = getIdx(io.req.bits.hist, io.req.bits.pc)
+  val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
   val s1_idx = RegEnable(s0_idx, enable=io.req.valid)
 
   table.io.r.req.valid := io.req.valid
@@ -97,7 +105,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val updateWayMask =
       VecInit((0 to 1).map(io.update.mask && _.U === io.update.tagePred.asUInt)).asUInt
 
-  val update_idx = getIdx(io.update.hist, io.update.pc)
+  val update_idx = getIdx(io.update.pc, io.update.folded_hist)
 
   table.io.w.apply(
     valid = io.update.mask,
@@ -170,23 +178,21 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   wrbypass.io.update_ctrPos := ctrPos
   wrbypass.io.update_altPos := altPos
 
-  if (BPUDebug && debug) {
-    val u = io.update
-    XSDebug(io.req.valid,
-      p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
-      p"s0_idx=${s0_idx}, hist=${Hexadecimal(io.req.bits.hist)}\n")
-    XSDebug(RegNext(io.req.valid),
-      p"scTableResp: s1_idx=${s1_idx}," +
-      p"ctr:${io.resp.ctr}\n")
-    XSDebug(io.update.mask,
-      p"update Table: pc:${Hexadecimal(u.pc)}, hist:${Hexadecimal(u.hist)}, " +
-      p"tageTaken:${u.tagePred}, taken:${u.taken}, oldCtr:${u.oldCtr}\n")
-    val ctrPos = io.update.tagePred
-    val hitCtr = wrbypass.io.ctrs(ctrPos).bits
-    XSDebug(wrbypass.io.hit && wrbypass.io.ctrs(ctrPos).valid && io.update.mask,
-      p"wrbypass hit idx:$update_idx, ctr:$hitCtr, " +
-      p"taken:${io.update.taken} newCtr:${update_wdata}\n")
-  }
+  val u = io.update
+  XSDebug(io.req.valid,
+    p"scTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
+    p"s0_idx=${s0_idx}\n")
+  XSDebug(RegNext(io.req.valid),
+    p"scTableResp: s1_idx=${s1_idx}," +
+    p"ctr:${io.resp.ctr}\n")
+  XSDebug(io.update.mask,
+    p"update Table: pc:${Hexadecimal(u.pc)}, " +
+    p"tageTaken:${u.tagePred}, taken:${u.taken}, oldCtr:${u.oldCtr}\n")
+  val updateCtrPos = io.update.tagePred
+  val hitCtr = wrbypass.io.ctrs(updateCtrPos).bits
+  XSDebug(wrbypass.io.hit && wrbypass.io.ctrs(updateCtrPos).valid && io.update.mask,
+    p"wrbypass hit idx:$update_idx, ctr:$hitCtr, " +
+    p"taken:${io.update.taken} newCtr:${update_wdata}\n")
 
 }
 
@@ -224,6 +230,7 @@ object SCThreshold {
 
 trait HasSC extends HasSCParameter { this: Tage =>
   val update_on_mispred, update_on_unconf = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  var sc_fh_info = Set[FoldedHistoryInfo]()
   if (EnableSC) {
     val bank_scTables = BankSCTableInfos.zipWithIndex.map {
       case (info, b) =>
@@ -233,7 +240,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
             val req = t.io.req
             req.valid := io.s0_fire
             req.bits.pc := s0_pc
-            req.bits.hist := io.in.bits.ghist << b
+            req.bits.folded_hist := io.in.bits.folded_hist
             req.bits.phist := DontCare
             if (!EnableSC) {t.io.update := DontCare}
             t
@@ -241,6 +248,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         }
         tables
     }
+    sc_fh_info = bank_scTables.flatMap(_.map(_.getFoldedHistoryInfo).reduce(_++_)).toSet
   
     val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
     val useThresholds = VecInit(scThresholds map (_.thres))
@@ -371,7 +379,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         bank_scTables(b)(i).io.update.taken    := RegNext(scUpdateTakens(b))
         bank_scTables(b)(i).io.update.oldCtr   := RegNext(scUpdateOldCtrs(b)(i))
         bank_scTables(b)(i).io.update.pc := RegNext(update.pc)
-        bank_scTables(b)(i).io.update.hist := RegNext(updateHist.predHist << b)
+        bank_scTables(b)(i).io.update.folded_hist := RegNext(updateFHist)
       }
     }
     
@@ -386,6 +394,9 @@ trait HasSC extends HasSCParameter { this: Tage =>
     XSPerfAccumulate("sc_correct_and_tage_wrong", PopCount(sc_corr_tage_misp))
     
   }
+
+  override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
+
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(3))

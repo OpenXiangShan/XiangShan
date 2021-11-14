@@ -19,6 +19,7 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
@@ -204,7 +205,7 @@ class WbArbiterWrapper(
 
   val numOutPorts = intArbiter.numOutPorts + fpArbiter.numOutPorts
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) with HasXSParameter {
     val io = IO(new Bundle() {
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))
@@ -222,6 +223,14 @@ class WbArbiterWrapper(
         wb.ready := arb.ready
       }
     }
+    intArbiter.module.io.out.foreach(out => {
+      val difftest = Module(new DifftestIntWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := hardId.U
+      difftest.io.valid := out.valid
+      difftest.io.dest := out.bits.uop.pdest
+      difftest.io.data := out.bits.data
+    })
 
     val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
     fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
@@ -232,6 +241,14 @@ class WbArbiterWrapper(
         wb.ready := arb.ready
       }
     }
+    fpArbiter.module.io.out.foreach(out => {
+      val difftest = Module(new DifftestFpWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := hardId.U
+      difftest.io.valid := out.valid
+      difftest.io.dest := out.bits.uop.pdest
+      difftest.io.data := out.bits.data
+    })
 
     io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
   }

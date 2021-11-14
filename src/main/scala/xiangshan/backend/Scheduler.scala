@@ -448,13 +448,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     }
   }
 
-  if (!env.FPGAPlatform && intRfConfig._1) {
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U
     difftest.io.gpr := intRfReadData.takeRight(32)
   }
-  if (!env.FPGAPlatform && fpRfConfig._1) {
+  if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
     difftest.io.coreid := hardId.U

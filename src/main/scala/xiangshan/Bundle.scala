@@ -24,10 +24,11 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.GlobalHistory
+import xiangshan.frontend.{GlobalHistory, ShiftingGlobalHistory, CircularGlobalHistory, AllFoldedHistories}
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
 import utils._
@@ -38,6 +39,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.AllFoldedHistories
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -75,7 +77,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pd = new PreDecodeInfo
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
-  val hist = new GlobalHistory
+  // val hist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val specCnt = Vec(numBr, UInt(10.W))
   val phNewBit = Bool()
@@ -89,7 +93,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val addIntoHist = Bool()
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    this.hist := entry.ghist
+    // this.hist := entry.ghist
+    this.folded_hist := entry.folded_hist
+    this.histPtr := entry.histPtr
     this.phist := entry.phist
     this.phNewBit := entry.phNewBit
     this.rasSp := entry.rasSp
@@ -301,6 +307,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val seip = Input(Bool())
   val debug = Input(Bool())
 }
 
@@ -324,7 +331,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
-  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr

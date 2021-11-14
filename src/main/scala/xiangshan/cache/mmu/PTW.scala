@@ -98,6 +98,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     val source = UInt(bSourceWidth.W)
   }, if (l2tlbParams.enablePrefetch) 3 else 2))
   val outArb = (0 until PtwWidth).map(i => Module(new Arbiter(new PtwResp, 3)).io)
+  val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
 
@@ -130,7 +131,9 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.sfence := sfence
   cache.io.csr := csr
-  cache.io.resp.ready := Mux(cache.io.resp.bits.hit, true.B, missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))
+  cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
+    outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
+    missQueue.io.in.ready || (!cache.io.resp.bits.toFsm.l2Hit && fsm.io.req.ready))
 
   val mq_in_arb = Module(new Arbiter(new L2TlbMQInBundle, 2))
   mq_in_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit && (cache.io.resp.bits.toFsm.l2Hit || !fsm.io.req.ready)
@@ -150,8 +153,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   fsm.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   fsm.io.csr := csr
   fsm.io.sfence := sfence
-  fsm.io.resp.ready := MuxLookup(fsm.io.resp.bits.source, true.B,
-    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbFsmPort).ready))
+  fsm.io.resp.ready := outReady(fsm.io.resp.bits.source, outArbFsmPort)
 
   // mem req
   def blockBytes_align(addr: UInt) = {
@@ -239,13 +241,12 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   pmp_check(1).req <> missQueue.io.pmp.req
   missQueue.io.pmp.resp <> pmp_check(1).resp
 
-  mq_out.ready := MuxLookup(missQueue.io.out.bits.req_info.source, true.B,
-    (0 until PtwWidth).map(i => i.U -> outArb(i).in(outArbMqPort).ready))
+  mq_out.ready := outReady(mq_out.bits.req_info.source, outArbMqPort)
   for (i <- 0 until PtwWidth) {
-    outArb(i).in(0).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
-    outArb(i).in(0).bits.entry := cache.io.resp.bits.toTlb
-    outArb(i).in(0).bits.pf := false.B
-    outArb(i).in(0).bits.af := false.B
+    outArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U
+    outArb(i).in(outArbCachePort).bits.entry := cache.io.resp.bits.toTlb
+    outArb(i).in(outArbCachePort).bits.pf := false.B
+    outArb(i).in(outArbCachePort).bits.af := false.B
     outArb(i).in(outArbFsmPort).valid := fsm.io.resp.valid && fsm.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := fsm.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := mq_out.valid && mq_out.bits.req_info.source===i.U
@@ -295,6 +296,11 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     ptw_resp.entry.prefetch := DontCare
     ptw_resp.entry.asid := satp.asid
     ptw_resp
+  }
+
+  def outReady(source: UInt, port: Int): Bool = {
+    MuxLookup(source, true.B,
+      (0 until PtwWidth).map(i => i.U -> outArb(i).in(port).ready))
   }
 
   // debug info

@@ -270,7 +270,7 @@ class Rename(implicit p: Parameters) extends XSModule {
   for (i <- 0 until CommitWidth) {
     val info = io.robCommits.info(i)
     XSDebug(io.robCommits.isWalk && io.robCommits.valid(i), p"[#$i walk info] pc:${Hexadecimal(info.pc)} " +
-      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} " + p"eliminatedMove:${info.eliminatedMove} " +
+      p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} " +
       p"pdest:${info.pdest} old_pdest:${info.old_pdest}\n")
   }
 

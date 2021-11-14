@@ -214,8 +214,8 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this
   }
 
-  def genPPN(vpn: UInt) : UInt = {
-    if (!pageSuper) ppn
+  def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
+    val ppn_res = if (!pageSuper) ppn
     else if (!pageNormal) MuxLookup(level.get, 0.U, Seq(
       0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen*2-1, 0)),
       1.U -> Cat(ppn, vpn(vpnnLen-1, 0))
@@ -225,6 +225,10 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
       2.U -> ppn
     ))
+
+    val static_part_length = ppn_res.getWidth - vpnnLen*2
+    if (saveLevel) Cat(ppn(ppn.getWidth-1, ppn.getWidth-static_part_length), RegEnable(ppn_res(vpnnLen*2-1, 0), valid))
+    else ppn_res
   }
 
   override def toPrintable: Printable = {
