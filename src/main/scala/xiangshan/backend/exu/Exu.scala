@@ -40,7 +40,7 @@ case class ExuParameters
 ) {
   assert(JmpCnt == 1, "Only support 1 JmpUnit now!")
 
-  def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt
+  def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt + 1 //1 for XsCC.
 
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
 

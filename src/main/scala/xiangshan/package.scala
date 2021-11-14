@@ -691,11 +691,12 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = true,
+    hasRedirect = false, //not very sure.
     latency = UncertainLatency()
   )
 
-  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg, XsCCIFCfg), 2, Int.MaxValue)
+  val XsCCExeUnitCfg = ExuConfig("XsCCExeUnit", "Int", Seq(XsCCIFCfg), 2, Int.MaxValue)
+  val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
