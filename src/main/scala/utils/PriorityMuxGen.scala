@@ -33,7 +33,7 @@ class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends M
         IO(Input(new InBundle)).suggestName(s)
     })
     val out = IO(Output(new OutBundle))
-    out.res := ParallelPriorityMux(ins.map{i => (i.sel, i.src)})
+    out.res := PriorityMux(ins.map{i => (i.sel, i.src)})
 }
 
 // this could be used to handle the situation

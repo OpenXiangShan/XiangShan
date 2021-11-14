@@ -478,11 +478,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // XSDebug(p"s1_predicted_ghist=${Binary(s1_predicted_ghist.predHist)}\n")
 
   when(s1_valid) { ghist_update(s1_ghist_ptr, resp.s1) }
-  npcGen.register(s1_valid, resp.s1.target, Some("s1_target"), 4)
-  foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
-  ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 4)
-  phistGen.register(s1_valid, (s1_phist << 1) | s1_pc(instOffsetBits), Some("s1_Phist"), 4)
-  lastPredGen.register(s1_valid, resp.s1, Some("s1_lastPred"), 4)
+  npcGen.register(s1_valid, resp.s1.target, Some("s1_target"), 5)
+  foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 5)
+  ghistPtrGen.register(s1_valid, s1_predicted_ghist_ptr, Some("s1_GHPtr"), 5)
+  phistGen.register(s1_valid, (s1_phist << 1) | s1_pc(instOffsetBits), Some("s1_Phist"), 5)
+  lastPredGen.register(s1_valid, resp.s1, Some("s1_lastPred"), 5)
 
   def preds_needs_redirect(x: BranchPredictionBundle, y: BranchPredictionBundle) = {
     x.real_slot_taken_mask().asUInt.orR =/= y.real_slot_taken_mask().asUInt().orR ||
@@ -518,11 +518,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       !s1_valid && (s0_pc_reg =/= resp.s2.target || s2_redirect_s0_last_pred))
 
   when(s2_redirect) { ghist_update(s2_ghist_ptr, resp.s2) }
-  npcGen.register(s2_redirect, resp.s2.target, Some("s2_target"), 3)
-  foldedGhGen.register(s2_redirect, s2_predicted_fh, Some("s2_FGH"), 3)
-  ghistPtrGen.register(s2_redirect, s2_predicted_ghist_ptr, Some("s2_GHPtr"), 3)
-  phistGen.register(s2_redirect, (s2_phist << 1) | s2_pc(instOffsetBits), Some("s2_Phist"), 3)
-  lastPredGen.register(s2_redirect, resp.s2, Some("s2_lastPred"), 3)
+  npcGen.register(s2_redirect, resp.s2.target, Some("s2_target"), 4)
+  foldedGhGen.register(s2_redirect, s2_predicted_fh, Some("s2_FGH"), 4)
+  ghistPtrGen.register(s2_redirect, s2_predicted_ghist_ptr, Some("s2_GHPtr"), 4)
+  phistGen.register(s2_redirect, (s2_phist << 1) | s2_pc(instOffsetBits), Some("s2_Phist"), 4)
+  lastPredGen.register(s2_redirect, resp.s2, Some("s2_lastPred"), 4)
 
   val s2_redirect_target = s2_fire && s1_valid && s1_pc =/= resp.s2.target
   val s2_saw_s1_hit = RegEnable(resp.s1.preds.hit, s1_fire)
@@ -550,11 +550,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
       (!s2_valid && !s1_valid && (s0_pc_reg =/= resp.s3.target || s3_redirect_s0_last_pred)))
 
   when(s3_redirect) { ghist_update(s3_ghist_ptr, resp.s3) }
-  npcGen.register(s3_redirect, resp.s3.target, Some("s3_target"), 2)
-  foldedGhGen.register(s3_redirect, s3_predicted_fh, Some("s3_FGH"), 2)
-  ghistPtrGen.register(s3_redirect, s3_predicted_ghist_ptr, Some("s3_GHPtr"), 2)
-  phistGen.register(s3_redirect, (s3_phist << 1) | s3_pc(instOffsetBits), Some("s3_Phist"), 2)
-  lastPredGen.register(s3_redirect, resp.s3, Some("s3_lastPred"), 2)
+  npcGen.register(s3_redirect, resp.s3.target, Some("s3_target"), 3)
+  foldedGhGen.register(s3_redirect, s3_predicted_fh, Some("s3_FGH"), 3)
+  ghistPtrGen.register(s3_redirect, s3_predicted_ghist_ptr, Some("s3_GHPtr"), 3)
+  phistGen.register(s3_redirect, (s3_phist << 1) | s3_pc(instOffsetBits), Some("s3_Phist"), 3)
+  lastPredGen.register(s3_redirect, resp.s3, Some("s3_lastPred"), 3)
 
   // Send signal tell Ftq override
   val s2_ftq_idx = RegEnable(io.ftq_to_bpu.enq_ptr, s1_fire)
@@ -591,10 +591,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val phNewBit = redirect.cfiUpdate.phNewBit
 
   when(io.ftq_to_bpu.redirect.valid) { ghist_update(oldPtr, shift, taken && addIntoHist) }
-  npcGen.register(io.ftq_to_bpu.redirect.valid, redirect.cfiUpdate.target, Some("redirect_target"), 1)
-  foldedGhGen.register(io.ftq_to_bpu.redirect.valid, updated_fh, Some("redirect_FGHT"), 1)
-  ghistPtrGen.register(io.ftq_to_bpu.redirect.valid, updated_ptr, Some("redirect_GHPtr"), 1)
-  phistGen.register(io.ftq_to_bpu.redirect.valid, (oldPh << 1) | phNewBit, Some("redirect_phist"), 1)
+  npcGen.register(io.ftq_to_bpu.redirect.valid, redirect.cfiUpdate.target, Some("redirect_target"), 2)
+  foldedGhGen.register(io.ftq_to_bpu.redirect.valid, updated_fh, Some("redirect_FGHT"), 2)
+  ghistPtrGen.register(io.ftq_to_bpu.redirect.valid, updated_ptr, Some("redirect_GHPtr"), 2)
+  phistGen.register(io.ftq_to_bpu.redirect.valid, (oldPh << 1) | phNewBit, Some("redirect_phist"), 2)
   // no need to assign s0_last_pred
 
   // XSDebug(io.ftq_to_bpu.redirect.valid, p"-------------redirect Repair------------\n")
@@ -611,11 +611,11 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   // }
 
   // Reset
-  npcGen.register(need_reset, resetVector.U, Some("reset_pc"), 5)
-  foldedGhGen.register(need_reset, 0.U.asTypeOf(s0_folded_gh), Some("reset_FGH"), 5)
-  ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 5)
-  phistGen.register(need_reset, 0.U, Some("reset_phist"), 5)
-  lastPredGen.register(need_reset, 0.U.asTypeOf(new BranchPredictionBundle), Some("reset_lastPred"), 5)
+  npcGen.register(need_reset, resetVector.U, Some("reset_pc"), 1)
+  foldedGhGen.register(need_reset, 0.U.asTypeOf(s0_folded_gh), Some("reset_FGH"), 1)
+  ghistPtrGen.register(need_reset, 0.U.asTypeOf(new CGHPtr), Some("reset_GHPtr"), 1)
+  phistGen.register(need_reset, 0.U, Some("reset_phist"), 1)
+  lastPredGen.register(need_reset, 0.U.asTypeOf(new BranchPredictionBundle), Some("reset_lastPred"), 1)
 
   s0_pc         := npcGen()
   s0_pc_reg     := s0_pc
