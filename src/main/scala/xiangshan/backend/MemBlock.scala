@@ -245,6 +245,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
 
     // TODO: load trigger, a total of 3
+      for (j <- 0 until 10) {
+        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+        io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
     when(ldExeWbReqs(i).fire()){
       // load data, we need to delay cmp for 1 cycle for better timing
 //      ldExeWbReqs(i).bits.data
@@ -303,6 +308,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     when(io.stOut(i).fire()){
       io.stOut(i).bits.debug.vaddr
       // TriggerCmp(io.stOut(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
+      for (j <- 0 until 10) {
+          io.stOut(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+          io.stOut(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
       for (j <- 0 until 3) {
         when(!tdata(j).select) {
           val hit = TriggerCmp(io.stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
@@ -315,6 +325,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // store data
     when(lsq.io.storeDataIn(i).fire()){
       lsq.io.storeDataIn(i).bits.data(XLEN-1, 0)
+      for (j <- 0 until 10) {
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
       // TriggerCmp(lsq.io.storeDataIn(i).bits.data(XLEN-1, 0), DontCare, DontCare, DontCare)
       for (j <- 0 until 3) {
         when(tdata(j).select) {

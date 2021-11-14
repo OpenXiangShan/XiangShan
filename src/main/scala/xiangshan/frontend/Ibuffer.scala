@@ -99,6 +99,9 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     inWire.acf := io.in.bits.acf(i)
     inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
     inWire.triggered := io.in.bits.triggered(i)
+    for(k<-0 until 10){
+    inWire.triggered.triggerHitVec(k) := false.B
+    }
 
 
     ibuf.io.waddr(i) := tail_vec(offset(i)).value

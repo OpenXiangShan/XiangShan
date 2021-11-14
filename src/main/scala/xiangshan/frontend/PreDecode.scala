@@ -183,6 +183,8 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.crossPageIPF(i)     := (io.out.pc(i) === align(realEndPC, 64) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
 //    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
     io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
     for (j <- 0 until 4) {
       val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
         TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
