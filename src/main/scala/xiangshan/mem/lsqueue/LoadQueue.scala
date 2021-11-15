@@ -104,7 +104,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
-  val dataModule = Module(new LoadQueueData(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
+  val dataModule = Module(new LoadQueueDataWrapper(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
   val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
@@ -272,22 +272,34 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val evenDeqMask = getEvenBits(deqMask)
   val oddDeqMask = getOddBits(deqMask)
   // generate lastCycleSelect mask
-  val evenSelectMask = Mux(io.ldout(0).fire(), getEvenBits(UIntToOH(loadWbSel(0))), 0.U)
-  val oddSelectMask = Mux(io.ldout(1).fire(), getOddBits(UIntToOH(loadWbSel(1))), 0.U)
+  val evenFireMask = getEvenBits(UIntToOH(loadWbSel(0)))
+  val oddFireMask = getOddBits(UIntToOH(loadWbSel(1)))
   // generate real select vec
-  val loadEvenSelVec = getEvenBits(loadWbSelVec) & ~evenSelectMask
-  val loadOddSelVec = getOddBits(loadWbSelVec) & ~oddSelectMask
-
   def toVec(a: UInt): Vec[Bool] = {
     VecInit(a.asBools)
   }
+  val loadEvenSelVecFire = getEvenBits(loadWbSelVec) & ~evenFireMask
+  val loadOddSelVecFire = getOddBits(loadWbSelVec) & ~oddFireMask
+  val loadEvenSelVecNotFire = getEvenBits(loadWbSelVec)
+  val loadOddSelVecNotFire = getOddBits(loadWbSelVec)
+  val loadEvenSel = Mux(
+    io.ldout(0).fire(),
+    getFirstOne(toVec(loadEvenSelVecFire), evenDeqMask),
+    getFirstOne(toVec(loadEvenSelVecNotFire), evenDeqMask)
+  )
+  val loadOddSel= Mux(
+    io.ldout(1).fire(),
+    getFirstOne(toVec(loadOddSelVecFire), oddDeqMask),
+    getFirstOne(toVec(loadOddSelVecNotFire), oddDeqMask)
+  )
+
 
   val loadWbSelGen = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelVGen = Wire(Vec(LoadPipelineWidth, Bool()))
-  loadWbSelGen(0) := Cat(getFirstOne(toVec(loadEvenSelVec), evenDeqMask), 0.U(1.W))
-  loadWbSelVGen(0):= loadEvenSelVec.asUInt.orR
-  loadWbSelGen(1) := Cat(getFirstOne(toVec(loadOddSelVec), oddDeqMask), 1.U(1.W))
-  loadWbSelVGen(1) := loadOddSelVec.asUInt.orR
+  loadWbSelGen(0) := Cat(loadEvenSel, 0.U(1.W))
+  loadWbSelVGen(0):= Mux(io.ldout(0).fire(), loadEvenSelVecFire.asUInt.orR, loadEvenSelVecNotFire.asUInt.orR)
+  loadWbSelGen(1) := Cat(loadOddSel, 1.U(1.W))
+  loadWbSelVGen(1) := Mux(io.ldout(1).fire(), loadOddSelVecFire.asUInt.orR, loadOddSelVecNotFire.asUInt.orR)
 
   (0 until LoadPipelineWidth).map(i => {
     loadWbSel(i) := RegNext(loadWbSelGen(i))
