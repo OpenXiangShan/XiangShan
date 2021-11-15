@@ -145,9 +145,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   store_req.valid := io.store_req.valid
   io.store_req.ready := store_req.ready
   val req_arb = Module(new Arbiter(new MainPipeReq, 3))
-  req_arb.io.in(0) <> io.atomic_req
-  req_arb.io.in(1) <> store_req
-  req_arb.io.in(2) <> io.probe_req
+  req_arb.io.in(0) <> store_req
+  req_arb.io.in(1) <> io.probe_req
+  req_arb.io.in(2) <> io.atomic_req
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
