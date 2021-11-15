@@ -111,6 +111,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+  val trigger = new TriggerCf
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -130,6 +131,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 }
+
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -287,6 +289,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
@@ -462,6 +465,10 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
+
+  val frontend_trigger = new FrontendTdataDistributeIO()
+  val mem_trigger = new MemTdataDistributeIO()
+  val trigger_enable = Output(Vec(10, Bool()))
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -490,4 +497,33 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     }
     println("Distributed CSR update req registered for " + src_description)
   }
+}
+
+class TriggerCf (implicit p: Parameters) extends XSBundle {
+  val triggerHitVec = Vec(10, Bool())
+  val triggerTiming = Vec(10, Bool())
+  val triggerChainVec = Vec(5, Bool())
+}
+
+class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+    val t = Valid(new Bundle {
+      val addr = Output(UInt(2.W))
+      val tdata = new MatchTriggerIO
+    })
+  }
+
+class MemTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+  val t = Valid(new Bundle {
+    val addr = Output(UInt(3.W))
+    val tdata = new MatchTriggerIO
+  })
+}
+
+class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
+  val matchType = Output(UInt(2.W))
+  val select = Output(Bool())
+  val timing = Output(Bool())
+  val action = Output(Bool())
+  val chain = Output(Bool())
+  val tdata2 = Output(UInt(64.W))
 }
