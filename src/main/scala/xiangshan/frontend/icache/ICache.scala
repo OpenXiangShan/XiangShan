@@ -186,24 +186,6 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-  val write_count = RegInit(0.U(8.W))
-  val debug_condition = io.write.valid && write.virIdx === "h02".U
-  // when(debug_condition){
-  //   write_count := write_count + 1.U
-  //   printf("[time:%d ]", GTimer().asUInt)
-  // }
-
-  // when(debug_condition && write_count === 1.U){
-  //   printf("[time:%d ]", GTimer().asUInt)
-  // } 
-
-  // when(debug_condition && write_count === 2.U){
-  //   printf("[time:%d ]", GTimer().asUInt)
-  // }  
-  when(io.write.valid){
-      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-  }
-
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
   val validMetas = VecInit((0 until 2).map{ bank =>
@@ -422,6 +404,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   val pmp         = Vec(PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new BlockTlbRequestIO)
+  val perfInfo = Output(new ICachePerfInfo)
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -472,6 +455,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainpipe.io.dataArray.fromIData <> dataArray.io.readResp
 
   mainpipe.io.respStall := io.stop
+  io.perfInfo := mainpipe.io.perfInfo
 
   meta_write_arb.io.in(FetchKey) <> missUnit.io.meta_write
   meta_write_arb.io.in(ProbeKey) <> probe.io.meta_write
@@ -546,14 +530,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //send to probe state machine and cancel the probe
   val probe_need_merge = VecInit(hasVictim.zip(victimSetSeq).zip(victimTagSeq).map{case((valid, idx), tag) =>  valid && probeReqValid && idx === probeReqVidx && tag === probeReqPtag}).reduce(_||_)
-  // val probe_need_merge = false.B 
-  // val probeShouldBeBlocked = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && idx === probeReqVidx}).reduce(_||_)
   probe.io.probe_should_merge := RegNext(probe_need_merge)
-
-  // probe.io.req.valid := probeQueue.io.pipe_req.valid && !probeShouldBeBlocked
-  // probe.io.req.bits  := probeQueue.io.pipe_req.bits
-  // probeQueue.io.pipe_req.ready := probe.io.req.ready && !probeShouldBeBlocked
-
 
    val hasMiss = VecInit(Seq(
     mainpipe.io.setInfor.s1(0).valid,

@@ -69,6 +69,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val ftqInter        = new FtqInterface
   val icacheInter     = Vec(2, Flipped(new ICacheMainPipeBundle))
   val icacheStop      = Output(Bool())
+  val icachePerfInfo  = Input(new ICachePerfInfo)
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val uncacheInter   =  new UncacheInterface
   val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
@@ -223,6 +224,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
 
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
+  val f2_perf_info    = io.icachePerfInfo
 
   def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
     if(HasCExtension){
@@ -263,20 +265,13 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   val f3_doubleLine     = RegEnable(next = f2_doubleLine, enable=f2_fire)
   val f3_fire           = io.toIbuffer.fire()
 
-  // when(f3_flush)                  {f3_valid := false.B}
-  // .elsewhen(f2_fire && !f2_flush) {f3_valid := true.B }
-  // .elsewhen(io.toIbuffer.fire())  {f3_valid := false.B}
-
   f3_ready := io.toIbuffer.ready || !f3_valid
 
   val f3_cut_data       = RegEnable(next = f2_cut_data, enable=f2_fire)
 
   val f3_except_pf      = RegEnable(next = f2_except_pf, enable = f2_fire)
   val f3_except_af      = RegEnable(next = f2_except_af, enable = f2_fire)
-  //val f3_hit            = RegEnable(next = f2_hit   , enable = f2_fire)
   val f3_mmio           = RegEnable(next = f2_mmio   , enable = f2_fire)
-
-  //assert((f3_ftq_req.startAddr + 34.U) >= f3_ftq_req.fallThruAddr, "Fall through address exceeds the limit")
 
   val f3_lastHalf       = RegInit(0.U.asTypeOf(new LastHalfInfo))
   val f3_lastHalfMatch  = f3_lastHalf.matchThisBlock(f3_ftq_req.startAddr)
@@ -288,17 +283,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
 
   val f3_data = if(HasCExtension) Wire(Vec(PredictWidth + 1, UInt(16.W))) else Wire(Vec(PredictWidth, UInt(32.W)))
   f3_data       :=  f3_cut_data
-
-  //TODO:performance counter
-  val f3_only_0_hit     = false.B//RegEnable(next = only_0_hit, enable = f2_fire)
-  val f3_only_0_miss    = false.B//RegEnable(next = only_0_miss, enable = f2_fire)
-  val f3_hit_0_hit_1    = false.B//RegEnable(next = hit_0_hit_1, enable = f2_fire)
-  val f3_hit_0_miss_1   = false.B//RegEnable(next = hit_0_miss_1, enable = f2_fire)
-  val f3_miss_0_hit_1   = false.B//RegEnable(next = miss_0_hit_1, enable = f2_fire)
-  val f3_miss_0_miss_1  = false.B//RegEnable(next = miss_0_miss_1, enable = f2_fire)
-
-  val f3_bank_hit = false.B//RegEnable(next = f2_bank_hit, enable = f2_fire)
-  val f3_hit = false.B
 
   val mmio_idle :: mmio_send_req :: mmio_w_resp :: mmio_resend :: mmio_resend_w_resp :: mmio_w_commit :: Nil = Enum(6)
   val mmio_state = RegInit(mmio_idle)
@@ -382,13 +366,6 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   toUncache.bits.addr := Mux((mmio_state === mmio_resend), f3_pAddrs(0) + 2.U, f3_pAddrs(0))
   fromUncache.ready   := true.B
 
-  //TODO:performance counter
-  //val f3_bank_hit = RegEnable(next = f2_bank_hit, enable = f2_fire)
-  val f3_req_0    = io.toIbuffer.fire()
-  val f3_req_1    = io.toIbuffer.fire() && f3_doubleLine
-  val f3_hit_0    = io.toIbuffer.fire() //& f3_bank_hit(0)
-  val f3_hit_1    = io.toIbuffer.fire() //&& f3_doubleLine & f3_bank_hit(1)
-
   preDecoderIn.instValid     :=  f3_valid && !f3_has_except
   preDecoderIn.data          :=  f3_data
   preDecoderIn.startAddr     :=  f3_ftq_req.startAddr
@@ -454,6 +431,15 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   val predecodeFlush     = preDecoderOut.misOffset.valid && f3_valid
   val predecodeFlushReg  = RegNext(predecodeFlush && !(f2_fire && !f2_flush))
 
+
+  /** performance counter */
+  val f3_perf_info     = RegEnable(next = f2_perf_info, enable = f2_fire)
+  val f3_req_0    = io.toIbuffer.fire()
+  val f3_req_1    = io.toIbuffer.fire() && f3_doubleLine
+  val f3_hit_0    = io.toIbuffer.fire() && f3_perf_info.bank_hit(0)
+  val f3_hit_1    = io.toIbuffer.fire() && f3_doubleLine & f3_perf_info.bank_hit(1)
+  val f3_hit      = f3_perf_info.hit
+
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(15))
   })
@@ -461,17 +447,17 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   val perfEvents = Seq(
     ("frontendFlush                ", f3_redirect                                ),
     ("ifu_req                      ", io.toIbuffer.fire()                        ),
-    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_hit             ),
+    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_perf_info.hit   ),
     ("ifu_req_cacheline_0          ", f3_req_0                                   ),
     ("ifu_req_cacheline_1          ", f3_req_1                                   ),
     ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
     ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
-    ("only_0_hit                   ", f3_only_0_hit       && io.toIbuffer.fire() ),
-    ("only_0_miss                  ", f3_only_0_miss      && io.toIbuffer.fire() ),
-    ("hit_0_hit_1                  ", f3_hit_0_hit_1      && io.toIbuffer.fire() ),
-    ("hit_0_miss_1                 ", f3_hit_0_miss_1     && io.toIbuffer.fire() ),
-    ("miss_0_hit_1                 ", f3_miss_0_hit_1     && io.toIbuffer.fire() ),
-    ("miss_0_miss_1                ", f3_miss_0_miss_1    && io.toIbuffer.fire() ),
+    ("only_0_hit                   ", f3_perf_info.only_0_hit       && io.toIbuffer.fire() ),
+    ("only_0_miss                  ", f3_perf_info.only_0_miss      && io.toIbuffer.fire() ),
+    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1      && io.toIbuffer.fire() ),
+    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && io.toIbuffer.fire() ),
+    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && io.toIbuffer.fire() ),
+    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && io.toIbuffer.fire() ),
     ("cross_line_block             ", io.toIbuffer.fire() && f3_situation(0)     ),
     ("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1)     ),
   )
@@ -482,19 +468,19 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
 
   f3_redirect := (!predecodeFlushReg && predecodeFlush && !f3_req_is_mmio) || (f3_mmio_req_commit && f3_mmio_use_seq_pc)
 
-//  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
-//  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
-//  XSPerfAccumulate("ifu_req_cacheline_0", f3_req_0  )
-//  XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
-//  XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
-//  XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
-//  XSPerfAccumulate("frontendFlush",  f3_redirect )
-//  XSPerfAccumulate("only_0_hit",      f3_only_0_hit   && io.toIbuffer.fire()  )
-//  XSPerfAccumulate("only_0_miss",     f3_only_0_miss  && io.toIbuffer.fire()  )
-//  XSPerfAccumulate("hit_0_hit_1",     f3_hit_0_hit_1  && io.toIbuffer.fire()  )
-//  XSPerfAccumulate("hit_0_miss_1",    f3_hit_0_miss_1 && io.toIbuffer.fire()  )
-//  XSPerfAccumulate("miss_0_hit_1",    f3_miss_0_hit_1  && io.toIbuffer.fire() )
-//  XSPerfAccumulate("miss_0_miss_1",   f3_miss_0_miss_1 && io.toIbuffer.fire() )
-//  XSPerfAccumulate("cross_line_block", io.toIbuffer.fire() && f3_situation(0) )
-//  XSPerfAccumulate("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1) )
+  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
+  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
+  XSPerfAccumulate("ifu_req_cacheline_0", f3_req_0  )
+  XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
+  XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
+  XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
+  XSPerfAccumulate("frontendFlush",  f3_redirect )
+  XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && io.toIbuffer.fire()  )
+  XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && io.toIbuffer.fire()  )
+  XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && io.toIbuffer.fire()  )
+  XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && io.toIbuffer.fire()  )
+  XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && io.toIbuffer.fire() )
+  XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire() )
+  XSPerfAccumulate("cross_line_block", io.toIbuffer.fire() && f3_situation(0) )
+  XSPerfAccumulate("fall_through_is_cacheline_end", io.toIbuffer.fire() && f3_situation(1) )
 }

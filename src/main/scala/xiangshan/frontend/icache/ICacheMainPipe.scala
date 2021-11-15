@@ -68,6 +68,17 @@ class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle{
   val resp = Input(new PMPRespBundle())
 }
 
+class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
+  val only_0_hit     = Bool()
+  val only_0_miss    = Bool()
+  val hit_0_hit_1    = Bool()
+  val hit_0_miss_1   = Bool()
+  val miss_0_hit_1   = Bool()
+  val miss_0_miss_1  = Bool()
+  val bank_hit       = Vec(2,Bool())
+  val hit            = Bool()
+}
+
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   /* internal interface */
   val metaArray   = new ICacheMetaReqBundle
@@ -87,6 +98,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
     val s1 = Vec(2, Output(new ICacheSetInfor()))
     val s2 = Vec(2, Output(new ICacheSetInfor()))
   }
+  val perfInfo = Output(new ICachePerfInfo)
 }
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -355,9 +367,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val  miss_0_miss_1_latch    =   holdReleaseLatch(valid = miss_0_miss_1,   release = s2_fire,      flush = false.B)
   val  only_0_miss_latch      =   holdReleaseLatch(valid = only_0_miss,     release = s2_fire,      flush = false.B)
   val  hit_0_miss_1_latch     =   holdReleaseLatch(valid = hit_0_miss_1,    release = s2_fire,      flush = false.B)
+
   val  miss_0_except_1_latch  =   holdReleaseLatch(valid = miss_0_except_1, release = s2_fire,      flush = false.B)
   val  except_0_latch          =   holdReleaseLatch(valid = except_0,    release = s2_fire,      flush = false.B)
   val  hit_0_except_1_latch         =    holdReleaseLatch(valid = hit_0_except_1,    release = s2_fire,      flush = false.B)
+
+  val only_0_hit_latch        = holdReleaseLatch(valid = only_0_hit,   release = s2_fire,      flush = false.B)
+  val hit_0_hit_1_latch        = holdReleaseLatch(valid = hit_0_hit_1,   release = s2_fire,      flush = false.B)
+
 
   def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 
@@ -571,4 +588,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
   }
 
+  io.perfInfo.only_0_hit    := only_0_miss_latch
+  io.perfInfo.only_0_miss   := only_0_miss_latch
+  io.perfInfo.hit_0_hit_1   := hit_0_hit_1_latch
+  io.perfInfo.hit_0_miss_1  := hit_0_miss_1_latch
+  io.perfInfo.miss_0_hit_1  := miss_0_hit_1_latch
+  io.perfInfo.miss_0_miss_1 := miss_0_miss_1_latch
+  io.perfInfo.bank_hit(0)   := only_0_miss_latch  || hit_0_hit_1_latch || hit_0_miss_1_latch || hit_0_except_1_latch
+  io.perfInfo.bank_hit(1)   := miss_0_hit_1_latch || hit_0_hit_1_latch 
+  io.perfInfo.hit           := hit_0_hit_1_latch
 }
