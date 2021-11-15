@@ -36,6 +36,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
   val ITTageNTables = ITTageTableInfos.size // Number of tage tables
   val UBitPeriod = 2048
   val ITTageCtrBits = 2
+  val uFoldedWidth = 8
   def ctr_null(ctr: UInt, ctrBits: Int = ITTageCtrBits) = {
     ctr === 0.U
   }
@@ -121,7 +122,7 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
   val pred_cycle = UInt(64.W) // TODO: Use Option
-  
+
   override def toPrintable = {
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
     p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget)}), " +
@@ -170,7 +171,7 @@ class ITTageTable
   //   )
   //   (idx, tag)
   // }
-  
+
   require(histLen == 0 && tagLen == 0 || histLen != 0 && tagLen != 0)
   val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
   val tagFhInfo = (histLen, min(histLen, tagLen))
@@ -218,8 +219,8 @@ class ITTageTable
   val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.valid), RegEnable(s0_tag, io.req.valid))
 
-  val hi_us   = Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8))
-  val lo_us   = Module(new Folded1WDataModuleTemplate(Bool(), nRows, numRead=1, isSync=true, width=8))
+  val hi_us  = Module(new FoldedSRAMTemplate(Bool(), nRows, width=uFoldedWidth, shouldReset=true, holdRead=true))
+  val lo_us  = Module(new FoldedSRAMTemplate(Bool(), nRows, width=uFoldedWidth, shouldReset=true, holdRead=true))
   val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   //val hi_us = Module(new SRAMTemplate(UInt(2.W), set=nRows, way=ITTageBanks, shouldReset=true, holdRead=true, singlePort=false))
   //val lo_us = Module(new SRAMTemplate(UInt(2.W), set=nRows, way=ITTageBanks, shouldReset=true, holdRead=true, singlePort=false))
@@ -229,11 +230,14 @@ class ITTageTable
   //hi_us.io.r.req.valid := io.req.valid
   //lo_us.io.r.req.valid := io.req.valid
   table.io.r.req.bits.setIdx := s0_idx
-  hi_us.io.raddr(0) := s0_idx
-  lo_us.io.raddr(0) := s0_idx
 
-  val s1_hi_us_r = hi_us.io.rdata(0) //.resp.data
-  val s1_lo_us_r = lo_us.io.rdata(0) //.resp.data
+  hi_us.io.r.req.valid := io.req.valid
+  hi_us.io.r.req.bits.setIdx := s0_idx
+  lo_us.io.r.req.valid := io.req.valid
+  lo_us.io.r.req.bits.setIdx := s0_idx
+
+  val s1_hi_us_r = hi_us.io.r.resp.data(0) //.resp.data
+  val s1_lo_us_r = lo_us.io.r.resp.data(0) //.resp.data
   val s1_table_r = table.io.r.resp.data(0)
 
 
@@ -277,9 +281,16 @@ class ITTageTable
     waymask = Mux(doing_clear_u_hi, Fill(ITTageBanks, "b1".U), io.update.uMask.asUInt)
   )
    */
-  hi_us.io.wen := io.update.uValid || doing_clear_u_hi
-  hi_us.io.wdata := Mux(doing_clear_u_hi, false.B, update_hi_wdata)
-  hi_us.io.waddr := Mux(doing_clear_u_hi, clear_u_idx, update_idx)
+  val hi_us_wen = io.update.uValid || doing_clear_u_hi
+  val hi_us_wdata = Mux(doing_clear_u_hi, false.B, update_hi_wdata)
+  val hi_us_setIdx = Mux(doing_clear_u_hi, clear_u_idx, update_idx)
+
+  hi_us.io.w.apply(
+    valid = hi_us_wen,
+    data = hi_us_wdata,
+    setIdx = hi_us_setIdx,
+    waymask = true.B
+  )
 
   val update_lo_wdata = Wire(Bool())
   /*
@@ -290,9 +301,16 @@ class ITTageTable
     waymask = Mux(doing_clear_u_lo, Fill(ITTageBanks, "b1".U), io.update.uMask.asUInt)
   )
    */
-  lo_us.io.wen := io.update.uValid || doing_clear_u_lo
-  lo_us.io.wdata := Mux(doing_clear_u_lo, false.B, update_lo_wdata)
-  lo_us.io.waddr := Mux(doing_clear_u_lo, clear_u_idx, update_idx)
+  val lo_us_wen = io.update.uValid || doing_clear_u_lo
+  val lo_us_wdata = Mux(doing_clear_u_lo, false.B, update_lo_wdata)
+  val lo_us_setIdx = Mux(doing_clear_u_lo, clear_u_idx, update_idx)
+
+  lo_us.io.w.apply(
+    valid = lo_us_wen,
+    data = lo_us_wdata,
+    setIdx = lo_us_setIdx,
+    waymask = true.B
+  )
 
   val wrbypass_tags    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(tagLen.W))))
   val wrbypass_idxs    = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
