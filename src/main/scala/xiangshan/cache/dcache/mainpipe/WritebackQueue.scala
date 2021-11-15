@@ -131,6 +131,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (merge_probe) {
       state := s_release_req
       req.voluntary := false.B
+      req.param := req.param
       req.hasData := req.hasData || io.req.bits.hasData
       req.dirty := req.dirty || io.req.bits.dirty
       req.data := Mux(

@@ -106,7 +106,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(LoadQueueSize, new LsRobEntry))
   val dataModule = Module(new LoadQueueData(LoadQueueSize, wbNumRead = LoadPipelineWidth, wbNumWrite = LoadPipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1, numWrite = LoadPipelineWidth))
+  val vaddrModule = Module(new SyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 3, numWrite = LoadPipelineWidth))
   vaddrModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
@@ -331,6 +331,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
     io.ldout(i).bits.debug.isPerfCnt := false.B
     io.ldout(i).bits.debug.paddr := debug_paddr(loadWbSel(i))
+    io.ldout(i).bits.debug.vaddr := vaddrModule.io.rdata(i+1)
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
 
@@ -708,6 +709,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   // no inst will be commited 1 cycle before tval update
   vaddrModule.io.raddr(0) := (deqPtrExt + commitCount).value
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
+
+  // Read vaddr for debug trigger
+  (0 until LoadPipelineWidth).map(i => {
+    vaddrModule.io.raddr(i+1) := loadWbSel(i)
+  })
+
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx

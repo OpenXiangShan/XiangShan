@@ -71,6 +71,8 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val icacheStop      = Output(Bool())
   val toIbuffer       = Decoupled(new FetchToIBuffer)
   val uncacheInter   =  new UncacheInterface
+  val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
+  val csrTriggerEnable = Input(Vec(4, Bool()))
   val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
 }
 
@@ -95,6 +97,9 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val instValid     = Bool()
   val lastHalfMatch = Bool()
   val oversize      = Bool()
+  val mmio = Bool()
+  val frontendTrigger = new FrontendTdataDistributeIO
+  val csrTriggerEnable = Vec(4, Bool())
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters with HasIFUConst
@@ -396,6 +401,9 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   preDecoderIn.lastHalfMatch :=  f3_lastHalfMatch
   preDecoderIn.pageFault     :=  f3_except_pf
   preDecoderIn.accessFault   :=  f3_except_af
+  preDecoderIn.mmio          :=  f3_mmio
+  preDecoderIn.frontendTrigger := io.frontendTrigger
+  preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
 
 
   // TODO: What if next packet does not match?
@@ -420,6 +428,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   io.toIbuffer.bits.ipf       := preDecoderOut.pageFault
   io.toIbuffer.bits.acf       := preDecoderOut.accessFault
   io.toIbuffer.bits.crossPageIPFFix := preDecoderOut.crossPageIPF
+  io.toIbuffer.bits.triggered := preDecoderOut.triggered
 
   //Write back to Ftq
   val f3_cache_fetch = f3_valid && !(f2_fire && !f2_flush)

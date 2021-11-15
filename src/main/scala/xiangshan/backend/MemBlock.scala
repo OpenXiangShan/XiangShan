@@ -118,8 +118,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
-  io.writeback <> exeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  val ldExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  io.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fastUop)).foreach{case(a,b)=> a := b}
 
@@ -189,6 +189,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.req := d
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
+  val tdata = Reg(Vec(6, new MatchTriggerIO))
+  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
+  val en = io.csrCtrl.trigger_enable
+  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
+  when(io.csrCtrl.mem_trigger.t.valid) {
+    tdata(io.csrCtrl.mem_trigger.t.bits.addr) := io.csrCtrl.mem_trigger.t.bits.tdata
+  }
+  val lTriggerMapping = Map(0 -> 4, 1 -> 5, 2 -> 9)
+  val sTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 7)
+  val lChainMapping = Map(0 -> 2)
+  val sChainMapping = Map(0 -> 1)
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -225,10 +236,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
     lsq.io.loadDataForwarded(i)   <> loadUnits(i).io.lsq.loadDataForwarded
 
-    // update waittable
-    // TODO: read pc
+    // update mem dependency predictor
     io.memPredUpdate(i) := DontCare
     lsq.io.needReplayFromRS(i)    <> loadUnits(i).io.lsq.needReplayFromRS
+
+    // Trigger Regs
+    // addr: 0-2 for store, 3-5 for load
+
+
+    // TODO: load trigger, a total of 3
+      for (j <- 0 until 10) {
+        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+        io.writeback(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
+    when(ldExeWbReqs(i).fire()){
+      // load data, we need to delay cmp for 1 cycle for better timing
+//      ldExeWbReqs(i).bits.data
+      // TriggerCmp(ldExeWbReqs(i).bits.data, DontCare, DontCare, DontCare) 
+      // load vaddr 
+//      ldExeWbReqs(i).bits.debug.vaddr
+      // TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
+      for (j <- 0 until 3) {
+        val hit = Mux(tdata(j+3).select, TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)),
+          TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)))
+        io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
+        io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
+        if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
+      }
+    }
   }
 
   // StoreUnit
@@ -266,6 +302,44 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.stOut(i).valid := stu.io.stout.valid
     io.stOut(i).bits  := stu.io.stout.bits
     stu.io.stout.ready := true.B
+
+    // TODO: debug trigger
+    // store vaddr 
+    when(io.stOut(i).fire()){
+      io.stOut(i).bits.debug.vaddr
+      // TriggerCmp(io.stOut(i).bits.debug.vaddr, DontCare, DontCare, DontCare)
+      for (j <- 0 until 10) {
+          io.stOut(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+          io.stOut(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
+      for (j <- 0 until 3) {
+        when(!tdata(j).select) {
+          val hit = TriggerCmp(io.stOut(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
+          io.stOut(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
+          io.stOut(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
+          if (sChainMapping.contains(j)) io.stOut(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
+        }
+      }
+    }
+    // store data
+    when(lsq.io.storeDataIn(i).fire()){
+      lsq.io.storeDataIn(i).bits.data(XLEN-1, 0)
+      for (j <- 0 until 10) {
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(j) := false.B
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(j) := false.B
+          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(j) := false.B
+      }
+      // TriggerCmp(lsq.io.storeDataIn(i).bits.data(XLEN-1, 0), DontCare, DontCare, DontCare)
+      for (j <- 0 until 3) {
+        when(tdata(j).select) {
+          val hit = TriggerCmp(lsq.io.storeDataIn(i).bits.data, tdata(j).tdata2, tdata(j).matchType, tEnable(j))
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerHitVec(sTriggerMapping(j)) := hit
+          lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerTiming(sTriggerMapping(j)) := hit && tdata(j + 3).timing
+          if (sChainMapping.contains(j)) lsq.io.storeDataIn(i).bits.uop.cf.trigger.triggerChainVec(sChainMapping(j)) := hit && tdata(j + 3).chain
+        }
+      }
+    }
   }
 
   // mmio store writeback will use store writeback port 0
