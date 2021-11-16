@@ -3,9 +3,9 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, timing-memblock ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, timing-memblock ]
 
 jobs:
   generate-verilog:
