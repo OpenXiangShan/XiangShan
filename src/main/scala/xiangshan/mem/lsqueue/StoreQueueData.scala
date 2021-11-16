@@ -31,15 +31,19 @@ import xiangshan.backend.rob.RobPtr
 // These data modules are like SyncDataModuleTemplate, but support cam-like ops
 class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle {
+    // sync read
     val raddr = Input(Vec(numRead, UInt(log2Up(numEntries).W)))
-    val rdata = Output(Vec(numRead, UInt(dataWidth.W)))
-    val rlineflag = Output(Vec(numRead, Bool()))
+    val rdata = Output(Vec(numRead, UInt(dataWidth.W))) // rdata: store addr
+    val rlineflag = Output(Vec(numRead, Bool())) // rdata: line op flag
+    // write
     val wen   = Input(Vec(numWrite, Bool()))
     val waddr = Input(Vec(numWrite, UInt(log2Up(numEntries).W)))
-    val wdata = Input(Vec(numWrite, UInt(dataWidth.W)))
-    val wlineflag = Input(Vec(numWrite, Bool()))
-    val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W)))
-    val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool())))
+    val wdata = Input(Vec(numWrite, UInt(dataWidth.W))) // wdata: store addr
+    val wlineflag = Input(Vec(numWrite, Bool())) // wdata: line op flag
+    // forward addr cam
+    val forwardMdata = Input(Vec(numForward, UInt(dataWidth.W))) // addr
+    val forwardMmask = Output(Vec(numForward, Vec(numEntries, Bool()))) // cam result mask
+    // debug
     val debug_data = Output(Vec(numEntries, UInt(dataWidth.W)))
   })
 
@@ -81,29 +85,34 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
 }
 
 class SQData8Entry(implicit p: Parameters) extends XSBundle {
-  // val paddr = UInt(PAddrBits.W)
-  val valid = Bool()
+  val valid = Bool() // this byte is valid
   val data = UInt((XLEN/8).W)
 }
 
 class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
-    val rdata = Vec(numRead,  Output(new SQData8Entry))
+    // sync read port
+    val raddr = Vec(numRead, Input(UInt(log2Up(numEntries).W)))
+    val rdata = Vec(numRead, Output(new SQData8Entry))
+    // data write port
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(UInt((XLEN/8).W)))
     }
+    // mask (data valid) write port
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(Bool()))
     }
 
+    // st-ld forward addr cam result input, used to select forward data
     val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
+    // forward result valid bit generated in current cycle
     val forwardValidFast = Vec(numForward, Output(Bool()))
-    val forwardValid = Vec(numForward, Output(Bool()))
+    // forward result generated in the next cycle
+    val forwardValid = Vec(numForward, Output(Bool())) // forwardValid = RegNext(forwardValidFast)
     val forwardData = Vec(numForward, Output(UInt(8.W)))
   })
 
@@ -195,29 +204,35 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 }
 
 class SQDataEntry(implicit p: Parameters) extends XSBundle {
-  // val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
 }
 
+// SQDataModule is a wrapper of SQData8Modules
 class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    // sync read port
     val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
     val rdata = Vec(numRead,  Output(new SQDataEntry))
+    // data write port
     val data = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(UInt(XLEN.W)))
     }
+    // mask (data valid) write port
     val mask = new Bundle() {
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(UInt(8.W)))
     }
 
+    // st-ld forward addr cam result input, used to select forward data
     val needForward = Input(Vec(numForward, Vec(2, UInt(numEntries.W))))
+    // forward result valid bit generated in current cycle
     val forwardMaskFast = Vec(numForward, Output(Vec(8, Bool())))
-    val forwardMask = Vec(numForward, Output(Vec(8, Bool())))
+    // forward result generated in the next cycle
+    val forwardMask = Vec(numForward, Output(Vec(8, Bool()))) // forwardMask = RegNext(forwardMaskFast)
     val forwardData = Vec(numForward, Output(Vec(8, UInt(8.W))))
   })
 

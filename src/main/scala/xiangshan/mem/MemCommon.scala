@@ -84,7 +84,7 @@ class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val mask = Output(UInt(8.W))
   val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
-  val valid = Output(Bool()) //for debug
+  val valid = Output(Bool())
 
   val forwardMaskFast = Input(Vec(8, Bool())) // resp to load_s1
   val forwardMask = Input(Vec(8, Bool())) // resp to load_s2
