@@ -274,12 +274,12 @@ class TageTable
   //   (idx, tag)
   // }
 
-  
+
   val idxFhInfo = (histLen, min(log2Ceil(nRows), histLen))
   val tagFhInfo = (histLen, min(histLen, tagLen))
   val altTagFhInfo = (histLen, min(histLen, tagLen-1))
   val allFhInfos = Seq(idxFhInfo, tagFhInfo, altTagFhInfo)
-  
+
   def getFoldedHistoryInfo = allFhInfos.filter(_._1 >0).toSet
   def compute_tag_and_hash(unhashed_idx: UInt, allFh: AllFoldedHistories) = {
     val idx_fh = allFh.getHistWithInfo(idxFhInfo).folded_hist
@@ -367,21 +367,21 @@ class TageTable
   val update_hi_wdata = Wire(Bool())
   val update_lo_wdata = Wire(Bool())
 
-  val hi_wen = io.update.uMask || doing_clear_u_hi
+  val hi_us_wen = io.update.uMask || doing_clear_u_hi
   val hi_us_wdata = Mux(doing_clear_u_hi, false.B, update_hi_wdata)
   val hi_us_setIdx = Mux(doing_clear_u_hi, clear_u_idx, update_idx)
   hi_us.io.w.apply(
-    valid = hi_wen,
+    valid = hi_us_wen,
     data = hi_us_wdata,
     setIdx = hi_us_setIdx,
     waymask = true.B
   )
 
-  val lo_wen = io.update.uMask || doing_clear_u_lo
+  val lo_us_wen = io.update.uMask || doing_clear_u_lo
   val lo_us_wdata = Mux(doing_clear_u_lo, false.B, update_lo_wdata)
   val lo_us_setIdx = Mux(doing_clear_u_lo, clear_u_idx, update_idx)
   lo_us.io.w.apply(
-    valid = lo_wen,
+    valid = lo_us_wen,
     data = lo_us_wdata,
     setIdx = lo_us_setIdx,
     waymask = true.B
