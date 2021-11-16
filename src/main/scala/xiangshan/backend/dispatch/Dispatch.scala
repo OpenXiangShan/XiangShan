@@ -120,13 +120,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     io.lfst.req(i).valid := io.fromRename(i).fire() && updatedUop(i).cf.storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).cf.ssid
-    io.lfst.req(i).bits.sqIdx := updatedUop(i).sqIdx // speculatively assigned in rename, wip
     io.lfst.req(i).bits.robIdx := updatedUop(i).robIdx // speculatively assigned in rename
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
       updatedUop(i).cf.loadWaitBit := io.lfst.resp(i).bits.shouldWait
-      updatedUop(i).cf.waitForSqIdx := io.lfst.resp(i).bits.sqIdx
+      updatedUop(i).cf.waitForRobIdx := io.lfst.resp(i).bits.robIdx
     } else {
       updatedUop(i).cf.loadWaitBit := isLs(i) && !isStore(i) && io.fromRename(i).bits.cf.loadWaitBit
     }

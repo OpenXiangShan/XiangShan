@@ -21,7 +21,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.rob.RobPtr
 
 // store set load violation predictor
@@ -294,21 +293,18 @@ class SSIT(implicit p: Parameters) extends XSModule {
 // Last Fetched Store Table Entry
 class LFSTEntry(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
-  val sqIdx = new SqPtr
   val robIdx = new RobPtr
 }
 
 class LFSTReq(implicit p: Parameters) extends XSBundle {
   val isstore = Bool()
   val ssid = UInt(SSIDWidth.W) // use ssid to lookup LFST
-  val sqIdx = new SqPtr
   val robIdx = new RobPtr
 }
 
 class LFSTResp(implicit p: Parameters) extends XSBundle {
-  // val ssid = UInwt(SSIDWidth.W)
   val shouldWait = Bool()
-  val sqIdx = new SqPtr
+  val robIdx = new RobPtr
 }
 
 class DispatchLFSTIO(implicit p: Parameters) extends XSBundle {
@@ -327,10 +323,8 @@ class LFST(implicit p: Parameters) extends XSModule {
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
-  // TODO: use MemTemplate
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
-  val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
-  val lastSqIdx = Reg(Vec(LFSTSize, new SqPtr))
+  val lastRobIdx = Reg(Vec(LFSTSize, new RobPtr))
   val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
@@ -359,11 +353,11 @@ class LFST(implicit p: Parameters) extends XSModule {
         io.dispatch.req(i).valid &&
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
       ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
-    io.dispatch.resp(i).bits.sqIdx := lastSqIdx(io.dispatch.req(i).bits.ssid)
+    io.dispatch.resp(i).bits.robIdx := lastRobIdx(io.dispatch.req(i).bits.ssid)
     if(i > 0){
       (0 until i).map(j =>
         when(hitInDispatchBundleVec(j)){
-          io.dispatch.resp(i).bits.sqIdx := io.dispatch.req(i).bits.sqIdx
+          io.dispatch.resp(i).bits.robIdx := io.dispatch.req(i).bits.robIdx
         }
       )
     }
@@ -373,7 +367,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   (0 until exuParameters.StuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.sqIdx.value === sqIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.robIdx.value === robIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
         validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
       }
     })
@@ -386,9 +380,8 @@ class LFST(implicit p: Parameters) extends XSModule {
       val wptr = allocPtr(waddr)
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
-      sqIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.sqIdx
       robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
-      lastSqIdx(waddr) := io.dispatch.req(i).bits.sqIdx
+      lastRobIdx(waddr) := io.dispatch.req(i).bits.robIdx
     }
   })
 

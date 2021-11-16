@@ -77,7 +77,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
     val issuePtrExt = Output(new SqPtr)
     val sqFull = Output(Bool())
     val lqFull = Output(Bool())
-    val speculativeSqIdxUpdate = new SpeculativeSqIdxUpdateIO
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -130,7 +129,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt
-  storeQueue.io.speculativeSqIdxUpdate <> io.speculativeSqIdxUpdate
 
   loadQueue.io.load_s1 <> io.forward
   storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE

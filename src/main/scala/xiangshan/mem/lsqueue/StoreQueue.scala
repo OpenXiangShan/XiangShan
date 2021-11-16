@@ -50,12 +50,6 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(exuParameters.LsExuCnt, Output(new SqPtr))
 }
 
-// for speculatively sqIdx assign 
-class SpeculativeSqIdxUpdateIO(implicit p: Parameters) extends XSBundle {
-  val lastCycleCancelCount = Output(UInt(log2Up(StoreQueueSize).W))
-  val lastCycleRedirect = Output(Bool())
-}
-
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
@@ -73,7 +67,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqempty = Output(Bool())
     val issuePtrExt = Output(new SqPtr) // used to wake up delayed load/store
     val sqFull = Output(Bool())
-    val speculativeSqIdxUpdate = new SpeculativeSqIdxUpdateIO
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -561,9 +554,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }.otherwise {
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
-
-  io.speculativeSqIdxUpdate.lastCycleRedirect := lastCycleRedirect
-  io.speculativeSqIdxUpdate.lastCycleCancelCount := lastCycleCancelCount
 
   deqPtrExt := deqPtrExtNext
 
