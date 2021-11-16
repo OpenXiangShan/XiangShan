@@ -62,6 +62,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
@@ -566,7 +567,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       val difftest = Module(new DifftestStoreEvent)
       difftest.io.clock       := clock
-      difftest.io.coreid      := hardId.U
+      difftest.io.coreid      := io.hartId
       difftest.io.index       := i.U
       difftest.io.valid       := storeCommit
       difftest.io.storeAddr   := waddr

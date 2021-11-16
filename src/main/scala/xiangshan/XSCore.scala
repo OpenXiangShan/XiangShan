@@ -171,6 +171,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val ptw = outer.ptw.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
+
+  ctrlBlock.io.hartId := io.hartId
+  exuBlocks.foreach(_.io.hartId := io.hartId)
+  memBlock.io.hartId := io.hartId
+  outer.wbArbiter.module.io.hartId := io.hartId
+
+
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback

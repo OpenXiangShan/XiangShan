@@ -55,6 +55,7 @@ class LsqEnqIO(implicit p: Parameters) extends XSBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -82,6 +83,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
+
+  storeQueue.io.hartId := io.hartId
 
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready

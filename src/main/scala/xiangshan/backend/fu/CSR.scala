@@ -190,7 +190,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
 }
 
 class CSRFileIO(implicit p: Parameters) extends XSBundle {
-  val hartId = Input(UInt(64.W))
+  val hartId = Input(UInt(8.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
   val isPerfCnt = Output(Bool())
@@ -1218,7 +1218,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := hardId.U
+    difftest.io.coreid := csrio.hartId
     difftest.io.intrNO := RegNext(difftestIntrNO)
     difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
     difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
@@ -1228,7 +1228,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = Module(new DifftestCSRState)
     difftest.io.clock := clock
-    difftest.io.coreid := hardId.U
+    difftest.io.coreid := csrio.hartId
     difftest.io.priviledgeMode := priviledgeMode
     difftest.io.mstatus := mstatus
     difftest.io.sstatus := mstatus & sstatusRmask
