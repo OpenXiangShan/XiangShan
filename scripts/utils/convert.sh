@@ -1,4 +1,4 @@
-sed 's/|/ /g' | awk '
+sed 's/|/ /g' | awk --bignum '
 
 func chnstr(chn) {
   split("A B C D E", channels, " ");

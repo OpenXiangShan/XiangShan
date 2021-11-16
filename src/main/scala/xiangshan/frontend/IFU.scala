@@ -104,6 +104,7 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
 }
 
 class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters with HasIFUConst
+with HasCircularQueuePtrHelper
 {
   println(s"icache ways: ${nWays} sets:${nSets}")
   val io = IO(new NewIFUIO)
@@ -295,9 +296,10 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
   val f3_mmio_to_commit_next = RegNext(f3_mmio_to_commit)
   val f3_mmio_can_go      = f3_mmio_to_commit && !f3_mmio_to_commit_next
 
-  val f3_ftq_flush_self    = fromFtq.redirect.valid && RedirectLevel.flushItself(fromFtq.redirect.bits.level)
+  val f3_ftq_flush_self     = fromFtq.redirect.valid && RedirectLevel.flushItself(fromFtq.redirect.bits.level)
+  val f3_ftq_flush_by_older = fromFtq.redirect.valid && isBefore(fromFtq.redirect.bits.ftqIdx, f3_ftq_req.ftqIdx)
 
-  val f3_need_not_flush = f3_req_is_mmio && fromFtq.redirect.valid && !f3_ftq_flush_self
+  val f3_need_not_flush = f3_req_is_mmio && fromFtq.redirect.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
 
   when(f3_flush && !f3_need_not_flush)               {f3_valid := false.B}
   .elsewhen(f2_fire && !f2_flush)                    {f3_valid := true.B }
@@ -357,7 +359,7 @@ class NewIFU(implicit p: Parameters) extends XSModule with HasICacheParameters w
     }  
   }
 
-  when(f3_ftq_flush_self)  {
+  when(f3_ftq_flush_self || f3_ftq_flush_by_older)  {
     mmio_state := mmio_idle 
     f3_mmio_data := 0.U
   }

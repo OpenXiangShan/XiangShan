@@ -50,8 +50,6 @@ trait HasSbufferConst extends HasXSParameter {
 class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
   val state_valid    = Bool() // this entry is active
   val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
-  // val s_pipe_req = Bool() // scheduled dcache store pipeline req
-  val w_pipe_resp = Bool() // waiting for dcache store pipeline resp
   val w_timeout = Bool() // waiting for resend store pipeline req timeout
 
   def isInvalid(): Bool = !state_valid
@@ -120,6 +118,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
+  val willSendDcacheReq = Wire(Bool())
+
   /*
        idle --[flush]   --> drain   --[buf empty]--> idle
             --[buf full]--> replace --[dcache resp]--> idle
@@ -171,7 +171,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val cohTimeOutMask = VecInit(widthMap(i => cohCount(i)(EvictCountBits - 1) && stateVec(i).isActive()))
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
-  val (missqReplayTimeOutIdx, missqReplayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
+  val (missqReplayTimeOutIdx, missqReplayMayHasTimeOut) = PriorityEncoderWithFlag(missqReplayTimeOutMask)
+  val missqReplayHasTimeOut = RegNext(missqReplayMayHasTimeOut) && !RegNext(willSendDcacheReq)
+  val missqReplayTimeOutIdxReg = RegEnable(missqReplayTimeOutIdx, missqReplayMayHasTimeOut)
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
   val drainIdx = PriorityEncoder(activeMask)
@@ -224,8 +226,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     firstCanInsert,
     Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
   )
-  val need_uarch_drain = WireInit(false.B)
-  val do_uarch_drain = RegNext(need_uarch_drain)
+  val forward_need_uarch_drain = WireInit(false.B)
+  val merge_need_uarch_drain = WireInit(false.B)
+  val do_uarch_drain = RegNext(forward_need_uarch_drain) || RegNext(RegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   io.in(0).ready := firstCanInsert
@@ -234,7 +237,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   def wordReqToBufLine(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateVec(insertIdx).state_valid := true.B
     cohCount(insertIdx) := 0.U
-    missqReplayCount(insertIdx) := 0.U
+    // missqReplayCount(insertIdx) := 0.U
     ptag(insertIdx) := reqptag
     vtag(insertIdx) := reqvtag // update vtag iff a new sbuffer line is allocated
     when(flushMask){
@@ -252,9 +255,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     }
   }
 
-  def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx:UInt, wordOffset:UInt): Unit = {
+  def mergeWordReq(req: DCacheWordReq, reqptag: UInt, reqvtag: UInt, mergeIdx: UInt, wordOffset: UInt): Unit = {
     cohCount(mergeIdx) := 0.U
-    missqReplayCount(mergeIdx) := 0.U
+    // missqReplayCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         mask(mergeIdx)(wordOffset)(i) := true.B
@@ -269,7 +272,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         vtag(mergeIdx) << OffsetWidth,
         ptag(mergeIdx) << OffsetWidth
       )
-      need_uarch_drain := true.B
+      merge_need_uarch_drain := true.B
     }
   }
 
@@ -369,7 +372,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
   val evictionIdx = Mux(missqReplayHasTimeOut,
-    missqReplayTimeOutIdx,
+    missqReplayTimeOutIdxReg,
     Mux(need_drain,
       drainIdx,
       Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
@@ -386,7 +389,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // when canSendDcacheReq, send dcache req stored in pipeline reg to dcache
   val canSendDcacheReq = io.dcache.req.ready || !prepareValidReg
   // when willSendDcacheReq, read dcache req data and store them in a pipeline reg 
-  val willSendDcacheReq = prepareValid && canSendDcacheReq
+  willSendDcacheReq := prepareValid && canSendDcacheReq
   when(io.dcache.req.fire()){
     prepareValidReg := false.B
   }
@@ -422,9 +425,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.dcache.req.bits.id := evictionIdxReg
 
   when (io.dcache.req.fire()) {
-    // stateVec(evictionIdxReg).s_pipe_req := false.B
-    stateVec(evictionIdxReg).w_pipe_resp := true.B
-    // assert(stateVec(evictionIdxReg).s_pipe_req === true.B)
     assert(!(io.dcache.req.bits.vaddr === 0.U))
     assert(!(io.dcache.req.bits.addr === 0.U))
   }
@@ -442,10 +442,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     when (resp.fire()) {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
-      stateVec(dcache_resp_id).w_pipe_resp := false.B
       assert(!resp.bits.replay)
       assert(!resp.bits.miss) // not need to resp if miss, to be opted
-      assert(stateVec(dcache_resp_id).w_pipe_resp === true.B)
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
   })
@@ -457,7 +455,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     stateVec(replay_resp_id).w_timeout := true.B
     // waiting for timeout
     assert(io.dcache.replay_resp.bits.replay)
-    assert(stateVec(replay_resp_id).w_pipe_resp === true.B)
     assert(stateVec(replay_resp_id).state_inflight === true.B)
   }
   
@@ -470,20 +467,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       cohCount(i) := cohCount(i)+1.U
     }
   })
-
-  // TODO: fix perf counter
-  // // performance counters
-  // XSPerfAccumulate("store_req", io.lsu.req.fire())
-  // XSPerfAccumulate("store_penalty", state =/= s_invalid)
-  // // this is useless
-  // // XSPerf("store_hit", state === s_pipe_resp && io.pipe_resp.fire() && !io.pipe_resp.bits.miss)
-  // XSPerfAccumulate("store_replay", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss && io.pipe_resp.bits.replay)
-  // XSPerfAccumulate("store_miss", state === s_pipe_resp && io.pipe_resp.fire() && io.pipe_resp.bits.miss)
-  // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
-  // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
-  // XSPerfAccumulate("store_req", io.lsu.req.fire())
-  // val num_valids = PopCount(entries.map(e => !e.io.lsu.req.ready))
-  // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nStoreReplayEntries, 1)
 
   if (env.EnableDifftest) {
     // hit resp
@@ -499,16 +482,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       difftest.io.sbufferMask := RegNext(mask(dcache_resp_id).asUInt)
     }}
     
-//    // replay resp
-//    val replay_resp_id = io.dcache.replay_resp.bits.id
-//    val difftest = Module(new DifftestSbufferEvent)
-//    difftest.io.clock := clock
-//    difftest.io.coreid := hardId.U
-//    difftest.io.index := io.dcache.hit_resps.size.U // use an extra port
-//    difftest.io.sbufferResp := io.dcache.replay_resp.fire()
-//    difftest.io.sbufferAddr := getAddr(ptag(replay_resp_id))
-//    difftest.io.sbufferData := data(replay_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
-//    difftest.io.sbufferMask := mask(replay_resp_id).asUInt
   }
 
   // ---------------------- Load Data Forward ---------------------
@@ -529,7 +502,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
         RegNext(forward.vaddr),
         RegNext(forward.paddr)
       )
-      do_uarch_drain := true.B
+      forward_need_uarch_drain := true.B
     }
     val valid_tag_matches = widthMap(w => tag_matches(w) && activeMask(w))
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
@@ -538,12 +511,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
     val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
     val line_offset_reg = RegNext(line_offset_mask)
+    val forward_data_candidate_reg = RegEnable(
+      VecInit(data.map(entry => entry(getWordOffset(forward.paddr)))),
+      forward.valid
+    )
 
     val selectedValidMask = Mux1H(line_offset_reg, Mux1H(valid_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-    val selectedValidData = Mux1H(line_offset_reg, Mux1H(valid_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
+    val selectedValidData = Mux1H(valid_tag_match_reg, forward_data_candidate_reg)
+    selectedValidData.suggestName("selectedValidData_"+i)
 
     val selectedInflightMask = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-    val selectedInflightData = Mux1H(line_offset_reg, Mux1H(inflight_tag_match_reg, data).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
+    val selectedInflightData = Mux1H(inflight_tag_match_reg, forward_data_candidate_reg)
+    selectedInflightData.suggestName("selectedInflightData_"+i)
 
     val selectedInflightMaskFast = Mux1H(line_offset_mask, Mux1H(inflight_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
     val selectedValidMaskFast = Mux1H(line_offset_mask, Mux1H(valid_tag_matches, mask).asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
@@ -569,13 +548,12 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for (i <- 0 until StoreBufferSize) {
-    XSDebug("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_resp %x w_timeout %x\n",
+    XSDebug("sbf entry " + i + " : ptag %x vtag %x valid %x active %x inflight %x w_timeout %x\n",
       ptag(i) << OffsetWidth,
       vtag(i) << OffsetWidth,
       stateVec(i).isValid(),
       activeMask(i),
       inflightMask(i),
-      stateVec(i).w_pipe_resp,
       stateVec(i).w_timeout
     )
   }
@@ -593,6 +571,14 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
+  XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire())
+  XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire())
+  XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire())
+  XSPerfAccumulate("coh_timeout", cohHasTimeOut)
+
+  // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
+  // XSPerfAccumulate("store_req", io.lsu.req.fire())
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(10))
@@ -604,6 +590,13 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     ("sbuffer_newline   ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt)               ),
     ("dcache_req_valid  ", io.dcache.req.valid                                                                                         ),
     ("dcache_req_fire   ", io.dcache.req.fire()                                                                                        ),
+    ("sbuffer_idle      ", sbuffer_state === x_idle                                                                                    ),
+    ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
+    ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
+    ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire()                                                                         ),
+    ("refill_resp_valid ", io.dcache.refill_hit_resp.fire()                                                                            ),
+    ("replay_resp_valid ", io.dcache.replay_resp.fire()                                                                                ),
+    ("coh_timeout       ", cohHasTimeOut                                                                                               ),
     ("sbuffer_1/4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
     ("sbuffer_2/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
     ("sbuffer_3/4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
