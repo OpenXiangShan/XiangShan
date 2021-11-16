@@ -85,6 +85,6 @@ trait HasXSDts {
     }
   }
   ResourceBinding {
-    Resource(device, "reg").bind(ResourceAddress(hardId))
+    Resource(device, "reg").bind(ResourceAddress(coreParams.HartId))
   }
 }

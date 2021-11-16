@@ -24,9 +24,10 @@ import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleFieldBase
+import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+
 import scala.math.max
 
 // DCache specific parameters
@@ -321,6 +322,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
+  val hartId = Input(UInt(8.W))
   val lsu = new DCacheToLsuIO
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
@@ -385,6 +387,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
+
+  missQueue.io.hartId := io.hartId
 
   //----------------------------------------
   // meta array

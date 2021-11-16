@@ -100,6 +100,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
 
 class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReqWithVaddr)))  //Todo: store logic only support Width == 2 now
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
@@ -491,24 +492,13 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       val difftest = Module(new DifftestSbufferEvent)
       val dcache_resp_id = resp.bits.id
       difftest.io.clock := clock
-      difftest.io.coreid := hardId.U
+      difftest.io.coreid := io.hartId
       difftest.io.index := index.U
       difftest.io.sbufferResp := RegNext(resp.fire())
       difftest.io.sbufferAddr := RegNext(getAddr(ptag(dcache_resp_id)))
       difftest.io.sbufferData := RegNext(data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
       difftest.io.sbufferMask := RegNext(mask(dcache_resp_id).asUInt)
     }}
-    
-//    // replay resp
-//    val replay_resp_id = io.dcache.replay_resp.bits.id
-//    val difftest = Module(new DifftestSbufferEvent)
-//    difftest.io.clock := clock
-//    difftest.io.coreid := hardId.U
-//    difftest.io.index := io.dcache.hit_resps.size.U // use an extra port
-//    difftest.io.sbufferResp := io.dcache.replay_resp.fire()
-//    difftest.io.sbufferAddr := getAddr(ptag(replay_resp_id))
-//    difftest.io.sbufferData := data(replay_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
-//    difftest.io.sbufferMask := mask(replay_resp_id).asUInt
   }
 
   // ---------------------- Load Data Forward ---------------------

@@ -268,7 +268,6 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
-  val hardId = coreParams.HartId
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
