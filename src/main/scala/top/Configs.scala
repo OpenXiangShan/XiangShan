@@ -246,7 +246,9 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
-        ))
+        )),
+        sramClkDivBy2 = true,
+        simulation = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
 })
