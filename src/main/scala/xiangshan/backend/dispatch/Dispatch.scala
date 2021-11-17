@@ -40,6 +40,7 @@ case class DispatchParameters
 // read rob and enqueue
 class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val recv = Output(Vec(RenameWidth, Bool()))
@@ -133,7 +134,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // update singleStep
     updatedUop(i).ctrl.singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
 
-    if (!env.FPGAPlatform) {
+    if (env.EnableDifftest) {
       // debug runahead hint
       val debug_runahead_checkpoint_id = Wire(checkpoint_id.cloneType)
       if(i == 0){
@@ -146,7 +147,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
       val runahead = Module(new DifftestRunaheadEvent)
       runahead.io.clock         := clock
-      runahead.io.coreid        := hardId.U
+      runahead.io.coreid        := io.hartId
       runahead.io.index         := i.U
       runahead.io.valid         := io.fromRename(i).fire()
       runahead.io.branch        := isBranch(i) // setup checkpoint for branch
@@ -163,25 +164,24 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
       //   );
       // }
 
-      // TODO: move to dispatch2
-      // val mempred_check = Module(new DifftestRunaheadMemdepPred)
-      // mempred_check.io.clock     := clock
-      // mempred_check.io.coreid    := hardId.U
-      // mempred_check.io.index     := i.U
-      // mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
-      // mempred_check.io.is_load   := !isStore(i) && isLs(i)
-      // mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
-      // mempred_check.io.pc        := updatedUop(i).cf.pc 
+      val mempred_check = Module(new DifftestRunaheadMemdepPred)
+      mempred_check.io.clock     := clock
+      mempred_check.io.coreid    := io.hartId
+      mempred_check.io.index     := i.U
+      mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
+      mempred_check.io.is_load   := !isStore(i) && isLs(i)
+      mempred_check.io.need_wait := updatedUop(i).cf.loadWaitBit
+      mempred_check.io.pc        := updatedUop(i).cf.pc 
 
-      // when(RegNext(mempred_check.io.valid)){
-      //   XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
-      //     RegNext(GTimer()),
-      //     RegNext(mempred_check.io.pc),
-      //     RegNext(mempred_check.io.is_load),
-      //     RegNext(mempred_check.io.need_wait),
-      //     mempred_check.io.oracle_vaddr 
-      //   );
-      // }
+      when(RegNext(mempred_check.io.valid)){
+        XSDebug("mempred_check " + i + " : %d: pc %x ld %x need_wait %x oracle va %x\n",
+          RegNext(GTimer()),
+          RegNext(mempred_check.io.pc),
+          RegNext(mempred_check.io.is_load),
+          RegNext(mempred_check.io.need_wait),
+          mempred_check.io.oracle_vaddr 
+        );
+      }
       updatedUop(i).debugInfo.runahead_checkpoint_id := debug_runahead_checkpoint_id
     }
   }

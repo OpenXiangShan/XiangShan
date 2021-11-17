@@ -24,10 +24,11 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.GlobalHistory
+import xiangshan.frontend.{GlobalHistory, ShiftingGlobalHistory, CircularGlobalHistory, AllFoldedHistories}
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
 import utils._
@@ -38,6 +39,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.AllFoldedHistories
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -75,7 +77,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pd = new PreDecodeInfo
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
-  val hist = new GlobalHistory
+  // val hist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val specCnt = Vec(numBr, UInt(10.W))
   val phNewBit = Bool()
@@ -89,7 +93,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val addIntoHist = Bool()
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    this.hist := entry.ghist
+    // this.hist := entry.ghist
+    this.folded_hist := entry.folded_hist
+    this.histPtr := entry.histPtr
     this.phist := entry.phist
     this.phNewBit := entry.phNewBit
     this.rasSp := entry.rasSp
@@ -105,6 +111,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+  val trigger = new TriggerCf
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
@@ -124,6 +131,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 }
+
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -162,9 +170,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
-  val isORI = Bool() //for softprefetch
-  val isSoftPrefetchRead = Bool() //for softprefetch
-  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
@@ -284,6 +289,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
@@ -304,6 +310,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val seip = Input(Bool())
   val debug = Input(Bool())
 }
 
@@ -327,7 +334,6 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
-  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
@@ -454,8 +460,15 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
+  // Decode
+  val svinval_enable = Output(Bool())
+
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
+
+  val frontend_trigger = new FrontendTdataDistributeIO()
+  val mem_trigger = new MemTdataDistributeIO()
+  val trigger_enable = Output(Vec(10, Bool()))
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -484,4 +497,33 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     }
     println("Distributed CSR update req registered for " + src_description)
   }
+}
+
+class TriggerCf (implicit p: Parameters) extends XSBundle {
+  val triggerHitVec = Vec(10, Bool())
+  val triggerTiming = Vec(10, Bool())
+  val triggerChainVec = Vec(5, Bool())
+}
+
+class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+    val t = Valid(new Bundle {
+      val addr = Output(UInt(2.W))
+      val tdata = new MatchTriggerIO
+    })
+  }
+
+class MemTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+  val t = Valid(new Bundle {
+    val addr = Output(UInt(3.W))
+    val tdata = new MatchTriggerIO
+  })
+}
+
+class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
+  val matchType = Output(UInt(2.W))
+  val select = Output(Bool())
+  val timing = Output(Bool())
+  val action = Output(Bool())
+  val chain = Output(Bool())
+  val tdata2 = Output(UInt(64.W))
 }

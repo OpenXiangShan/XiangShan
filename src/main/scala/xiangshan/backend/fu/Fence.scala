@@ -34,7 +34,13 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   val toSbuffer = IO(new FenceToSbuffer)
   val disableSfence = IO(Input(Bool()))
 
-  val s_idle :: s_wait :: s_tlb :: s_icache :: s_fence :: Nil = Enum(5)
+  val (valid, src1) = (
+    io.in.valid,
+    io.in.bits.src(0)
+  )
+
+  val s_idle :: s_wait :: s_tlb :: s_icache :: s_fence :: s_nofence :: Nil = Enum(6)
+
   val state = RegInit(s_idle)
   /* fsm
    * s_idle    : init state, send sbflush
@@ -42,6 +48,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
    * s_tlb   : flush tlb, just hold one cycle
    * s_icache: flush icache, just hold one cycle
    * s_fence : do nothing, for timing optimiaztion
+   * s_nofence: do nothing , for Svinval extension
    */
 
   val sbuffer = toSbuffer.flushSb
@@ -64,6 +71,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit with HasExceptionNO {
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
   when (state === s_wait && func === FenceOpType.sfence && (sbEmpty || disableSfence)) { state := s_tlb }
   when (state === s_wait && func === FenceOpType.fence  && sbEmpty) { state := s_fence }
+  when (state === s_wait && func === FenceOpType.nofence  && sbEmpty) { state := s_nofence }
   when (state =/= s_idle && state =/= s_wait) { state := s_idle }
 
   io.in.ready := state === s_idle

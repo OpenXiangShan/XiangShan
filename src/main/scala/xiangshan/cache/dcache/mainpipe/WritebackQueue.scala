@@ -19,7 +19,7 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle, PipelineConnect}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import huancun.{DirtyField, DirtyKey}
 
@@ -131,6 +131,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     when (merge_probe) {
       state := s_release_req
       req.voluntary := false.B
+      req.param := req.param
       req.hasData := req.hasData || io.req.bits.hasData
       req.dirty := req.dirty || io.req.bits.dirty
       req.data := Mux(
@@ -244,6 +245,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val block_miss_req  = Output(Bool())
   })
 
+  require(cfg.nReleaseEntries > cfg.nMissEntries)
+
+
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nReleaseEntries, Bool()))
   val merge_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
@@ -251,7 +255,36 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val merge = merge_vec.asUInt.orR
   val alloc_idx = PriorityEncoder(Mux(merge, merge_vec, primary_ready))
 
-  val req = io.req
+  // delay writeback req
+  val DelayWritebackReq = true
+  val req_delayed = Wire(Flipped(DecoupledIO(new WritebackReq)))
+  val req_delayed_valid = RegInit(false.B)
+  val req_delayed_bits = Reg(io.req.bits.cloneType)
+  req_delayed.valid := req_delayed_valid
+  req_delayed.bits := req_delayed_bits
+  when(req_delayed.fire()){
+    req_delayed_valid := false.B
+  }
+  // We delayed writeback queue enq for 1 cycle, missQ req does not
+  // depend on wbQ enqueue. As a result, missQ req may be blocked in
+  // req_delayed. When grant comes, that req should also be updated.
+  when(
+    req_delayed_valid &&
+    io.release_wakeup.valid &&
+    io.release_wakeup.bits === req_delayed_bits.miss_id
+  ){
+    // TODO: it is dirty
+    req_delayed_bits.delay_release := false.B // update pipe reg
+    req_delayed.bits.delay_release := false.B // update entry write req in current cycle
+  }
+  when(io.req.fire()){
+    req_delayed_valid := true.B
+    req_delayed_bits := io.req.bits
+  }
+  io.req.ready := !req_delayed_valid || req_delayed.fire()
+  dontTouch(req_delayed)
+
+  val req = req_delayed
   val block_conflict = Wire(Bool())
   val accept = merge || allocate && !block_conflict
   req.ready := accept
@@ -262,11 +295,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_grant.ready   := false.B
 
   require(isPow2(cfg.nMissEntries))
-  val grant_source = io.mem_grant.bits.source(log2Up(cfg.nReleaseEntries) - 1, 0)
+  val grant_source = io.mem_grant.bits.source
   val entries = (0 until cfg.nReleaseEntries) map { i =>
     val entry = Module(new WritebackEntry(edge))
+    val entry_id = (i + releaseIdBase).U
 
-    entry.io.id := (i + releaseIdBase).U
+    entry.io.id := entry_id
 
     // entry req
     entry.io.req.valid := (i.U === alloc_idx) && req.valid && accept
@@ -274,9 +308,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     merge_vec(i) := entry.io.merge
     entry.io.req.bits  := req.bits
 
-    entry.io.mem_grant.valid := (i.U === grant_source) && io.mem_grant.valid
+    entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
     entry.io.mem_grant.bits  := io.mem_grant.bits
-    when (i.U === grant_source) {
+    when (entry_id === grant_source) {
       io.mem_grant.ready := entry.io.mem_grant.ready
     }
 
@@ -286,8 +320,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     entry
   }
 
-  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR
-  val miss_req_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
+  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === req.bits.addr)).asUInt.orR
+  val miss_req_conflict = if(DelayWritebackReq)
+    req.bits.addr === io.miss_req.bits && req.valid || 
+    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
+  else 
+    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
   io.block_miss_req := io.miss_req.valid && miss_req_conflict
 
   TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
@@ -295,8 +333,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // sanity check
   // print all input/output requests for debug purpose
   // print req
-  when (io.req.fire()) {
-    io.req.bits.dump()
+  when (req.fire()) {
+    req.bits.dump()
   }
 
   when (io.mem_release.fire()) {
@@ -316,13 +354,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   // performance counters
-  XSPerfAccumulate("wb_req", io.req.fire())
+  XSPerfAccumulate("wb_req", req.fire())
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(5))
   })
   val perfEvents = Seq(
-    ("dcache_wbq_req          ", io.req.fire()                                                                                                                                                              ),
+    ("dcache_wbq_req          ", req.fire()                                                                                                                                                              ),
     ("dcache_wbq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))                                                                                          ),
     ("dcache_wbq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))     ),
     ("dcache_wbq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) ),

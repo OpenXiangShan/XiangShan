@@ -31,10 +31,10 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
   var metas = 0.U(1.W)
   var meta_sz = 0
   for (c <- components) {
-    c.io.in.valid           := io.in.valid
-    c.io.in.bits.s0_pc      := io.in.bits.s0_pc
-    c.io.in.bits.ghist      := io.in.bits.ghist
-    c.io.in.bits.phist      := io.in.bits.phist
+    c.io.in.valid            := io.in.valid
+    c.io.in.bits.s0_pc       := io.in.bits.s0_pc
+    c.io.in.bits.folded_hist := io.in.bits.folded_hist
+    c.io.in.bits.phist       := io.in.bits.phist
 
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire
@@ -74,6 +74,8 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     }
     metas(idx)
   }
+
+  override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_++_))
 
   val comp_1_perf = components(1).asInstanceOf[MicroBTB].perfEvents.map(_._1).zip(components(1).asInstanceOf[MicroBTB].perfinfo.perfEvents.perf_events)
   val comp_2_perf = components(2).asInstanceOf[Tage_SC].perfEvents.map(_._1).zip(components(2).asInstanceOf[Tage_SC].perfinfo.perfEvents.perf_events)

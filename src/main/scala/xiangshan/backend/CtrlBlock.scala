@@ -42,6 +42,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -163,7 +164,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   if (!env.FPGAPlatform) {
     val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
     runahead_redirect.io.clock := clock
-    runahead_redirect.io.coreid := hardId.U
+    runahead_redirect.io.coreid := io.hartId
     runahead_redirect.io.valid := io.stage3Redirect.valid
     runahead_redirect.io.pc :=  s2_pc // for debug only
     runahead_redirect.io.target_pc := s2_target // for debug only
@@ -174,6 +175,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(8.W))
     val frontend = Flipped(new FrontendToCtrlIO)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
@@ -258,6 +260,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
   io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
   io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
+  redirectGen.io.hartId := io.hartId
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := RegNext(rob.io.flushOut.valid)
@@ -330,6 +333,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
 
+  dispatch.io.hartId := io.hartId
   dispatch.io.redirect <> stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.toIntDq <> intDq.io.enq
@@ -352,6 +356,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val jumpTargetRead = io.frontend.fromFtq.target_read
   io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 
+  rob.io.hartId := io.hartId
   rob.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
   val timer = GTimer()

@@ -145,7 +145,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))
-  val ghist = new GlobalHistory
+  // val ghist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val phNewBit = UInt(1.W)
 
@@ -153,7 +155,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasSp := resp.rasSp
     this.rasEntry := resp.rasTop
     this.specCnt := resp.specCnt
-    this.ghist := resp.ghist
+    // this.ghist := resp.ghist
+    this.folded_hist := resp.folded_hist
+    this.histPtr := resp.histPtr
     this.phist := resp.phist
     this.phNewBit := resp.pc(instOffsetBits)
     this
@@ -169,28 +173,28 @@ class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 }
 
-class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val startAddr = UInt(VAddrBits.W)
-  val fallThruAddr = UInt(VAddrBits.W)
-  val isNextMask = Vec(PredictWidth, Bool())
+// class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
+//   val startAddr = UInt(VAddrBits.W)
+//   val fallThruAddr = UInt(VAddrBits.W)
+//   val isNextMask = Vec(PredictWidth, Bool())
 
-  val meta = UInt(MaxMetaLength.W)
+//   val meta = UInt(MaxMetaLength.W)
 
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasEntry = new RASEntry
-  val hist = new GlobalHistory
-  val specCnt = Vec(numBr, UInt(10.W))
-
-  val valids = Vec(PredictWidth, Bool())
-  val brMask = Vec(PredictWidth, Bool())
-  // isJalr, isCall, isRet
-  val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
-  val jmpOffset = UInt(log2Ceil(PredictWidth).W)
-
-  val mispredVec = Vec(PredictWidth, Bool())
-  val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target = UInt(VAddrBits.W)
-}
+//   val rasSp = UInt(log2Ceil(RasSize).W)
+//   val rasEntry = new RASEntry
+//   val hist = new ShiftingGlobalHistory
+//   val specCnt = Vec(numBr, UInt(10.W))
+  
+//   val valids = Vec(PredictWidth, Bool())
+//   val brMask = Vec(PredictWidth, Bool())
+//   // isJalr, isCall, isRet
+//   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
+//   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
+  
+//   val mispredVec = Vec(PredictWidth, Bool())
+//   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+//   val target = UInt(VAddrBits.W)
+// }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
   val ptr = Output(new FtqPtr)
@@ -848,8 +852,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
   // only the valid bit is actually needed
-  io.toIfu.redirect := DontCare
-  io.toIfu.redirect.valid := stage2Flush
+  io.toIfu.redirect.bits    := Mux(robFlush.valid, robFlush.bits, stage2Redirect.bits)
+  io.toIfu.redirect.valid   := stage2Flush
 
   // commit
   for (c <- io.fromBackend.rob_commits) {
@@ -976,15 +980,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val isCfi = isBr || isJmp
     val isTaken = commit_cfi.valid && commit_cfi.bits === i.U
     val misPred = commit_mispredict(i)
-    val ghist = commit_spec_meta.ghist.predHist
+    // val ghist = commit_spec_meta.ghist.predHist
+    val histPtr = commit_spec_meta.histPtr
     val predCycle = commit_meta.meta(63, 0)
     val target = commit_target
-
+    
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
     val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
-    val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid))
+    val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
     XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
-    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
+    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
   }

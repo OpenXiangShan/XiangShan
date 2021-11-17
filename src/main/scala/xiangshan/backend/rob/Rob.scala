@@ -163,10 +163,23 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool()
   val crossPageIPFFix = Bool()
+  val trigger = new TriggerCf
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst
+  // make sure chains are fired at same timing
+  def trigger_vec_fix = VecInit(trigger.triggerHitVec.zipWithIndex.map{ case (hit, i) =>
+    def chain = trigger.triggerChainVec(i / 2)
+    if (i % 2 == 0)
+      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i + 1)), trigger.triggerHitVec(i))
+    else
+      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i - 1)), trigger.triggerHitVec(i))
+  })
+
+  def trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)
+  def trigger_after = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && timing}.reduce(_ | _)
+
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger_vec_fix.asUInt.orR
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep
+  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger_before
 }
 
 class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -226,6 +239,7 @@ class ExceptionGen(implicit p: Parameters) extends XSModule with HasCircularQueu
         current.bits.flushPipe := s1_out_bits.flushPipe || current.bits.flushPipe
         current.bits.replayInst := s1_out_bits.replayInst || current.bits.replayInst
         current.bits.singleStep := s1_out_bits.singleStep || current.bits.singleStep
+//        current.bits.trigger := (s1_out_bits.trigger.asUInt | current.bits.trigger.asUInt).asTypeOf(new TriggerCf)
       }
     }
   }.elsewhen (s1_out_valid && !s1_flush) {
@@ -251,6 +265,7 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 
 class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
@@ -277,8 +292,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // data for redirect, exception, etc.
   // val flagBkup = RegInit(VecInit(List.fill(RobSize)(false.B)))
   val flagBkup = Mem(RobSize, Bool())
-  // record move elimination info for each instruction
-  val eliminatedMove = Mem(RobSize, Bool())
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -334,6 +347,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
+  val doingSvinval = RegInit(false.B)
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
@@ -360,6 +374,18 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       when (io.enq.req(i).bits.ctrl.noSpecExec) {
         hasNoSpecExec := true.B
       }
+      // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalBegin(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        doingSvinval := true.B
+      }
+      // the end instruction of Svinval enqs so clear doingSvinval 
+      when(!Cat(io.enq.req(i).bits.cf.exceptionVec).orR && FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe))
+      {
+        doingSvinval := false.B
+      }
+      // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
+      assert( !doingSvinval || (FuType.isSvinval(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe) || FuType.isSvinvalEnd(io.enq.req(i).bits.ctrl.fuType,io.enq.req(i).bits.ctrl.fuOpType,io.enq.req(i).bits.ctrl.flushPipe)))
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
@@ -411,11 +437,14 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
   val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
+  val triggerBefore = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_before
+  val triggerAfter = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_after && !exceptionDataRead.bits.trigger_before
   val deqHasException = deqHasExceptionOrFlush && exceptionDataRead.bits.exceptionVec.asUInt.orR
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
-  val exceptionEnable = writebacked(deqPtr.value) && deqHasException
-  val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
+  val exceptionEnable = writebacked(deqPtr.value) && deqHasException// && triggerBefore
+
+  val isFlushPipe = writebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst || triggerAfter)
 
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
@@ -441,6 +470,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   io.exception.bits.uop.ctrl.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.uop.cf.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
+  io.exception.bits.uop.cf.trigger.triggerHitVec := RegEnable(exceptionDataRead.bits.trigger_vec_fix, exceptionHappen)
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.uop.cf.pc)} intr $intrEnable " +
@@ -534,7 +564,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       io.commits.info(i).ldest
     )
   }
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     io.commits.info.map(info => dontTouch(info.pc))
   }
 
@@ -674,7 +704,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // enqueue logic set 6 writebacked to false
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i)) {
-      eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
       writebacked(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove && !io.enq.req(i).bits.cf.exceptionVec.asUInt.orR
       val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
       store_data_writebacked(enqPtrVec(i).value) := !isStu
@@ -727,7 +756,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     wdata.fpWen := req.ctrl.fpWen
     wdata.wflags := req.ctrl.fpu.wflags
     wdata.commitType := req.ctrl.commitType
-    wdata.eliminatedMove := req.eliminatedMove
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest
     wdata.ftqIdx := req.cf.ftqPtr
@@ -747,6 +775,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     assert(exceptionGen.io.enq(i).bits.replayInst === false.B)
     exceptionGen.io.enq(i).bits.singleStep := io.enq.req(i).bits.ctrl.singleStep
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.cf.crossPageIPFFix
+    exceptionGen.io.enq(i).bits.trigger := io.enq.req(i).bits.cf.trigger
   }
 
   // TODO: don't hard code these idxes
@@ -757,7 +786,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   def load_wb_idxes = Seq(exuParameters.AluCnt + 1) // second port for load
   def store_wb_idxes = io.exeWbResults.indices.takeRight(2)
   val all_exception_possibilities = Seq(csr_wb_idx, atomic_wb_idx) ++ load_wb_idxes ++ store_wb_idxes
-  all_exception_possibilities.zipWithIndex.map{ case (p, i) => connect_exception(i, p) }
+  all_exception_possibilities.zipWithIndex.foreach{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
     exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
     // A temporary fix for float load writeback
@@ -780,6 +809,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.wb(index).bits.replayInst      := io.exeWbResults(wb_index).bits.uop.ctrl.replayInst
     exceptionGen.io.wb(index).bits.singleStep      := false.B
     exceptionGen.io.wb(index).bits.crossPageIPFFix := false.B
+    exceptionGen.io.wb(index).bits.trigger := io.exeWbResults(wb_index).bits.uop.cf.trigger
   }
 
   // 4 fmac + 2 fmisc + 1 i2f
@@ -892,37 +922,27 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       XSPerfAccumulate(s"${fuName}_latency_execute_fma", ifCommit(latencySum(commitIsFma, executeLatency)))
     }
   }
-  val l1Miss = Wire(Bool())
-  l1Miss := false.B
-  ExcitingUtils.addSink(l1Miss, "TMA_l1miss")
-  XSPerfAccumulate("TMA_L1miss", deqNotWritebacked && deqUopCommitType === CommitType.LOAD && l1Miss)
-
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.valid, VecInit(List.tabulate(CommitWidth)(_.U)))).value
 
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
-  val trapVec = Wire(Vec(CommitWidth, Bool()))
+
   for(i <- 0 until CommitWidth) {
     val idx = deqPtrVec(i).value
     wdata(i) := debug_exuData(idx)
     wpc(i) := SignExt(commitDebugUop(i).cf.pc, XLEN)
-    trapVec(i) := io.commits.valid(i) && (state===s_idle) && commitDebugUop(i).ctrl.isXSTrap
   }
   val retireCounterFix = Mux(io.exception.valid, 1.U, retireCounter)
   val retirePCFix = SignExt(Mux(io.exception.valid, io.exception.bits.uop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)
   val retireInstFix = Mux(io.exception.valid, io.exception.bits.uop.cf.instr, debug_microOp(firstValidCommit).cf.instr)
 
-  val hitTrap = trapVec.reduce(_||_)
-  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-  val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
-
-  if (!env.FPGAPlatform) {
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
-      difftest.io.coreid   := hardId.U
+      difftest.io.coreid   := io.hartId
       difftest.io.index    := i.U
 
       val ptr = deqPtrVec(i).value
@@ -932,7 +952,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.valid    := RegNext(io.commits.valid(i) && !io.commits.isWalk)
       difftest.io.pc       := RegNext(SignExt(uop.cf.pc, XLEN))
       difftest.io.instr    := RegNext(uop.cf.instr)
-      difftest.io.special  := RegNext(CommitType.isFused(uop.ctrl.commitType))
+      difftest.io.special  := RegNext(CommitType.isFused(io.commits.info(i).commitType))
       // when committing an eliminated move instruction,
       // we must make sure that skip is properly set to false (output from EXU is random value)
       difftest.io.skip     := RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
@@ -940,16 +960,14 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       difftest.io.scFailed := RegNext(!uop.diffTestDebugLrScValid &&
         uop.ctrl.fuType === FuType.mou &&
         (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
-      difftest.io.wen      := RegNext(io.commits.valid(i) && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U)
-      difftest.io.wdata    := RegNext(exuData)
-      difftest.io.wdest    := RegNext(uop.ctrl.ldest)
-
-      // XSDebug(p"[difftest-instr-commit]valid:${difftest.io.valid},pc:${difftest.io.pc},instr:${difftest.io.instr},skip:${difftest.io.skip},isRVC:${difftest.io.isRVC},scFailed:${difftest.io.scFailed},wen:${difftest.io.wen},wdata:${difftest.io.wdata},wdest:${difftest.io.wdest}\n")
+      difftest.io.wen      := RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)
+      difftest.io.wpdest   := RegNext(io.commits.info(i).pdest)
+      difftest.io.wdest    := RegNext(io.commits.info(i).ldest)
 
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       runahead_commit.io.clock := clock
-      runahead_commit.io.coreid := hardId.U
+      runahead_commit.io.coreid := io.hartId
       runahead_commit.io.index := i.U
       runahead_commit.io.valid := difftest.io.valid && 
         (commitBranchValid(i) || commitIsStore(i))
@@ -957,12 +975,50 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
       runahead_commit.io.pc    := difftest.io.pc
     }
   }
+  else if (env.AlwaysBasicDiff) {
+    // These are the structures used by difftest only and should be optimized after synthesis.
+    val dt_eliminatedMove = Mem(RobSize, Bool())
+    val dt_isRVC = Mem(RobSize, Bool())
+    val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
+    for (i <- 0 until RenameWidth) {
+      when (canEnqueue(i)) {
+        dt_eliminatedMove(enqPtrVec(i).value) := io.enq.req(i).bits.eliminatedMove
+        dt_isRVC(enqPtrVec(i).value) := io.enq.req(i).bits.cf.pd.isRVC
+      }
+    }
+    for (i <- 0 until numWbPorts) {
+      when (io.exeWbResults(i).valid) {
+        val wbIdx = io.exeWbResults(i).bits.uop.robIdx.value
+        dt_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
+      }
+    }
+    // Always instantiate basic difftest modules.
+    for (i <- 0 until CommitWidth) {
+      val commitInfo = io.commits.info(i)
+      val ptr = deqPtrVec(i).value
+      val exuOut = dt_exuDebug(ptr)
+      val eliminatedMove = dt_eliminatedMove(ptr)
+      val isRVC = dt_isRVC(ptr)
 
-  if (!env.FPGAPlatform) {
+      val difftest = Module(new DifftestBasicInstrCommit)
+      difftest.io.clock   := clock
+      difftest.io.coreid  := io.hartId
+      difftest.io.index   := i.U
+      difftest.io.valid   := RegNext(io.commits.valid(i) && !io.commits.isWalk)
+      difftest.io.special := RegNext(CommitType.isFused(commitInfo.commitType))
+      difftest.io.skip    := RegNext(Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))
+      difftest.io.isRVC   := RegNext(isRVC)
+      difftest.io.wen     := RegNext(io.commits.valid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U)
+      difftest.io.wpdest  := RegNext(commitInfo.pdest)
+      difftest.io.wdest   := RegNext(commitInfo.ldest)
+    }
+  }
+
+  if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestLoadEvent)
       difftest.io.clock  := clock
-      difftest.io.coreid := hardId.U
+      difftest.io.coreid := io.hartId
       difftest.io.index  := i.U
 
       val ptr = deqPtrVec(i).value
@@ -975,16 +1031,44 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
-  if (!env.FPGAPlatform) {
+  // Always instantiate basic difftest modules.
+  if (env.EnableDifftest) {
+    val dt_isXSTrap = Mem(RobSize, Bool())
+    for (i <- 0 until RenameWidth) {
+      when (canEnqueue(i)) {
+        dt_isXSTrap(enqPtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
+      }
+    }
+    val trapVec = io.commits.valid.zip(deqPtrVec).map{ case (v, d) => state === s_idle && v && dt_isXSTrap(d.value) }
+    val hitTrap = trapVec.reduce(_||_)
+    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+    val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
     val difftest = Module(new DifftestTrapEvent)
     difftest.io.clock    := clock
-    difftest.io.coreid   := hardId.U
+    difftest.io.coreid   := io.hartId
     difftest.io.valid    := hitTrap
     difftest.io.code     := trapCode
     difftest.io.pc       := trapPC
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt
   }
+  else if (env.AlwaysBasicDiff) {
+    val dt_isXSTrap = Mem(RobSize, Bool())
+    for (i <- 0 until RenameWidth) {
+      when (canEnqueue(i)) {
+        dt_isXSTrap(enqPtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
+      }
+    }
+    val trapVec = io.commits.valid.zip(deqPtrVec).map{ case (v, d) => state === s_idle && v && dt_isXSTrap(d.value) }
+    val hitTrap = trapVec.reduce(_||_)
+    val difftest = Module(new DifftestBasicTrapEvent)
+    difftest.io.clock    := clock
+    difftest.io.coreid   := io.hartId
+    difftest.io.valid    := hitTrap
+    difftest.io.cycleCnt := timer
+    difftest.io.instrCnt := instrCnt
+  }
+
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(18))
   })

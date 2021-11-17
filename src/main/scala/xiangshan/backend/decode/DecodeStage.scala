@@ -28,12 +28,17 @@ class DecodeStage(implicit p: Parameters) extends XSModule {
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
+    // csr control
+    val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.enq.ctrl_flow <> io.in(i).bits
+
+    // csr control
+    decoders(i).io.csrCtrl := io.csrCtrl
 
     io.out(i).valid      := io.in(i).valid
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl

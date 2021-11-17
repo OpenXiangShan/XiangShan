@@ -55,10 +55,12 @@ class LsqEnqIO(implicit p: Parameters) extends XSBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val enq = new LsqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle()))
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreDataBundle))) // store data, send to sq from rs
     val loadDataForwarded = Vec(LoadPipelineWidth, Input(Bool()))
     val needReplayFromRS = Vec(LoadPipelineWidth, Input(Bool()))
@@ -81,6 +83,8 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
+
+  storeQueue.io.hartId := io.hartId
 
   // io.enq logic
   // LSQ: send out canAccept when both load queue and store queue are ready
@@ -122,6 +126,7 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   // storeQueue.io <> DontCare
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeIn <> io.storeIn
+  storeQueue.io.storeInRe <> io.storeInRe
   storeQueue.io.storeDataIn <> io.storeDataIn
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout

@@ -3,7 +3,7 @@ package xiangshan
 import chisel3._
 import chipsalliance.rocketchip.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, LazyModuleImpLike}
+import freechips.rocketchip.diplomacy.{BundleBridgeSink, LazyModule, LazyModuleImp, LazyModuleImpLike}
 import freechips.rocketchip.diplomaticobjectmodel.logicaltree.GenericLogicalTreeNode
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortParameters, IntSinkPortSimple}
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
@@ -12,7 +12,7 @@ import huancun.debug.TLLogger
 import huancun.{HCCacheParamsKey, HuanCun}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utils.ResetGen
+import utils.{ResetGen, TLEdgeBuffer}
 
 class L1CacheErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val paddr = Valid(UInt(soc.PAddrBits.W))
@@ -47,7 +47,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000), new GenericLogicalTreeNode
   ))
   val busPMU = BusPerfMonitor(enable = !debugOpts.FPGAPlatform)
-  val l1d_logger = TLLogger(s"L2_L1D_$hardId", !debugOpts.FPGAPlatform)
+  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", !debugOpts.FPGAPlatform)
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   val i_mmio_port = TLTempNode()
@@ -56,15 +56,9 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   busPMU := l1d_logger
   l1_xbar :=* busPMU
 
-  def bufferN[T <: TLNode](n: Int, sink: T, source: T) = {
-    val buffers = (0 until n).map(_ => TLBuffer())
-    val nodes = sink +: buffers :+ source
-    nodes.reduce((x, y) => x :=* y)
-  }
-
   l2_binder match {
     case Some(binder) =>
-      bufferN(5, memory_port, binder)
+      memory_port :=* TLEdgeBuffer(_ => true, Some("l2_to_l3_buffer")) :=* binder
     case None =>
       memory_port := l1_xbar
   }
@@ -98,18 +92,21 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_sink = core.plic_int_sink
   val debug_int_sink = core.debug_int_sink
   val beu_int_source = misc.beu.intNode
+  val core_reset_sink = BundleBridgeSink(Some(() => Bool()))
 
   if (coreParams.dcacheParametersOpt.nonEmpty) {
     misc.l1d_logger := core.memBlock.dcache.clientNode
   }
   misc.busPMU :=
-    TLLogger(s"L2_L1I_$hardId", !debugOpts.FPGAPlatform) :=
+    TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+    TLBuffer() :=
     TLBuffer() :=
     core.frontend.icache.clientNode
 
   if (!coreParams.softPTW) {
     misc.busPMU :=
-      TLLogger(s"L2_PTW_$hardId", !debugOpts.FPGAPlatform) :=
+      TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+      TLBuffer() :=
       TLBuffer() :=
       core.ptw.node
   }
@@ -125,8 +122,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
-      val reset = Input(Bool())
     })
+
+    dontTouch(io.hartId)
+
+    val core_soft_rst = core_reset_sink.in.head._1
 
     core.module.io.hartId := io.hartId
     if(l2cache.isDefined){
@@ -147,6 +147,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val resetChain = Seq(
       Seq(misc.module, core.module) ++ l2cacheMod
     )
-    ResetGen(resetChain, reset.asBool || io.reset, !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset.asBool || core_soft_rst, !debugOpts.FPGAPlatform)
   }
 }

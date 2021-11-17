@@ -150,6 +150,38 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
 }
 
+class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4,
+  shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false, bypassWrite: Boolean = false) extends Module {
+  val io = IO(new Bundle {
+    val r = Flipped(new SRAMReadBus(gen, set, 1))
+    val w = Flipped(new SRAMWriteBus(gen, set, 1))
+  })
+
+  require(width > 0 && isPow2(width))
+  require(set % width == 0)
+
+  val nRows = set / width
+
+  val array = Module(new SRAMTemplate(gen, set=nRows, way=width, shouldReset=shouldReset, holdRead=holdRead, singlePort=singlePort))
+
+  io.r.req.ready := array.io.r.req.ready
+  io.w.req.ready := array.io.w.req.ready
+
+  val raddr = io.r.req.bits.setIdx >> log2Ceil(width)
+  val ridx = RegNext(io.r.req.bits.setIdx(log2Ceil(width)-1, 0))
+  val ren  = io.r.req.valid
+
+  array.io.r.req.valid := ren
+  array.io.r.req.bits.setIdx := raddr
+  io.r.resp.data(0) := array.io.r.resp.data(ridx)
+
+  val wen = io.w.req.valid
+  val wdata = VecInit(Seq.fill(width)(io.w.req.bits.data(0)))
+  val waddr = io.w.req.bits.setIdx >> log2Ceil(width)
+  val wmask = UIntToOH(io.w.req.bits.setIdx(log2Ceil(width)-1, 0))
+
+  array.io.w.apply(wen, wdata, waddr, wmask)
+}
 class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
   shouldReset: Boolean = false) extends Module {
   val io = IO(new Bundle {

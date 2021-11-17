@@ -52,21 +52,13 @@ trait NeedImpl {
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
   with HasXSParameter
 
-case class EnviromentParameters
-(
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = true,
-  DualCore: Boolean = false
-)
-
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbMappingHelper
 {
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-  val plic_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val ptw = LazyModule(new PTWWrapper())
@@ -171,8 +163,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
-  AddressSpace.checkMemmap()
-  AddressSpace.printMemmap()
 
   val ctrlBlock = Module(new CtrlBlock)
 
@@ -180,6 +170,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
   val exuBlocks = outer.exuBlocks.map(_.module)
+
+
+  ctrlBlock.io.hartId := io.hartId
+  exuBlocks.foreach(_.io.hartId := io.hartId)
+  memBlock.io.hartId := io.hartId
+  outer.wbArbiter.module.io.hartId := io.hartId
+
 
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
@@ -288,6 +285,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
   csrioIn.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
   csrioIn.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  csrioIn.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
   csrioIn.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
 
   csrioIn.distributedUpdate <> memBlock.io.csrUpdate // TODO
@@ -304,16 +302,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.robio.exception.bits.uop.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
 
-  val itlbRepeater = Module(new PTWRepeater(2))
-  val dtlbRepeater = Module(new PTWFilter(LoadPipelineWidth + StorePipelineWidth, l2tlbParams.filterSize))
-  itlbRepeater.io.tlb <> frontend.io.ptw
-  dtlbRepeater.io.tlb <> memBlock.io.ptw
-  itlbRepeater.io.sfence <> fenceio.sfence
-  dtlbRepeater.io.sfence <> fenceio.sfence
-  itlbRepeater.io.csr <> csrioIn.tlb
-  dtlbRepeater.io.csr <> csrioIn.tlb
-  ptw.io.tlb(0) <> itlbRepeater.io.ptw
-  ptw.io.tlb(1) <> dtlbRepeater.io.ptw
+  val itlbRepeater1 = PTWRepeater(frontend.io.ptw, fenceio.sfence, csrioIn.tlb)
+  val itlbRepeater2 = PTWRepeater(itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)
+  val dtlbRepeater1  = PTWFilter(memBlock.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.filterSize)
+  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, dtlbRepeater1.io.ptw, ptw.io.tlb(1), fenceio.sfence, csrioIn.tlb)
   ptw.io.sfence <> fenceio.sfence
   ptw.io.csr.tlb <> csrioIn.tlb
   ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
@@ -327,12 +319,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   //                  v          v            v           v           v
   //                 PTW  {MemBlock, dtlb}  ExuBlocks  CtrlBlock  {Frontend, itlb}
   val resetChain = Seq(
-    Seq(ptw),
-    Seq(memBlock, dtlbRepeater),
+    Seq(memBlock, dtlbRepeater1, dtlbRepeater2),
+    Seq(exuBlocks.head),
     // Note: arbiters don't actually have reset ports
-    exuBlocks ++ Seq(outer.wbArbiter.module),
+    exuBlocks.tail ++ Seq(outer.wbArbiter.module),
     Seq(ctrlBlock),
-    Seq(frontend, itlbRepeater)
+    Seq(ptw),
+    Seq(frontend, itlbRepeater1, itlbRepeater2)
   )
   ResetGen(resetChain, reset.asBool, !debugOpts.FPGAPlatform)
 }

@@ -24,9 +24,10 @@ import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleFieldBase
+import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+
 import scala.math.max
 
 // DCache specific parameters
@@ -37,7 +38,7 @@ case class DCacheParameters
   rowBits: Int = 128,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
-  replacer: Option[String] = Some("random"),
+  replacer: Option[String] = Some("setplru"),
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
@@ -107,10 +108,11 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
 
-  require(isPow2(cfg.nMissEntries))
-  require(isPow2(cfg.nReleaseEntries))
-  val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
-  val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
+  require(isPow2(cfg.nMissEntries)) // TODO
+  // require(isPow2(cfg.nReleaseEntries))
+  require(cfg.nMissEntries < cfg.nReleaseEntries)
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
+  val releaseIdBase = cfg.nMissEntries
 
   // banked dcache support
   val DCacheSets = cacheParams.nSets
@@ -320,6 +322,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
+  val hartId = Input(UInt(8.W))
   val lsu = new DCacheToLsuIO
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
@@ -384,6 +387,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
+
+  missQueue.io.hartId := io.hartId
 
   //----------------------------------------
   // meta array
@@ -471,7 +476,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMissReqPort = 0
 
   // Request
-  val missReqArb = Module(new RRArbiter(new MissReq, MissReqPortCount))
+  val missReqArb = Module(new Arbiter(new MissReq, MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
@@ -496,6 +501,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // probeQueue.io.mem_probe <> bus.b
   block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
+  probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
   //----------------------------------------
   // mainPipe
@@ -508,7 +514,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   replacePipeStatusS0.bits := get_idx(replacePipe.io.req.bits.vaddr)
   val blockMainPipeReqs = Seq(
     refillPipeStatus,
-	replacePipeStatusS0,
+	  replacePipeStatusS0,
     replacePipe.io.status.s1_set,
     replacePipe.io.status.s2_set
   )
@@ -533,8 +539,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
   val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
-  val replaceShouldBeBlocked = // mpStatus.s0_set.valid && replaceSet === mpStatus.s0_set.bits ||
-    Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+  val replaceShouldBeBlocked = mpStatus.s1.valid ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
       s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
     )).orR()
   block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
