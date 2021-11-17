@@ -324,7 +324,6 @@ class LFST(implicit p: Parameters) extends XSModule {
   })
 
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
-  val lastRobIdx = Reg(Vec(LFSTSize, new RobPtr))
   val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
@@ -353,7 +352,7 @@ class LFST(implicit p: Parameters) extends XSModule {
         io.dispatch.req(i).valid &&
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
       ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
-    io.dispatch.resp(i).bits.robIdx := lastRobIdx(io.dispatch.req(i).bits.ssid)
+    io.dispatch.resp(i).bits.robIdx := robIdxVec(io.dispatch.req(i).bits.ssid)(allocPtr(io.dispatch.req(i).bits.ssid)-1.U)
     if(i > 0){
       (0 until i).map(j =>
         when(hitInDispatchBundleVec(j)){
@@ -381,7 +380,6 @@ class LFST(implicit p: Parameters) extends XSModule {
       allocPtr(waddr) := allocPtr(waddr) + 1.U
       validVec(waddr)(wptr) := true.B
       robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
-      lastRobIdx(waddr) := io.dispatch.req(i).bits.robIdx
     }
   })
 
@@ -393,4 +391,17 @@ class LFST(implicit p: Parameters) extends XSModule {
       }
     })
   })
+
+  // recover robIdx after squash
+  // behavior model, to be refactored later 
+  when(RegNext(io.redirect.fire())) {
+    (0 until LFSTSize).map(i => {
+      (0 until LFSTWidth).map(j => {
+        val check_position = WireInit(allocPtr(i) + (j+1).U)
+        when(!validVec(i)(check_position)){
+          allocPtr(i) := check_position
+        }
+      })
+    })
+  }
 }
