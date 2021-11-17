@@ -69,14 +69,14 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
     fdiv.io.a := src1
     fdiv.io.b := src2
     fdiv.io.rm := rm
-    fdiv.io.specialIO.in_valid := in_fire && !kill_w
+    fdiv.io.specialIO.in_valid := in_fire && !kill_w && (FPU.ftypes.indexOf(t).U === tag)
     fdiv.io.specialIO.out_ready := out_ready
     fdiv.io.specialIO.isSqrt := fpCtrl.sqrt
     fdiv.io.specialIO.kill := kill_r
     fdiv
   }
 
-  in_ready := Mux1H(outSel, divSqrt.map(_.io.specialIO.in_ready))
+  in_ready := divSqrt.map(_.io.specialIO.in_ready).foldRight(true.B)(_ && _)
   out_valid := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
   io.out.data := Mux1H(outSel, divSqrt.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
