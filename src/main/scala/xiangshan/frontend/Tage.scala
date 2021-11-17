@@ -157,7 +157,6 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val s1_read = bt.io.r.resp.data
 
-  //io.s1_cnt := Cat((0 until numBr reverse).map(i => s1_read(i)(1,0))).asUInt()
   io.s1_cnt := bt.io.r.resp.data
 
   // Update logic
@@ -165,22 +164,23 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val update = io.update.bits
 
   val u_idx = bimAddr.getIdx(update.pc)
+  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i)/* && update_mask(i)*/))
 
-  // Bypass logic
-  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, UInt(2.W)))))
-  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, Bool()))))
-  val wrbypass_idx        = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(BtSize).W))))
-  val wrbypass_enq_ptr    = RegInit(0.U(log2Up(bypassEntries).W))
+  val newCtrs = Wire(Vec(numBr, UInt(2.W)))
 
-  val wrbypass_hits = VecInit((0 until bypassEntries).map(i =>
-    !doing_reset && wrbypass_idx(i) === u_idx))
-  val wrbypass_hit = wrbypass_hits.reduce(_||_)
-  val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
+  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr))
+  wrbypass.io.wen := need_to_update.reduce(_||_)
+  wrbypass.io.write_idx := u_idx
+  wrbypass.io.write_data := newCtrs
+  wrbypass.io.write_way_mask.map(_ := need_to_update)
 
-  val oldCtrs = VecInit((0 until numBr).map(i =>
-    Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i),
-    wrbypass_ctrs(wrbypass_hit_idx)(i), io.update_cnt(i))))
-    //wrbypass_ctrs(wrbypass_hit_idx)(i), update.meta(2*i+1, 2*i))))
+
+  val oldCtrs =
+    VecInit((0 until numBr).map(i =>
+      Mux(wrbypass.io.hit && wrbypass.io.hit_data(i).valid,
+        wrbypass.io.hit_data(i).bits,
+        io.update_cnt(i))
+    ))
 
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
     val oldSatTaken = old === ((1 << len)-1).U
@@ -191,36 +191,9 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   }
 
   val newTakens = update.preds.br_taken_mask
-  val newCtrs = VecInit((0 until numBr).map(i =>
+  newCtrs := VecInit((0 until numBr).map(i =>
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
-
-//  val update_mask = LowerMask(PriorityEncoderOH(update.preds.taken_mask.asUInt))
-  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i)/* && update_mask(i)*/))
-
-  when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}
-
-  for (i <- 0 until numBr) {
-    when(need_to_update.reduce(_||_)) {
-      when(wrbypass_hit) {
-        when(need_to_update(i)) {
-          wrbypass_ctrs(wrbypass_hit_idx)(i) := newCtrs(i)
-          wrbypass_ctr_valids(wrbypass_hit_idx)(i) := true.B
-        }
-      }.otherwise {
-        wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := false.B
-        when(need_to_update(i)) {
-          wrbypass_ctrs(wrbypass_enq_ptr)(i) := newCtrs(i)
-          wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := true.B
-        }
-      }
-    }
-  }
-
-  when (need_to_update.reduce(_||_) && !wrbypass_hit) {
-    wrbypass_idx(wrbypass_enq_ptr) := u_idx
-    wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypassEntries)-1, 0)
-  }
 
   bt.io.w.apply(
     valid = need_to_update.asUInt.orR || doing_reset,
@@ -243,10 +216,6 @@ class TageTable
     val resp = Output(Valid(new TageResp))
     val update = Input(new TageUpdate)
   })
-  // val folded_hist = Wire(new FoldedHistory(histLen, log2Ceil(nRows), numBr))
-  // // val folded_tag_hist = Wire(new FoldedHistory(histLen, tagLen, numBr))
-  // def zeros = VecInit(false.B, false.B)
-  // folded_hist.update(zeros, zeros, 0.U(64.W), 0.U(6.W))
   // bypass entries for tage update
   val wrBypassEntries = 8
   val phistLen = if (PathHistoryLength > histLen) histLen else PathHistoryLength
@@ -387,59 +356,15 @@ class TageTable
     waymask = true.B
   )
 
-
-  class WrBypass extends XSModule {
-    val io = IO(new Bundle {
-      val wen = Input(Bool())
-      val update_idx  = Input(UInt(log2Ceil(nRows).W))
-      val update_tag  = Input(UInt(tagLen.W))
-      val update_ctr  = Input(UInt(TageCtrBits.W))
-
-      val hit   = Output(Bool())
-      val ctr  = Output(UInt(TageCtrBits.W))
-    })
-
-    val tags        = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(tagLen.W))))
-    val idxes       = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W))))
-    val ctrs        = RegInit(0.U.asTypeOf(Vec(wrBypassEntries, UInt(TageCtrBits.W))))
-    val enq_idx     = RegInit(0.U(log2Ceil(wrBypassEntries).W))
-
-    val hits = VecInit((0 until wrBypassEntries).map { i =>
-      tags(i) === io.update_tag && idxes(i) === io.update_idx
-    })
-
-    val hit = hits.reduce(_||_)
-    val hit_idx = ParallelPriorityEncoder(hits)
-
-    io.hit := hit
-    io.ctr := ctrs(hit_idx)
-
-    when (io.wen) {
-      when (hit) {
-        ctrs(hit_idx) := io.update_ctr
-      }.otherwise {
-        ctrs(enq_idx) := io.update_ctr
-      }
-    }
-
-    when(io.wen && !hit) {
-      tags(enq_idx) := io.update_tag
-      idxes(enq_idx) := io.update_idx
-      enq_idx := (enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1, 0)
-    }
-  }
-
-  val wrbypass = Module(new WrBypass)
+  val wrbypass = Module(new WrBypass(UInt(TageCtrBits.W), wrBypassEntries, log2Ceil(nRows), tagWidth=tagLen))
 
   wrbypass.io.wen := io.update.mask
-  wrbypass.io.update_ctr := update_wdata.ctr
+  wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   update_wdata.ctr   := Mux(io.update.alloc,
-    Mux(io.update.taken, 4.U,
-                          3.U
-    ),
+    Mux(io.update.taken, 4.U, 3.U),
     Mux(wrbypass.io.hit,
-          inc_ctr(wrbypass.io.ctr, io.update.taken),
+          inc_ctr(wrbypass.io.hit_data(0).bits, io.update.taken),
           inc_ctr(io.update.oldCtr, io.update.taken)
     )
   )
@@ -449,8 +374,8 @@ class TageTable
   update_hi_wdata    := io.update.u(1)
   update_lo_wdata    := io.update.u(0)
 
-  wrbypass.io.update_idx := update_idx
-  wrbypass.io.update_tag := update_tag
+  wrbypass.io.write_idx := update_idx
+  wrbypass.io.write_tag.map(_ := update_tag)
 
 
 
@@ -475,11 +400,6 @@ class TageTable
   XSDebug(io.update.mask,
     p"update Table: writing tag:$update_tag, " +
     p"ctr: ${update_wdata.ctr} in idx ${update_idx}\n")
-  val hitCtr = wrbypass.io.ctr
-  XSDebug(wrbypass.io.hit && io.update.mask,
-    // p"bank $i wrbypass hit wridx:$wrbypass_hit_idx, idx:$update_idx, tag: $update_tag, " +
-    p"ctr:$hitCtr, newCtr:${update_wdata.ctr}")
-
   XSDebug(RegNext(io.req.valid) && !req_rhit, "TageTableResp: not hit!\n")
 
   // ------------------------------Debug-------------------------------------
