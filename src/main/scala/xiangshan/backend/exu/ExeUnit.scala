@@ -121,6 +121,7 @@ class JumpExeUnit(implicit p: Parameters) extends ExeUnit(JumpExeUnitCfg)
 class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
+class XsCCExeUnit(implicit p: Parameters) extends ExeUnit(XsCCExeUnitCfg)
 
 object ExeUnitDef {
   def apply(cfg: ExuConfig)(implicit p: Parameters): Definition[ExeUnit] = {
@@ -132,6 +133,7 @@ object ExeUnitDef {
       case FmacExeUnitCfg => Definition(new FmacExeUnit)
       case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
       case StdExeUnitCfg => Definition(new StdExeUnit)
+      case XsCCExeUnitCfg => Definition(new XsCCExeUnit)
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null

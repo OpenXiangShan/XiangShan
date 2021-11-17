@@ -76,6 +76,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           LsDqDeqWidth = 4
         ),
         exuParameters = ExuParameters(
+          XsCCCnt = 1,
           JmpCnt = 1,
           AluCnt = 2,
           MulCnt = 0,

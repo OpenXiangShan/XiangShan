@@ -28,6 +28,7 @@ import xiangshan.mem.StoreDataBundle
 
 case class ExuParameters
 (
+  XsCCCnt: Int,
   JmpCnt: Int,
   AluCnt: Int,
   MulCnt: Int,
@@ -40,7 +41,7 @@ case class ExuParameters
 ) {
   assert(JmpCnt == 1, "Only support 1 JmpUnit now!")
 
-  def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt
+  def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt + XsCCCnt // +1 for XsCC
 
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
 

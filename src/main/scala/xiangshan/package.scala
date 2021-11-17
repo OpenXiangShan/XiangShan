@@ -695,7 +695,7 @@ package object xiangshan {
     latency = UncertainLatency()
   )
 
-  val XsCCExeUnitCfg = ExuConfig("XsCCExeUnit", "Int", Seq(XsCCIFCfg), 2, Int.MaxValue)
+  val XsCCExeUnitCfg = ExuConfig("XsCCExeUnit", "Int", Seq(XsCCIFCfg), 3, Int.MaxValue)
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)

@@ -121,6 +121,7 @@ case class XSCoreParameters
     LsDqDeqWidth = 4
   ),
   exuParameters: ExuParameters = ExuParameters(
+    XsCCCnt = 1,
     JmpCnt = 1,
     AluCnt = 4,
     MulCnt = 0,
@@ -207,7 +208,7 @@ case class XSCoreParameters
   val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(LdExeUnitCfg)
   val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(StaExeUnitCfg) ++ Seq.fill(exuParameters.StuCnt)(StdExeUnitCfg)
 
-  val intExuConfigs = (Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
+  val intExuConfigs = (Seq.fill(exuParameters.XsCCCnt)(XsCCExeUnitCfg) ++ Seq.fill(exuParameters.AluCnt)(AluExeUnitCfg) ++
     Seq.fill(exuParameters.MduCnt)(MulDivExeUnitCfg) :+ JumpCSRExeUnitCfg)
 
   val fpExuConfigs =

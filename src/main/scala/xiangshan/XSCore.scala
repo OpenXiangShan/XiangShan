@@ -92,13 +92,13 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val schedulePorts = Seq(
     // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
     Seq(
-      //(XsCCExeUnitCfg, 1, Seq(), Seq() ),
       (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg, JumpCSRExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
       (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg), Seq()),
       (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
       (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
       (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
       (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
+      ,(XsCCExeUnitCfg, 1, Seq(), Seq() ),  //XsCC
     ),
     Seq(
       (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
@@ -130,7 +130,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
     else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
-  })
+  }) ++ Vector(Seq((6, 0)))// XsCC DpPort
   val lsDpPorts = Seq(
     Seq((3, 0)),
     Seq((3, 1)),
