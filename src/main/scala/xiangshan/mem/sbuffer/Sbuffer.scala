@@ -348,7 +348,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       }
     }
     is(x_drain_sbuffer){
-      when(sbuffer_empty){
+      when(io.flush.valid){
+        sbuffer_state := x_drain_all
+      }.elsewhen(sbuffer_empty){
         sbuffer_state := x_idle
       }
     }
