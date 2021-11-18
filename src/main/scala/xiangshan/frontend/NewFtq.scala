@@ -82,10 +82,18 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
   def getFallThrough() = {
-    getFallThroughAddr(this.startAddr, this.carry, this.pftAddr)
+    def getHigher(pc: UInt) = pc.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits-1)
+    val startHigher = getHigher(startAddr)
+    val nextHigher  = getHigher(nextRangeAddr)
+    val higher = Mux(carry, nextHigher, startHigher)
+    Cat(higher, pftAddr, 0.U(instOffsetBits.W))
   }
   def fallThroughError() = {
-    !carry && startAddr(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits) > pftAddr
+    val startLower        = Cat(0.U(1.W), startAddr(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits))
+    val endLowerwithCarry = Cat(carry,    pftAddr)
+    require(startLower.getWidth == log2Ceil(PredictWidth)+2)
+    require(endLowerwithCarry.getWidth == log2Ceil(PredictWidth)+2)
+    startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     this.startAddr := resp.pc
@@ -586,41 +594,34 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
   ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
 
-  val toIfuReq = Wire(chiselTypeOf(io.toIfu.req))
-
-  toIfuReq.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
-  toIfuReq.bits.ftqIdx := ifuPtr
-  toIfuReq.bits.target := update_target(ifuPtr.value)
-  toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-  toIfuReq.bits.fallThruError  := false.B
+  io.toIfu.req.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  io.toIfu.req.bits.ftqIdx := ifuPtr
+  io.toIfu.req.bits.target := update_target(ifuPtr.value)
+  io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
 
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
-    toIfuReq.bits.fromFtqPcBundle(bpu_in_bypass_buf)
+    io.toIfu.req.bits.fromFtqPcBundle(bpu_in_bypass_buf)
   }.elsewhen (last_cycle_to_ifu_fire) {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
+    io.toIfu.req.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
   }.otherwise {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
+    io.toIfu.req.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
   }
 
-  io.toIfu.req <> toIfuReq
-
   // when fall through is smaller in value than start address, there must be a false hit
-  when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
+  when (io.toIfu.req.bits.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
       !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) &&
       !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
     ) {
       entry_hit_status(ifuPtr.value) := h_false_hit
-      XSDebug(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
+      XSDebug(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.fallThruAddr)
     }
-    io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
-    io.toIfu.req.bits.fallThruError  := true.B
-    XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
+    XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.fallThruAddr)
   }
 
   val ifu_req_should_be_flushed =
-    io.toIfu.flushFromBpu.shouldFlushByStage2(toIfuReq.bits.ftqIdx) ||
-    io.toIfu.flushFromBpu.shouldFlushByStage3(toIfuReq.bits.ftqIdx)
+    io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
+    io.toIfu.flushFromBpu.shouldFlushByStage3(io.toIfu.req.bits.ftqIdx)
 
   when (io.toIfu.req.fire && !ifu_req_should_be_flushed) {
     entry_fetch_status(ifuPtr.value) := f_sent
