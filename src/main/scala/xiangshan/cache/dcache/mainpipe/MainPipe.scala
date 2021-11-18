@@ -499,7 +499,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     (s3_s_amoalu || !amo_wait_amoalu) &&
     io.tag_write.ready &&
     io.wb.ready
-  val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go
+  val s3_replace_can_go = s3_req.replace && io.wb.ready
+  val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go
   val s3_fire = s3_valid && s3_can_go
   when (s2_fire_to_s3) {
     s3_valid := true.B
