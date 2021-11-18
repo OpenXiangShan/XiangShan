@@ -638,7 +638,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val priviledgeModeOH = UIntToOH(priviledgeMode)
   val perfEventscounten = RegInit(0.U.asTypeOf(Vec(nrPerfCnts, Bool())))
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfEvents = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h1040010400".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h2080020800".U(XLEN.W))) ++ 
+                   List.fill(5)(RegInit("h30c0030c00".U(XLEN.W)))
   for (i <-0 until nrPerfCnts) {
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
   }
@@ -659,35 +662,35 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   minstret := minstret + RegNext(csrio.perf.retiredInstr)
-  perfCnts( 0)  := Mux((mcountinhibit( 3) | perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.perf_events(0 ).incr_step)))
-  perfCnts( 1)  := Mux((mcountinhibit( 4) | perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.perf_events(1 ).incr_step)))
-  perfCnts( 2)  := Mux((mcountinhibit( 5) | perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.perf_events(2 ).incr_step)))
-  perfCnts( 3)  := Mux((mcountinhibit( 6) | perfEventscounten( 3)),perfCnts( 3) , (perfCnts( 3) + RegNext(csrio.perf.perfEventsFrontend.perf_events(3 ).incr_step)))
-  perfCnts( 4)  := Mux((mcountinhibit( 7) | perfEventscounten( 4)),perfCnts( 4) , (perfCnts( 4) + RegNext(csrio.perf.perfEventsFrontend.perf_events(4 ).incr_step)))
-  perfCnts( 5)  := Mux((mcountinhibit( 8) | perfEventscounten( 5)),perfCnts( 5) , (perfCnts( 5) + RegNext(csrio.perf.perfEventsFrontend.perf_events(5 ).incr_step)))
-  perfCnts( 6)  := Mux((mcountinhibit( 9) | perfEventscounten( 6)),perfCnts( 6) , (perfCnts( 6) + RegNext(csrio.perf.perfEventsFrontend.perf_events(6 ).incr_step)))
-  perfCnts( 7)  := Mux((mcountinhibit(10) | perfEventscounten( 7)),perfCnts( 7) , (perfCnts( 7) + RegNext(csrio.perf.perfEventsFrontend.perf_events(7 ).incr_step)))
-  perfCnts( 8)  := Mux((mcountinhibit(11) | perfEventscounten( 8)),perfCnts( 8) , (perfCnts( 8) + RegNext(csrio.perf.perfEventsCtrl.perf_events(0 ).incr_step)))
-  perfCnts( 9)  := Mux((mcountinhibit(12) | perfEventscounten( 9)),perfCnts( 9) , (perfCnts( 9) + RegNext(csrio.perf.perfEventsCtrl.perf_events(1 ).incr_step)))
-  perfCnts(10)  := Mux((mcountinhibit(13) | perfEventscounten(10)),perfCnts(10) , (perfCnts(10) + RegNext(csrio.perf.perfEventsCtrl.perf_events(2 ).incr_step)))
-  perfCnts(11)  := Mux((mcountinhibit(14) | perfEventscounten(11)),perfCnts(11) , (perfCnts(11) + RegNext(csrio.perf.perfEventsCtrl.perf_events(3 ).incr_step)))
-  perfCnts(12)  := Mux((mcountinhibit(15) | perfEventscounten(12)),perfCnts(12) , (perfCnts(12) + RegNext(csrio.perf.perfEventsCtrl.perf_events(4 ).incr_step)))
-  perfCnts(13)  := Mux((mcountinhibit(16) | perfEventscounten(13)),perfCnts(13) , (perfCnts(13) + RegNext(csrio.perf.perfEventsCtrl.perf_events(5 ).incr_step)))
-  perfCnts(14)  := Mux((mcountinhibit(17) | perfEventscounten(14)),perfCnts(14) , (perfCnts(14) + RegNext(csrio.perf.perfEventsCtrl.perf_events(6 ).incr_step)))
-  perfCnts(15)  := Mux((mcountinhibit(18) | perfEventscounten(15)),perfCnts(15) , (perfCnts(15) + RegNext(csrio.perf.perfEventsCtrl.perf_events(7 ).incr_step)))
-  perfCnts(16)  := Mux((mcountinhibit(19) | perfEventscounten(16)),perfCnts(16) , (perfCnts(16) + RegNext(csrio.perf.perfEventsLsu.perf_events(0 ).incr_step)))
-  perfCnts(17)  := Mux((mcountinhibit(20) | perfEventscounten(17)),perfCnts(17) , (perfCnts(17) + RegNext(csrio.perf.perfEventsLsu.perf_events(1 ).incr_step)))
-  perfCnts(18)  := Mux((mcountinhibit(21) | perfEventscounten(18)),perfCnts(18) , (perfCnts(18) + RegNext(csrio.perf.perfEventsLsu.perf_events(2 ).incr_step)))
-  perfCnts(19)  := Mux((mcountinhibit(22) | perfEventscounten(19)),perfCnts(19) , (perfCnts(19) + RegNext(csrio.perf.perfEventsLsu.perf_events(3 ).incr_step)))
-  perfCnts(20)  := Mux((mcountinhibit(23) | perfEventscounten(20)),perfCnts(20) , (perfCnts(20) + RegNext(csrio.perf.perfEventsLsu.perf_events(4 ).incr_step)))
-  perfCnts(21)  := Mux((mcountinhibit(24) | perfEventscounten(21)),perfCnts(21) , (perfCnts(21) + RegNext(csrio.perf.perfEventsLsu.perf_events(5 ).incr_step)))
-  perfCnts(22)  := Mux((mcountinhibit(25) | perfEventscounten(22)),perfCnts(22) , (perfCnts(22) + RegNext(csrio.perf.perfEventsLsu.perf_events(6 ).incr_step)))
-  perfCnts(23)  := Mux((mcountinhibit(26) | perfEventscounten(23)),perfCnts(23) , (perfCnts(23) + RegNext(csrio.perf.perfEventsLsu.perf_events(7 ).incr_step)))
-  perfCnts(24)  := Mux((mcountinhibit(27) | perfEventscounten(24)),perfCnts(24) , (perfCnts(24) + RegNext(hpm_hc.io.events_selected.perf_events(0 ).incr_step)))
-  perfCnts(25)  := Mux((mcountinhibit(28) | perfEventscounten(25)),perfCnts(25) , (perfCnts(25) + RegNext(hpm_hc.io.events_selected.perf_events(1 ).incr_step)))
-  perfCnts(26)  := Mux((mcountinhibit(29) | perfEventscounten(26)),perfCnts(26) , (perfCnts(26) + RegNext(hpm_hc.io.events_selected.perf_events(2 ).incr_step)))
-  perfCnts(27)  := Mux((mcountinhibit(30) | perfEventscounten(27)),perfCnts(27) , (perfCnts(27) + RegNext(hpm_hc.io.events_selected.perf_events(3 ).incr_step)))
-  perfCnts(28)  := Mux((mcountinhibit(31) | perfEventscounten(28)),perfCnts(28) , (perfCnts(28) + RegNext(hpm_hc.io.events_selected.perf_events(4 ).incr_step)))
+  perfCnts( 0)  := Mux((mcountinhibit( 3) | !perfEventscounten( 0)),perfCnts( 0) , (perfCnts( 0) + RegNext(csrio.perf.perfEventsFrontend.perf_events(0 ).incr_step)))
+  perfCnts( 1)  := Mux((mcountinhibit( 4) | !perfEventscounten( 1)),perfCnts( 1) , (perfCnts( 1) + RegNext(csrio.perf.perfEventsFrontend.perf_events(1 ).incr_step)))
+  perfCnts( 2)  := Mux((mcountinhibit( 5) | !perfEventscounten( 2)),perfCnts( 2) , (perfCnts( 2) + RegNext(csrio.perf.perfEventsFrontend.perf_events(2 ).incr_step)))
+  perfCnts( 3)  := Mux((mcountinhibit( 6) | !perfEventscounten( 3)),perfCnts( 3) , (perfCnts( 3) + RegNext(csrio.perf.perfEventsFrontend.perf_events(3 ).incr_step)))
+  perfCnts( 4)  := Mux((mcountinhibit( 7) | !perfEventscounten( 4)),perfCnts( 4) , (perfCnts( 4) + RegNext(csrio.perf.perfEventsFrontend.perf_events(4 ).incr_step)))
+  perfCnts( 5)  := Mux((mcountinhibit( 8) | !perfEventscounten( 5)),perfCnts( 5) , (perfCnts( 5) + RegNext(csrio.perf.perfEventsFrontend.perf_events(5 ).incr_step)))
+  perfCnts( 6)  := Mux((mcountinhibit( 9) | !perfEventscounten( 6)),perfCnts( 6) , (perfCnts( 6) + RegNext(csrio.perf.perfEventsFrontend.perf_events(6 ).incr_step)))
+  perfCnts( 7)  := Mux((mcountinhibit(10) | !perfEventscounten( 7)),perfCnts( 7) , (perfCnts( 7) + RegNext(csrio.perf.perfEventsFrontend.perf_events(7 ).incr_step)))
+  perfCnts( 8)  := Mux((mcountinhibit(11) | !perfEventscounten( 8)),perfCnts( 8) , (perfCnts( 8) + RegNext(csrio.perf.perfEventsCtrl.perf_events(0 ).incr_step)))
+  perfCnts( 9)  := Mux((mcountinhibit(12) | !perfEventscounten( 9)),perfCnts( 9) , (perfCnts( 9) + RegNext(csrio.perf.perfEventsCtrl.perf_events(1 ).incr_step)))
+  perfCnts(10)  := Mux((mcountinhibit(13) | !perfEventscounten(10)),perfCnts(10) , (perfCnts(10) + RegNext(csrio.perf.perfEventsCtrl.perf_events(2 ).incr_step)))
+  perfCnts(11)  := Mux((mcountinhibit(14) | !perfEventscounten(11)),perfCnts(11) , (perfCnts(11) + RegNext(csrio.perf.perfEventsCtrl.perf_events(3 ).incr_step)))
+  perfCnts(12)  := Mux((mcountinhibit(15) | !perfEventscounten(12)),perfCnts(12) , (perfCnts(12) + RegNext(csrio.perf.perfEventsCtrl.perf_events(4 ).incr_step)))
+  perfCnts(13)  := Mux((mcountinhibit(16) | !perfEventscounten(13)),perfCnts(13) , (perfCnts(13) + RegNext(csrio.perf.perfEventsCtrl.perf_events(5 ).incr_step)))
+  perfCnts(14)  := Mux((mcountinhibit(17) | !perfEventscounten(14)),perfCnts(14) , (perfCnts(14) + RegNext(csrio.perf.perfEventsCtrl.perf_events(6 ).incr_step)))
+  perfCnts(15)  := Mux((mcountinhibit(18) | !perfEventscounten(15)),perfCnts(15) , (perfCnts(15) + RegNext(csrio.perf.perfEventsCtrl.perf_events(7 ).incr_step)))
+  perfCnts(16)  := Mux((mcountinhibit(19) | !perfEventscounten(16)),perfCnts(16) , (perfCnts(16) + RegNext(csrio.perf.perfEventsLsu.perf_events(0 ).incr_step)))
+  perfCnts(17)  := Mux((mcountinhibit(20) | !perfEventscounten(17)),perfCnts(17) , (perfCnts(17) + RegNext(csrio.perf.perfEventsLsu.perf_events(1 ).incr_step)))
+  perfCnts(18)  := Mux((mcountinhibit(21) | !perfEventscounten(18)),perfCnts(18) , (perfCnts(18) + RegNext(csrio.perf.perfEventsLsu.perf_events(2 ).incr_step)))
+  perfCnts(19)  := Mux((mcountinhibit(22) | !perfEventscounten(19)),perfCnts(19) , (perfCnts(19) + RegNext(csrio.perf.perfEventsLsu.perf_events(3 ).incr_step)))
+  perfCnts(20)  := Mux((mcountinhibit(23) | !perfEventscounten(20)),perfCnts(20) , (perfCnts(20) + RegNext(csrio.perf.perfEventsLsu.perf_events(4 ).incr_step)))
+  perfCnts(21)  := Mux((mcountinhibit(24) | !perfEventscounten(21)),perfCnts(21) , (perfCnts(21) + RegNext(csrio.perf.perfEventsLsu.perf_events(5 ).incr_step)))
+  perfCnts(22)  := Mux((mcountinhibit(25) | !perfEventscounten(22)),perfCnts(22) , (perfCnts(22) + RegNext(csrio.perf.perfEventsLsu.perf_events(6 ).incr_step)))
+  perfCnts(23)  := Mux((mcountinhibit(26) | !perfEventscounten(23)),perfCnts(23) , (perfCnts(23) + RegNext(csrio.perf.perfEventsLsu.perf_events(7 ).incr_step)))
+  perfCnts(24)  := Mux((mcountinhibit(27) | !perfEventscounten(24)),perfCnts(24) , (perfCnts(24) + RegNext(hpm_hc.io.events_selected.perf_events(0 ).incr_step)))
+  perfCnts(25)  := Mux((mcountinhibit(28) | !perfEventscounten(25)),perfCnts(25) , (perfCnts(25) + RegNext(hpm_hc.io.events_selected.perf_events(1 ).incr_step)))
+  perfCnts(26)  := Mux((mcountinhibit(29) | !perfEventscounten(26)),perfCnts(26) , (perfCnts(26) + RegNext(hpm_hc.io.events_selected.perf_events(2 ).incr_step)))
+  perfCnts(27)  := Mux((mcountinhibit(30) | !perfEventscounten(27)),perfCnts(27) , (perfCnts(27) + RegNext(hpm_hc.io.events_selected.perf_events(3 ).incr_step)))
+  perfCnts(28)  := Mux((mcountinhibit(31) | !perfEventscounten(28)),perfCnts(28) , (perfCnts(28) + RegNext(hpm_hc.io.events_selected.perf_events(4 ).incr_step)))
 
   // CSR reg map
   val basicPrivMapping = Map(
@@ -775,35 +778,35 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
-    MaskedRegMap(Mhpmevent3 , perfEvents( 0)),
-    MaskedRegMap(Mhpmevent4 , perfEvents( 1)),
-    MaskedRegMap(Mhpmevent5 , perfEvents( 2)),
-    MaskedRegMap(Mhpmevent6 , perfEvents( 3)),
-    MaskedRegMap(Mhpmevent7 , perfEvents( 4)),
-    MaskedRegMap(Mhpmevent8 , perfEvents( 5)),
-    MaskedRegMap(Mhpmevent9 , perfEvents( 6)),
-    MaskedRegMap(Mhpmevent10, perfEvents( 7)),
-    MaskedRegMap(Mhpmevent11, perfEvents( 8)),
-    MaskedRegMap(Mhpmevent12, perfEvents( 9)),
-    MaskedRegMap(Mhpmevent13, perfEvents(10)),
-    MaskedRegMap(Mhpmevent14, perfEvents(11)),
-    MaskedRegMap(Mhpmevent15, perfEvents(12)),
-    MaskedRegMap(Mhpmevent16, perfEvents(13)),
-    MaskedRegMap(Mhpmevent17, perfEvents(14)),
-    MaskedRegMap(Mhpmevent18, perfEvents(15)),
-    MaskedRegMap(Mhpmevent19, perfEvents(16)),
-    MaskedRegMap(Mhpmevent20, perfEvents(17)),
-    MaskedRegMap(Mhpmevent21, perfEvents(18)),
-    MaskedRegMap(Mhpmevent22, perfEvents(19)),
-    MaskedRegMap(Mhpmevent23, perfEvents(20)),
-    MaskedRegMap(Mhpmevent24, perfEvents(21)),
-    MaskedRegMap(Mhpmevent25, perfEvents(22)),
-    MaskedRegMap(Mhpmevent26, perfEvents(23)),
-    MaskedRegMap(Mhpmevent27, perfEvents(24)),
-    MaskedRegMap(Mhpmevent28, perfEvents(25)),
-    MaskedRegMap(Mhpmevent29, perfEvents(26)),
-    MaskedRegMap(Mhpmevent30, perfEvents(27)),
-    MaskedRegMap(Mhpmevent31, perfEvents(28)),
+    MaskedRegMap(Mhpmevent3 , perfEvents( 0), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent4 , perfEvents( 1), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent5 , perfEvents( 2), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent6 , perfEvents( 3), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent7 , perfEvents( 4), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent8 , perfEvents( 5), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent9 , perfEvents( 6), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent10, perfEvents( 7), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent11, perfEvents( 8), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent12, perfEvents( 9), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent13, perfEvents(10), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent14, perfEvents(11), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent15, perfEvents(12), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent16, perfEvents(13), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent17, perfEvents(14), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent18, perfEvents(15), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent19, perfEvents(16), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent20, perfEvents(17), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent21, perfEvents(18), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent22, perfEvents(19), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent23, perfEvents(20), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent24, perfEvents(21), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent25, perfEvents(22), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent26, perfEvents(23), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent27, perfEvents(24), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent28, perfEvents(25), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent29, perfEvents(26), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent30, perfEvents(27), "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(Mhpmevent31, perfEvents(28), "hf87fff3fcff3fcff".U(XLEN.W)),
     MaskedRegMap(Mhpmcounter3 , perfCnts( 0)),
     MaskedRegMap(Mhpmcounter4 , perfCnts( 1)),
     MaskedRegMap(Mhpmcounter5 , perfCnts( 2)),
