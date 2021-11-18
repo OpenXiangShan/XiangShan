@@ -436,7 +436,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   amoalu.io.rhs  := s3_req.amo_data
 
   // merge amo write data
-  val amo_bitmask = FillInterleaved(8, s3_req.amo_mask)
+//  val amo_bitmask = FillInterleaved(8, s3_req.amo_mask)
   val s3_amo_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   val s3_sc_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {
@@ -448,7 +448,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
       0.U(wordBytes.W)
     )
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
-    s3_sc_data_merged(i) := amo_bitmask & s3_req.amo_data | ~amo_bitmask & old_data
+//    s3_sc_data_merged(i) := amo_bitmask & s3_req.amo_data | ~amo_bitmask & old_data
+    s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
+      Mux(s3_req.word_idx === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
+    )
   }
   val s3_amo_data_merged_reg = RegEnable(s3_amo_data_merged, do_amoalu)
   when(do_amoalu){

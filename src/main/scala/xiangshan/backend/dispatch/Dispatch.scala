@@ -40,6 +40,7 @@ case class DispatchParameters
 // read rob and enqueue
 class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val recv = Output(Vec(RenameWidth, Bool()))
@@ -169,7 +170,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
       val runahead = Module(new DifftestRunaheadEvent)
       runahead.io.clock         := clock
-      runahead.io.coreid        := hardId.U
+      runahead.io.coreid        := io.hartId
       runahead.io.index         := i.U
       runahead.io.valid         := io.fromRename(i).fire()
       runahead.io.branch        := isBranch(i) // setup checkpoint for branch
@@ -188,7 +189,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasExceptionNO {
 
       val mempred_check = Module(new DifftestRunaheadMemdepPred)
       mempred_check.io.clock     := clock
-      mempred_check.io.coreid    := hardId.U
+      mempred_check.io.coreid    := io.hartId
       mempred_check.io.index     := i.U
       mempred_check.io.valid     := io.fromRename(i).fire() && isLs(i)
       mempred_check.io.is_load   := !isStore(i) && isLs(i)

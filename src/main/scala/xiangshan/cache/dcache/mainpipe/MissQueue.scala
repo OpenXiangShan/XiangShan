@@ -416,6 +416,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
 class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(8.W))
     val req = Flipped(DecoupledIO(new MissReq))
     val refill_to_ldq = ValidIO(new Refill)
 
@@ -559,7 +560,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestRefillEvent)
     difftest.io.clock := clock
-    difftest.io.coreid := hardId.U
+    difftest.io.coreid := io.hartId
     difftest.io.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
     difftest.io.addr := io.refill_to_ldq.bits.addr
     difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
