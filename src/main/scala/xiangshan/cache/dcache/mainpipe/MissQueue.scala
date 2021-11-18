@@ -457,15 +457,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   val merge = Cat(secondary_ready_vec).orR
-  // val merge_idx = PriorityEncoder(secondary_ready_vec)
-
   val reject = Cat(secondary_reject_vec).orR
-
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
-  // val alloc_idx = PriorityEncoder(primary_ready_vec)
-
   val accept = alloc || merge
-  // val entry_idx = Mux(alloc, alloc_idx, merge_idx)
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
