@@ -18,7 +18,6 @@ package xiangshan.cache
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.internal.firrtl.Port
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
@@ -56,6 +55,10 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val amo_data   = UInt(DataBits.W)
   val amo_mask   = UInt((DataBits / 8).W)
 
+  // replace
+  val replace = Bool()
+  val replace_way_en = UInt(DCacheWays.W)
+
   val id = UInt(reqIdWidth.W)
 
   def isLoad: Bool = source === LOAD_SOURCE.U
@@ -75,6 +78,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.vaddr := store.vaddr
     req.store_data := store.data
     req.store_mask := store.mask
+    req.replace := false.B
     req.id := store.id
     req
   }
@@ -97,6 +101,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new AtomicsResp)
+    // replace
+    val replace_req = Flipped(DecoupledIO(new MainPipeReq))
+    val replace_resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
 
@@ -144,14 +151,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   store_req.bits := (new MainPipeReq).convertStoreReq(io.store_req.bits)
   store_req.valid := io.store_req.valid
   io.store_req.ready := store_req.ready
-  val req_arb = Module(new Arbiter(new MainPipeReq, 3))
-  req_arb.io.in(0) <> store_req
-  req_arb.io.in(1) <> io.probe_req
-  req_arb.io.in(2) <> io.atomic_req
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
-  req <> req_arb.io.out
+  arbiter(
+    in = Seq(
+      store_req,
+      io.probe_req,
+      io.atomic_req,
+      io.replace_req
+    ),
+    out = req,
+    name = Some("main_pipe_req")
+  )
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
   val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
@@ -169,11 +181,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val probe_need_data = s0_req.probe
   val amo_need_data = !s0_req.probe && s0_req.isAMO
   val miss_need_data = s0_req.miss
+  val replace_need_data = s0_req.replace
 
-  val banked_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data
+  val banked_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data || replace_need_data
 
   val s0_banked_rmask = Mux(store_need_data, banked_store_rmask,
-    Mux(probe_need_data || amo_need_data || miss_need_data,
+    Mux(probe_need_data || amo_need_data || miss_need_data || replace_need_data,
       banked_full_rmask,
       banked_none_rmask
     ))
@@ -226,9 +239,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
   val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
-  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
-  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
-  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  val s1_way_en = Mux(s1_req.replace, s1_req.replace_way_en, Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way))
+  val s1_tag = Mux(s1_req.replace, get_tag(s1_req.addr), Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag))
+  val s1_coh = Mux(
+    s1_req.replace,
+    Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
+    Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  )
+  val s1_replace_nothing = s1_req.replace && s1_coh.state === ClientStates.Nothing
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -253,13 +271,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   s2_s0_set_conlict := s2_valid && s0_idx === s2_idx
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
-  val s2_can_go_to_s3 = (s2_req.probe || s2_req.miss || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
-  val s2_can_go_to_mq = !s2_req.probe && !s2_req.miss && (s2_req.isStore || s2_req.isAMO) && !s2_hit
+  val s2_can_go_to_s3 = (s2_req.replace || s2_req.probe || s2_req.miss || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
+  val s2_can_go_to_mq = !s2_req.replace && !s2_req.probe && !s2_req.miss && (s2_req.isStore || s2_req.isAMO) && !s2_hit
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq)))
   val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq
   val s2_fire = s2_valid && s2_can_go
   val s2_fire_to_s3 = s2_valid && s2_can_go_to_s3
-  when (s1_fire) {
+  when (s1_fire && !s1_replace_nothing) {
     s2_valid := true.B
   }.elsewhen (s2_fire) {
     s2_valid := false.B
@@ -319,7 +337,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val store_update_meta = s3_req.isStore && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh
   val amo_update_meta = s3_req.isAMO && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh
   val amo_wait_amoalu = s3_req.isAMO && s3_req.cmd =/= M_XLR && s3_req.cmd =/= M_XSC
-  val update_meta = miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta
+  val update_meta = (miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta) && !s3_req.replace
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
@@ -460,13 +478,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   val miss_wb = s3_req.miss && s3_need_replacement && s3_coh.state =/= ClientStates.Nothing
   val probe_wb = s3_req.probe
-  val need_wb = miss_wb || probe_wb
+  val replace_wb = s3_req.replace
+  val need_wb = miss_wb || probe_wb || replace_wb
 
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
-  val writeback_param = Mux(miss_wb, miss_shrink_param, probe_shrink_param)
+  val writeback_param = Mux(probe_wb, probe_shrink_param, miss_shrink_param)
   val writeback_data = if (dcacheParameters.alwaysReleaseData) {
     s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
-      s3_coh === ClientStates.Dirty || miss_wb && s3_coh.state =/= ClientStates.Nothing
+      s3_coh === ClientStates.Dirty || (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
   } else {
     s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
   }
@@ -499,9 +518,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   io.meta_read.valid := req.valid && s1_ready && !set_conflict
   io.meta_read.bits.idx := get_idx(s0_req.vaddr)
-  io.meta_read.bits.way_en := ~0.U(nWays.W)
+  io.meta_read.bits.way_en := Mux(s0_req.replace, s0_req.replace_way_en, ~0.U(nWays.W))
 
-  io.tag_read.valid := req.valid && s1_ready && !set_conflict
+  io.tag_read.valid := req.valid && s1_ready && !set_conflict && !s0_req.replace
   io.tag_read.bits.idx := get_idx(s0_req.vaddr)
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
@@ -572,6 +591,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
 
+  io.replace_resp.valid := s1_fire && s1_req.replace
+  io.replace_resp.bits := s1_req.miss_id
+
   io.meta_write.valid := s3_fire && update_meta
   io.meta_write.bits.idx := s3_idx
   io.meta_write.bits.way_en := s3_way_en
@@ -596,8 +618,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
       s3_store_data_merged
     )
   )
+  assert(RegNext(!io.meta_write.valid || !s3_req.replace))
+  assert(RegNext(!io.tag_write.valid || !s3_req.replace))
+  assert(RegNext(!io.data_write.valid || !s3_req.replace))
 
   io.wb.valid := s3_valid && (
+    // replace
+    s3_req.replace ||
     // probe can go to wbq
     s3_req.probe && (io.meta_write.ready || !probe_update_meta) ||
       // amo miss can go to wbq
@@ -608,7 +635,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     ) && need_wb
   io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
   io.wb.bits.param := writeback_param
-  io.wb.bits.voluntary := s3_req.miss
+  io.wb.bits.voluntary := s3_req.miss || s3_req.replace
   io.wb.bits.hasData := writeback_data
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
   io.wb.bits.data := s3_data.asUInt()
