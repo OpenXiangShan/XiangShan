@@ -95,11 +95,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_reset_sink = BundleBridgeSink(Some(() => Bool()))
 
   if (coreParams.dcacheParametersOpt.nonEmpty) {
-    misc.l1d_logger := core.memBlock.dcache.clientNode
+    misc.l1d_logger :=
+      TLBuffer.chainNode(1, Some("L1D_to_L2_buffer")) :=
+      core.memBlock.dcache.clientNode
   }
   misc.busPMU :=
     TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
-    TLBuffer.chainNode(1, Some("L1_to_L2_buffer")) :=
+    TLBuffer.chainNode(1, Some("L1I_to_L2_buffer")) :=
     core.frontend.icache.clientNode
 
   if (!coreParams.softPTW) {
