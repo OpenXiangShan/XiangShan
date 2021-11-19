@@ -48,6 +48,16 @@ class MissReq(implicit p: Parameters) extends DCacheBundle {
   val replace_tag = UInt(tagBits.W)
   val id = UInt(reqIdWidth.W)
 
+  // For now, miss queue entry req is actually valid when req.valid && !cancel
+  // * req.valid is fast to generate
+  // * cancel is slow to generate, it will not be used until the last moment
+  //
+  // cancel may come from the following sources:
+  // 1. miss req blocked by writeback queue: 
+  //      a writeback req of the same address is in progress
+  // 2. pmp check failed
+  val cancel = Bool() // cancel is slow to generate, it will cancel missreq.valid
+
   def isLoad = source === LOAD_SOURCE.U
   def isStore = source === STORE_SOURCE.U
   def isAMO = source === AMO_SOURCE.U
@@ -59,6 +69,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     // MSHR ID
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
+    val req    = Flipped(ValidIO(new MissReq))
     // allocate this entry for new req
     val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
@@ -67,9 +78,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val secondary_ready = Output(Bool())
     // this entry is busy and it can not merge the new req
     val secondary_reject = Output(Bool())
-    val req    = Flipped(ValidIO(new MissReq))
+
     val refill_to_ldq = ValidIO(new Refill)
-    // TODO: bypass refill data to load pipe
 
     // bus
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -128,7 +138,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   val grant_beats = RegInit(0.U(beatBits.W))
 
-  when (io.req.valid && io.primary_ready && io.primary_valid) {
+  when (release_entry && req_valid) {
+    req_valid := false.B
+  }
+
+  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
+  when (primary_fire) {
     req_valid := true.B
     req := io.req.bits
     req.addr := get_block_addr(io.req.bits.addr)
@@ -155,11 +170,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     should_refill_data_reg := io.req.bits.isLoad
     grant_beats := 0.U
-  }.elsewhen (release_entry) {
-    req_valid := false.B
   }
 
-  when (io.req.valid && io.secondary_ready) {
+  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
+  when (secondary_fire) {
     assert(io.req.bits.req_coh.state <= req.req_coh.state)
     assert(!(io.req.bits.isAMO || req.isAMO))
     // use the most uptodate meta
@@ -386,24 +400,24 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
   io.debug_early_replace.bits.tag := req.replace_tag
 
-  XSPerfAccumulate("miss_req_primary", io.req.valid && io.primary_ready && io.primary_valid)
-  XSPerfAccumulate("miss_req_merged", io.req.valid && io.secondary_ready)
+  XSPerfAccumulate("miss_req_primary", primary_fire)
+  XSPerfAccumulate("miss_req_merged", secondary_fire)
   XSPerfAccumulate("load_miss_penalty_to_use",
     should_refill_data &&
-      BoolStopWatch(io.req.valid && io.primary_ready && io.primary_valid, io.refill_to_ldq.valid, true)
+      BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
   )
   XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire(), io.main_pipe_resp))
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
   XSPerfAccumulate("penalty_from_grant_to_refill", !s_refill && w_grantlast)
-  XSPerfAccumulate("soft_prefetch_number", io.req.valid && io.primary_ready && io.primary_valid && io.req.bits.source === SOFT_PREFETCH.U)
+  XSPerfAccumulate("soft_prefetch_number", primary_fire && io.req.bits.source === SOFT_PREFETCH.U)
 
-  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(io.req.valid && io.primary_ready && io.primary_valid), release_entry)
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(primary_fire), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
 
-  val load_miss_begin = io.req.valid && io.primary_ready && io.primary_valid && io.req.bits.isLoad
+  val load_miss_begin = primary_fire && io.req.bits.isLoad
   val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
   val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
@@ -457,7 +471,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   val merge = Cat(secondary_ready_vec).orR
-  val reject = Cat(secondary_reject_vec).orR
+  val reject = Cat(secondary_reject_vec).orR || io.req.bits.cancel
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
 

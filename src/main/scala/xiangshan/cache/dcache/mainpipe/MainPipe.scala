@@ -88,7 +88,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     // probe queue
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
     // store miss go to miss queue
-    val miss = DecoupledIO(new MissReq)
+    val miss_req = DecoupledIO(new MissReq)
     // store buffer
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
@@ -230,6 +230,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
   val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
 
+  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
+  val s1_hit = s1_tag_match && s1_has_permission
+  val s1_pregen_can_go_to_mq = !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO) && !s1_hit
+
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
@@ -254,7 +258,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_can_go_to_s3 = (s2_req.probe || s2_req.miss || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
-  val s2_can_go_to_mq = !s2_req.probe && !s2_req.miss && (s2_req.isStore || s2_req.isAMO) && !s2_hit
+  // val s2_can_go_to_mq = !s2_req.probe && !s2_req.miss && (s2_req.isStore || s2_req.isAMO) && !s2_hit
+  val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq)))
   val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq
   val s2_fire = s2_valid && s2_can_go
@@ -265,7 +270,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     s2_valid := false.B
   }
   s2_ready := !s2_valid || s2_can_go
-  val replay = !io.miss.ready
+  val replay = !io.miss_req.ready
 
   val data_resp = Wire(io.data_resp.cloneType)
   data_resp := Mux(RegNext(s1_fire), io.data_resp, RegNext(data_resp))
@@ -507,23 +512,24 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.data_read.bits.way_en := s1_way_en
   io.data_read.bits.addr := s1_req.vaddr
 
-  io.miss.valid := s2_valid && s2_can_go_to_mq
-  val miss = io.miss.bits
-  miss := DontCare
-  miss.source := s2_req.source
-  miss.cmd := s2_req.cmd
-  miss.addr := s2_req.addr
-  miss.vaddr := s2_req.vaddr
-  miss.way_en := s2_way_en
-  miss.store_data := s2_req.store_data
-  miss.store_mask := s2_req.store_mask
-  miss.word_idx := s2_req.word_idx
-  miss.amo_data := s2_req.amo_data
-  miss.amo_mask := s2_req.amo_mask
-  miss.req_coh := s2_hit_coh
-  miss.replace_coh := s2_repl_coh
-  miss.replace_tag := s2_repl_tag
-  miss.id := s2_req.id
+  io.miss_req.valid := s2_valid && s2_can_go_to_mq
+  val miss_req = io.miss_req.bits
+  miss_req := DontCare
+  miss_req.source := s2_req.source
+  miss_req.cmd := s2_req.cmd
+  miss_req.addr := s2_req.addr
+  miss_req.vaddr := s2_req.vaddr
+  miss_req.way_en := s2_way_en
+  miss_req.store_data := s2_req.store_data
+  miss_req.store_mask := s2_req.store_mask
+  miss_req.word_idx := s2_req.word_idx
+  miss_req.amo_data := s2_req.amo_data
+  miss_req.amo_mask := s2_req.amo_mask
+  miss_req.req_coh := s2_hit_coh
+  miss_req.replace_coh := s2_repl_coh
+  miss_req.replace_tag := s2_repl_tag
+  miss_req.id := s2_req.id
+  miss_req.cancel := false.B
 
   io.store_replay_resp.valid := s2_valid && s2_can_go_to_mq && replay && s2_req.isStore
   io.store_replay_resp.bits.data := DontCare

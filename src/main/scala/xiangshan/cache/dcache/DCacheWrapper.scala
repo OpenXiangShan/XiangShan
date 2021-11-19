@@ -474,13 +474,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Request
   val missReqArb = Module(new Arbiter(new MissReq, MissReqPortCount))
 
-  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
+  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
 
-  block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
+  // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
+  missReqArb.io.out <> missQueue.io.req
+  when(wb.io.block_miss_req) {
+    missQueue.io.req.bits.cancel := true.B
+    missReqArb.io.out.ready := false.B
+  }
 
   // refill to load queue
   io.lsu.lsq <> missQueue.io.refill_to_ldq
