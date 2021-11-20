@@ -55,6 +55,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val hartid =  Input(UInt(3.W))
   })
 
   //decouped-frontend modules
@@ -122,6 +123,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
   icache.io.csr.update <> io.csrUpdate
+  icache.io.hartid <> io.hartid
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in

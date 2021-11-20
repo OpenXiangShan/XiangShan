@@ -217,6 +217,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // distributed csr write
   val distributedUpdate = Flipped(new DistributedCSRUpdateReq)
+  // To Dcache, Icache, PTW
+  val mhartid = Output(UInt(XLEN.W))
 }
 
 class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMPMethod with PMAMethod with HasTriggerConst
@@ -460,6 +462,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), 0.U)
+  csrio.mhartid := mhartid + 1.U               // Luoshan: for test
 
   // mstatus Value Table
   // | sd   |
