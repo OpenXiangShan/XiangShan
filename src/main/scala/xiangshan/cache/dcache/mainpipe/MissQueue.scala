@@ -25,7 +25,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey, DsidKey}
 
 class MissReq(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -441,8 +441,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     }))
+    val hartid = Input(UInt(3.W))
   })
-  
+
   // 128KBL1: FIXME: provide vaddr for l2
 
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge)))
@@ -509,6 +510,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   TLArbiter.lowest(edge, io.mem_acquire, entries.map(_.io.mem_acquire):_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
+  io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
 
   rrArbiter(entries.map(_.io.refill_pipe_req), io.refill_pipe_req, Some("refill_pipe_req"))
   rrArbiter(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))

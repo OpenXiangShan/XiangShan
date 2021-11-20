@@ -91,12 +91,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val lqFull = Output(Bool())
       val dcacheMSHRFull = Output(Bool())
     }
+    val hartid =  Input(UInt(3.W))
   })
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
   dcache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
+  dcache.io.hartid <> io.hartid
   io.csrUpdate <> dcache.io.csr.update
   io.error <> RegNext(RegNext(dcache.io.error))
 

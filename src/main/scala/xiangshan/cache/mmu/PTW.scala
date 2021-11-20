@@ -28,6 +28,8 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
+import huancun.{DsidField, DsidKey}
+import freechips.rocketchip.util.BundleFieldBase
 
 class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
 
@@ -35,8 +37,10 @@ class PTW()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    ))
-  )))
+    )),
+    requestFields = Seq(DsidField(3))
+  )
+  ))
 
   lazy val module = new PTWImp(this)
 }
@@ -200,6 +204,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     lgSize     = log2Up(l2tlbParams.blockBytes).U
   )._2
   mem.a.bits := memRead
+  mem.a.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
   mem.a.valid := mem_arb.io.out.valid && !flush
   mem.d.ready := true.B
   // mem -> data buffer

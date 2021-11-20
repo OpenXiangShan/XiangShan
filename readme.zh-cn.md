@@ -94,3 +94,10 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 | FPU                | [Berkeley hardfloat](https://github.com/ucb-bar/berkeley-hardfloat) | 我们使用了 Barkeley-hardfloat 作为浮点运算器并为之设计了 SRT-4 除法/开方运算单元。此外我们分割了 FMA 流水线以优化时序 |
 
 我们深深地感谢来自开源社区的支持，我们也鼓励其他开源项目在[木兰宽松许可证](LICENSE)的范围下复用我们的代码。:)
+
+export NOOP_HOME="/home/cailuoshan/OpenXiangShan/XiangShan"
+export NEMU_HOME="/home/cailuoshan/OpenXiangShan/NEMU"
+export AM_HOME="/home/cailuoshan/OpenXiangShan/nexus-am"
+make verilog
+make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
+./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so

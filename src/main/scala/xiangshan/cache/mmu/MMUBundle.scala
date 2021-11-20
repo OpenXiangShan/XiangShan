@@ -677,6 +677,7 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
     val distribute_csr = Flipped(new DistributedCSRIO)
   }
   val perfEvents      = Output(new PerfEventsBundle(numPCntPtw))
+  val hartid =  Input(UInt(3.W))
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

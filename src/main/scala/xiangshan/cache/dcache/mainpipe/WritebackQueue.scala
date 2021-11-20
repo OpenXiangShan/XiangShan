@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle, PipelineConnect}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
-import huancun.{DirtyField, DirtyKey}
+import huancun.{DirtyField, DirtyKey,DsidKey}
 
 class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
@@ -242,6 +242,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val miss_req  = Flipped(Valid(UInt()))
     val block_miss_req  = Output(Bool())
+    val hartid = Input(UInt(3.W))
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -292,6 +293,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
+  io.mem_release.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
 
   require(isPow2(cfg.nMissEntries))
   val grant_source = io.mem_grant.bits.source

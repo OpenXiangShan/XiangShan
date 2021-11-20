@@ -24,6 +24,8 @@ import freechips.rocketchip.tilelink._
 import xiangshan._
 import xiangshan.cache._
 import utils._
+import freechips.rocketchip.util.BundleFieldBase
+import huancun.{DsidField, DsidKey}
 
 case class ICacheParameters(
     nSets: Int = 256,
@@ -41,6 +43,7 @@ case class ICacheParameters(
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
   def replacement = ReplacementPolicy.fromString(replacer,nWays,nSets)
+  val reqFields: Seq[BundleFieldBase] = Seq(DsidField(3))
 }
 
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst {
@@ -547,7 +550,7 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
 
     val flush       = Input(Bool())
     val fencei       = Input(Bool())
-
+    val hartid      = Input(UInt(3.W))
   })
 
   // assign default values to output signals
@@ -594,6 +597,7 @@ class ICacheMissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMis
   }
 
   TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
+  io.mem_acquire.bits.user.lift(DsidKey).foreach(_ := io.hartid)    // add hartid to tilelink
 
   io.meta_write     <> meta_write_arb.io.out
   io.data_write     <> refill_arb.io.out
@@ -619,6 +623,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val missQueue   = new ICacheMissBundle
   val fencei      = Input(Bool())
   val csr         = new L1CacheToCsrIO
+  val hartid      = Input(UInt(3.W))
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -627,7 +632,8 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     Seq(TLMasterParameters.v1(
       name = "icache",
       sourceId = IdRange(0, cacheParams.nMissEntries)
-    ))
+    )),
+    requestFields = cacheParams.reqFields
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -663,6 +669,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   metaArray.io.fencei := io.fencei
   bus.a <> missQueue.io.mem_acquire
   missQueue.io.mem_grant      <> bus.d
+  missQueue.io.hartid <> io.hartid   // add hartid to tilelinkA by missqueue
 
   bus.b.ready := false.B
   bus.c.valid := false.B
@@ -675,7 +682,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   cacheOpDecoder.io.csr <> io.csr
   dataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
   metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
-  cacheOpDecoder.io.cache.resp.valid := 
+  cacheOpDecoder.io.cache.resp.valid :=
     dataArray.io.cacheOp.resp.valid ||
     metaArray.io.cacheOp.resp.valid
   cacheOpDecoder.io.cache.resp.bits := Mux1H(List(

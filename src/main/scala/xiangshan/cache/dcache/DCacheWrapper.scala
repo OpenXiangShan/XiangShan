@@ -26,7 +26,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DsidField, DirtyField}
 import scala.math.max
 
 // DCache specific parameters
@@ -53,7 +53,8 @@ case class DCacheParameters
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
-    PreferCacheField()
+    PreferCacheField(),
+    DsidField(3)
   ) ++ aliasBitsOpt.map(AliasField)
   val echoFields: Seq[BundleFieldBase] = Seq(DirtyField())
 
@@ -325,6 +326,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
+  val hartid = Input(UInt(3.W))
 }
 
 
@@ -489,6 +491,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
+  missQueue.io.hartid <> io.hartid   // add hartid to tilelinkA by missqueue
 
   missQueue.io.main_pipe_resp := mainPipe.io.atomic_resp
 
@@ -564,6 +567,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wb.io.release_update := mainPipe.io.release_update
   io.lsu.release.valid := bus.c.fire()
   io.lsu.release.bits.paddr := bus.c.bits.address
+  wb.io.hartid <> io.hartid      // add hartid to tilelinkC by writebackqueue
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B

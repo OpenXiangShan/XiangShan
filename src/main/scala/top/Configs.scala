@@ -217,7 +217,7 @@ class WithNKBL2
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
+        reqField = Seq(PreferCacheField(),DsidField(3)),
         echoField = Seq(DirtyField()),
         prefetch = Some(huancun.prefetch.BOPParameters()),
         enablePerf = true
