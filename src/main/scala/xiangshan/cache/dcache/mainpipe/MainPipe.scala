@@ -592,8 +592,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
 
-  io.replace_resp.valid := s1_fire && s1_req.replace
-  io.replace_resp.bits := s1_req.miss_id
+  io.replace_resp.valid := s3_fire && s3_req.replace
+  io.replace_resp.bits := s3_req.miss_id
 
   io.meta_write.valid := s3_fire && update_meta
   io.meta_write.bits.idx := s3_idx
