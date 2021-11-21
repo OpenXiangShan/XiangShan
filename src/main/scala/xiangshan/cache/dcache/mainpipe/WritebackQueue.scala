@@ -60,6 +60,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
     // this entry is busy, but it can merge the new req
+    val secondary_valid = Input(Bool())
     val secondary_ready = Output(Bool())
     val req = Flipped(DecoupledIO(new WritebackReq))
 
@@ -127,11 +128,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // --------------------------------------------------------------------------------
   // s_sleep: wait for refill pipe to inform me that I can keep releasing
-  val merge = io.req.valid && io.secondary_ready
+  val merge = io.secondary_valid && io.secondary_ready
   when (state === s_sleep) {
     assert(remain === 0.U)
     // There shouldn't be a new Release with the same addr in sleep state
-    assert(!(io.req.valid && io.secondary_ready && io.req.bits.voluntary))
+    assert(!(merge && io.req.bits.voluntary))
 
     val update = io.release_update.valid && io.release_update.bits.addr === req.addr
     when (update) {
@@ -428,6 +429,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.primary_valid := alloc &&
         !former_primary_ready &&
         entry.io.primary_ready
+      entry.io.secondary_valid := io.req.valid && !accept
 
       entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
       entry.io.mem_grant.bits  := io.mem_grant.bits
