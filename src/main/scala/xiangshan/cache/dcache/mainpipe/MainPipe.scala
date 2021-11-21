@@ -656,10 +656,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   io.status.s1.valid := s1_valid
   io.status.s1.bits.set := s1_idx
   io.status.s1.bits.way_en := s1_way_en
-  io.status.s2.valid := s2_valid
+  io.status.s2.valid := s2_valid && !s2_req.replace
   io.status.s2.bits.set := s2_idx
   io.status.s2.bits.way_en := s2_way_en
-  io.status.s3.valid := s3_valid
+  io.status.s3.valid := s3_valid && !s3_req.replace
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
 
