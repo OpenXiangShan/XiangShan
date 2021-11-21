@@ -280,9 +280,9 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   // when decode, send fold pc to mdp
   for (i <- 0 until DecodeWidth) {
     val mdp_foldpc = Mux(
-      rename.io.in(i).valid && rename.io.in(i).ready,
-      rename.io.in(i).bits.cf.foldpc,
-      decode.io.in(i).bits.foldpc
+      decode.io.out(i).fire(),
+      decode.io.in(i).bits.foldpc,
+      rename.io.in(i).bits.cf.foldpc
     )
     ssit.io.raddr(i) := mdp_foldpc
     waittable.io.raddr(i) := mdp_foldpc
