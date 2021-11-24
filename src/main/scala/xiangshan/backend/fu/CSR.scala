@@ -639,22 +639,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val perfEventscounten = RegInit(0.U.asTypeOf(Vec(nrPerfCnts, Bool())))
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h1040010400".U(XLEN.W))) ++ 
-                   List.fill(8)(RegInit("h2080020800".U(XLEN.W))) ++ 
-                   List.fill(5)(RegInit("h30c0030c00".U(XLEN.W)))
+                   List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++ 
+                   List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
+                   List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
   for (i <-0 until nrPerfCnts) {
     perfEventscounten(i) := (Cat(perfEvents(i)(62),perfEvents(i)(61),(perfEvents(i)(61,60))) & priviledgeModeOH).orR
   }
 
   val hpmEvents = Wire(new PerfEventsBundle(numPCntHc * coreParams.L2NBanks))
-  val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := csrio.customCtrl.distribute_csr
   for(i <- 0 until numPCntHc * coreParams.L2NBanks) {
     hpmEvents.perf_events(i).incr_step := csrio.perf.perfEventsHc(i)
   }
 
   val hpm_hc = Module(new HPerfmonitor(numPCntHc * coreParams.L2NBanks,numCSRPCntHc))
-  val csrevents = pfevent.io.hpmevent.slice(24,29)
+  val csrevents = perfEvents.slice(24,29)
   hpm_hc.io.hpm_event := csrevents
   hpm_hc.io.events_sets := hpmEvents
   val mcountinhibit = RegInit(0.U(XLEN.W))
@@ -749,72 +747,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
     MaskedRegMap(Dscratch, dscratch),
-    MaskedRegMap(Dscratch1, dscratch1)
-  )
-
-  var perfCntMapping = Map(
+    MaskedRegMap(Dscratch1, dscratch1),
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
     MaskedRegMap(Minstret, minstret),
-    MaskedRegMap(Mhpmevent3 , perfEvents( 0), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent4 , perfEvents( 1), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent5 , perfEvents( 2), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent6 , perfEvents( 3), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent7 , perfEvents( 4), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent8 , perfEvents( 5), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent9 , perfEvents( 6), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent10, perfEvents( 7), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent11, perfEvents( 8), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent12, perfEvents( 9), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent13, perfEvents(10), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent14, perfEvents(11), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent15, perfEvents(12), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent16, perfEvents(13), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent17, perfEvents(14), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent18, perfEvents(15), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent19, perfEvents(16), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent20, perfEvents(17), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent21, perfEvents(18), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent22, perfEvents(19), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent23, perfEvents(20), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent24, perfEvents(21), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent25, perfEvents(22), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent26, perfEvents(23), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent27, perfEvents(24), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent28, perfEvents(25), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent29, perfEvents(26), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent30, perfEvents(27), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent31, perfEvents(28), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmcounter3 , perfCnts( 0)),
-    MaskedRegMap(Mhpmcounter4 , perfCnts( 1)),
-    MaskedRegMap(Mhpmcounter5 , perfCnts( 2)),
-    MaskedRegMap(Mhpmcounter6 , perfCnts( 3)),
-    MaskedRegMap(Mhpmcounter7 , perfCnts( 4)),
-    MaskedRegMap(Mhpmcounter8 , perfCnts( 5)),
-    MaskedRegMap(Mhpmcounter9 , perfCnts( 6)),
-    MaskedRegMap(Mhpmcounter10, perfCnts( 7)),
-    MaskedRegMap(Mhpmcounter11, perfCnts( 8)),
-    MaskedRegMap(Mhpmcounter12, perfCnts( 9)),
-    MaskedRegMap(Mhpmcounter13, perfCnts(10)),
-    MaskedRegMap(Mhpmcounter14, perfCnts(11)),
-    MaskedRegMap(Mhpmcounter15, perfCnts(12)),
-    MaskedRegMap(Mhpmcounter16, perfCnts(13)),
-    MaskedRegMap(Mhpmcounter17, perfCnts(14)),
-    MaskedRegMap(Mhpmcounter18, perfCnts(15)),
-    MaskedRegMap(Mhpmcounter19, perfCnts(16)),
-    MaskedRegMap(Mhpmcounter20, perfCnts(17)),
-    MaskedRegMap(Mhpmcounter21, perfCnts(18)),
-    MaskedRegMap(Mhpmcounter22, perfCnts(19)),
-    MaskedRegMap(Mhpmcounter23, perfCnts(20)),
-    MaskedRegMap(Mhpmcounter24, perfCnts(21)),
-    MaskedRegMap(Mhpmcounter25, perfCnts(22)),
-    MaskedRegMap(Mhpmcounter26, perfCnts(23)),
-    MaskedRegMap(Mhpmcounter27, perfCnts(24)),
-    MaskedRegMap(Mhpmcounter28, perfCnts(25)),
-    MaskedRegMap(Mhpmcounter29, perfCnts(26)),
-    MaskedRegMap(Mhpmcounter30, perfCnts(27)),
-    MaskedRegMap(Mhpmcounter31, perfCnts(28)),
   )
+
+  val perfCntMapping = (0 until 29).map(i => {Map(
+    MaskedRegMap(addr = Mhpmevent3 +i,
+                 reg  = perfEvents(i),
+                 wmask = "hf87fff3fcff3fcff".U(XLEN.W)),
+    MaskedRegMap(addr = Mhpmcounter3 +i,
+                 reg  = perfCnts(i))
+  )}).fold(Map())((a,b) => a ++ b)
   // TODO: mechanism should be implemented later
   // val MhpmcounterStart = Mhpmcounter3
   // val MhpmeventStart   = Mhpmevent3
@@ -1244,37 +1189,11 @@ class PFEvent(implicit p: Parameters) extends XSModule with HasCSRConst  {
                    List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++ 
                    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
 
-  var perfEventMapping = Map(
-    MaskedRegMap(Mhpmevent3 , perfEvents( 0), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent4 , perfEvents( 1), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent5 , perfEvents( 2), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent6 , perfEvents( 3), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent7 , perfEvents( 4), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent8 , perfEvents( 5), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent9 , perfEvents( 6), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent10, perfEvents( 7), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent11, perfEvents( 8), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent12, perfEvents( 9), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent13, perfEvents(10), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent14, perfEvents(11), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent15, perfEvents(12), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent16, perfEvents(13), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent17, perfEvents(14), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent18, perfEvents(15), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent19, perfEvents(16), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent20, perfEvents(17), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent21, perfEvents(18), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent22, perfEvents(19), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent23, perfEvents(20), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent24, perfEvents(21), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent25, perfEvents(22), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent26, perfEvents(23), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent27, perfEvents(24), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent28, perfEvents(25), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent29, perfEvents(26), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent30, perfEvents(27), "hf87fff3fcff3fcff".U(XLEN.W)),
-    MaskedRegMap(Mhpmevent31, perfEvents(28), "hf87fff3fcff3fcff".U(XLEN.W)),
-  )
+  val perfEventMapping = (0 until 29).map(i => {Map(
+    MaskedRegMap(addr = Mhpmevent3 +i,
+                 reg  = perfEvents(i),
+                 wmask = "hf87fff3fcff3fcff".U(XLEN.W))
+  )}).fold(Map())((a,b) => a ++ b)
 
   val rdata = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(perfEventMapping, w.bits.addr, rdata, w.valid, w.bits.data)
