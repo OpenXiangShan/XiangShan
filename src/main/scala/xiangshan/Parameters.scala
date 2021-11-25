@@ -301,7 +301,7 @@ trait HasXSParameter {
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
   val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
-  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
+  val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt //+ exuParameters.XsCCCnt
   val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
