@@ -96,7 +96,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   if (coreParams.dcacheParametersOpt.nonEmpty) {
     misc.l1d_logger :=
-      TLBuffer.chainNode(1, Some("L1D_to_L2_buffer")) :=
       core.memBlock.dcache.clientNode
   }
   misc.busPMU :=
@@ -112,7 +111,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   }
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2.node :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= misc.l1_xbar
     case None =>
   }
 
