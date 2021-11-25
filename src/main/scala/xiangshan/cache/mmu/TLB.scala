@@ -117,8 +117,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
-    val ppn = Mux(normal_hit, normal_ppn, super_ppn)
-    val perm = Mux(normal_hit, normal_perm, super_perm)
+    val ppn = Mux(super_hit, super_ppn, normal_hit)
+    val perm = Mux(super_hit, super_perm, normal_perm)
 
     val pf = perm.pf
     val af = perm.af
