@@ -551,7 +551,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
 
-  io.toIfu.flushFromBpu.s2.valid := bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
+  io.toIfu.flushFromBpu.s2.valid := bpu_s2_redirect
   io.toIfu.flushFromBpu.s2.bits := bpu_s2_resp.ftq_idx
   when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect) {
     bpuPtr := bpu_s2_resp.ftq_idx + 1.U
@@ -561,7 +561,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  io.toIfu.flushFromBpu.s3.valid := bpu_s3_resp.valid && bpu_s3_resp.hasRedirect
+  io.toIfu.flushFromBpu.s3.valid := bpu_s3_redirect
   io.toIfu.flushFromBpu.s3.bits := bpu_s3_resp.ftq_idx
   when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect) {
     bpuPtr := bpu_s3_resp.ftq_idx + 1.U
@@ -813,31 +813,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** flush ptr and state queue ****************************
   // ***********************************************************************************
 
-  class RedirectInfo extends Bundle {
-    val valid = Bool()
-    val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-    val flushItSelf = Bool()
-    def apply(redirect: Valid[Redirect]) = {
-      this.valid := redirect.valid
-      this.ftqIdx := redirect.bits.ftqIdx
-      this.ftqOffset := redirect.bits.ftqOffset
-      this.flushItSelf := RedirectLevel.flushItself(redirect.bits.level)
-      this
-    }
-  }
-  val redirectVec = Wire(Vec(3, new RedirectInfo))
-  val robRedirect = robFlush
-
-  redirectVec.zip(Seq(robRedirect, stage2Redirect, fromIfuRedirect)).map {
-    case (ve, r) => ve(r)
-  }
+  val redirectVec = VecInit(robFlush, stage2Redirect, fromIfuRedirect)
 
   // when redirect, we should reset ptrs and status queues
   when(redirectVec.map(r => r.valid).reduce(_||_)){
-    val r = PriorityMux(redirectVec.map(r => (r.valid -> r)))
+    val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
     val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
-    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, r.flushItSelf)
+    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, RedirectLevel.flushItself(r.level))
     val next = idx + 1.U
     bpuPtr := next
     ifuPtr := next
