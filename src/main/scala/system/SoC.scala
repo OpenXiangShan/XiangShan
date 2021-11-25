@@ -19,18 +19,19 @@ package system
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
-import device.DebugModule
+import device.{DebugModule, TLPMA}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
 import utils.{BinaryArbiter, TLEdgeBuffer}
-import huancun._
-import huancun.debug._
 import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
 import top.BusPerfMonitor
+import xiangshan.backend.fu.PMAConst
+import huancun._
+import huancun.debug.TLLogger
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -87,52 +88,44 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
 
 // We adapt the following three traits from rocket-chip.
 // Source: rocket-chip/src/main/scala/subsystem/Ports.scala
-trait HaveSlaveAXI4Port {
-  this: BaseSoC with HaveAXI4MemPort =>
-
-  val idBits = 14
-
-  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
-    Seq(AXI4MasterParameters(
-      name = "dma",
-      id = IdRange(0, 1 << idBits)
-    ))
-  )))
-  private val errorDevice = LazyModule(new TLError(
-    params = DevNullParams(
-      address = Seq(AddressSet(0x0, 0x7fffffffL)),
-      maxAtomic = 8,
-      maxTransfer = 64),
-    beatBytes = L3InnerBusWidth / 8
-  ))
-  private val error_xbar = TLXbar()
-
-  val spliter = AXI4Spliter()
-  private val dma_to_l3 = AXI4IdentityNode()
-  private val dma_to_ddr = AXI4IdentityNode()
-
-  spliter.node := l3FrontendAXI4Node
-  dma_to_ddr := spliter.node
-  dma_to_l3 := spliter.node
-
-  error_xbar :=
-    TLFIFOFixer() :=
-    AXI4ToTL() :=
-    AXI4UserYanker(Some(1)) :=
-    AXI4Fragmenter() :=
-    AXI4IdIndexer(1) :=
-    dma_to_l3
-  errorDevice.node := error_xbar
-  l3_xbar :=
-    TLBuffer() :=
-    error_xbar
-
-  mem_axi_xbar := AXI4Fragmenter() := AXI4Buffer() := dma_to_ddr
-
-  val dma = InModuleBody {
-    l3FrontendAXI4Node.makeIOs()
-  }
-}
+//trait HaveSlaveAXI4Port {
+//  this: BaseSoC with HaveAXI4MemPort =>
+//
+//  val idBits = 14
+//
+//  val l3FrontendAXI4Node = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+//    Seq(AXI4MasterParameters(
+//      name = "dma",
+//      id = IdRange(0, 1 << idBits)
+//    ))
+//  )))
+//  private val errorDevice = LazyModule(new TLError(
+//    params = DevNullParams(
+//      address = Seq(AddressSet(0x0, 0x7fffffffL)),
+//      maxAtomic = 8,
+//      maxTransfer = 64),
+//    beatBytes = L3InnerBusWidth / 8
+//  ))
+//  private val error_xbar = TLXbar()
+//
+//  error_xbar :=
+//    TLFIFOFixer() :=
+//    AXI4ToTL() :=
+//    AXI4UserYanker(Some(1)) :=
+//    AXI4Fragmenter() :=
+//    AXI4IdIndexer(1) :=
+//    dma_to_l3
+//  errorDevice.node := error_xbar
+//  l3_xbar :=
+//    TLBuffer() :=
+//    error_xbar
+//
+//  mem_axi_xbar := AXI4Fragmenter() := AXI4Buffer()
+//
+//  val dma = InModuleBody {
+//    l3FrontendAXI4Node.makeIOs()
+//  }
+//}
 
 trait HaveAXI4MemPort {
   this: BaseSoC =>
@@ -228,7 +221,8 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
 class SoCMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4MemPort
   with HaveAXI4PeripheralPort
-  with HaveSlaveAXI4Port
+  with PMAConst
+//  with HaveSlaveAXI4Port
 {
   val peripheral_ports = Array.fill(NumCores) { TLTempNode() }
   val core_to_l3_ports = Array.fill(NumCores) { TLTempNode() }
@@ -299,8 +293,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
 
-  // from HaveSlaveAXI4Port's spliter
-  spliter.pmaNode := peripheralXbar
+  val pma = LazyModule(new TLPMA)
+  pma.node := peripheralXbar
 
   lazy val module = new LazyModuleImp(this){
 
@@ -308,9 +302,20 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
+    val cacheable_check = IO(new Bundle {
+      val req_valid = Vec(mmpma.num, Input(Bool()))
+      val req = Vec(mmpma.num, Input(UInt(PMPAddrBits.W)))
+      val resp = Vec(mmpma.num, Output(UInt((PMPAddrBits+1).W)))
+    })
 
     debugModule.module.io <> debug_module_io
     plicSource.module.in := ext_intrs.asBools
+    for (i <- 0 until mmpma.num) {
+      pma.module.io.req(i) := DontCare
+      pma.module.io.req(i).valid := cacheable_check.req_valid(i)
+      pma.module.io.req(i).bits.addr := cacheable_check.req(i)
+      cacheable_check.resp(i) := Cat(pma.module.io.resp(i).mmio, cacheable_check.req(i))
+    }
 
     val freq = 100
     val cnt = RegInit(freq.U)

@@ -35,12 +35,12 @@ case class AXI4SpliterNode()(implicit valName: ValName) extends CustomNode(AXI4I
         responseFields = BundleField.union(seq.flatMap(_.responseFields)),
         requestKeys    = seq.flatMap(_.requestKeys).distinct,
         minLatency = seq.map(_.minLatency).min,
-        slaves = seq.last.slaves
-//        slaves = seq.flatMap { port =>
-//          require (port.beatBytes == seq(0).beatBytes,
-//            s"Xbar data widths don't match: ${port.slaves.map(_.name)} has ${port.beatBytes}B vs ${seq(0).slaves.map(_.name)} has ${seq(0).beatBytes}B")
-//          port.slaves
-//        }.distinct
+//        slaves = seq.last.slaves
+        slaves = seq.flatMap { port =>
+          require (port.beatBytes == seq(0).beatBytes,
+            s"Xbar data widths don't match: ${port.slaves.map(_.name)} has ${port.beatBytes}B vs ${seq(0).slaves.map(_.name)} has ${seq(0).beatBytes}B")
+          port.slaves
+        }
       )
     }
 //    for((port, i) <- p.zipWithIndex){
