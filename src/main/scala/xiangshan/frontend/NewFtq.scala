@@ -76,9 +76,9 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   val oversize = Bool()
   val carry = Bool()
   def getPc(offset: UInt) = {
-    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits)
-    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits)
-    Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
+    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
+    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits, instOffsetBits)
+    Cat(getHigher(Mux(isNextMask(offset) && startAddr(log2Ceil(PredictWidth)+instOffsetBits), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
   def getFallThrough() = {
@@ -97,7 +97,7 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     this.startAddr := resp.pc
-    this.nextRangeAddr := resp.pc + (FetchWidth * 4).U
+    this.nextRangeAddr := resp.pc + (FetchWidth * 4 * 2).U
     this.pftAddr := resp.ftb_entry.pftAddr
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
       (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
