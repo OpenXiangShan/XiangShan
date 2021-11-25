@@ -246,7 +246,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
     Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
   )
-  val s1_replace_nothing = s1_req.replace && s1_coh.state === ClientStates.Nothing
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -277,7 +276,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq
   val s2_fire = s2_valid && s2_can_go
   val s2_fire_to_s3 = s2_valid && s2_can_go_to_s3
-  when (s1_fire && !s1_replace_nothing) {
+  when (s1_fire) {
     s2_valid := true.B
   }.elsewhen (s2_fire) {
     s2_valid := false.B
@@ -499,7 +498,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
     (s3_s_amoalu || !amo_wait_amoalu) &&
     io.tag_write.ready &&
     io.wb.ready
-  val s3_replace_can_go = s3_req.replace && io.wb.ready
+  val s3_replace_nothing = s3_req.replace && s3_coh.state === ClientStates.Nothing
+  val s3_replace_can_go = s3_req.replace && (s3_replace_nothing || io.wb.ready)
   val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go
   val s3_fire = s3_valid && s3_can_go
   when (s2_fire_to_s3) {
@@ -625,7 +625,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
 
   io.wb.valid := s3_valid && (
     // replace
-    s3_req.replace ||
+    s3_req.replace && !s3_replace_nothing ||
     // probe can go to wbq
     s3_req.probe && (io.meta_write.ready || !probe_update_meta) ||
       // amo miss can go to wbq
