@@ -389,6 +389,11 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
       VecInit(real_slot_taken_mask().init)
   }
 
+  // the vec indicating if ghr should shift on each branch
+  def shouldShiftVec =
+    VecInit(preds.br_valids.zipWithIndex.map{ case (v, i) =>
+      v && !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B)})
+
   def br_count(): UInt = {
     val last_valid_idx = PriorityMux(
       preds.br_valids.reverse :+ true.B,
