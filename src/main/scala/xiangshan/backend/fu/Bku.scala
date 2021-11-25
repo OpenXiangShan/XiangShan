@@ -255,8 +255,8 @@ class BlockCipherModule(implicit p: Parameters) extends XSModule {
   sm4SboxTop := SboxSm4Top(sm4SboxIn)
   val sm4SboxOut = SboxSm4Out(SboxInv(sm4SboxTop))
 
-  val sm4ed = sm4SboxOut ^ (sm4SboxOut<<8) ^ (sm4SboxOut<<2) ^ (sm4SboxOut<<18) ^ (sm4SboxOut&"h3f".U<<26) ^ (sm4SboxOut&"hc0".U<<10)
-  val sm4ks = sm4SboxOut ^ (sm4SboxOut&"h07".U<<29) ^ (sm4SboxOut&"hfe".U<<7) ^ (sm4SboxOut&"h01".U<<23) ^ (sm4SboxOut&"hf8".U<<13)
+  val sm4ed = sm4SboxOut ^ (sm4SboxOut<<8) ^ (sm4SboxOut<<2) ^ (sm4SboxOut<<18) ^ ((sm4SboxOut&"h3f".U)<<26) ^ ((sm4SboxOut&"hc0".U)<<10)
+  val sm4ks = sm4SboxOut ^ ((sm4SboxOut&"h07".U)<<29) ^ ((sm4SboxOut&"hfe".U)<<7) ^ ((sm4SboxOut&"h01".U)<<23) ^ ((sm4SboxOut&"hf8".U)<<13)
   val sm4Source = VecInit(Seq(
     sm4ed(31,0),
     Cat(sm4ed(23,0), sm4ed(31,24)),
