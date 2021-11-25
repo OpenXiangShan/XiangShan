@@ -168,8 +168,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val tlb_req = io.tlb.req
   val oldMatchVec = tlb_req.map(a => vpn.zip(v).map{case (pi, vi) => vi && a.valid && pi === a.bits.vpn })
   val newMatchVec = tlb_req.map(a => tlb_req.map(b => b.valid && a.valid && b.bits.vpn === a.bits.vpn ))
-  val ptwResp_newMatchVec = tlb_req.map(a => ptwResp_valid && ptwResp.entry.hit(a.bits.vpn, io.csr.satp.asid, allType = true) && a.valid) // TODO: may have long latency
-  val ptwResp_oldMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && ptwResp.entry.hit(pi, io.csr.satp.asid, allType = true) }
+  val ptwResp_newMatchVec = tlb_req.map(a => ptwResp_valid && ptwResp.entry.hit(a.bits.vpn, 0.U, allType = true, true) && a.valid) // TODO: may have long latency
+  val ptwResp_oldMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && ptwResp.entry.hit(pi, 0.U, allType = true, true) }
   val update_ports = v.indices.map(i => oldMatchVec.map(j => j(i)))
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
