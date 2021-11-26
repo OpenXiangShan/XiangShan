@@ -45,9 +45,9 @@ class Rename(implicit p: Parameters) extends XSModule {
   })
 
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(MEFreeListSize))
-  val intRefCounter = Module(new RefCounter(MEFreeListSize))
-  val fpFreeList = Module(new StdFreeList(StdFreeListSize))
+  val intFreeList = Module(new MEFreeList(NRPhyRegs))
+  val intRefCounter = Module(new RefCounter(NRPhyRegs))
+  val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
