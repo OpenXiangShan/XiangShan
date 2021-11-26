@@ -164,22 +164,35 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   val flush = RegNext(io.sfence.valid || io.csr.satp.changed)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
-  val ptwResp_valid = RegNext(io.ptw.resp.valid, init = false.B)
-  val tlb_req = io.tlb.req
-  val oldMatchVec = tlb_req.map(a => vpn.zip(v).map{case (pi, vi) => vi && a.valid && pi === a.bits.vpn })
-  val newMatchVec = tlb_req.map(a => tlb_req.map(b => b.valid && a.valid && b.bits.vpn === a.bits.vpn ))
-  val ptwResp_newMatchVec = tlb_req.map(a => ptwResp_valid && ptwResp.entry.hit(a.bits.vpn, 0.U, allType = true, true) && a.valid) // TODO: may have long latency
-  val ptwResp_oldMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && ptwResp.entry.hit(pi, 0.U, allType = true, true) }
-  val update_ports = v.indices.map(i => oldMatchVec.map(j => j(i)))
+  val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
+    vi && io.ptw.resp.bits.entry.hit(pi, io.csr.satp.asid, true, true)}
+  val ptwResp_valid = RegNext(io.ptw.resp.fire() && Cat(ptwResp_OldMatchVec).orR, init = false.B)
+  val tlb_req = WireInit(io.tlb.req)
+  tlb_req.zip(io.tlb.req).foreach { case (a, b) =>
+    a.valid := RegNext(b.valid && !(ptwResp_valid && ptwResp.entry.hit(b.bits.vpn, 0.U, true, true)),
+      init = false.B)
+    a.bits := RegEnable(b.bits, b.valid)
+  }
+  val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
+  val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
+  val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn})
+  val lastReqMatchVec = lastReqMatchVec_early.map(a => RegNext(Cat(a).orR))
+  val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn))
+  val newMatchVec = (0 until Width).map(i => (0 until Width).map(j =>
+    RegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
+  ))
+  val ptwResp_newMatchVec = tlb_req.map(a =>
+    ptwResp_valid && ptwResp.entry.hit(a.bits.vpn, 0.U, allType = true, true))
+
+  val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(RegNext(_)).map(_ & tlb_req(i).valid))
+  val update_ports = v.indices.map(i => oldMatchVec2.map(j => j(i)))
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
-  val resp_vector = ParallelMux(ptwResp_oldMatchVec zip ports)
-  val resp_still_valid = ParallelOR(ptwResp_oldMatchVec).asBool
+  val resp_vector = RegEnable(ParallelMux(ptwResp_OldMatchVec zip ports), io.ptw.resp.fire())
 
   def canMerge(index: Int) : Bool = {
-    ptwResp_newMatchVec(index) ||
-    Cat(oldMatchVec(index)).orR ||
-    Cat(newMatchVec(index).take(index)).orR
+    ptwResp_newMatchVec(index) || oldMatchVec(index) ||
+    lastReqMatchVec(index) || Cat(newMatchVec(index).take(index)).orR
   }
 
   def filter_req() = {
@@ -195,17 +208,17 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   val reqs = filter_req()
   val req_ports = filter_ports
-  var enqPtr_next = WireInit(deqPtr)
   val isFull = enqPtr === deqPtr && mayFullDeq
   val isEmptyDeq = enqPtr === deqPtr && !mayFullDeq
   val isEmptyIss = enqPtr === issPtr && !mayFullIss
   val accumEnqNum = (0 until Width).map(i => PopCount(reqs.take(i).map(_.valid)))
-  val enqPtrVec = VecInit((0 until Width).map(i => enqPtr + accumEnqNum(i)))
+  val enqPtrVecInit = VecInit((0 until Width).map(i => enqPtr + i.U))
+  val enqPtrVec = VecInit((0 until Width).map(i => enqPtrVecInit(accumEnqNum(i))))
   val enqNum = PopCount(reqs.map(_.valid))
   val canEnqueue = counter +& enqNum <= Size.U
 
   io.tlb.req.map(_.ready := true.B) // NOTE: just drop un-fire reqs
-  io.tlb.resp.valid := ptwResp_valid && resp_still_valid
+  io.tlb.resp.valid := ptwResp_valid
   io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.vector := resp_vector
   io.ptw.req(0).valid := v(issPtr) && !isEmptyIss && !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, ignoreAsid = true))
@@ -228,7 +241,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   val do_enq = canEnqueue && Cat(reqs.map(_.valid)).orR
   val do_deq = (!v(deqPtr) && !isEmptyDeq)
-  val do_iss = io.ptw.req(0).fire() || (!v(issPtr) && !isEmptyIss)
+  val do_iss = Mux(v(issPtr), io.ptw.req(0).fire(), !isEmptyIss)
   when (do_enq) {
     enqPtr := enqPtr + enqNum
   }
@@ -245,8 +258,8 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
     mayFullIss := do_enq
   }
 
-  when (ptwResp_valid) {
-    v.zip(ptwResp_oldMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
+  when (io.ptw.resp.fire()) {
+    v.zip(ptwResp_OldMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
   }
 
   counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)

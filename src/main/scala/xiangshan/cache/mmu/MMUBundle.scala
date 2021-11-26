@@ -486,7 +486,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 
   def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
-    require(this.asid.getWidth <= asid.getWidth)
+//    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
     if (allType) {
       require(hasLevel)
