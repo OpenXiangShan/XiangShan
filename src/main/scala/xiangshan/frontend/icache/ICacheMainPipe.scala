@@ -19,6 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tilelink.ClientStates
 import xiangshan._
 import xiangshan.cache.mmu._
 import utils._
@@ -175,13 +176,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   toITLB(0).valid         := s1_valid
   toITLB(0).bits.size     := 3.U // TODO: fix the size
-  toITLB(0).bits.vaddr    := s1_req_vaddr(0)//addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
-  toITLB(0).bits.debug.pc := s1_req_vaddr(0)//addrAlign(s1_req_vaddr(0), blockBytes, VAddrBits)
+  toITLB(0).bits.vaddr    := s1_req_vaddr(0)
+  toITLB(0).bits.debug.pc := s1_req_vaddr(0)
 
   toITLB(1).valid         := s1_valid && s1_double_line
   toITLB(1).bits.size     := 3.U // TODO: fix the size
-  toITLB(1).bits.vaddr    := s1_req_vaddr(1)//addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
-  toITLB(1).bits.debug.pc := s1_req_vaddr(1)//addrAlign(s1_req_vaddr(1), blockBytes, VAddrBits)
+  toITLB(1).bits.vaddr    := s1_req_vaddr(1)
+  toITLB(1).bits.debug.pc := s1_req_vaddr(1)
 
   toITLB.map{port =>
     port.bits.cmd                 := TlbCmd.exec
@@ -232,7 +233,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.setInfor.s1(i).valid := s1_bank_miss(i) 
     io.setInfor.s1(i).vidx  := s1_req_vsetIdx(i)
   }
-
 
   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
 
@@ -535,7 +535,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toRealseUnit(i).bits.addr      := get_block_addr(Cat(s2_victim_tag(i), get_untag(s2_req_vaddr(i))) )
     toRealseUnit(i).bits.param     := s2_victim_coh(i).onCacheControl(M_FLUSH)._2
     toRealseUnit(i).bits.voluntary := true.B
-    toRealseUnit(i).bits.hasData   := false.B
+    toRealseUnit(i).bits.hasData   := s2_victim_coh(i) === ClientStates.Dirty
+    toRealseUnit(i).bits.dirty     := s2_victim_coh(i) === ClientStates.Dirty
     toRealseUnit(i).bits.data      := s2_victim_data(i)
     toRealseUnit(i).bits.waymask   := s2_waymask(i)
     toRealseUnit(i).bits.vidx      := s2_req_vsetIdx(i)

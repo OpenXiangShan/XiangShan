@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
 import xiangshan._
 import utils._
+import huancun.{DirtyField, DirtyKey}
 
 class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(PAddrBits.W)
@@ -29,6 +30,7 @@ class ReleaseReq(implicit p: Parameters) extends ICacheBundle{
   val param  = UInt(TLPermissions.cWidth.W)
   val voluntary = Bool()
   val hasData = Bool()
+  val dirty = Bool()
   val data = UInt((blockBytes * 8).W)
   val waymask = UInt(nWays.W)
 }
@@ -84,7 +86,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
 
   val probeResponseData = edge.ProbeAck(
     fromSource = io.id,
-    toAddress = req.addr,
+    toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
     lgSize = log2Ceil(cacheParams.blockBytes).U,
     reportPermissions = req.param,
     data = beat_data(beat)
@@ -97,11 +99,21 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
     shrinkPermissions = req.param
   )._2
 
+    val voluntaryReleaseData = edge.Release(
+    fromSource = io.id,
+    toAddress = addrAlign(req.addr, blockBytes, PAddrBits),
+    lgSize = log2Ceil(blockBytes).U,
+    shrinkPermissions = req.param,
+    data = beat_data(beat)
+  )._2
+
+  voluntaryReleaseData.echo.lift(DirtyKey).foreach(_ := req.dirty)
+
   val needMergeProbe = (io.probeMerge.valid && state === s_release_req && io.probeMerge.ptag === req_ptag && io.probeMerge.vidx === req_idx)
 
   io.mem_release.valid := Mux(!req.voluntary && req.hasData, busy,  state === s_release_req && !needMergeProbe)
-  io.mem_release.bits  := Mux(!req.voluntary, probeResponseData,voluntaryRelease)
-
+  io.mem_release.bits  := Mux(req.voluntary,
+          Mux(req.hasData, voluntaryReleaseData, voluntaryRelease), probeResponseData)
 
   when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
 

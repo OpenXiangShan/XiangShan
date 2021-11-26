@@ -24,7 +24,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink._
 import xiangshan._
-import huancun.AliasKey
+import huancun.{AliasKey, DirtyKey}
 import xiangshan.cache._
 import utils._
 
@@ -135,6 +135,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire())
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
+  val is_dirty = RegInit(false.B)
   val is_grant = RegEnable(edge.isRequest(io.mem_grant.bits), io.mem_grant.fire())
 
   val neddSendAck = RegInit(false.B)
@@ -149,11 +150,6 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
       }
     }
 
-//    is(s_send_release){
-//      when(io.release.fire()){
-//        state := s_send_mem_aquire
-//      }
-//    }
     // memory request
     is(s_send_mem_aquire) {
       when(io.mem_acquire.fire()) {
@@ -167,6 +163,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
           grant_param := io.mem_grant.bits.param
+          is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
           when(readBeatCnt === (refillCycles - 1).U) {
             assert(refill_done, "refill not done!")
             state := s_write_back
@@ -197,13 +194,15 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   /** refill write and meta write */
 
   /** update coh meta */
-  def missCohGen(param: UInt): UInt = {
-    MuxLookup(param, Nothing, Seq(
-      toB -> Branch,
-      toT -> Trunk))
+  def missCohGen(param: UInt, dirty: Bool): UInt = {
+    MuxLookup(Cat(param, dirty), Nothing, Seq(
+      Cat(toB, false.B) -> Branch,
+      Cat(toB, true.B)  -> Branch,
+      Cat(toT, false.B) -> Trunk,
+      Cat(toT, true.B)  -> Dirty))
   }
 
-  val miss_new_coh = ClientMetadata(missCohGen(grant_param))
+  val miss_new_coh = ClientMetadata(missCohGen(grant_param, is_dirty))
 
   io.meta_write.valid := (state === s_write_back)
   io.meta_write.bits.generate(tag = req_tag, coh = miss_new_coh, idx = req_idx, waymask = req_waymask, bankIdx = req_idx(0))
