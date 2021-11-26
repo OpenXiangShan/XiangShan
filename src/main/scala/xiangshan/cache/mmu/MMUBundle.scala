@@ -359,6 +359,7 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 class TlbResp(implicit p: Parameters) extends TlbBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val miss = Output(Bool())
+  val fast_miss = Output(Bool()) // without sram part for timing optimization
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
