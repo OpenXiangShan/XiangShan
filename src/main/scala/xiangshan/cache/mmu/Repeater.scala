@@ -163,21 +163,26 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   val counter = RegInit(0.U(log2Up(Size+1).W))
 
   val flush = RegNext(io.sfence.valid || io.csr.satp.changed)
+  val tlb_req = WireInit(io.tlb.req)
+  tlb_req.suggestName("tlb_req")
+
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
   val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
     vi && io.ptw.resp.bits.entry.hit(pi, io.csr.satp.asid, true, true)}
   val ptwResp_valid = RegNext(io.ptw.resp.fire() && Cat(ptwResp_OldMatchVec).orR, init = false.B)
-  val tlb_req = WireInit(io.tlb.req)
-  tlb_req.zip(io.tlb.req).foreach { case (a, b) =>
-    a.valid := RegNext(b.valid && !(ptwResp_valid && ptwResp.entry.hit(b.bits.vpn, 0.U, true, true)),
-      init = false.B)
-    a.bits := RegEnable(b.bits, b.valid)
-  }
   val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
-  val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
   val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn})
-  val lastReqMatchVec = lastReqMatchVec_early.map(a => RegNext(Cat(a).orR))
   val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn))
+
+  (0 until Width) foreach { i =>
+    tlb_req(i).valid := RegNext(io.tlb.req(i).valid &&
+      !(ptwResp_valid && ptwResp.entry.hit(io.tlb.req(i).bits.vpn, 0.U, true, true)) &&
+      !Cat(lastReqMatchVec_early(i)).orR,
+      init = false.B)
+    tlb_req(i).bits := RegEnable(io.tlb.req(i).bits, io.tlb.req(i).valid)
+  }
+
+  val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
   val newMatchVec = (0 until Width).map(i => (0 until Width).map(j =>
     RegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
   ))
@@ -192,7 +197,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
 
   def canMerge(index: Int) : Bool = {
     ptwResp_newMatchVec(index) || oldMatchVec(index) ||
-    lastReqMatchVec(index) || Cat(newMatchVec(index).take(index)).orR
+    Cat(newMatchVec(index).take(index)).orR
   }
 
   def filter_req() = {
