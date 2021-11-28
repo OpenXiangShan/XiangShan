@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, XSDebug, ZeroExt}
+import utils.{LookupTreeDefault, ParallelMux, ParallelXOR, SignExt, XSDebug, XSError, ZeroExt}
 import xiangshan._
 import xiangshan.backend.fu.util._
 
@@ -296,13 +296,12 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
 
 class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
 
-  override def latency = 1
+  override def latency = 2
 
-  val (src1, src2, func, funcReg) = (
+  val (src1, src2, func) = (
     io.in.bits.src(0),
     io.in.bits.src(1),
-    io.in.bits.uop.ctrl.fuOpType,
-    uopVec(latency).ctrl.fuOpType
+    io.in.bits.uop.ctrl.fuOpType
   )
 
   val countModule = Module(new CountModule)
@@ -325,9 +324,12 @@ class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
   cryptoModule.io.func := func
 
 
+  // CountModule, ClmulModule, MiscModule, and CryptoModule have a latency of 1 cycle
+  val funcReg = uopVec(1).ctrl.fuOpType
   val result = Mux(funcReg(5), cryptoModule.io.out,
                   Mux(funcReg(3), countModule.io.out,
                       Mux(funcReg(2),miscModule.io.out, clmulModule.io.out)))
 
-  io.out.bits.data := result
+  io.out.bits.data := RegNext(result)
+  XSError(io.out.valid && !io.out.ready, "bku cannot handle block now\n")
 }
