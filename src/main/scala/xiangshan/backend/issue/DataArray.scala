@@ -66,9 +66,9 @@ class DataArray(params: RSParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new DataArrayIO(params))
 
   for (i <- 0 until params.numSrc) {
-    val delayedWen = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
-    val delayedWaddr = if (i == 1 && params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
-    val delayedWdata = if (i == 1 && params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
+    val delayedWen = if (params.delayedRf) io.delayedWrite.map(_.valid) else Seq()
+    val delayedWaddr = if (params.delayedRf) RegNext(VecInit(io.write.map(_.addr))) else Seq()
+    val delayedWdata = if (params.delayedRf) io.delayedWrite.map(_.bits) else Seq()
 
     val partialWen = if (i < 2 && params.hasMidState) io.partialWrite.map(_.enable) else Seq()
     val partialWaddr = if (i < 2 && params.hasMidState) io.partialWrite.map(_.addr) else Seq()
