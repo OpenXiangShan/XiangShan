@@ -23,7 +23,7 @@ import utils._
 import system._
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
-import xiangshan.frontend.ICacheParameters
+import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
 import freechips.rocketchip.tile.MaxHartIdBits
 import xiangshan.backend.dispatch.DispatchParameters
@@ -90,7 +90,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
-          nMissEntries = 2
+          nMissEntries = 2,
+          nReleaseEntries = 2
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
