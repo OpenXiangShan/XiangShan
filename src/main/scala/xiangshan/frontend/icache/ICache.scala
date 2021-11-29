@@ -556,7 +556,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val fetchShouldBlock = VecInit(fetchReq.map(req => VecInit(hasMiss.zip(missSetSeq).map{case(valid, idx)=>  valid && idx === req.bits.vsetIdx}).reduce(_||_)))
   
   (0 until PortNumber).map{i => 
-      mainpipe.io.fetch(i).req.valid := io.fetch(i).req.valid && !fetchShouldBlock(i)
+      mainpipe.io.fetch(i).req.valid := io.fetch(i).req.valid //&& !fetchShouldBlock(i)
       io.fetch(i).req.ready          :=  mainpipe.io.fetch(i).req.ready && !fetchShouldBlock(i)
       mainpipe.io.fetch(i).req.bits  := io.fetch(i).req.bits
   }
