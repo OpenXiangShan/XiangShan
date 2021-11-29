@@ -266,6 +266,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       for (j <- 0 until 3) {
         val hit = Mux(tdata(j+3).select, TriggerCmp(ldExeWbReqs(i).bits.data, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)),
           TriggerCmp(ldExeWbReqs(i).bits.debug.vaddr, tdata(j+3).tdata2, tdata(j+3).matchType, tEnable(j+3)))
+        // TODO (1) pick out vaddr cmp. put it in earlier stages of pipeline
+        // TODO (2) kandiao load data and hit on load instr
         io.writeback(i).bits.uop.cf.trigger.triggerHitVec(lTriggerMapping(j)) := hit
         io.writeback(i).bits.uop.cf.trigger.triggerTiming(lTriggerMapping(j)) := hit && tdata(j+3).timing
         if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain

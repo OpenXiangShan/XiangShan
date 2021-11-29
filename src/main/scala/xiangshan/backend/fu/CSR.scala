@@ -304,7 +304,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.debugMode := debugMode
 
   val dpcPrev = RegNext(dpc)
-  XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x.", dpc, dpcPrev)
+  XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x\n", dpc, dpcPrev)
 
   // dcsr value table
   // | debugver | 0100
@@ -1087,8 +1087,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // todo
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr // exception in debug mode (except ebrk) changes cmderr. how ???
+  val raiseDebugExceptionIntr = !debugMode && hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit // TODO
+  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     csrio.exception.bits.uop.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
