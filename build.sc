@@ -25,17 +25,17 @@ import $file.`rocket-chip`.hardfloat.build
 
 object ivys {
   val sv = "2.12.13"
-	val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0-RC1"
-	val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0-RC1"
-	val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
+  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0-RC1"
+  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0-RC1"
+  val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
   val scalatest = ivy"org.scalatest::scalatest:3.2.2"
   val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
 }
 
 trait XSModule extends ScalaModule with PublishModule {
 
-	// override this to use chisel from source
-	def chiselOpt: Option[PublishModule] = None
+  // override this to use chisel from source
+  def chiselOpt: Option[PublishModule] = None
 
   override def scalaVersion = ivys.sv
 
@@ -52,7 +52,7 @@ trait XSModule extends ScalaModule with PublishModule {
   def publishVersion = "0.0.1"
 
   // TODO: fix this
-	def pomSettings = PomSettings(
+  def pomSettings = PomSettings(
     description = "XiangShan",
     organization = "",
     url = "https://github.com/OpenXiangShan/XiangShan",
@@ -124,7 +124,7 @@ object fudian extends XSModule with SbtModule
 // extends this trait to use XiangShan in other projects
 trait CommonXiangShan extends XSModule with SbtModule { m =>
 
-	// module deps
+  // module deps
   def rocketModule: PublishModule
   def difftestModule: PublishModule
   def huancunModule: PublishModule
@@ -156,8 +156,8 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
 }
 
 object XiangShan extends CommonXiangShan {
-	override def rocketModule = rocketchip
-	override def difftestModule = difftest
-	override def huancunModule = huancun
-	override def fudianModule = fudian
+  override def rocketModule = rocketchip
+  override def difftestModule = difftest
+  override def huancunModule = huancun
+  override def fudianModule = fudian
 }
