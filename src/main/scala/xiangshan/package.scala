@@ -604,7 +604,7 @@ package object xiangshan {
     hasRedirect = false,
     latency = UncertainLatency(),
     fastUopOut = true,
-    fastImplemented = false
+    fastImplemented = true
   )
 
   val mulCfg = FuConfig(
