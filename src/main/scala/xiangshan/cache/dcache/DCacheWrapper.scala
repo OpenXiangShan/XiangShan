@@ -468,7 +468,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   io.lsu.atomics <> atomicsReplayUnit.io.lsu
-  atomicsReplayUnit.io.pipe_resp := mainPipe.io.atomic_resp
+  atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
 
   //----------------------------------------
   // miss queue
@@ -478,13 +478,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // Request
   val missReqArb = Module(new Arbiter(new MissReq, MissReqPortCount))
 
-  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
+  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
 
-  block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
+  // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
+  missReqArb.io.out <> missQueue.io.req
+  when(wb.io.block_miss_req) {
+    missQueue.io.req.bits.cancel := true.B
+    missReqArb.io.out.ready := false.B
+  }
 
   // refill to load queue
   io.lsu.lsq <> missQueue.io.refill_to_ldq
@@ -494,7 +499,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
 
-  missQueue.io.main_pipe_resp := mainPipe.io.atomic_resp
+  missQueue.io.main_pipe_resp := RegNext(mainPipe.io.atomic_resp)
 
   //----------------------------------------
   // probe
@@ -513,18 +518,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   replacePipeStatusS0.valid := replacePipe.io.req.valid
   replacePipeStatusS0.bits := get_idx(replacePipe.io.req.bits.vaddr)
   val blockMainPipeReqs = Seq(
-    refillPipeStatus,
 	  replacePipeStatusS0,
     replacePipe.io.status.s1_set,
     replacePipe.io.status.s2_set
   )
-  val storeShouldBeBlocked = Cat(blockMainPipeReqs.map(r => r.valid && r.bits === io.lsu.store.req.bits.idx)).orR
-  val probeShouldBeBlocked = Cat(blockMainPipeReqs.map(r => r.valid && r.bits === get_idx(probeQueue.io.pipe_req.bits.vaddr))).orR
+  val storeShouldBeBlocked = refillPipeStatus.valid || Cat(blockMainPipeReqs.map(r => r.valid && r.bits === io.lsu.store.req.bits.idx)).orR
+  val probeShouldBeBlocked = refillPipeStatus.valid || Cat(blockMainPipeReqs.map(r => r.valid && r.bits === get_idx(probeQueue.io.pipe_req.bits.vaddr))).orR
 
   block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, probeShouldBeBlocked)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, storeShouldBeBlocked)
 
-  io.lsu.store.replay_resp := mainPipe.io.store_replay_resp
+  io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
   val mainPipeAtomicReqArb = Module(new Arbiter(new MainPipeReq, 2))
@@ -532,7 +536,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipeAtomicReqArb.io.in(1) <> atomicsReplayUnit.io.pipe_req
   mainPipe.io.atomic_req <> mainPipeAtomicReqArb.io.out
 
-  mainPipe.io.invalid_resv_set := wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits
+  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
 
   //----------------------------------------
   // replace pipe
@@ -555,7 +559,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
-  io.lsu.store.refill_hit_resp := refillPipe.io.store_resp
+  io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
   //----------------------------------------
   // wb
@@ -566,8 +570,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
-  io.lsu.release.valid := bus.c.fire()
-  io.lsu.release.bits.paddr := bus.c.bits.address
+  io.lsu.release.valid := RegNext(bus.c.fire())
+  io.lsu.release.bits.paddr := RegNext(bus.c.bits.address)
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B

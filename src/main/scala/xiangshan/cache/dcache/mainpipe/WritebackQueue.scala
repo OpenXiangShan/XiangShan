@@ -54,9 +54,14 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 {
   val io = IO(new Bundle {
     val id = Input(UInt())
-
+    // allocate this entry for new req
+    val primary_valid = Input(Bool())
+    // this entry is free and can be allocated to new reqs
+    val primary_ready = Output(Bool())
+    // this entry is busy, but it can merge the new req
+    val secondary_ready = Output(Bool())
     val req = Flipped(DecoupledIO(new WritebackReq))
-    val merge = Output(Bool())
+
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
@@ -101,7 +106,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // --------------------------------------------------------------------------------
   // s_invalid: receive requests
   // new req entering
-  when (io.req.fire()) {
+  when (io.req.valid && io.primary_valid && io.primary_ready) {
     assert (remain === 0.U)
     req := io.req.bits
     when (io.req.bits.delay_release) {
@@ -114,8 +119,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // --------------------------------------------------------------------------------
   // s_sleep: wait for refill pipe to inform me that I can keep releasing
-  val merge_probe = WireInit(false.B)
-  io.merge := WireInit(false.B)
   when (state === s_sleep) {
     assert (remain === 0.U)
 
@@ -126,9 +129,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
     }
 
-    io.merge := !io.req.bits.voluntary && io.req.bits.addr === req.addr
-    merge_probe := io.req.valid && io.merge
-    when (merge_probe) {
+    when (io.req.valid && io.secondary_ready) {
       state := s_release_req
       req.voluntary := false.B
       req.param := req.param
@@ -220,8 +221,8 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // 2. When this entry wants to release while still waiting for release_wakeup signal,
   //    and a probe req with the same addr comes. In this case we merge probe with release,
   //    handle this probe, so we don't need another release.
-  io.req.ready := state === s_invalid ||
-    state === s_sleep && !io.req.bits.voluntary && io.req.bits.addr === req.addr
+  io.primary_ready := state === s_invalid
+  io.secondary_ready := state === s_sleep && !io.req.bits.voluntary && io.req.bits.addr === req.addr
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
@@ -246,14 +247,6 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
-
-
-  // allocate a free entry for incoming request
-  val primary_ready  = Wire(Vec(cfg.nReleaseEntries, Bool()))
-  val merge_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
-  val allocate = primary_ready.asUInt.orR
-  val merge = merge_vec.asUInt.orR
-  val alloc_idx = PriorityEncoder(Mux(merge, merge_vec, primary_ready))
 
   // delay writeback req
   val DelayWritebackReq = true
@@ -284,9 +277,17 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.req.ready := !req_delayed_valid || req_delayed.fire()
   dontTouch(req_delayed)
 
-  val req = req_delayed
+  // allocate a free entry for incoming request
   val block_conflict = Wire(Bool())
-  val accept = merge || allocate && !block_conflict
+  val primary_ready_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
+  val secondary_ready_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
+  val merge = Cat(secondary_ready_vec).orR
+  val alloc = !merge && Cat(primary_ready_vec).orR && !block_conflict 
+  // Now we block release until last release of that block is finished
+  // TODO: Is it possible to merge these release req?
+
+  val req = req_delayed
+  val accept = merge || alloc
   req.ready := accept
 
   // assign default values to output signals
@@ -296,28 +297,35 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   require(isPow2(cfg.nMissEntries))
   val grant_source = io.mem_grant.bits.source
-  val entries = (0 until cfg.nReleaseEntries) map { i =>
-    val entry = Module(new WritebackEntry(edge))
-    val entry_id = (i + releaseIdBase).U
+  val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
+  entries.zipWithIndex.foreach {
+    case (entry, i) =>
+      val former_primary_ready = if(i == 0)
+        false.B 
+      else
+        Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
+      val entry_id = (i + releaseIdBase).U
 
-    entry.io.id := entry_id
+      entry.io.id := entry_id
 
-    // entry req
-    entry.io.req.valid := (i.U === alloc_idx) && req.valid && accept
-    primary_ready(i)   := entry.io.req.ready
-    merge_vec(i) := entry.io.merge
-    entry.io.req.bits  := req.bits
+      // entry req
+      entry.io.req.valid := req.valid
+      primary_ready_vec(i)   := entry.io.primary_ready
+      secondary_ready_vec(i) := entry.io.secondary_ready
+      entry.io.req.bits  := req.bits
 
-    entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
-    entry.io.mem_grant.bits  := io.mem_grant.bits
-    when (entry_id === grant_source) {
-      io.mem_grant.ready := entry.io.mem_grant.ready
-    }
+      entry.io.primary_valid := alloc &&
+        !former_primary_ready &&
+        entry.io.primary_ready
 
-    entry.io.release_wakeup := io.release_wakeup
-    entry.io.release_update := io.release_update
+      entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
+      entry.io.mem_grant.bits  := io.mem_grant.bits
+      when (entry_id === grant_source) {
+        io.mem_grant.ready := entry.io.mem_grant.ready
+      }
 
-    entry
+      entry.io.release_wakeup := io.release_wakeup
+      entry.io.release_update := io.release_update
   }
 
   block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === req.bits.addr)).asUInt.orR
