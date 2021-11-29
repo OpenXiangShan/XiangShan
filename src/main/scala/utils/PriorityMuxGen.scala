@@ -117,12 +117,12 @@ class PhyPriorityMuxGenerator[T <: Data] {
     def apply(): T = {
         rev_src = src.reverse
         for (i <- 0 until rev_src.length) {
-            println(rev_src(i)._3)
+            // println(rev_src(i)._3)
             sorted_src = (rev_src(i)._1 && (if (i == rev_src.length-1) true.B else (i+1 until rev_src.length).map(j => !rev_src(j)._1).reduce(_&&_)),
                 rev_src(i)._2, rev_src(i)._3, rev_src(i)._4) :: sorted_src
         }
-        sorted_src = sorted_src.sortBy(_._4)
-        println(sorted_src)
+        sorted_src = sorted_src.sortBy(_._4).reverse
+        // println(sorted_src)
         val names = sorted_src.map(_._3)
         val ins = sorted_src.map(s => (s._1, s._2))
         // we should use this sample data to get type and width
