@@ -29,6 +29,19 @@ class PTWReapterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new TlbPtwIO(Width))
   val ptw = new TlbPtwIO
 
+  def apply(tlb: TlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+    this.tlb <> tlb
+    this.ptw <> ptw
+    this.sfence <> sfence
+    this.csr <> csr
+  }
+
+  def apply(tlb: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+    this.tlb <> tlb
+    this.sfence <> sfence
+    this.csr <> csr
+  }
+
   override def cloneType: this.type = (new PTWReapterIO(Width)).asInstanceOf[this.type]
 }
 
@@ -71,9 +84,65 @@ class PTWRepeater(Width: Int = 1)(implicit p: Parameters) extends XSModule with 
 /* dtlb
  *
  */
+
+class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new PTWReapterIO(Width))
+
+  val req_in = if (Width == 1) {
+    io.tlb.req(0)
+  } else {
+    val arb = Module(new RRArbiter(io.tlb.req(0).bits.cloneType, Width))
+    arb.io.in <> io.tlb.req
+    arb.io.out
+  }
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, RegNext(io.sfence.valid || io.csr.satp.changed))
+  /* sent: tlb -> repeater -> ptw
+   * recv: ptw -> repeater -> tlb
+   * different from PTWRepeater
+   */
+
+  // tlb -> repeater -> ptw
+  val req = RegEnable(req_in.bits, req_in.fire())
+  val sent = BoolStopWatch(req_in.fire(), ptw.req(0).fire() || flush)
+  req_in.ready := !sent || { if (passReady) ptw.req(0).ready else false.B }
+  ptw.req(0).valid := sent
+  ptw.req(0).bits := req
+
+  // ptw -> repeater -> tlb
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
+  val recv = BoolStopWatch(ptw.resp.fire(), tlb.resp.fire() || flush)
+  ptw.resp.ready := !recv || { if (passReady) tlb.resp.ready else false.B }
+  tlb.resp.valid := recv
+  tlb.resp.bits := resp
+
+  XSPerfAccumulate("req", req_in.fire())
+  XSPerfAccumulate("resp", tlb.resp.fire())
+  if (!passReady) {
+    XSPerfAccumulate("req_blank", req_in.valid && sent && ptw.req(0).ready)
+    XSPerfAccumulate("resp_blank", ptw.resp.valid && recv && tlb.resp.ready)
+    XSPerfAccumulate("req_blank_ignore_ready", req_in.valid && sent)
+    XSPerfAccumulate("resp_blank_ignore_ready", ptw.resp.valid && recv)
+  }
+  XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
+  XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
+}
+
 class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new BTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
+
+  def apply(tlb: BTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+    this.tlb <> tlb
+    this.ptw <> ptw
+    this.sfence <> sfence
+    this.csr <> csr
+  }
+
+  def apply(tlb: BTlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
+    this.tlb <> tlb
+    this.sfence <> sfence
+    this.csr <> csr
+  }
 
   override def cloneType: this.type = (new PTWFilterIO(Width)).asInstanceOf[this.type]
 }
@@ -233,10 +302,7 @@ object PTWRepeater {
   )(implicit p: Parameters) = {
     val width = tlb.req.size
     val repeater = Module(new PTWRepeater(width))
-    repeater.io.tlb <> tlb
-    repeater.io.sfence <> sfence
-    repeater.io.csr <> csr
-
+    repeater.io.apply(tlb, sfence, csr)
     repeater
   }
 
@@ -248,11 +314,32 @@ object PTWRepeater {
   )(implicit p: Parameters) = {
     val width = tlb.req.size
     val repeater = Module(new PTWRepeater(width))
-    repeater.io.tlb <> tlb
-    repeater.io.ptw <> ptw
-    repeater.io.sfence <> sfence
-    repeater.io.csr <> csr
+    repeater.io.apply(tlb, ptw, sfence, csr)
+    repeater
+  }
+}
 
+object PTWRepeaterNB {
+  def apply(passReady: Boolean,
+    tlb: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val repeater = Module(new PTWRepeaterNB(width, passReady))
+    repeater.io.apply(tlb, sfence, csr)
+    repeater
+  }
+
+  def apply(passReady: Boolean,
+    tlb: TlbPtwIO,
+    ptw: TlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val repeater = Module(new PTWRepeaterNB(width, passReady))
+    repeater.io.apply(tlb, ptw, sfence, csr)
     repeater
   }
 }
@@ -267,11 +354,20 @@ object PTWFilter {
   )(implicit p: Parameters) = {
     val width = tlb.req.size
     val filter = Module(new PTWFilter(width, size))
-    filter.io.tlb <> tlb
-    filter.io.ptw <> ptw
-    filter.io.sfence <> sfence
-    filter.io.csr <> csr
-
+    filter.io.apply(tlb, ptw, sfence, csr)
     filter
   }
+
+  def apply(
+    tlb: BTlbPtwIO,
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle,
+    size: Int
+  )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val filter = Module(new PTWFilter(width, size))
+    filter.io.apply(tlb, sfence, csr)
+    filter
+  }
+
 }

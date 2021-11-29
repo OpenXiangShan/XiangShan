@@ -76,20 +76,28 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
   val oversize = Bool()
   val carry = Bool()
   def getPc(offset: UInt) = {
-    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits)
-    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits-1, instOffsetBits)
-    Cat(getHigher(Mux(isNextMask(offset), nextRangeAddr, startAddr)),
+    def getHigher(pc: UInt) = pc(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
+    def getOffset(pc: UInt) = pc(log2Ceil(PredictWidth)+instOffsetBits, instOffsetBits)
+    Cat(getHigher(Mux(isNextMask(offset) && startAddr(log2Ceil(PredictWidth)+instOffsetBits), nextRangeAddr, startAddr)),
         getOffset(startAddr)+offset, 0.U(instOffsetBits.W))
   }
   def getFallThrough() = {
-    getFallThroughAddr(this.startAddr, this.carry, this.pftAddr)
+    def getHigher(pc: UInt) = pc.head(VAddrBits-log2Ceil(PredictWidth)-instOffsetBits-1)
+    val startHigher = getHigher(startAddr)
+    val nextHigher  = getHigher(nextRangeAddr)
+    val higher = Mux(carry, nextHigher, startHigher)
+    Cat(higher, pftAddr, 0.U(instOffsetBits.W))
   }
   def fallThroughError() = {
-    !carry && startAddr(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits) > pftAddr
+    val startLower        = Cat(0.U(1.W), startAddr(instOffsetBits+log2Ceil(PredictWidth), instOffsetBits))
+    val endLowerwithCarry = Cat(carry,    pftAddr)
+    require(startLower.getWidth == log2Ceil(PredictWidth)+2)
+    require(endLowerwithCarry.getWidth == log2Ceil(PredictWidth)+2)
+    startLower >= endLowerwithCarry || (endLowerwithCarry - startLower) > (PredictWidth+1).U
   }
   def fromBranchPrediction(resp: BranchPredictionBundle) = {
     this.startAddr := resp.pc
-    this.nextRangeAddr := resp.pc + (FetchWidth * 4).U
+    this.nextRangeAddr := resp.pc + (FetchWidth * 4 * 2).U
     this.pftAddr := resp.ftb_entry.pftAddr
     this.isNextMask := VecInit((0 until PredictWidth).map(i =>
       (resp.pc(log2Ceil(PredictWidth), 1) +& i.U)(log2Ceil(PredictWidth)).asBool()
@@ -145,7 +153,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
   val rasSp = UInt(log2Ceil(RasSize).W)
   val rasEntry = new RASEntry
   val specCnt = Vec(numBr, UInt(10.W))
-  val ghist = new GlobalHistory
+  // val ghist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val phNewBit = UInt(1.W)
 
@@ -153,7 +163,9 @@ class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBP
     this.rasSp := resp.rasSp
     this.rasEntry := resp.rasTop
     this.specCnt := resp.specCnt
-    this.ghist := resp.ghist
+    // this.ghist := resp.ghist
+    this.folded_hist := resp.folded_hist
+    this.histPtr := resp.histPtr
     this.phist := resp.phist
     this.phNewBit := resp.pc(instOffsetBits)
     this
@@ -169,28 +181,28 @@ class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
 }
 
-class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  val startAddr = UInt(VAddrBits.W)
-  val fallThruAddr = UInt(VAddrBits.W)
-  val isNextMask = Vec(PredictWidth, Bool())
+// class FtqEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
+//   val startAddr = UInt(VAddrBits.W)
+//   val fallThruAddr = UInt(VAddrBits.W)
+//   val isNextMask = Vec(PredictWidth, Bool())
 
-  val meta = UInt(MaxMetaLength.W)
+//   val meta = UInt(MaxMetaLength.W)
 
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasEntry = new RASEntry
-  val hist = new GlobalHistory
-  val specCnt = Vec(numBr, UInt(10.W))
-
-  val valids = Vec(PredictWidth, Bool())
-  val brMask = Vec(PredictWidth, Bool())
-  // isJalr, isCall, isRet
-  val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
-  val jmpOffset = UInt(log2Ceil(PredictWidth).W)
-
-  val mispredVec = Vec(PredictWidth, Bool())
-  val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
-  val target = UInt(VAddrBits.W)
-}
+//   val rasSp = UInt(log2Ceil(RasSize).W)
+//   val rasEntry = new RASEntry
+//   val hist = new ShiftingGlobalHistory
+//   val specCnt = Vec(numBr, UInt(10.W))
+  
+//   val valids = Vec(PredictWidth, Bool())
+//   val brMask = Vec(PredictWidth, Bool())
+//   // isJalr, isCall, isRet
+//   val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
+//   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
+  
+//   val mispredVec = Vec(PredictWidth, Bool())
+//   val cfiIndex = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+//   val target = UInt(VAddrBits.W)
+// }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
   val ptr = Output(new FtqPtr)
@@ -547,7 +559,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   }
 
 
-  io.toIfu.flushFromBpu.s2.valid := bpu_s2_resp.valid && bpu_s2_resp.hasRedirect
+  io.toIfu.flushFromBpu.s2.valid := bpu_s2_redirect
   io.toIfu.flushFromBpu.s2.bits := bpu_s2_resp.ftq_idx
   when (bpu_s2_resp.valid && bpu_s2_resp.hasRedirect) {
     bpuPtr := bpu_s2_resp.ftq_idx + 1.U
@@ -557,7 +569,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
-  io.toIfu.flushFromBpu.s3.valid := bpu_s3_resp.valid && bpu_s3_resp.hasRedirect
+  io.toIfu.flushFromBpu.s3.valid := bpu_s3_redirect
   io.toIfu.flushFromBpu.s3.bits := bpu_s3_resp.ftq_idx
   when (bpu_s3_resp.valid && bpu_s3_resp.hasRedirect) {
     bpuPtr := bpu_s3_resp.ftq_idx + 1.U
@@ -582,41 +594,34 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.raddr.init.init.last := ifuPtr.value
   ftq_pc_mem.io.raddr.init.last := (ifuPtr+1.U).value
 
-  val toIfuReq = Wire(chiselTypeOf(io.toIfu.req))
-
-  toIfuReq.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
-  toIfuReq.bits.ftqIdx := ifuPtr
-  toIfuReq.bits.target := update_target(ifuPtr.value)
-  toIfuReq.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
-  toIfuReq.bits.fallThruError  := false.B
+  io.toIfu.req.valid := allowToIfu && entry_fetch_status(ifuPtr.value) === f_to_send && ifuPtr =/= bpuPtr
+  io.toIfu.req.bits.ftqIdx := ifuPtr
+  io.toIfu.req.bits.target := update_target(ifuPtr.value)
+  io.toIfu.req.bits.ftqOffset := cfiIndex_vec(ifuPtr.value)
 
   when (last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr) {
-    toIfuReq.bits.fromFtqPcBundle(bpu_in_bypass_buf)
+    io.toIfu.req.bits.fromFtqPcBundle(bpu_in_bypass_buf)
   }.elsewhen (last_cycle_to_ifu_fire) {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
+    io.toIfu.req.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.last)
   }.otherwise {
-    toIfuReq.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
+    io.toIfu.req.bits.fromFtqPcBundle(ftq_pc_mem.io.rdata.init.init.last)
   }
 
-  io.toIfu.req <> toIfuReq
-
   // when fall through is smaller in value than start address, there must be a false hit
-  when (toIfuReq.bits.fallThroughError() && entry_hit_status(ifuPtr.value) === h_hit) {
+  when (io.toIfu.req.bits.fallThruError && entry_hit_status(ifuPtr.value) === h_hit) {
     when (io.toIfu.req.fire &&
       !(bpu_s2_redirect && bpu_s2_resp.ftq_idx === ifuPtr) &&
       !(bpu_s3_redirect && bpu_s3_resp.ftq_idx === ifuPtr)
     ) {
       entry_hit_status(ifuPtr.value) := h_false_hit
-      XSDebug(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
+      XSDebug(true.B, "FTB false hit by fallThroughError, startAddr: %x, fallTHru: %x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.fallThruAddr)
     }
-    io.toIfu.req.bits.fallThruAddr   := toIfuReq.bits.startAddr + (FetchWidth*4).U
-    io.toIfu.req.bits.fallThruError  := true.B
-    XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", toIfuReq.bits.startAddr, toIfuReq.bits.fallThruAddr)
+    XSDebug(true.B, "fallThruError! start:%x, fallThru:%x\n", io.toIfu.req.bits.startAddr, io.toIfu.req.bits.fallThruAddr)
   }
 
   val ifu_req_should_be_flushed =
-    io.toIfu.flushFromBpu.shouldFlushByStage2(toIfuReq.bits.ftqIdx) ||
-    io.toIfu.flushFromBpu.shouldFlushByStage3(toIfuReq.bits.ftqIdx)
+    io.toIfu.flushFromBpu.shouldFlushByStage2(io.toIfu.req.bits.ftqIdx) ||
+    io.toIfu.flushFromBpu.shouldFlushByStage3(io.toIfu.req.bits.ftqIdx)
 
   when (io.toIfu.req.fire && !ifu_req_should_be_flushed) {
     entry_fetch_status(ifuPtr.value) := f_sent
@@ -809,31 +814,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** flush ptr and state queue ****************************
   // ***********************************************************************************
 
-  class RedirectInfo extends Bundle {
-    val valid = Bool()
-    val ftqIdx = new FtqPtr
-    val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-    val flushItSelf = Bool()
-    def apply(redirect: Valid[Redirect]) = {
-      this.valid := redirect.valid
-      this.ftqIdx := redirect.bits.ftqIdx
-      this.ftqOffset := redirect.bits.ftqOffset
-      this.flushItSelf := RedirectLevel.flushItself(redirect.bits.level)
-      this
-    }
-  }
-  val redirectVec = Wire(Vec(3, new RedirectInfo))
-  val robRedirect = robFlush
-
-  redirectVec.zip(Seq(robRedirect, stage2Redirect, fromIfuRedirect)).map {
-    case (ve, r) => ve(r)
-  }
+  val redirectVec = VecInit(robFlush, stage2Redirect, fromIfuRedirect)
 
   // when redirect, we should reset ptrs and status queues
   when(redirectVec.map(r => r.valid).reduce(_||_)){
-    val r = PriorityMux(redirectVec.map(r => (r.valid -> r)))
+    val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
     val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
-    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, r.flushItSelf)
+    val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, RedirectLevel.flushItself(r.level))
     val next = idx + 1.U
     bpuPtr := next
     ifuPtr := next
@@ -976,15 +963,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val isCfi = isBr || isJmp
     val isTaken = commit_cfi.valid && commit_cfi.bits === i.U
     val misPred = commit_mispredict(i)
-    val ghist = commit_spec_meta.ghist.predHist
+    // val ghist = commit_spec_meta.ghist.predHist
+    val histPtr = commit_spec_meta.histPtr
     val predCycle = commit_meta.meta(63, 0)
     val target = commit_target
-
+    
     val brIdx = OHToUInt(Reverse(Cat(update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U})))
     val inFtbEntry = update_ftb_entry.brValids.zip(update_ftb_entry.brOffset).map{case(v, offset) => v && offset === i.U}.reduce(_||_)
-    val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid))
+    val addIntoHist = ((commit_hit === h_hit) && inFtbEntry) || ((!(commit_hit === h_hit) && i.U === commit_cfi.bits && isBr && commit_cfi.valid)) 
     XSDebug(v && do_commit && isCfi, p"cfi_update: isBr(${isBr}) pc(${Hexadecimal(pc)}) " +
-    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${Hexadecimal(ghist)}) " +
+    p"taken(${isTaken}) mispred(${misPred}) cycle($predCycle) hist(${histPtr.value}) " +
     p"startAddr(${Hexadecimal(commit_pc_bundle.startAddr)}) AddIntoHist(${addIntoHist}) " +
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
   }

@@ -142,7 +142,6 @@ trait HasCSRConst {
   val Mhpmcounter30 = 0xB1E
   val Mhpmcounter31 = 0xB1F
 
-  // Machine Counter Setup (not implemented)
   val Mcountinhibit = 0x320
   val Mhpmevent3    = 0x323
   val Mhpmevent4    = 0x324
@@ -175,6 +174,14 @@ trait HasCSRConst {
   val Mhpmevent31   = 0x33F
 
   // Debug/Trace Registers (shared with Debug Mode) (not implemented)
+
+  // Trigger Registers
+  val Tselect = 0x7A0
+  val Tdata1 = 0x7A1
+  val Tdata2 = 0x7A2
+  val Tinfo = 0x7A4
+  val Tcontrol = 0x7A5
+
   // Debug Mode Registers
   val Dcsr          = 0x7B0
   val Dpc           = 0x7B1
@@ -239,5 +246,16 @@ trait HasCSRConst {
   def perfcntPermissionCheck(addr: UInt, mode: UInt, mmask: UInt, smask: UInt): Bool = {
     val index = UIntToOH(addr & 31.U)
     Mux(mode === ModeM, true.B, Mux(mode === ModeS, (index & mmask) =/= 0.U, (index & mmask & smask) =/= 0.U))
+  }
+
+  def dcsrPermissionCheck(addr: UInt, mModeCanWrite: UInt, debug: Bool): Bool = {
+    // debug mode write only regs
+    val isDebugReg = addr(11, 4) === "h7b".U
+    Mux(!mModeCanWrite && isDebugReg, debug, true.B)
+  }
+
+  def triggerPermissionCheck(addr: UInt, mModeCanWrite: UInt, debug: Bool): Bool = {
+    val isTriggerReg = addr(11, 4) === "h7a".U
+    Mux(!mModeCanWrite && isTriggerReg, debug, true.B)
   }
 }

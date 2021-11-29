@@ -22,8 +22,8 @@ import chisel3.{util, _}
 import chisel3.util._
 import utils._
 import xiangshan._
+import xiangshan.frontend.icache._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
-import xiangshan.cache._
 
 trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst{
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
@@ -97,6 +97,7 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   val pageFault    = Vec(PredictWidth, Bool())
   val accessFault  = Vec(PredictWidth, Bool())
   val crossPageIPF = Vec(PredictWidth, Bool())
+  val triggered    = Vec(PredictWidth, new TriggerCf)
 }
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
@@ -135,7 +136,18 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
                        else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val nextLinePC =  align(pcStart, 64) + 64.U
+  val nextLinePC =  addrAlign(pcStart, 64, VAddrBits) + 64.U
+
+  // Frontend Triggers
+  val tdata = Reg(Vec(4, new MatchTriggerIO))
+  when(io.in.frontendTrigger.t.valid) {
+    tdata(io.in.frontendTrigger.t.bits.addr) := io.in.frontendTrigger.t.bits.tdata
+  }
+  io.out.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
+  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
+  triggerEnable := io.in.csrTriggerEnable
+  val triggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 6, 3 -> 8)
+  val chainMapping = Map(0 -> 0, 2 -> 3, 3 -> 4)
 
   for (i <- 0 until PredictWidth) {
     //TODO: Terrible timing for pc comparing
@@ -168,7 +180,18 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     io.out.pd(i).isCall        := isCall
     io.out.pd(i).isRet         := isRet
     io.out.pc(i)               := currentPC
-    io.out.crossPageIPF(i)     := (io.out.pc(i) === align(realEndPC, 64) - 2.U) && !pageFault(0) && pageFault(1) && !currentIsRVC
+    io.out.crossPageIPF(i)     := (io.out.pc(i) === addrAlign(realEndPC, 64, VAddrBits) - 2.U)&& !pageFault(0) && pageFault(1) && !currentIsRVC
+//    io.out.triggered(i)        := TriggerCmp(Mux(currentIsRVC, inst(15,0), inst), tInstData, matchType, triggerEnable) && TriggerCmp(currentPC, tPcData, matchType, triggerEnable)
+    io.out.triggered(i).triggerTiming := VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i).triggerHitVec := VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i).triggerChainVec := VecInit(Seq.fill(5)(false.B))
+    for (j <- 0 until 4) {
+      val hit = Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
+        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
+      io.out.triggered(i).triggerHitVec(triggerMapping(j)) := hit
+      io.out.triggered(i).triggerTiming(triggerMapping(j)) := hit && tdata(j).timing
+      if(chainMapping.contains(j)) io.out.triggered(i).triggerChainVec(chainMapping(j)) := hit && tdata(j).chain
+    }
     io.out.pageFault(i)        := hasPageFault    ||  io.out.crossPageIPF(i) 
     io.out.accessFault(i)      := hasAccessFault
 
@@ -200,7 +223,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   }
 
   //TODO:
-  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B
+  val beyondFetch            =  ((pcStart + 34.U === realEndPC)  && oversize && validEnd.last && isRVC(data.last)) && HasCExtension.B && !io.out.cfiOffset.valid
 
   val jumpOH                  =  VecInit(io.out.pd.zipWithIndex.map{ case(inst, i) => inst.isJal  && validStart(i) }) //TODO: need jalr?
   val jumpOffset              =  PriorityEncoder(jumpOH)
@@ -209,7 +232,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val jumpIsRVC               =  rvcOH(jumpOffset)
   val jumpNextPC              =  jumpPC + Mux(jumpIsRVC, 2.U, 4.U)
   val (hasFalseHit, hasJump)  =  (ParallelOR(falseHit), ParallelOR(jumpOH))
-  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize || beyondFetch)))
+  val endRange                =  ((Fill(PredictWidth, 1.U(1.W)) >> (~getBasicBlockIdx(realEndPC, pcStart))) | (Fill(PredictWidth, oversize)))
   val takeRange               =  Fill(PredictWidth, !ParallelOR(takens))   | Fill(PredictWidth, 1.U(1.W)) >> (~PriorityEncoder(takens))
   val fixCross                =  ((pcStart + (FetchWidth * 4).U) > nextLinePC || (pcStart + (FetchWidth * 4).U) === nextLinePC) && !isDoubleLine
   val boundPC                 =  Mux(fixCross, nextLinePC - 2.U  ,pcStart + (FetchWidth * 4).U)

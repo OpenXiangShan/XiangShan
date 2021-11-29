@@ -23,7 +23,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-abstract class BaseFusionCase(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]] = None)(implicit p: Parameters)
+abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends DecodeUnitConstants {
   require(pair.length == 2)
 
@@ -393,11 +393,10 @@ class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 
 // Case: addw and extract its lower 8 bits (fused into addwbyte)
 class FusedAddwbyte(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
-  extends BaseFusionCase(pair, csPair) {
-  require(csPair.isDefined)
-
-  // the first instruction is a addw
-  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isAddw(csPair.get(0).fuOpType)
+  extends BaseFusionCase(pair) {
+  // the first instruction is a ALUOpType.addw
+  // According to DecodeUnit.scala, only ADDIW and ADDW are ALUOpType.addw, which are used for inst1Cond.
+  def inst1Cond = instr(0) === Instructions.ADDIW || instr(0) === Instructions.ADDIW
   def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 0xff.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
@@ -457,12 +456,22 @@ class FusedAddwsexth(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(i
 }
 
 // Case: logic operation and extract its LSB
+
 class FusedLogiclsb(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
-  extends BaseFusionCase(pair, csPair) {
+  extends BaseFusionCase(pair) {
   require(csPair.isDefined)
 
-  // the first instruction is a logic
-  def inst1Cond = csPair.get(0).fuType === FuType.alu && ALUOpType.isSimpleLogic(csPair.get(0).fuOpType)
+  // the first instruction is a logic (and, or, xor, orcb)
+  // (1) def ANDI               = BitPat("b?????????????????111?????0010011")
+  // (2) def AND                = BitPat("b0000000??????????111?????0110011")
+  // (3) def ORI                = BitPat("b?????????????????110?????0010011")
+  // (4) def OR                 = BitPat("b0000000??????????110?????0110011")
+  // (5) def XORI               = BitPat("b?????????????????100?????0010011")
+  // (6) def XOR                = BitPat("b0000000??????????100?????0110011")
+  // (7) def ORC_B              = BitPat("b001010000111?????101?????0010011")
+  val logicInstrList = Seq(Instructions.ANDI, Instructions.AND, Instructions.ORI, Instructions.OR,
+    Instructions.XORI, Instructions.XOR, Instructions.ORC_B)
+  def inst1Cond = VecInit(logicInstrList.map(_ === instr(0))).asUInt.orR
   def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 1.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
@@ -512,17 +521,15 @@ class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 // Case: mul 7bit data with 32-bit data
 // Source: `andi r1, r0, 127`` + `mulw r1, r1, r2`
 // Target: `mulw7 r1, r0, r2`
-class FusedMulw7(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(implicit p: Parameters)
-  extends BaseFusionCase(pair, csPair) {
-  require(csPair.isDefined)
-
+class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
+  extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.ANDI && instr(0)(31, 20) === 127.U
   def inst2Cond = instr(1) === Instructions.MULW
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   def target: CtrlSignals = {
     // use MULW as the base
-    val cs = WireInit(csPair.get(1))
+    val cs = getBaseCS(Instructions.MULW)
     // replace the fuOpType with mulw7
     cs.fuOpType := MDUOpType.mulw7
     cs.lsrc(0) := instr1Rs1
@@ -568,14 +575,14 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedSr32add(pair),
       new FusedOddadd(pair),
       new FusedOddaddw(pair),
+      new FusedOrh48(pair),
+      new FusedMulw7(pair),
       new FusedAddwbyte(pair, Some(cs)),
       new FusedAddwbit(pair, Some(cs)),
       new FusedAddwzexth(pair, Some(cs)),
       new FusedAddwsexth(pair, Some(cs)),
       new FusedLogiclsb(pair, Some(cs)),
-      new FusedLogicZexth(pair, Some(cs)),
-      new FusedOrh48(pair),
-      new FusedMulw7(pair, Some(cs))
+      new FusedLogicZexth(pair, Some(cs))
     )
     val pairValid = VecInit(pair.map(_.valid)).asUInt().andR
     val thisCleared = io.clear(i)

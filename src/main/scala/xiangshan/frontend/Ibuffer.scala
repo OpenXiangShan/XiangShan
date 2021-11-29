@@ -49,6 +49,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val ipf = Bool()
     val acf = Bool()
     val crossPageIPFFix = Bool()
+    val triggered = new TriggerCf
   }
 
   for(out <- io.out) {
@@ -97,6 +98,12 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     inWire.ipf := io.in.bits.ipf(i)
     inWire.acf := io.in.bits.acf(i)
     inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix(i)
+    for(k<-0 until 10){
+    inWire.triggered.triggerHitVec(k) := false.B
+    }
+    inWire.triggered := io.in.bits.triggered(i)
+
+    dontTouch(inWire.triggered.triggerHitVec)
 
     ibuf.io.waddr(i) := tail_vec(offset(i)).value
     ibuf.io.wdata(i) := inWire
@@ -126,11 +133,12 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     io.out(i).bits.foldpc := outWire.foldpc
     io.out(i).bits.loadWaitBit := DontCare
-    io.out(i).bits.waitForSqIdx := DontCare
+    io.out(i).bits.waitForRobIdx := DontCare
     io.out(i).bits.storeSetHit := DontCare
     io.out(i).bits.loadWaitStrict := DontCare
     io.out(i).bits.ssid := DontCare
     io.out(i).bits.replayInst := false.B
+    io.out(i).bits.trigger := outWire.triggered
   }
   val next_head_vec = VecInit(head_vec.map(_ + numDeq))
   ibuf.io.raddr := VecInit(next_head_vec.map(_.value))

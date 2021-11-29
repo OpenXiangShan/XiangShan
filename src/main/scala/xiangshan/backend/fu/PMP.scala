@@ -383,7 +383,13 @@ trait PMPCheckMethod extends PMPConst {
     resp
   }
 
-  def pmp_match_res(addr: UInt, size: UInt, pmpEntries: Vec[PMPEntry], mode: UInt, lgMaxSize: Int) = {
+  def pmp_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
+    addr: UInt,
+    size: UInt,
+    pmpEntries: Vec[PMPEntry],
+    mode: UInt,
+    lgMaxSize: Int
+  ) = {
     val num = pmpEntries.size
     require(num == NumPMP)
 
@@ -415,7 +421,11 @@ trait PMPCheckMethod extends PMPConst {
     match_vec(num) := true.B
     cfg_vec(num) := pmpDefault
 
-    ParallelPriorityMux(match_vec, cfg_vec)
+    if (leaveHitMux) {
+      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+    } else {
+      ParallelPriorityMux(match_vec, cfg_vec)
+    }
   }
 }
 
@@ -460,23 +470,25 @@ class PMPChecker
 (
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
+  leaveHitMux: Boolean = false,
   pmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
 {
+  require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckIO(lgMaxSize))
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
-  val res_pma = pma_match_res(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
 
-  if (sameCycle) {
+  if (sameCycle || leaveHitMux) {
     io.resp := resp
   } else {
     io.resp := RegEnable(resp, io.req.valid)

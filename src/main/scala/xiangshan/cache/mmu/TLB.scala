@@ -70,6 +70,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = q.normalNSets,
     nWays = q.normalNWays,
     sramSinglePort = sramSinglePort,
+    saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
   )
@@ -81,6 +82,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = q.superNSets,
     nWays = q.superNWays,
     sramSinglePort = sramSinglePort,
+    saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
   )

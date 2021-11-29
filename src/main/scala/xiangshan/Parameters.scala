@@ -23,12 +23,14 @@ import xiangshan.backend.exu._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, ITTage, MicroBTB, RAS, Tage, Tage_SC}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import scala.math.min
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -59,7 +61,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 64,
+  HistoryLength: Int = 256,
   PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -68,6 +70,27 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
+  TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
+  //       Sets  Hist   Tag
+    Seq(( 128*8,    2,    7),
+        ( 128*8,    4,    7),
+        ( 256*8,    8,    8),
+        ( 256*8,   16,    8),
+        ( 128*8,   32,    9),
+        ( 128*8,   65,    9)),
+  TageBanks: Int = 2,
+  ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
+  //      Sets  Hist   Tag
+    Seq(( 512,    0,    0),
+        ( 256,    4,    8),
+        ( 256,    8,    8),
+        ( 512,   12,    8),
+        ( 512,   16,    8),
+        ( 512,   32,    8)),
+  SCNRows: Int = 1024,
+  SCNTables: Int = 6,
+  SCCtrBits: Int = 6,
+  numBr: Int = 2,
   branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
     ((resp_in: BranchPredictionResp, p: Parameters) => {
       // val loop = Module(new LoopPredictor)
@@ -139,7 +162,7 @@ case class XSCoreParameters
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
-  EnableFastForward: Boolean = true,
+  EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
@@ -162,7 +185,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -172,7 +196,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -184,10 +209,11 @@ case class XSCoreParameters
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = Some("parity"),
+    tagECC = Some("secded"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2
+    nMissEntries = 2,
+    nReleaseEntries = 2
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -225,8 +251,10 @@ case object DebugOptionsKey extends Field[DebugOptions]
 
 case class DebugOptions
 (
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = true,
+  FPGAPlatform: Boolean = false,
+  EnableDifftest: Boolean = false,
+  AlwaysBasicDiff: Boolean = true,
+  EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false
 )
@@ -241,7 +269,6 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
-  val hardId = coreParams.HartId
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -281,6 +308,44 @@ trait HasXSParameter {
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)
   }
+  val numBr = coreParams.numBr
+  val TageTableInfos = coreParams.TageTableInfos
+
+
+  val BankTageTableInfos = (0 until numBr).map(i =>
+    TageTableInfos.map{ case (s, h, t) => (s/(1 << i), h, t) }
+  )
+  val TageBanks = coreParams.TageBanks
+  val SCNRows = coreParams.SCNRows
+  val SCCtrBits = coreParams.SCCtrBits
+  val BankSCHistLens = BankTageTableInfos.map(info => 0 :: info.map{ case (_,h,_) => h}.toList)
+  val BankSCNTables = Seq.fill(numBr)(coreParams.SCNTables)
+
+  val BankSCTableInfos = (BankSCNTables zip BankSCHistLens).map {
+    case (ntable, histlens) =>
+      Seq.fill(ntable)((SCNRows, SCCtrBits)) zip histlens map {case ((n, cb), h) => (n, cb, h)}
+  }
+  val ITTageTableInfos = coreParams.ITTageTableInfos
+  type FoldedHistoryInfo = Tuple2[Int, Int]
+  val foldedGHistInfos =
+    (BankTageTableInfos.flatMap(_.map{ case (nRows, h, t) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toSet ++
+    BankSCTableInfos.flatMap(_.map{ case (nRows, _, h) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows/TageBanks), h)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toSet ++
+    ITTageTableInfos.map{ case (nRows, h, t) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toList
 
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
@@ -298,8 +363,6 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val StdFreeListSize = NRPhyRegs - 32
-  val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams
@@ -326,10 +389,10 @@ trait HasXSParameter {
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
 
-  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 
-              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 + 
+  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
+              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
               (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2) 
+              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2)
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)

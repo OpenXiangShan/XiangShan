@@ -74,14 +74,14 @@ class SimTop(implicit p: Parameters) extends Module {
     io.memAXI <> soc.memory
   }
 
-  if (debugOpts.EnableDebug || debugOpts.EnablePerfDebug) {
+  if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
     val timer = GTimer()
     val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
     ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
     ExcitingUtils.addSource(timer, "logTimestamp")
   }
 
-  if (debugOpts.EnablePerfDebug) {
+  if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
     val clean = io.perfInfo.clean
     val dump = io.perfInfo.dump
     ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
@@ -94,15 +94,13 @@ class SimTop(implicit p: Parameters) extends Module {
 }
 
 object SimTop extends App {
-
   override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args, fpga = false)
-    // generate verilog
-    XiangShanStage.execute(
-      firrtlOpts,
-      Seq(
-        ChiselGeneratorAnnotation(() => DisableMonitors(p => new SimTop()(p))(config))
-      )
-    )
+    // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+    val (config, firrtlOpts) = ArgParser.parse(args)
+    XiangShanStage.execute(firrtlOpts, Seq(
+      ChiselGeneratorAnnotation(() => {
+        DisableMonitors(p => new SimTop()(p))(config)
+      })
+    ))
   }
 }

@@ -39,7 +39,7 @@ case class SoCParameters
 (
   EnableILA: Boolean = false,
   PAddrBits: Int = 36,
-  extIntrs: Int = 150,
+  extIntrs: Int = 64,
   L3NBanks: Int = 4,
   L3CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l3",
@@ -239,7 +239,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for(port <- peripheral_ports) {
-    peripheralXbar := port
+    peripheralXbar := TLBuffer.chainNode(1, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
@@ -308,8 +308,11 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
       val resp = Vec(mmpma.num, Output(UInt((PMPAddrBits+1).W)))
     })
 
+    val ext_intrs_sync = RegNext(RegNext(RegNext(ext_intrs)))
+    val ext_intrs_wire = Wire(UInt(NrExtIntr.W))
+    ext_intrs_wire := ext_intrs_sync
     debugModule.module.io <> debug_module_io
-    plicSource.module.in := ext_intrs.asBools
+    plicSource.module.in := ext_intrs_wire.asBools
     for (i <- 0 until mmpma.num) {
       pma.module.io.req(i) := DontCare
       pma.module.io.req(i).valid := cacheable_check.req_valid(i)
