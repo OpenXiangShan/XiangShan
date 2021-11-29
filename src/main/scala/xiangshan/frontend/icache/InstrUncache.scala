@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.cache
+package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
@@ -132,7 +132,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   }
 }
 
-class InstrUncacheIO(implicit p: Parameters) extends DCacheBundle {
+class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
     val req = Flipped(DecoupledIO(new InsUncacheReq ))
     val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())

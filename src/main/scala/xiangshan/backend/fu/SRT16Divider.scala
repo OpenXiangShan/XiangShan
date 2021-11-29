@@ -88,9 +88,9 @@ class SRT16DividerDataModule(len: Int) extends Module {
     state := Mux(finalIter, UIntToOH(s_post_0, 7), UIntToOH(s_iter, 7))
   } .elsewhen(state(s_post_0)) { // if rem < 0, rem = rem + d
     state := UIntToOH(s_post_1, 7)
-  } .elsewhen(state(s_post_1)) {
+  } .elsewhen(state(s_post_1) && out_fire) {
     state := UIntToOH(s_finish, 7)
-  } .elsewhen(state(s_finish) && out_fire) {
+  } .elsewhen(state(s_finish)) {
     state := UIntToOH(s_idle, 7)
   } .otherwise {
     state := state
@@ -388,7 +388,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state(s_idle)
-  io.out_valid := state(s_finish)
+  io.out_valid := state(s_post_1)
 
 }
 
