@@ -24,7 +24,8 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
 import huancun.{CacheParameters, HCCacheParameters}
-import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, MicroBTB, RAS, Tage, ITTage, Tage_SC}
+import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
@@ -160,7 +161,7 @@ case class XSCoreParameters
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
-  EnableFastForward: Boolean = true,
+  EnableFastForward: Boolean = false,
   EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
@@ -209,10 +210,11 @@ case class XSCoreParameters
   NumPMA: Int = 16,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = Some("parity"),
+    tagECC = Some("secded"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2
+    nMissEntries = 2,
+    nReleaseEntries = 2
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -362,8 +364,6 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RobSize = coreParams.RobSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val StdFreeListSize = NRPhyRegs - 32
-  val MEFreeListSize = NRPhyRegs
   val LoadQueueSize = coreParams.LoadQueueSize
   val StoreQueueSize = coreParams.StoreQueueSize
   val dpParams = coreParams.dpParams

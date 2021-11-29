@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
+import xiangshan.mem.mdp._
 
 class Rename(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -30,6 +31,10 @@ class Rename(implicit p: Parameters) extends XSModule {
     val robCommits = Flipped(new RobCommitIO)
     // from decode
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
+    // ssit read result
+    val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
+    // waittable read result
+    val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
     // to rename table
     val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
@@ -40,9 +45,9 @@ class Rename(implicit p: Parameters) extends XSModule {
   })
 
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(MEFreeListSize))
-  val intRefCounter = Module(new RefCounter(MEFreeListSize))
-  val fpFreeList = Module(new StdFreeList(StdFreeListSize))
+  val intFreeList = Module(new MEFreeList(NRPhyRegs))
+  val intRefCounter = Module(new RefCounter(NRPhyRegs))
+  val fpFreeList = Module(new StdFreeList(NRPhyRegs - 32))
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
@@ -108,6 +113,14 @@ class Rename(implicit p: Parameters) extends XSModule {
   for (i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+
+    // update cf according to ssit result
+    uops(i).cf.storeSetHit := io.ssit(i).valid
+    uops(i).cf.loadWaitStrict := io.ssit(i).strict && io.ssit(i).valid
+    uops(i).cf.ssid := io.ssit(i).ssid
+
+    // update cf according to waittable result
+    uops(i).cf.loadWaitBit := io.waittable(i)
 
     val inValid = io.in(i).valid
 
