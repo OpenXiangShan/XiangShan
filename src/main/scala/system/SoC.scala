@@ -163,6 +163,7 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
@@ -202,6 +203,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
+    AXI4IdIndexer(idBits = 2) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
