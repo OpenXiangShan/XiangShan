@@ -398,7 +398,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
-      when(io.rob.pendingst && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr)) {
+      when(RegNext(io.rob.pendingst && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr))) {
         uncacheState := s_req
       }
     }
