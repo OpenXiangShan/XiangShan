@@ -33,22 +33,29 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
 
   val allocate = RegNext(io.allocate)
   val deallocate = RegNext(io.deallocate)
-
   // recording referenced times of each physical registers
   // refCounter: increase at rename; decrease at walk/commit
   // Originally 0-31 registers have counters of ones.
-  val refCounter = RegInit(VecInit(Seq.fill(32)(1.U(IntRefCounterWidth.W)) ++ Seq.fill(NRPhyRegs - 32)(0.U(IntRefCounterWidth.W))))
+  val refCounter = RegInit(VecInit(Seq.fill(32)(1.U(IntRefCounterWidth.W)) ++ Seq.fill(size - 32)(0.U(IntRefCounterWidth.W))))
+  val refCounterInc = WireInit(refCounter)
+  val refCounterDec = WireInit(refCounter)
   val refCounterNext = WireInit(refCounter)
 
+  // One-hot Encoding for allocation and de-allocation
+  val allocateOH = allocate.map(alloc => UIntToOH(alloc.bits))
+  val deallocateOH = deallocate.map(dealloc => UIntToOH(dealloc.bits))
+
   /**
-    * Deallocation: when refCounter becomes zero, the register can be released to freelist
+    * De-allocation: when refCounter becomes zero, the register can be released to freelist
     */
   for ((de, i) <- deallocate.zipWithIndex) {
     val isNonZero = de.valid && refCounter(de.bits) =/= 0.U
     val hasDuplicate = deallocate.take(i).map(de => de.valid && de.bits === deallocate(i).bits)
     val blockedByDup = if (i == 0) false.B else VecInit(hasDuplicate).asUInt.orR
-    val isFreed = refCounter(RegNext(de.bits)) === 0.U
-    io.freeRegs(i).valid := RegNext(isNonZero && !blockedByDup) && isFreed
+    val isFreed = refCounter(de.bits) + refCounterInc(de.bits) === refCounterDec(de.bits)
+    io.freeRegs(i).valid := RegNext(isNonZero && !blockedByDup) && RegNext(isFreed)
+    val isFreed1 = refCounter(RegNext(de.bits)) === 0.U
+    XSError(RegNext(isFreed) =/= isFreed1, p"why isFreed ${RegNext(isFreed)} $isFreed1\n")
     io.freeRegs(i).bits := RegNext(deallocate(i).bits)
   }
 
@@ -68,17 +75,23 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     * We don't count the number of references for physical register 0.
     * It should never be released to freelist.
     */
-  for (i <- 1 until NRPhyRegs) {
-    val numAlloc = PopCount(allocate.map(alloc => alloc.valid && alloc.bits === i.U))
-    val numDealloc = PopCount(deallocate.map(dealloc => dealloc.valid && dealloc.bits === i.U))
-    refCounterNext(i) := refCounter(i) + numAlloc - numDealloc
-    XSError(RegNext(refCounter(i) + numAlloc < numDealloc), p"why $i?\n")
+  for (i <- 1 until size) {
+    refCounterInc(i) := PopCount(allocate.zip(allocateOH).map(alloc => alloc._1.valid && alloc._2(i)))
+    refCounterDec(i) := PopCount(deallocate.zip(deallocateOH).map(dealloc => dealloc._1.valid && dealloc._2(i)))
+    val numAlloc1 = PopCount(allocate.map(alloc => alloc.valid && alloc.bits === i.U))
+    val numDealloc1 = PopCount(deallocate.map(dealloc => dealloc.valid && dealloc.bits === i.U))
+    XSError(refCounterInc(i) =/= numAlloc1, p"why numAlloc ${refCounterInc(i)} $numAlloc1??")
+    XSError(refCounterDec(i) =/= numDealloc1, p"why numDealloc ${refCounterDec(i)} $numDealloc1??")
+    refCounterNext(i) := refCounter(i) + refCounterInc(i) - refCounterDec(i)
+    XSError(RegNext(refCounter(i) + refCounterInc(i) < refCounterDec(i)), p"why $i?\n")
     refCounter(i) := refCounterNext(i)
   }
 
   for (i <- 0 until RobSize) {
     val numCounters = PopCount(refCounter.map(_ === i.U))
     XSPerfAccumulate(s"ref_counter_$i", numCounters)
+  }
+  for (i <- 0 until size) {
     val isFreed = io.freeRegs.map(f => f.valid && f.bits === i.U)
     XSPerfAccumulate(s"free_reg_$i", VecInit(isFreed).asUInt.orR)
   }

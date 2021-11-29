@@ -265,6 +265,7 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 
 class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
@@ -941,7 +942,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestInstrCommit)
       difftest.io.clock    := clock
-      difftest.io.coreid   := hardId.U
+      difftest.io.coreid   := io.hartId
       difftest.io.index    := i.U
 
       val ptr = deqPtrVec(i).value
@@ -961,12 +962,12 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
         (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w))
       difftest.io.wen      := RegNext(io.commits.valid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)
       difftest.io.wpdest   := RegNext(io.commits.info(i).pdest)
-      difftest.io.wdest    := RegNext(io.commits.info(i)ldest)
+      difftest.io.wdest    := RegNext(io.commits.info(i).ldest)
 
       // runahead commit hint
       val runahead_commit = Module(new DifftestRunaheadCommitEvent)
       runahead_commit.io.clock := clock
-      runahead_commit.io.coreid := hardId.U
+      runahead_commit.io.coreid := io.hartId
       runahead_commit.io.index := i.U
       runahead_commit.io.valid := difftest.io.valid && 
         (commitBranchValid(i) || commitIsStore(i))
@@ -1001,7 +1002,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
       val difftest = Module(new DifftestBasicInstrCommit)
       difftest.io.clock   := clock
-      difftest.io.coreid  := hardId.U
+      difftest.io.coreid  := io.hartId
       difftest.io.index   := i.U
       difftest.io.valid   := RegNext(io.commits.valid(i) && !io.commits.isWalk)
       difftest.io.special := RegNext(CommitType.isFused(commitInfo.commitType))
@@ -1017,7 +1018,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     for (i <- 0 until CommitWidth) {
       val difftest = Module(new DifftestLoadEvent)
       difftest.io.clock  := clock
-      difftest.io.coreid := hardId.U
+      difftest.io.coreid := io.hartId
       difftest.io.index  := i.U
 
       val ptr = deqPtrVec(i).value
@@ -1044,7 +1045,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
     val difftest = Module(new DifftestTrapEvent)
     difftest.io.clock    := clock
-    difftest.io.coreid   := hardId.U
+    difftest.io.coreid   := io.hartId
     difftest.io.valid    := hitTrap
     difftest.io.code     := trapCode
     difftest.io.pc       := trapPC
@@ -1062,7 +1063,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     val hitTrap = trapVec.reduce(_||_)
     val difftest = Module(new DifftestBasicTrapEvent)
     difftest.io.clock    := clock
-    difftest.io.coreid   := hardId.U
+    difftest.io.coreid   := io.hartId
     difftest.io.valid    := hitTrap
     difftest.io.cycleCnt := timer
     difftest.io.instrCnt := instrCnt

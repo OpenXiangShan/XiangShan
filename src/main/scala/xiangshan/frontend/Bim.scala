@@ -64,55 +64,32 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   // Update logic
   val u_valid = RegNext(io.update.valid)
   val update = RegNext(io.update.bits)
-
   val u_idx = bimAddr.getIdx(update.pc)
+  
+  val update_mask = LowerMask(PriorityEncoderOH(update.preds.br_taken_mask.asUInt))
+  val newCtrs = Wire(Vec(numBr, UInt(2.W)))
+  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
+
 
   // Bypass logic
-  val wrbypass_ctrs       = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, UInt(2.W)))))
-  val wrbypass_ctr_valids = RegInit(0.U.asTypeOf(Vec(bypassEntries, Vec(numBr, Bool()))))
-  val wrbypass_idx       = RegInit(0.U.asTypeOf(Vec(bypassEntries, UInt(log2Up(bimSize).W))))
-  val wrbypass_enq_ptr    = RegInit(0.U(log2Up(bypassEntries).W))
+  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(bimSize), numWays = numBr))
+  wrbypass.io.wen := need_to_update.reduce(_||_)
+  wrbypass.io.write_idx := u_idx
+  wrbypass.io.write_data := newCtrs
+  wrbypass.io.write_way_mask.map(_ := need_to_update)
 
-  val wrbypass_hits = VecInit((0 until bypassEntries).map(i =>
-    !doing_reset && wrbypass_idx(i) === u_idx))
-  val wrbypass_hit = wrbypass_hits.reduce(_||_)
-  val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
-
-  val oldCtrs = VecInit((0 until numBr).map(i =>
-    Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(i),
-    wrbypass_ctrs(wrbypass_hit_idx)(i), update.meta(2*i+1, 2*i))))
+  val oldCtrs = 
+    VecInit((0 until numBr).map(i =>
+      Mux(wrbypass.io.hit && wrbypass.io.hit_data(i).valid,
+        wrbypass.io.hit_data(i).bits,
+        update.meta(2*i+1, 2*i))
+    ))
 
   val newTakens = update.preds.br_taken_mask
-  val newCtrs = VecInit((0 until numBr).map(i =>
+  newCtrs := VecInit((0 until numBr).map(i =>
     satUpdate(oldCtrs(i), 2, newTakens(i))
   ))
 
-  val update_mask = LowerMask(PriorityEncoderOH(update.preds.br_taken_mask.asUInt))
-  val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
-
-  when (reset.asBool) { wrbypass_ctr_valids.foreach(_ := VecInit(Seq.fill(numBr)(false.B)))}
-
-  for (i <- 0 until numBr) {
-    when(need_to_update.reduce(_||_)) {
-      when(wrbypass_hit) {
-        when(need_to_update(i)) {
-          wrbypass_ctrs(wrbypass_hit_idx)(i) := newCtrs(i)
-          wrbypass_ctr_valids(wrbypass_hit_idx)(i) := true.B
-        }
-      }.otherwise {
-        wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := false.B
-        when(need_to_update(i)) {
-          wrbypass_ctrs(wrbypass_enq_ptr)(i) := newCtrs(i)
-          wrbypass_ctr_valids(wrbypass_enq_ptr)(i) := true.B
-        }
-      }
-    }
-  }
-
-  when (need_to_update.reduce(_||_) && !wrbypass_hit) {
-    wrbypass_idx(wrbypass_enq_ptr) := u_idx
-    wrbypass_enq_ptr := (wrbypass_enq_ptr + 1.U)(log2Up(bypassEntries)-1, 0)
-  }
 
   bim.io.w.apply(
     valid = need_to_update.asUInt.orR || doing_reset,

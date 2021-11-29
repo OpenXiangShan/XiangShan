@@ -207,6 +207,7 @@ class WbArbiterWrapper(
 
   lazy val module = new LazyModuleImp(this) with HasXSParameter {
     val io = IO(new Bundle() {
+      val hartId = Input(UInt(8.W))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))
     })
@@ -226,7 +227,7 @@ class WbArbiterWrapper(
     intArbiter.module.io.out.foreach(out => {
       val difftest = Module(new DifftestIntWriteback)
       difftest.io.clock := clock
-      difftest.io.coreid := hardId.U
+      difftest.io.coreid := io.hartId
       difftest.io.valid := out.valid
       difftest.io.dest := out.bits.uop.pdest
       difftest.io.data := out.bits.data
@@ -244,7 +245,7 @@ class WbArbiterWrapper(
     fpArbiter.module.io.out.foreach(out => {
       val difftest = Module(new DifftestFpWriteback)
       difftest.io.clock := clock
-      difftest.io.coreid := hardId.U
+      difftest.io.coreid := io.hartId
       difftest.io.valid := out.valid
       difftest.io.dest := out.bits.uop.pdest
       difftest.io.data := out.bits.data

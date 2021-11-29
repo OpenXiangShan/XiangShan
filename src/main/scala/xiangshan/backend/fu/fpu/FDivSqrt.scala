@@ -18,9 +18,34 @@ package xiangshan.backend.fu.fpu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
-import freechips.rocketchip.tile.FType
-import fudian.{FPUpConverter,FDIV}
+import fudian.FDIV
+
+import scala.collection.mutable
+
+/*
+    Because fdiv use the decoder and decoder has 'Dedup' bug now,
+    we use hierarchy API to force FDIV be deduped to avoid the bug.
+ */
+object FDivGen {
+  val defMap = new mutable.HashMap[FPU.FType, Definition[InstantiableFDIV]]()
+  def apply(t: FPU.FType) = {
+    val divDef = defMap.getOrElseUpdate(t, Definition(new InstantiableFDIV(t)))
+    Instance(divDef)
+  }
+}
+
+@instantiable
+class InstantiableFDIV(t: FPU.FType) extends Module {
+
+  val div = Module(new FDIV(t.expWidth, t.precision))
+
+  @public val io = IO(chiselTypeOf(div.io))
+
+  io <> div.io
+
+}
 
 class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_valid, out_ready = IO(Input(Bool()))
@@ -40,18 +65,18 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val outSel = RegEnable(typeSel, VecInit(Seq.fill(typeSel.length)(true.B)), in_fire)  // inelegant
 
   val divSqrt = FPU.ftypes.map{ t =>
-    val fdiv = Module(new FDIV(t.expWidth, t.precision))
+    val fdiv = FDivGen(t)
     fdiv.io.a := src1
     fdiv.io.b := src2
     fdiv.io.rm := rm
-    fdiv.io.specialIO.in_valid := in_fire && !kill_w
+    fdiv.io.specialIO.in_valid := in_fire && !kill_w && (FPU.ftypes.indexOf(t).U === tag)
     fdiv.io.specialIO.out_ready := out_ready
     fdiv.io.specialIO.isSqrt := fpCtrl.sqrt
     fdiv.io.specialIO.kill := kill_r
     fdiv
   }
 
-  in_ready := Mux1H(outSel, divSqrt.map(_.io.specialIO.in_ready))
+  in_ready := divSqrt.map(_.io.specialIO.in_ready).foldRight(true.B)(_ && _)
   out_valid := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
   io.out.data := Mux1H(outSel, divSqrt.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)

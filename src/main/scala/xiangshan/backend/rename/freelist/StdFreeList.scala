@@ -88,13 +88,13 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     val perfEvents = Output(new PerfEventsBundle(4))
   })
   val perfEvents = Seq(
-    ("std_freelist_1/4_valid          ", (freeRegCnt < (StdFreeListSize.U/4.U))                                              ),
-    ("std_freelist_2/4_valid          ", (freeRegCnt > (StdFreeListSize.U/4.U)) & (freeRegCnt <= (StdFreeListSize.U/2.U))    ),
-    ("std_freelist_3/4_valid          ", (freeRegCnt > (StdFreeListSize.U/2.U)) & (freeRegCnt <= (StdFreeListSize.U*3.U/4.U))),
-    ("std_freelist_4/4_valid          ", (freeRegCnt > (StdFreeListSize.U*3.U/4.U))                                          ),
+    ("std_freelist_1_4_valid", (freeRegCnt < (size / 4).U)                                   ),
+    ("std_freelist_2_4_valid", (freeRegCnt > (size / 4).U) & (freeRegCnt <= (size / 2).U)    ),
+    ("std_freelist_3_4_valid", (freeRegCnt > (size / 2).U) & (freeRegCnt <= (size * 3 / 4).U)),
+    ("std_freelist_4_4_valid", (freeRegCnt > (size * 3 / 4).U)                               )
   )
 
-  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+  for (((perf_out, (perf_name, perf)), i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
     perf_out.incr_step := RegNext(perf)
   }
 }

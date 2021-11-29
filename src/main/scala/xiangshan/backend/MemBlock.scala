@@ -60,6 +60,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 {
 
   val io = IO(new Bundle {
+    val hartId = Input(UInt(8.W))
     val redirect = Flipped(ValidIO(new Redirect))
     // in
     val issue = Vec(exuParameters.LsExuCnt + 2, Flipped(DecoupledIO(new ExuInput)))
@@ -129,6 +130,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
   io.stIssuePtr := lsq.io.issuePtrExt
+
+  dcache.io.hartId := io.hartId
+  lsq.io.hartId := io.hartId
+  sbuffer.io.hartId := io.hartId
+  atomicsUnit.io.hartId := io.hartId
 
   // dtlb
   val sfence = RegNext(io.sfence)

@@ -28,6 +28,7 @@ import xiangshan.backend.fu.PMPRespBundle
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))
     val storeDataIn   = Flipped(Valid(new StoreDataBundle)) // src2 from rs
     val out           = Decoupled(new ExuOutput)
@@ -293,7 +294,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   if (env.EnableDifftest) {
     val difftest = Module(new DifftestAtomicEvent)
     difftest.io.clock      := clock
-    difftest.io.coreid     := hardId.U
+    difftest.io.coreid     := io.hartId
     difftest.io.atomicResp := io.dcache.resp.fire()
     difftest.io.atomicAddr := paddr_reg
     difftest.io.atomicData := data_reg

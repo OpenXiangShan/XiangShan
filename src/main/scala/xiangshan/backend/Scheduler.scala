@@ -221,6 +221,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
 
   val io = IO(new Bundle {
+    val hartId = Input(UInt(8.W))
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
     // dispatch and issue ports
@@ -451,13 +452,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = Module(new DifftestArchIntRegState)
     difftest.io.clock := clock
-    difftest.io.coreid := hardId.U
+    difftest.io.coreid := io.hartId
     difftest.io.gpr := intRfReadData.takeRight(32)
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
     val difftest = Module(new DifftestArchFpRegState)
     difftest.io.clock := clock
-    difftest.io.coreid := hardId.U
+    difftest.io.coreid := io.hartId
     difftest.io.fpr := fpRfReadData.takeRight(32)
   }
 

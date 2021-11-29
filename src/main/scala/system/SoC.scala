@@ -233,7 +233,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for(port <- peripheral_ports) {
-    peripheralXbar := port
+    peripheralXbar := TLBuffer.chainNode(1, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
