@@ -28,7 +28,6 @@ import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
-  val lsIdx = Input(new LSIdx)
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
 }
@@ -119,7 +118,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   loadQueue.io.rollback <> io.rollback
   loadQueue.io.dcache <> io.dcache
   loadQueue.io.release <> io.release
-  loadQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   loadQueue.io.exceptionAddr.isStore := DontCare
 
   // store queue wiring
@@ -131,7 +129,6 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
   storeQueue.io.sbuffer <> io.sbuffer
   storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.rob <> io.rob
-  storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.issuePtrExt <> io.issuePtrExt
 
@@ -142,7 +139,13 @@ class LsqWrappper(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
   storeQueue.io.sqempty <> io.sqempty
 
-  io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
+  // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
+  // s0: commit
+  // s1:               exception find
+  // s2:               exception triggered
+  // s3: ptr updated & new address
+  // address will be used at the next cycle after exception is triggered
+  io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
