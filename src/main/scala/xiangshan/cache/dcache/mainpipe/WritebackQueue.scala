@@ -367,8 +367,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //    and a probe req with the same addr comes. In this case we merge probe with release,
   //    handle this probe, so we don't need another release.
   io.primary_ready := state === s_invalid
-//  io.secondary_ready := state === s_sleep && !io.req.bits.voluntary && io.req.bits.addr === req.addr
-  io.secondary_ready := (state === s_sleep || state === s_release_req || state === s_release_resp) && io.req.bits.addr === req.addr
+  io.secondary_ready := state =/= s_invalid && io.req.bits.addr === req.addr
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
@@ -429,7 +428,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.primary_valid := alloc &&
         !former_primary_ready &&
         entry.io.primary_ready
-      entry.io.secondary_valid := io.req.valid && !accept
+      entry.io.secondary_valid := io.req.valid && accept
 
       entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
       entry.io.mem_grant.bits  := io.mem_grant.bits
