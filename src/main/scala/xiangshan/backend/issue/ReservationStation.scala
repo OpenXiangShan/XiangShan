@@ -577,34 +577,38 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       // we reduce its latency for one cycle since it does not need to read
       // from data array. Timing to be optimized later.
       if (params.isLoad) {
-        val ldFastDeq = Wire(io.deq(i).cloneType)
-        // Condition: wakeup by load (to select load wakeup bits)
-        val ldCanBeFast = VecInit(
-          wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
-        ).asUInt
-        ldFastDeq.valid := issueVec(i).valid && ldCanBeFast.orR
-        ldFastDeq.ready := true.B
-        ldFastDeq.bits.src := DontCare
-        ldFastDeq.bits.uop := s1_out(i).bits.uop
-        // when last cycle load has fast issue, cancel this cycle's normal issue and let it go
-        val lastCycleLdFire = RegNext(ldFastDeq.valid && !s2_deq(i).valid && io.deq(i).ready)
-        when (lastCycleLdFire) {
-          s2_deq(i).valid := false.B
-          s2_deq(i).ready := true.B
+        if (EnableLoadToLoadForward) {
+          val ldFastDeq = Wire(io.deq(i).cloneType)
+          // Condition: wakeup by load (to select load wakeup bits)
+          val ldCanBeFast = VecInit(
+            wakeupBypassMask.drop(exuParameters.AluCnt).take(exuParameters.LduCnt).map(_.asUInt.orR)
+          ).asUInt
+          ldFastDeq.valid := issueVec(i).valid && ldCanBeFast.orR
+          ldFastDeq.ready := true.B
+          ldFastDeq.bits.src := DontCare
+          ldFastDeq.bits.uop := s1_out(i).bits.uop
+          // when last cycle load has fast issue, cancel this cycle's normal issue and let it go
+          val lastCycleLdFire = RegNext(ldFastDeq.valid && !s2_deq(i).valid && io.deq(i).ready)
+          when (lastCycleLdFire) {
+            s2_deq(i).valid := false.B
+            s2_deq(i).ready := true.B
+          }
+          // For now, we assume deq.valid has higher priority than ldFastDeq.
+          when (!s2_deq(i).valid) {
+            io.deq(i).valid := ldFastDeq.valid
+            io.deq(i).bits := ldFastDeq.bits
+            s2_deq(i).ready := true.B
+          }
+          io.load.get.fastMatch(i) := Mux(s2_deq(i).valid, 0.U, ldCanBeFast)
+          when (!s2_deq(i).valid) {
+            io.feedback.get(i).rsIdx := s1_issue_index(i)
+            io.feedback.get(i).isFirstIssue := s1_first_issue(i)
+          }
+          XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
+          XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
+        } else {
+          io.load.get.fastMatch(i) := DontCare
         }
-        // For now, we assume deq.valid has higher priority than ldFastDeq.
-        when (!s2_deq(i).valid) {
-          io.deq(i).valid := ldFastDeq.valid
-          io.deq(i).bits := ldFastDeq.bits
-          s2_deq(i).ready := true.B
-        }
-        io.load.get.fastMatch(i) := Mux(s2_deq(i).valid, 0.U, ldCanBeFast)
-        when (!s2_deq(i).valid) {
-          io.feedback.get(i).rsIdx := s1_issue_index(i)
-          io.feedback.get(i).isFirstIssue := s1_first_issue(i)
-        }
-        XSPerfAccumulate(s"fast_load_deq_valid_$i", !s2_deq(i).valid && ldFastDeq.valid)
-        XSPerfAccumulate(s"fast_load_deq_fire_$i", !s2_deq(i).valid && ldFastDeq.valid && io.deq(i).ready)
       }
 
       io.deq(i).bits.uop.debugInfo.issueTime := GTimer()
