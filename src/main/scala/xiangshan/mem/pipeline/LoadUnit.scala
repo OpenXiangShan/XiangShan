@@ -161,6 +161,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val dcachePAddr = Output(UInt(PAddrBits.W))
     val dcacheKill = Output(Bool())
+    val fastUopKill = Output(Bool())
     val dcacheBankConflict = Input(Bool())
     val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
@@ -186,6 +187,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.dcachePAddr := s1_paddr
   //io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
   io.dcacheKill := s1_tlb_miss || s1_exception
+  io.fastUopKill := io.dtlbResp.bits.fast_miss || s1_exception
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
@@ -535,7 +537,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.fastUop.valid := io.dcache.s1_hit_way.orR && // dcache hit
     !io.dcache.s1_disable_fast_wakeup &&  // load fast wakeup should be disabled when dcache data read is not ready
     load_s1.io.in.valid && // valid laod request
-    !load_s1.io.dcacheKill && // not mmio or tlb miss
+    !load_s1.io.fastUopKill && // not mmio or tlb miss
     !io.lsq.forward.dataInvalidFast && // forward failed
     !load_s1.io.needLdVioCheckRedo // load-load violation check: load paddr cam struct hazard
   io.fastUop.bits := load_s1.io.out.bits.uop
