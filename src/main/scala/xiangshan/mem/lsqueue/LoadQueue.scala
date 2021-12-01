@@ -661,7 +661,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
-      when(io.rob.pendingld && lqTailMmioPending && lqTailAllocated) {
+      when(RegNext(io.rob.pendingld) && lqTailMmioPending && lqTailAllocated) {
         uncacheState := s_req
       }
     }
@@ -676,7 +676,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_wait) {
-      when(io.rob.commit) {
+      when(RegNext(io.rob.commit)) {
         uncacheState := s_idle // ready for next mmio
       }
     }
