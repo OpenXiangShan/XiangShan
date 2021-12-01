@@ -33,12 +33,21 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val needReplayFromRS = Output(Bool())
   val forward = new PipeLoadForwardQueryIO
   val loadViolationQuery = new LoadViolationQueryIO
+  val trigger = Flipped(new LqTriggerIO)
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
   // load to load fast path is limited to ld (64 bit) used as vaddr src1 only
   val data = UInt(XLEN.W)
   val valid = Bool()
+}
+
+class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
+  val tdata2 = Input(UInt(64.W)) 
+  val matchType = Input(UInt(2.W)) 
+  val tEnable = Input(Bool()) 
+  val addrHit = Output(Bool())
+  val lastDataHit = Output(Bool())
 }
 
 // Load Pipeline Stage 0
@@ -455,6 +464,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadToLsqIO
     val fastUop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1
+    val trigger = Vec(3, new LoadUnitTriggerIO)
 
     val tlb = new TlbRequestIO
     val pmp = Flipped(new PMPRespBundle()) // arrive same to tlb now
@@ -577,6 +587,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
   io.lsq.ldout.ready := !hitLoadOut.valid
+
+  val lastValidData = RegEnable(io.ldout.bits.data, io.ldout.fire())
+  val hitLoadAddrTriggerHitVec = Wire(Vec(3, Bool()))
+  val lqLoadAddrTriggerHitVec = io.lsq.trigger.lqLoadAddrTriggerHitVec
+  (0 until 3).map{i => {
+    val tdata2 = io.trigger(i).tdata2
+    val matchType = io.trigger(i).matchType
+    val tEnable = io.trigger(i).tEnable
+    hitLoadAddrTriggerHitVec(i) := TriggerCmp(io.ldout.bits.debug.vaddr, tdata2, matchType, tEnable)
+    io.trigger(i).addrHit := Mux(hitLoadOut.valid, hitLoadAddrTriggerHitVec(i), lqLoadAddrTriggerHitVec(i))
+    io.trigger(i).lastDataHit := TriggerCmp(lastValidData, tdata2, matchType, tEnable)
+  }}
+  io.lsq.trigger.hitLoadAddrTriggerHitVec := hitLoadAddrTriggerHitVec
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(12))
