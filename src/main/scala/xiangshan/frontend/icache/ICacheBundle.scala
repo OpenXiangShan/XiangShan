@@ -36,8 +36,8 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
   val valid      = Vec(2, Vec(nWays ,Bool()))
   val errors     = Vec(2, Vec(nWays ,Bool()))
 
-  def tags = VecInit(metaData.map(meta_way => VecInit(meta_way.map( meta=> meta.tag ))))
-  def cohs = VecInit(metaData.map(meta_way => VecInit(meta_way.map( meta=> meta.coh ))))
+  def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
+  def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
