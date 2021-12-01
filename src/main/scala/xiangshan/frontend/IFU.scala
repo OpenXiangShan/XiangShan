@@ -196,10 +196,6 @@ with HasCircularQueuePtrHelper
   val f2_vSetIdx    = RegEnable(next = f1_vSetIdx,    enable=f1_fire)
   val f2_fire       = f2_valid && f2_ready
 
-  def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
-    Mux(valid, data, RegEnable(data, valid))
-  }
-
   f2_ready := f3_ready && icacheRespAllValid || !f2_valid
   //TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire       =  fromICache(0).valid && (fromICache(0).bits.vaddr ===  f2_ftq_req.startAddr) && ((fromICache(1).valid && (fromICache(1).bits.vaddr ===  f2_ftq_req.fallThruAddr)) || !f2_doubleLine)
