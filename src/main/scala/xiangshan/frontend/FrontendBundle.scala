@@ -167,17 +167,15 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
     oldest_bit_to_get_from_ghr.map(i => ghr((histPtr + (i+1).U).value))
   }
 
-  def circular_shift_left(max_shift_value: Int)(src: UInt, shamt: UInt) = {
+  def circular_shift_left(src: UInt, shamt: Int) = {
     val srcLen = src.getWidth
-    require(max_shift_value <= srcLen)
     val src_doubled = Cat(src, src)
-    val shifted_vec = (0 to max_shift_value).map(i => src_doubled(srcLen*2-1-i, srcLen-i))
-    val sel_vec = (0 to max_shift_value).map(_.U === shamt)
-    Mux1H(sel_vec, shifted_vec)
+    val shifted = src_doubled(srcLen*2-1-shamt, srcLen-shamt)
+    shifted
   }
 
 
-  def update(ghr: Vec[Bool], histPtr: CGHPtr, num: UInt, taken: Bool): FoldedHistory = {
+  def update(ghr: Vec[Bool], histPtr: CGHPtr, num: Int, taken: Bool): FoldedHistory = {
     // do xors for several bitsets at specified bits
     def bitsets_xor(len: Int, bitsets: Seq[Seq[Tuple2[Int, Bool]]]) = {
       val res = Wire(Vec(len, Bool()))
@@ -208,7 +206,7 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
 
     // mask off bits that do not update
     val oldest_bits_masked = oldest_bits.zipWithIndex.map{
-      case (ob, i) => ob && (i.U < num)
+      case (ob, i) => ob && (i < num).B
     }
     // if a bit does not wrap around, it should not be xored when it exits
     val oldest_bits_set = (0 until max_update_num).filter(oldest_bit_wrap_around).map(i => (oldest_bit_pos_in_folded(i), oldest_bits_masked(i)))
@@ -216,14 +214,14 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
     // println(f"old bits pos ${oldest_bits_set.map(_._1)}")
 
     // only the last bit could be 1, as we have at most one taken branch at a time
-    val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && (i+1).U === num)).asUInt
+    val newest_bits_masked = VecInit((0 until max_update_num).map(i => taken && ((i+1) == num).B)).asUInt
     // if a bit does not wrap around, newest bits should not be xored onto it either
     val newest_bits_set = (0 until max_update_num).map(i => (compLen-1-i, newest_bits_masked(i)))
 
     // println(f"new bits set ${newest_bits_set.map(_._1)}")
     //
     val original_bits_masked = VecInit(folded_hist.asBools.zipWithIndex.map{
-      case (fb, i) => fb && !(num >= (len-i).U)
+      case (fb, i) => fb && !(num >= (len-i)).B
     })
     val original_bits_set = (0 until compLen).map(i => (i, original_bits_masked(i)))
 
@@ -236,7 +234,7 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
       } else {
         // do xor then shift
         val xored = bitsets_xor(compLen, Seq(original_bits_set, oldest_bits_set, newest_bits_set))
-        circular_shift_left(max_update_num)(xored, num)
+        circular_shift_left(xored, num)
       }
     val fh = WireInit(this)
     fh.folded_hist := new_folded_hist
@@ -380,6 +378,20 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
     else
       VecInit(real_slot_taken_mask().init)
   }
+
+  // the vec indicating if ghr should shift on each branch
+  def shouldShiftVec =
+    VecInit(preds.br_valids.zipWithIndex.map{ case (v, i) =>
+      v && !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B)})
+
+  def lastBrPosOH =
+    (!preds.hit || !preds.br_valids.reduce(_||_)) +: // not hit or no brs in entry
+    VecInit((0 until numBr).map(i =>
+      preds.br_valids(i) &&
+      !real_br_taken_mask.take(i).reduceOption(_||_).getOrElse(false.B) && // no brs taken in front it
+      (real_br_taken_mask()(i) || !preds.br_valids.drop(i+1).reduceOption(_||_).getOrElse(false.B)) && // no brs behind it
+      preds.hit
+    ))
 
   def br_count(): UInt = {
     val last_valid_idx = PriorityMux(

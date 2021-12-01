@@ -1029,26 +1029,27 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   )
 
   // mtval write logic
+  // Due to timing reasons of memExceptionVAddr, we delay the write of mtval and stval
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when (hasInstrPageFault || hasLoadPageFault || hasStorePageFault) {
-    val tval = Mux(
-      hasInstrPageFault,
-      Mux(
+  when (RegNext(RegNext(hasInstrPageFault || hasLoadPageFault || hasStorePageFault))) {
+      val tval = RegNext(Mux(
+      RegNext(hasInstrPageFault),
+      RegNext(Mux(
         csrio.exception.bits.uop.cf.crossPageIPFFix,
         SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
         SignExt(csrio.exception.bits.uop.cf.pc, XLEN)
-      ),
+      )),
       memExceptionAddr
-    )
-    when (priviledgeMode === ModeM) {
+    ))
+    when (RegNext(RegNext(priviledgeMode === ModeM))) {
       mtval := tval
     }.otherwise {
       stval := tval
     }
   }
 
-  when (hasLoadAddrMisaligned || hasStoreAddrMisaligned) {
-    mtval := memExceptionAddr
+  when (RegNext(RegNext(hasLoadAddrMisaligned || hasStoreAddrMisaligned))) {
+    mtval := RegNext(memExceptionAddr)
   }
 
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
@@ -1145,9 +1146,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val difftest = Module(new DifftestArchEvent)
     difftest.io.clock := clock
     difftest.io.coreid := csrio.hartId
-    difftest.io.intrNO := RegNext(difftestIntrNO)
-    difftest.io.cause := RegNext(Mux(csrio.exception.valid, causeNO, 0.U))
-    difftest.io.exceptionPC := RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))
+    difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
+    difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
+    difftest.io.exceptionPC := RegNext(RegNext(RegNext(SignExt(csrio.exception.bits.uop.cf.pc, XLEN))))
   }
 
   // Always instantiate basic difftest modules.
