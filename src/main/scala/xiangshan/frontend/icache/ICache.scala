@@ -477,8 +477,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
 
-  meta_write_arb.io.in(ReplacePipeKey)  <> missUnit.io.meta_write
-  meta_write_arb.io.in(mainPipeKey)    <> replacePipe.io.meta_write
+  meta_write_arb.io.in(ReplacePipeKey)    <> replacePipe.io.meta_write
+  meta_write_arb.io.in(mainPipeKey)  <> missUnit.io.meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write

@@ -36,22 +36,6 @@ trait HasIFUConst extends HasXSParameter {
   def fetchQueueSize = 2
 }
 
-class IfuPtr(implicit p: Parameters) extends CircularQueuePtr[IfuPtr](entries = 2){
-  override def cloneType = (new IfuPtr).asInstanceOf[this.type]
-}
-
-object IfuPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): IfuPtr = {
-    val ptr = Wire(new IfuPtr)
-    ptr.flag := f
-    ptr.value := v
-    ptr
-  }
-  def inverse(ptr: IfuPtr)(implicit p: Parameters): IfuPtr = {
-    apply(!ptr.flag, ptr.value)
-  }
-}
-
 class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
 }
@@ -249,13 +233,7 @@ with HasCircularQueuePtrHelper
 
   val f2_cut_data = cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
 
-  //---------------------------------------------
-  //  Fetch Stage 3 :
-  //  * get data from last stage (hit from f2_hit_data/miss from missQueue response)
-  //  * if at least one needed cacheline miss, wait for miss queue response (a wait_state machine) THIS IS TOO UGLY!!!
-  //  * cut cacheline(s) and send to PreDecode
-  //  * check if prediction is right (branch target and type, jump direction and type , jal target )
-  //---------------------------------------------
+  /** Fetch Stage 3  */
   val f3_valid          = RegInit(false.B)
   val f3_ftq_req        = RegEnable(next = f2_ftq_req,    enable=f2_fire)
   val f3_situation      = RegEnable(next = f2_situation,  enable=f2_fire)
