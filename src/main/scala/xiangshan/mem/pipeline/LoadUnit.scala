@@ -59,24 +59,29 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
   val s0_uop = io.in.bits.uop
   val imm12 = WireInit(s0_uop.ctrl.imm(11,0))
 
-  // slow vaddr from non-load insts
-  val slowpath_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
-  val slowpath_mask = genWmask(slowpath_vaddr, s0_uop.ctrl.fuOpType(1,0))
+  val s0_vaddr = WireInit(io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits))
+  val s0_mask = WireInit(genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0)))
 
-  // fast vaddr from load insts
-  val fastpath_vaddrs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-     io.fastpath(i).data + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
-  })))
-  val fastpath_masks = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-     genWmask(fastpath_vaddrs(i), s0_uop.ctrl.fuOpType(1,0))
-  })))
-  val fastpath_vaddr = Mux1H(io.loadFastMatch, fastpath_vaddrs)
-  val fastpath_mask  = Mux1H(io.loadFastMatch, fastpath_masks)
+  if (EnableLoadToLoadForward) {
+    // slow vaddr from non-load insts
+    val slowpath_vaddr = io.in.bits.src(0) + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+    val slowpath_mask = genWmask(slowpath_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
-  // select vaddr from 2 alus
-  val s0_vaddr = Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr)
-  val s0_mask  = Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
-  XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
+    // fast vaddr from load insts
+    val fastpath_vaddrs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+      io.fastpath(i).data + SignExt(s0_uop.ctrl.imm(11,0), VAddrBits)
+    })))
+    val fastpath_masks = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+      genWmask(fastpath_vaddrs(i), s0_uop.ctrl.fuOpType(1,0))
+    })))
+    val fastpath_vaddr = Mux1H(io.loadFastMatch, fastpath_vaddrs)
+    val fastpath_mask  = Mux1H(io.loadFastMatch, fastpath_masks)
+
+    // select vaddr from 2 alus
+    s0_vaddr := Mux(io.loadFastMatch.orR, fastpath_vaddr, slowpath_vaddr)
+    s0_mask  := Mux(io.loadFastMatch.orR, fastpath_mask, slowpath_mask)
+    XSPerfAccumulate("load_to_load_forward", io.loadFastMatch.orR && io.in.fire())
+  }
 
   val isSoftPrefetch = LSUOpType.isPrefetch(s0_uop.ctrl.fuOpType)
   val isSoftPrefetchRead = s0_uop.ctrl.fuOpType === LSUOpType.prefetch_r
@@ -386,7 +391,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   when (io.in.bits.isSoftPrefetch) {
     io.rsFeedback.bits.hit := (!s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception))
   }.otherwise {
-    io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+    if (EnableFastForward) {
+      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
+    } else {
+      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
+    }
   }
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
@@ -400,7 +409,11 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.rsFeedback.bits.dataInvalidSqIdx.flag := DontCare
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
-  io.needReplayFromRS := s2_cache_replay && !fullForward
+  if (EnableFastForward) {
+    io.needReplayFromRS := s2_cache_replay && !fullForward
+  } else {
+    io.needReplayFromRS := s2_cache_replay
+  }
 
   // fast load to load forward
   io.fastpath.valid := io.in.valid // for debug only

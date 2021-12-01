@@ -108,6 +108,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   val s1_vaddr = s1_req.addr
   val s1_bank_oh = UIntToOH(addr_to_dcache_bank(s1_req.addr))
   val s1_nack = RegNext(io.nack)
+  val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
 
@@ -154,8 +155,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.replace_access.bits.set := RegNext(get_idx(s1_req.addr))
   io.replace_access.bits.way := RegNext(OHToUInt(s1_tag_match_way))
 
+  // TODO: optimize implementation
+  val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
+  val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
+  val s1_hit = s1_tag_match && s1_has_permission && s1_hit_coh === s1_new_hit_coh
+  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_nack_data && !s1_hit
+
   // tag ecc check
-//  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
+  //  (0 until nWays).foreach(w => assert(!RegNext(s1_valid && s1_tag_match_way(w) && cacheParams.tagCode.decode(io.meta_resp(w)).uncorrectable)))
 
   // --------------------------------------------------------------------------------
   // stage 2
@@ -209,8 +216,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   dump_pipeline_valids("LoadPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
+  val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
+
   // send load miss to miss queue
-  io.miss_req.valid := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit && !io.lsu.s2_kill
+  io.miss_req.valid := s2_valid && s2_can_send_miss_req
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.cmd := s2_req.cmd
@@ -220,6 +229,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule {
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
+  io.miss_req.bits.cancel := io.lsu.s2_kill
 
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))

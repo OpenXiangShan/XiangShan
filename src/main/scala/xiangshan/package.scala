@@ -604,7 +604,7 @@ package object xiangshan {
     hasRedirect = false,
     latency = UncertainLatency(),
     fastUopOut = true,
-    fastImplemented = false
+    fastImplemented = true
   )
 
   val mulCfg = FuConfig(
@@ -666,7 +666,7 @@ package object xiangshan {
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
-    fastUopOut = true, fastImplemented = false, hasInputBuffer = true
+    fastUopOut = true, fastImplemented = true, hasInputBuffer = true
   )
 
   val lduCfg = FuConfig(

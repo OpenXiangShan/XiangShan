@@ -316,7 +316,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   }
 
   val intRfReadData = if (intRfConfig._1) genRegfile(true) else io.extra.intRfReadIn.getOrElse(Seq()).map(_.data)
-  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)
+  val fpRfReadData = if (fpRfConfig._1) genRegfile(false) else DelayN(VecInit(io.extra.fpRfReadIn.getOrElse(Seq()).map(_.data)), 1)
 
   if (io.extra.intRfReadIn.isDefined) {
     io.extra.intRfReadIn.get.map(_.addr).zip(readIntRf).foreach{ case (r, addr) => r := addr}
@@ -378,10 +378,13 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       feedbackIdx += width
     }
 
+    val intWriteback = io.writeback.take(intRfWritePorts)
+    val fpWriteback  = io.writeback.drop(intRfWritePorts)
     (cfg.intSrcCnt > 0, cfg.fpSrcCnt > 0) match {
-      case (true,  false) => rs.io.slowPorts := io.writeback.take(intRfWritePorts)
-      case (false, true) => rs.io.slowPorts := io.writeback.drop(intRfWritePorts)
-      case (true,  true) => rs.io.slowPorts := io.writeback
+      case (true,  false) => rs.io.slowPorts := intWriteback
+      case (false, true) => rs.io.slowPorts := fpWriteback
+      // delay fp for extra one cycle
+      case (true,  true) => rs.io.slowPorts := intWriteback ++ RegNext(VecInit(fpWriteback))
       case _ => throw new RuntimeException("unknown wakeup source")
     }
 
@@ -434,15 +437,18 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
       val fpRfPorts = VecInit(fpRfReadData.slice(fpReadPort, fpReadPort + numFpRfPorts))
       for ((rs, idx) <- dp) {
         val mod = rs_all(rs).module
-        val target = mod.io.srcRegValue(idx)
-        // dirty code for store
-        val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
-        val fromFp = if (numIntRfPorts > 0) isFp else false.B
         if (numIntRfPorts > 0) {
           require(numFpRfPorts == 1 && numIntRfPorts == 1)
+          // dirty code for store
+          mod.io.fpRegValue.get(idx) := fpRfPorts.head
         }
-        when (fromFp) {
-          target := fpRfPorts.take(target.length)
+        else {
+          val target = mod.io.srcRegValue(idx)
+          val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
+          val fromFp = if (numIntRfPorts > 0) isFp else false.B
+          when (fromFp) {
+            target := fpRfPorts.take(target.length)
+          }
         }
       }
       fpReadPort += numFpRfPorts
