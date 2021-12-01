@@ -110,7 +110,7 @@ trait HaveSlaveAXI4Port {
 
   error_xbar :=
     TLFIFOFixer() :=
-    TLWidthWidget(16) :=
+    TLWidthWidget(32) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
