@@ -579,11 +579,11 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE))
-  io.lsq.lcommit := Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec))
-  io.lsq.scommit := Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec))
-  io.lsq.pendingld := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value)
-  io.lsq.pendingst := !io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value)
-  io.lsq.commit := !io.commits.isWalk && io.commits.valid(0)
+  io.lsq.lcommit := RegNext(Mux(io.commits.isWalk, 0.U, PopCount(ldCommitVec)))
+  io.lsq.scommit := RegNext(Mux(io.commits.isWalk, 0.U, PopCount(stCommitVec)))
+  io.lsq.pendingld := RegNext(!io.commits.isWalk && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value))
+  io.lsq.pendingst := RegNext(!io.commits.isWalk && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
+  io.lsq.commit := RegNext(!io.commits.isWalk && io.commits.valid(0))
 
   /**
     * state changes
@@ -727,8 +727,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   }
   // store data writeback logic mark store as data_writebacked
   for (i <- 0 until StorePipelineWidth) {
-    when(io.lsq.storeDataRobWb(i).valid) {
-      store_data_writebacked(io.lsq.storeDataRobWb(i).bits.value) := true.B
+    when(RegNext(io.lsq.storeDataRobWb(i).valid)) {
+      store_data_writebacked(RegNext(io.lsq.storeDataRobWb(i).bits.value)) := true.B
     }
   }
 

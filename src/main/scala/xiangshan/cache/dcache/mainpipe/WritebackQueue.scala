@@ -20,12 +20,13 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle, PipelineConnect}
-import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
+import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
+import freechips.rocketchip.tilelink.TLPermissions._
 import huancun.{DirtyField, DirtyKey}
 
 class WritebackReq(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
-  val param  = UInt(TLPermissions.cWidth.W)
+  val param  = UInt(cWidth.W)
   val voluntary = Bool()
   val hasData = Bool()
   val dirty = Bool()
@@ -59,6 +60,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
     // this entry is busy, but it can merge the new req
+    val secondary_valid = Input(Bool())
     val secondary_ready = Output(Bool())
     val req = Flipped(DecoupledIO(new WritebackReq))
 
@@ -72,6 +74,13 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   })
 
   val s_invalid :: s_sleep :: s_release_req :: s_release_resp :: Nil = Enum(4)
+  // ProbeAck:               s_invalid ->            s_release_req
+  // ProbeAck merge Release: s_invalid ->            s_release_req
+  // Release:                s_invalid -> s_sleep -> s_release_req -> s_release_resp
+  // Release merge ProbeAck: s_invalid -> s_sleep -> s_release_req
+  //                        (change Release into ProbeAck when Release is not fired)
+  //                     or: s_invalid -> s_sleep -> s_release_req -> s_release_resp -> s_release_req
+  //                        (send a ProbeAck after Release transaction is over)
   val state = RegInit(s_invalid)
 
   // internal regs
@@ -119,17 +128,18 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // --------------------------------------------------------------------------------
   // s_sleep: wait for refill pipe to inform me that I can keep releasing
+  val merge = io.secondary_valid && io.secondary_ready
   when (state === s_sleep) {
-    assert (remain === 0.U)
+    assert(remain === 0.U)
+    // There shouldn't be a new Release with the same addr in sleep state
+    assert(!(merge && io.req.bits.voluntary))
 
     val update = io.release_update.valid && io.release_update.bits.addr === req.addr
     when (update) {
       req.hasData := req.hasData || io.release_update.bits.mask.orR
       req.dirty := req.dirty || io.release_update.bits.mask.orR
       req.data := mergeData(req.data, io.release_update.bits.data, io.release_update.bits.mask)
-    }
-
-    when (io.req.valid && io.secondary_ready) {
+    }.elsewhen (merge) {
       state := s_release_req
       req.voluntary := false.B
       req.param := req.param
@@ -142,10 +152,16 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       )
       req.delay_release := false.B
       remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-    }.elsewhen (io.release_wakeup.valid && io.release_wakeup.bits === req.miss_id) {
+    }
+
+    when (io.release_wakeup.valid && io.release_wakeup.bits === req.miss_id) {
       state := s_release_req
       req.delay_release := false.B
-      remain_set := Mux(req.hasData || update && io.release_update.bits.mask.orR, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+      remain_set := Mux(
+        req.hasData || update && io.release_update.bits.mask.orR || merge && io.req.bits.hasData,
+        ~0.U(refillCycles.W),
+        1.U(refillCycles.W)
+      )
     }
   }
 
@@ -203,16 +219,145 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   val (_, _, release_done, _) = edge.count(io.mem_release)
 
-  when (state === s_release_req && release_done) {
-    state := Mux(req.voluntary, s_release_resp, s_invalid)
+//  when (state === s_release_req && release_done) {
+//    state := Mux(req.voluntary, s_release_resp, s_invalid)
+//  }
+
+  // Because now wbq merges a same-addr req unconditionally, when the req to be merged comes too late,
+  // the previous req might not be able to merge. Thus we have to handle the new req later after the
+  // previous one finishes.
+  // TODO: initiate these
+  val release_later = RegInit(false.B)
+  val c_already_sent = RegInit(false.B)
+  def tmp_req() = new Bundle {
+    val param = UInt(cWidth.W)
+    val voluntary = Bool()
+    val hasData = Bool()
+    val dirty = Bool()
+    val delay_release = Bool()
+    val miss_id = UInt(log2Up(cfg.nMissEntries).W)
+
+    def toWritebackReq = {
+      val r = Wire(new WritebackReq())
+      r.data := req.data
+      r.addr := req.addr
+      r.param := param
+      r.voluntary := voluntary
+      r.hasData := hasData
+      r.dirty := dirty
+      r.delay_release := delay_release
+      r.miss_id := miss_id
+      r
+    }
+  }
+  val req_later = Reg(tmp_req())
+
+  when (state === s_release_req) {
+    when (io.mem_release.fire()) {
+      c_already_sent := !release_done
+    }
+
+    when (req.voluntary) {
+      // The previous req is Release
+      when (release_done) {
+        state := s_release_resp
+      }
+      // merge a ProbeAck
+      when (merge) {
+        when (io.mem_release.fire() || c_already_sent) {
+          // too late to merge, handle the ProbeAck later
+          release_later := true.B
+          req_later.param := io.req.bits.param
+          req_later.voluntary := io.req.bits.voluntary
+          req_later.hasData := io.req.bits.hasData
+          req_later.dirty := io.req.bits.dirty
+          req_later.delay_release := io.req.bits.delay_release
+          req_later.miss_id := io.req.bits.miss_id
+        }.otherwise {
+          // Release hasn't been sent out yet, change Release to ProbeAck
+          req.voluntary := false.B
+          req.hasData := req.hasData || io.req.bits.hasData
+          req.dirty := req.dirty || io.req.bits.dirty
+          req.data := Mux(
+            io.req.bits.hasData,
+            io.req.bits.data,
+            req.data
+          )
+          req.delay_release := false.B
+          remain_set := Mux(req.hasData || io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+        }
+      }
+    }.otherwise {
+      // The previous req is ProbeAck
+      when (merge) {
+        release_later := true.B
+        req_later.param := io.req.bits.param
+        req_later.voluntary := io.req.bits.voluntary
+        req_later.hasData := io.req.bits.hasData
+        req_later.dirty := io.req.bits.dirty
+        req_later.delay_release := io.req.bits.delay_release
+        req_later.miss_id := io.req.bits.miss_id
+      }
+
+      when (release_done) {
+        when (merge) {
+          // Send the Release after ProbeAck
+//          state := s_release_req
+//          req := Mux(merge, io.req.bits, req_later.toWritebackReq)
+//          release_later := false.B
+          state := s_sleep
+          req := io.req.bits
+          release_later := false.B
+        }.elsewhen (release_later) {
+          state := Mux(
+            io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release,
+            s_release_req,
+            s_sleep
+          )
+          req := req_later.toWritebackReq
+          when (io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id) {
+            req.delay_release := false.B
+          }
+          release_later := false.B
+        }.otherwise {
+          state := s_invalid
+          release_later := false.B
+        }
+      }
+
+      when (io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id) {
+        req_later.delay_release := false.B
+      }
+    }
   }
 
   // --------------------------------------------------------------------------------
   // receive ReleaseAck for Releases
   when (state === s_release_resp) {
     io.mem_grant.ready := true.B
+
+    when (merge) {
+      release_later := true.B
+      req_later.param := io.req.bits.param
+      req_later.voluntary := io.req.bits.voluntary
+      req_later.hasData := io.req.bits.hasData
+      req_later.dirty := io.req.bits.dirty
+      req_later.delay_release := io.req.bits.delay_release
+      req_later.miss_id := io.req.bits.miss_id
+    }
     when (io.mem_grant.fire()) {
-      state := s_invalid
+      when (merge) {
+        state := s_release_req
+        req := io.req.bits
+        release_later := false.B
+      }.elsewhen(release_later) {
+        state := s_release_req
+        req := req_later.toWritebackReq
+        release_later := false.B
+      }.otherwise {
+        state := s_invalid
+        release_later := false.B
+      }
     }
   }
 
@@ -222,7 +367,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //    and a probe req with the same addr comes. In this case we merge probe with release,
   //    handle this probe, so we don't need another release.
   io.primary_ready := state === s_invalid
-  io.secondary_ready := state === s_sleep && !io.req.bits.voluntary && io.req.bits.addr === req.addr
+  io.secondary_ready := state =/= s_invalid && io.req.bits.addr === req.addr
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire())
@@ -232,8 +377,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   XSPerfAccumulate("penalty_waiting_for_channel_D", io.mem_grant.ready && !io.mem_grant.valid && state === s_release_resp)
 }
 
-class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump
-{
+class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
     val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
@@ -242,53 +386,20 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val release_wakeup = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
     val release_update = Flipped(ValidIO(new ReleaseUpdate))
 
-    val miss_req  = Flipped(Valid(UInt()))
-    val block_miss_req  = Output(Bool())
+    val miss_req = Flipped(Valid(UInt()))
+    val block_miss_req = Output(Bool())
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
 
-  // delay writeback req
-  val DelayWritebackReq = true
-  val req_delayed = Wire(Flipped(DecoupledIO(new WritebackReq)))
-  val req_delayed_valid = RegInit(false.B)
-  val req_delayed_bits = Reg(io.req.bits.cloneType)
-  req_delayed.valid := req_delayed_valid
-  req_delayed.bits := req_delayed_bits
-  when(req_delayed.fire()){
-    req_delayed_valid := false.B
-  }
-  // We delayed writeback queue enq for 1 cycle, missQ req does not
-  // depend on wbQ enqueue. As a result, missQ req may be blocked in
-  // req_delayed. When grant comes, that req should also be updated.
-  when(
-    req_delayed_valid &&
-    io.release_wakeup.valid &&
-    io.release_wakeup.bits === req_delayed_bits.miss_id
-  ){
-    // TODO: it is dirty
-    req_delayed_bits.delay_release := false.B // update pipe reg
-    req_delayed.bits.delay_release := false.B // update entry write req in current cycle
-  }
-  when(io.req.fire()){
-    req_delayed_valid := true.B
-    req_delayed_bits := io.req.bits
-  }
-  io.req.ready := !req_delayed_valid || req_delayed.fire()
-  dontTouch(req_delayed)
-
-  // allocate a free entry for incoming request
-  val block_conflict = Wire(Bool())
   val primary_ready_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
   val secondary_ready_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
+  val accept = Cat(primary_ready_vec).orR
   val merge = Cat(secondary_ready_vec).orR
-  val alloc = !merge && Cat(primary_ready_vec).orR && !block_conflict 
-  // Now we block release until last release of that block is finished
-  // TODO: Is it possible to merge these release req?
-
-  val req = req_delayed
-  val accept = merge || alloc
-  req.ready := accept
+  val alloc = accept && !merge
+  // When there are empty entries, merge or allocate a new entry.
+  // When there is no empty entry, reject it even if it can be merged.
+  io.req.ready := accept
 
   // assign default values to output signals
   io.mem_release.valid := false.B
@@ -301,7 +412,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   entries.zipWithIndex.foreach {
     case (entry, i) =>
       val former_primary_ready = if(i == 0)
-        false.B 
+        false.B
       else
         Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
       val entry_id = (i + releaseIdBase).U
@@ -309,31 +420,29 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.id := entry_id
 
       // entry req
-      entry.io.req.valid := req.valid
+      entry.io.req.valid := io.req.valid
       primary_ready_vec(i)   := entry.io.primary_ready
       secondary_ready_vec(i) := entry.io.secondary_ready
-      entry.io.req.bits  := req.bits
+      entry.io.req.bits  := io.req.bits
 
       entry.io.primary_valid := alloc &&
         !former_primary_ready &&
         entry.io.primary_ready
+      entry.io.secondary_valid := io.req.valid && accept
 
       entry.io.mem_grant.valid := (entry_id === grant_source) && io.mem_grant.valid
       entry.io.mem_grant.bits  := io.mem_grant.bits
-      when (entry_id === grant_source) {
-        io.mem_grant.ready := entry.io.mem_grant.ready
-      }
+//      when (entry_id === grant_source) {
+//        io.mem_grant.ready := entry.io.mem_grant.ready
+//      }
 
       entry.io.release_wakeup := io.release_wakeup
       entry.io.release_update := io.release_update
   }
+  assert(RegNext(!(io.mem_grant.valid && !io.mem_grant.ready)))
+  io.mem_grant.ready := true.B
 
-  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === req.bits.addr)).asUInt.orR
-  val miss_req_conflict = if(DelayWritebackReq)
-    req.bits.addr === io.miss_req.bits && req.valid || 
-    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
-  else 
-    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
+  val miss_req_conflict = VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.miss_req.bits)).asUInt.orR
   io.block_miss_req := io.miss_req.valid && miss_req_conflict
 
   TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
@@ -341,8 +450,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // sanity check
   // print all input/output requests for debug purpose
   // print req
-  when (req.fire()) {
-    req.bits.dump()
+  when (io.req.fire()) {
+    io.req.bits.dump()
   }
 
   when (io.mem_release.fire()) {
@@ -362,13 +471,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   // performance counters
-  XSPerfAccumulate("wb_req", req.fire())
+  XSPerfAccumulate("wb_req", io.req.fire())
 
   val perfinfo = IO(new Bundle(){
     val perfEvents = Output(new PerfEventsBundle(5))
   })
   val perfEvents = Seq(
-    ("dcache_wbq_req          ", req.fire()                                                                                                                                                              ),
+    ("dcache_wbq_req          ", io.req.fire()                                                                                                                                                              ),
     ("dcache_wbq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nReleaseEntries.U/4.U))                                                                                          ),
     ("dcache_wbq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U/2.U))     ),
     ("dcache_wbq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nReleaseEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nReleaseEntries.U*3.U/4.U)) ),

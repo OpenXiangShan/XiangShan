@@ -681,7 +681,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_wait) {
-      when(io.rob.commit) {
+      when(RegNext(io.rob.commit)) {
         uncacheState := s_idle // ready for next mmio
       }
     }

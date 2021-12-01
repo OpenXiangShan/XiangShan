@@ -396,7 +396,7 @@ class FusedAddwbyte(pair: Seq[Valid[UInt]], csPair: Option[Seq[CtrlSignals]])(im
   extends BaseFusionCase(pair) {
   // the first instruction is a ALUOpType.addw
   // According to DecodeUnit.scala, only ADDIW and ADDW are ALUOpType.addw, which are used for inst1Cond.
-  def inst1Cond = instr(0) === Instructions.ADDIW || instr(0) === Instructions.ADDIW
+  def inst1Cond = instr(0) === Instructions.ADDIW || instr(0) === Instructions.ADDW
   def inst2Cond = instr(1) === Instructions.ANDI && instr(1)(31, 20) === 0xff.U
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1

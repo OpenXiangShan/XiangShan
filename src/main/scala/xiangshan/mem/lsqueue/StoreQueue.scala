@@ -281,8 +281,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // Write data to sq
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.data.wen(i) := false.B
-    io.rob.storeDataRobWb(i).valid := false.B
-    io.rob.storeDataRobWb(i).bits := DontCare
     val stWbIndex = io.storeDataIn(i).bits.uop.sqIdx.value
     when (io.storeDataIn(i).fire()) {
       datavalid(stWbIndex) := true.B
@@ -296,9 +294,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
       debug_data(dataModule.io.data.waddr(i)) := dataModule.io.data.wdata(i)
 
-      io.rob.storeDataRobWb(i).valid := true.B
-      io.rob.storeDataRobWb(i).bits := io.storeDataIn(i).bits.uop.robIdx
-
       XSInfo("store data write to sq idx %d pc 0x%x data %x -> %x\n",
         io.storeDataIn(i).bits.uop.sqIdx.value,
         io.storeDataIn(i).bits.uop.cf.pc,
@@ -306,6 +301,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
         dataModule.io.data.wdata(i)
       )
     }
+    io.rob.storeDataRobWb(i).valid := RegNext(io.storeDataIn(i).fire())
+    io.rob.storeDataRobWb(i).bits := RegNext(io.storeDataIn(i).bits.uop.robIdx)
   }
 
   /**
