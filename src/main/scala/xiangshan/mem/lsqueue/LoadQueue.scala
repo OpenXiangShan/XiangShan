@@ -635,14 +635,19 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     dataModule.io.release_violation.takeRight(1)(0).paddr := io.release.bits.paddr
     io.loadViolationQuery.takeRight(1)(0).req.ready := false.B
     // If a load needs that cam port, replay it from rs
-    (0 until LoadQueueSize).map(i => {
-      when(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && allocated(i) && writebacked(i)){
-        // Note: if a load has missed in dcache and is waiting for refill in load queue,
-        // its released flag still needs to be set as true if addr matches. 
-        released(i) := true.B
-      }
-    })
   }
+
+  (0 until LoadQueueSize).map(i => {
+    when(RegNext(dataModule.io.release_violation.takeRight(1)(0).match_mask(i) && 
+      allocated(i) && 
+      writebacked(i) &&
+      io.release.valid
+    )){
+      // Note: if a load has missed in dcache and is waiting for refill in load queue,
+      // its released flag still needs to be set as true if addr matches. 
+      released(i) := true.B
+    }
+  })
 
   /**
     * Memory mapped IO / other uncached operations
@@ -661,7 +666,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
     is(s_idle) {
-      when(RegNext(io.rob.pendingld) && lqTailMmioPending && lqTailAllocated) {
+      when(RegNext(io.rob.pendingld && lqTailMmioPending && lqTailAllocated)) {
         uncacheState := s_req
       }
     }
