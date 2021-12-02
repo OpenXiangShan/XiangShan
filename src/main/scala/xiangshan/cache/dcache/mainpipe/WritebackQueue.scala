@@ -349,10 +349,12 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       when (merge) {
         state := s_release_req
         req := io.req.bits
+        remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
       }.elsewhen(release_later) {
         state := s_release_req
         req := req_later.toWritebackReq
+        remain_set := Mux(req_later.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
         release_later := false.B
       }.otherwise {
         state := s_invalid
