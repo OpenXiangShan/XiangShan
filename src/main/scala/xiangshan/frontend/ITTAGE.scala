@@ -123,12 +123,12 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   val altProviderTarget = UInt(VAddrBits.W)
   // val scMeta = new SCMeta(EnableSC)
   // TODO: check if we need target info here
-  val pred_cycle = UInt(64.W) // TODO: Use Option
+  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 
   override def toPrintable = {
     p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
     p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget)}), " +
-    p"altdiff:$altDiffers, alloc(v:${allocate.valid} num:${allocate.bits}), taken:$taken, cycle:$pred_cycle"
+    p"altdiff:$altDiffers, alloc(v:${allocate.valid} num:${allocate.bits}), taken:$taken, cycle:${pred_cycle.getOrElse(0.U)}"
   }
 }
 
@@ -224,6 +224,7 @@ class ITTageTable
   io.resp.bits.u := us.io.rdata(0)
   io.resp.bits.target := s1_table_r.target
 
+  // TODO: reset all us at once?
   val doing_reset_u = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(nRows).W))
   resetRow := resetRow + doing_reset_u
@@ -494,7 +495,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   resp_meta.taken             := s2_tageTaken
   resp_meta.providerTarget    := s2_providerTarget
   resp_meta.altProviderTarget := s2_altProviderTarget
-  resp_meta.pred_cycle        := GTimer()
+  resp_meta.pred_cycle.map(_:= GTimer())
   // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider
@@ -514,11 +515,11 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   when (updateValid) {
     when (updateMeta.provider.valid) {
       val provider = updateMeta.provider.bits
-      XSDebug(true.B, p"update provider $provider, pred cycle ${updateMeta.pred_cycle}\n")
+      XSDebug(true.B, p"update provider $provider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
       val altProvider = updateMeta.altProvider.bits
       val usedAltpred = updateMeta.altProvider.valid && updateMeta.providerCtr === 0.U
       when (usedAltpred && updateMisPred) { // update altpred if used as pred
-        XSDebug(true.B, p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle}\n")
+        XSDebug(true.B, p"update altprovider $altProvider, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
 
         updateMask(altProvider)    := true.B
         updateUMask(altProvider)   := false.B
@@ -546,7 +547,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   when (updateValid) {
     val useBaseTableAsAltPred = updateMeta.provider.valid && !updateMeta.altProvider.valid && updateMeta.providerCtr === 0.U
     val usedBaseTable = !updateMeta.provider.valid || useBaseTableAsAltPred
-    XSDebug(usedBaseTable, p"update base table, pred cycle ${updateMeta.pred_cycle}\n")
+    XSDebug(usedBaseTable, p"update base table, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
     updateMask(0) := usedBaseTable
     updateCorrect(0) := !updateMisPred
     updateTarget(0) := updateRealTarget
@@ -566,7 +567,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     val allocate = updateMeta.allocate
     tickCtr := satUpdate(tickCtr, TickWidth, allocate.valid)
     when (allocate.valid) {
-      XSDebug(true.B, p"allocate new table entry, pred cycle ${updateMeta.pred_cycle}\n")
+      XSDebug(true.B, p"allocate new table entry, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
       updateMask(allocate.bits)  := true.B
       updateCorrect(allocate.bits) := true.B // useless for alloc
       updateTarget(allocate.bits) := updateRealTarget

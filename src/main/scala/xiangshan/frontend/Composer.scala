@@ -48,6 +48,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     }
     meta_sz = meta_sz + c.meta_size
   }
+  println(s"total meta size: $meta_sz\n\n")
 
   io.in.ready := components.map(_.io.s1_ready).reduce(_ && _)
 

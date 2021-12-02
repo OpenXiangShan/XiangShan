@@ -234,7 +234,7 @@ class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams wi
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
   val writeWay = UInt(log2Ceil(numWays).W)
   val hit = Bool()
-  val pred_cycle = UInt(64.W) // TODO: Use Option
+  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 }
 
 object FTBMeta {
@@ -242,7 +242,7 @@ object FTBMeta {
     val e = Wire(new FTBMeta)
     e.writeWay := writeWay
     e.hit := hit
-    e.pred_cycle := pred_cycle
+    e.pred_cycle.map(_ := pred_cycle)
     e
   }
 }

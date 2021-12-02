@@ -26,7 +26,7 @@ import utils._
 import scala.math.min
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaLength = 1024 // TODO: Reduce meta length
+  val MaxMetaLength = 512 // TODO: Reduce meta length
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   // val numBr = 2

@@ -115,7 +115,7 @@ class TageMeta(val bank: Int)(implicit p: Parameters)
   val allocate = ValidUndirectioned(UInt(log2Ceil(BankTageNTables(bank)).W))
   val taken = Bool()
   val scMeta = new SCMeta(EnableSC, BankSCNTables(bank))
-  val pred_cycle = UInt(64.W) // TODO: Use Option
+  val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 }
 
 class FakeTageTable()(implicit p: Parameters) extends TageModule {
@@ -308,6 +308,7 @@ class TageTable
   io.resp.bits.u := us.io.rdata(0)
 
 
+  // TODO: reset all us at once?
   val doing_reset_u = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(nRows).W))
   resetRow := resetRow + doing_reset_u
@@ -559,7 +560,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta(w).altpredhit       := s2_altpredhits(w)
     resp_meta(w).taken            := s2_tageTakens(w)
     resp_meta(w).basecnt          := s2_basecnts(w)
-    resp_meta(w).pred_cycle       := GTimer()
+    resp_meta(w).pred_cycle.map(_ := GTimer())
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
