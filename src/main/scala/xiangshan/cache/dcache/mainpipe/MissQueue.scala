@@ -88,6 +88,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     // refill pipe
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
+    val refill_pipe_resp = Input(Bool())
 
     // replace pipe
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
@@ -121,9 +122,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
   val w_replace_resp = RegInit(true.B)
+  val w_refill_resp = RegInit(true.B)
   val w_mainpipe_resp = RegInit(true.B)
 
-  val release_entry = s_grantack && s_refill && w_mainpipe_resp
+  val release_entry = s_grantack && w_refill_resp && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantlast
@@ -156,6 +158,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     when (!io.req.bits.isAMO) {
       s_refill := false.B
+      w_refill_resp := false.B
     }
 
     when (!io.req.bits.hit && io.req.bits.replace_coh.isValid() && !io.req.bits.isAMO) {
@@ -251,6 +254,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   when (io.refill_pipe_req.fire()) {
     s_refill := true.B
+  }
+
+  when (io.refill_pipe_resp) {
+    w_refill_resp := true.B
   }
 
   when (io.main_pipe_req.fire()) {
@@ -401,7 +408,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.main_pipe_req.bits.amo_mask := req.amo_mask
   io.main_pipe_req.bits.id := req.id
 
-  io.block_addr.valid := req_valid && w_grantlast && !s_refill
+  io.block_addr.valid := req_valid && w_grantlast && !w_refill_resp
   io.block_addr.bits := req.addr
 
   io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
@@ -418,7 +425,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("penalty_from_grant_to_refill", !s_refill && w_grantlast)
+  XSPerfAccumulate("penalty_from_grant_to_refill", !w_refill_resp && w_grantlast)
   XSPerfAccumulate("soft_prefetch_number", primary_fire && io.req.bits.source === SOFT_PREFETCH.U)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(primary_fire), release_entry)
@@ -447,6 +454,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
+    val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
     val replace_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
@@ -528,6 +536,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
         e.io.mem_grant <> io.mem_grant
       }
 
+      e.io.refill_pipe_resp := io.refill_pipe_resp.valid && io.refill_pipe_resp.bits === i.U
       e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
