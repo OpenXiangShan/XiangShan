@@ -22,17 +22,19 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
 
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle, PipelineConnect}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
   val source = UInt()
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
-  // TODO: l2 should use vaddr index to probe l1
-  val vaddr  = UInt(VAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W) // l2 uses vaddr index to probe l1
   val param  = UInt(TLPermissions.bdWidth.W)
   val needData = Bool()
+
+  // probe queue entry ID
+  val id = UInt(log2Up(cfg.nProbeEntries).W)
 
   def dump() = {
     XSDebug("ProbeReq source: %d opcode: %d addr: %x param: %d\n",
@@ -40,17 +42,24 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   }
 }
 
+class ProbeResp(implicit p: Parameters) extends DCacheBundle {
+  // probe queue entry ID
+  val id = UInt(log2Up(cfg.nProbeEntries).W)
+}
+
 class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new ProbeReq))
     val pipe_req  = DecoupledIO(new MainPipeReq)
+    val pipe_resp = Input(Valid(new ProbeResp))
     val lrsc_locked_block = Input(Valid(UInt()))
+    val id = Input(UInt(log2Up(cfg.nProbeEntries).W))
 
     // the block we are probing
     val block_addr  = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_pipe_req :: Nil = Enum(2)
+  val s_invalid :: s_pipe_req :: s_wait_resp :: Nil = Enum(3)
 
   val state = RegInit(s_invalid)
 
@@ -80,10 +89,15 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     }
   }
 
+  val lrsc_blocked = Mux(
+    io.req.fire(),
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === io.req.bits.addr,
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr
+  )
+
   when (state === s_pipe_req) {
     // Note that probe req will be blocked in the next cycle if a lr updates lrsc_locked_block addr
     // in this way, we can RegNext(lrsc_blocked) for better timing
-    val lrsc_blocked = io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr
     io.pipe_req.valid := !RegNext(lrsc_blocked)
 
     val pipe_req = io.pipe_req.bits
@@ -94,8 +108,15 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.addr   := req.addr
     pipe_req.vaddr  := req.vaddr
     pipe_req.probe_need_data := req.needData
+    pipe_req.id := io.id
 
     when (io.pipe_req.fire()) {
+      state := s_wait_resp
+    }
+  }
+
+  when (state === s_wait_resp) {
+    when (io.pipe_resp.valid && io.id === io.pipe_resp.bits.id) {
       state := s_invalid
     }
   }
@@ -141,11 +162,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
   req.param := io.mem_probe.bits.param
   req.needData := io.mem_probe.bits.data(0)
+  req.id := DontCare
 
   io.mem_probe.ready := allocate
 
   val entries = (0 until cfg.nProbeEntries) map { i =>
     val entry = Module(new ProbeEntry)
+    entry.io.id := i.U
 
     // entry req
     entry.io.req.valid := (i.U === alloc_idx) && allocate && io.mem_probe.valid
@@ -155,18 +178,28 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     // pipe_req
     pipe_req_arb.io.in(i) <> entry.io.pipe_req
 
+    // pipe_resp
+    entry.io.pipe_resp.valid := io.pipe_req.fire()
+    entry.io.pipe_resp.bits.id := io.pipe_req.bits.id
+
     entry.io.lrsc_locked_block := io.lrsc_locked_block
 
     entry
   }
 
-  io.pipe_req <> pipe_req_arb.io.out
+  // delay probe req for 1 cycle
+  val selected_lrsc_blocked = Mux(
+    pipe_req_arb.io.out.fire(),
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === pipe_req_arb.io.out.bits.addr,
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === io.pipe_req.bits.addr && io.pipe_req.valid
+  )
+  val resvsetProbeBlock = RegNext(io.update_resv_set || selected_lrsc_blocked)
+  PipelineConnect(pipe_req_arb.io.out, io.pipe_req, io.pipe_req.fire() && !resvsetProbeBlock, false.B, resvsetProbeBlock)
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
-  when(RegNext(io.update_resv_set)){
+  when(resvsetProbeBlock){
     io.pipe_req.valid := false.B
-    pipe_req_arb.io.out.ready := false.B
   }
 
   // print all input/output requests for debug purpose
