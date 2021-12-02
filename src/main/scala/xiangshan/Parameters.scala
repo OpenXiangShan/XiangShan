@@ -131,10 +131,6 @@ case class XSCoreParameters
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
-  NRIntReadPorts: Int = 14,
-  NRIntWritePorts: Int = 8,
-  NRFpReadPorts: Int = 14,
-  NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 80,
   StoreQueueSize: Int = 64,
   RobSize: Int = 256,
