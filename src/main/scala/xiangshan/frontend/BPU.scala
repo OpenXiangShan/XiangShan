@@ -484,8 +484,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s2_redirect_s1_last_pred = preds_needs_redirect(s1_last_pred, resp.s2)
   val s2_redirect_s0_last_pred = preds_needs_redirect(s0_last_pred_reg, resp.s2)
 
-  s2_redirect := s2_fire && ((s1_valid && (s1_pc =/= resp.s2.target || s2_redirect_s1_last_pred)) ||
-      !s1_valid && (s0_pc_reg =/= resp.s2.target || s2_redirect_s0_last_pred))
+  s2_redirect := s2_fire && ((s1_valid && (resp.s2.targetDiffFrom(s1_pc) || s2_redirect_s1_last_pred)) ||
+      !s1_valid && (resp.s2.targetDiffFrom(s0_pc_reg) || s2_redirect_s0_last_pred))
 
   // when(s2_redirect) { ghist_update(s2_ghist_ptr, resp.s2) }
   npcGen.register(s2_redirect, resp.s2.target, Some("s2_target"), 4)
@@ -530,9 +530,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst {
   val s3_redirect_s1_last_pred = preds_needs_redirect(s1_last_pred, resp.s3)
   val s3_redirect_s0_last_pred = preds_needs_redirect(s0_last_pred_reg, resp.s3)
 
-  s3_redirect := s3_fire && ((s2_valid && (s2_pc =/= resp.s3.target || s3_redirect_s2_last_pred)) ||
-      (!s2_valid && s1_valid && (s1_pc =/= resp.s3.target || s3_redirect_s1_last_pred)) ||
-      (!s2_valid && !s1_valid && (s0_pc_reg =/= resp.s3.target || s3_redirect_s0_last_pred)))
+  s3_redirect := s3_fire && (
+      ( s2_valid && (resp.s3.targetDiffFrom(s2_pc) || s3_redirect_s2_last_pred)) ||
+      (!s2_valid && s1_valid && (resp.s3.targetDiffFrom(s1_pc) || s3_redirect_s1_last_pred)) ||
+      (!s2_valid && !s1_valid && (resp.s3.targetDiffFrom(s0_pc_reg) || s3_redirect_s0_last_pred)))
 
   // when(s3_redirect) { ghist_update(s3_ghist_ptr, resp.s3) }
   npcGen.register(s3_redirect, resp.s3.target, Some("s3_target"), 3)

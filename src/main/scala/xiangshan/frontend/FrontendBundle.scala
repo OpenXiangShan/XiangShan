@@ -415,10 +415,25 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle with HasBP
   def fallThroughAddr = getFallThroughAddr(pc, ftb_entry.carry, ftb_entry.pftAddr)
 
   def target(): UInt = {
-    val targetVec = preds.targets :+ fallThroughAddr :+ (pc + (FetchWidth*4).U)
-    val selVec = real_slot_taken_mask() :+ (preds.hit && !real_slot_taken_mask().asUInt.orR) :+ true.B
-    PriorityMux(selVec zip targetVec)
+    val targetVecOnHit = preds.targets :+ fallThroughAddr
+    val targetOnNotHit = pc + (FetchWidth * 4).U
+    val taken_mask = preds.taken_mask_on_slot
+    val selVecOHOnHit =
+      taken_mask.zipWithIndex.map{ case (t, i) => !taken_mask.take(i).fold(false.B)(_||_) && t} :+ !taken_mask.asUInt.orR
+    val targetOnHit = Mux1H(selVecOHOnHit, targetVecOnHit)
+    Mux(preds.hit, targetOnHit, targetOnNotHit)
   }
+
+  def targetDiffFrom(addr: UInt) = {
+    val targetVec = preds.targets :+ fallThroughAddr :+ (pc + (FetchWidth*4).U)
+    val taken_mask = preds.taken_mask_on_slot
+    val selVecOH =
+      taken_mask.zipWithIndex.map{ case (t, i) => !taken_mask.take(i).fold(false.B)(_||_) && t && preds.hit} :+
+      (!taken_mask.asUInt.orR && preds.hit) :+ !preds.hit
+    val diffVec = targetVec map (_ =/= addr)
+    Mux1H(selVecOH, diffVec)
+  }
+
   def genCfiIndex = {
     val cfiIndex = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
     cfiIndex.valid := real_slot_taken_mask().asUInt.orR
