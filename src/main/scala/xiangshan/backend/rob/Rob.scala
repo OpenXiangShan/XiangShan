@@ -789,13 +789,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   all_exception_possibilities.zipWithIndex.foreach{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
     exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
-    // A temporary fix for float load writeback
-    // TODO: let int/fp load use the same two wb ports
-    if (wb_index == atomic_wb_idx || load_wb_idxes.contains(wb_index)) {
-      when (io.exeWbResults(wb_index - exuParameters.AluCnt + numIntWbPorts + exuParameters.FmacCnt).valid) {
-        exceptionGen.io.wb(index).valid := true.B
-      }
-    }
     exceptionGen.io.wb(index).bits.robIdx       := io.exeWbResults(wb_index).bits.uop.robIdx
     val selectFunc = if (wb_index == csr_wb_idx) selectCSR _
     else if (wb_index == atomic_wb_idx) selectAtomics _
@@ -814,7 +807,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
 
   // 4 fmac + 2 fmisc + 1 i2f
   val fmacWb = (0 until exuParameters.FmacCnt).map(_ + numIntWbPorts)
-  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt + 2)
+  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt)
   val i2fWb = Seq(numIntWbPorts - 1) // last port in int
   val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
     (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
