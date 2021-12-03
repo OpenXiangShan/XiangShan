@@ -10,6 +10,11 @@ import freechips.rocketchip.regmapper.RegFieldGroup
 import freechips.rocketchip.tilelink.TLRegisterNode
 import xiangshan.backend.fu.{MMPMAMethod, PMAConst, PMPChecker, PMPReqBundle, PMPRespBundle}
 
+class TLPMAIO(implicit val p: Parameters) extends Bundle with PMAConst {
+  val req = Vec(mmpma.num, Flipped(Valid(new PMPReqBundle(mmpma.lgMaxSize))))
+  val resp = Vec(mmpma.num, new PMPRespBundle())
+}
+
 class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAMethod{
   val node = TLRegisterNode(
     address = Seq(AddressSet(mmpma.address/*pmaParam.address*/, mmpma.mask)),
@@ -20,10 +25,7 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
 
   lazy val module = new LazyModuleImp(this) {
 
-    val io = IO(new Bundle {
-      val req = Vec(mmpma.num, Flipped(Valid(new PMPReqBundle(mmpma.lgMaxSize))))
-      val resp = Vec(mmpma.num, new PMPRespBundle())
-    })
+    val io = IO(new TLPMAIO)
     val req = io.req
     val resp = io.resp
 

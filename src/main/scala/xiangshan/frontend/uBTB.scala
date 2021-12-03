@@ -95,10 +95,6 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.ftb_entry := read_entry.entry
   io.out.resp.s1.preds.fromFtbEntry(read_entry.entry, s1_pc)
 
-  when(!bank.read_hit) {
-    io.out.resp.s1.ftb_entry.onNotHit(s1_pc)
-  }
-
   outMeta.hit := bank.read_hit
   io.out.s3_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
 

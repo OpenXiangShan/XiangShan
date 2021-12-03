@@ -117,8 +117,8 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     val hit = normal_hit || super_hit
     val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
-    val ppn = Mux(normal_hit, normal_ppn, super_ppn)
-    val perm = Mux(normal_hit, normal_perm, super_perm)
+    val ppn = Mux(super_hit, super_ppn, normal_ppn)
+    val perm = Mux(super_hit, super_perm, normal_perm)
 
     val pf = perm.pf
     val af = perm.af
@@ -129,6 +129,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
+    val fast_miss = !super_hit && vmEnable
     val miss_sameCycle = !hit_sameCycle && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
@@ -142,6 +143,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
+    resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     pmp(i).valid := resp(i).valid

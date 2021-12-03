@@ -88,9 +88,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     // refill pipe
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
+    val refill_pipe_resp = Input(Bool())
 
     // replace pipe
-    val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
+    val replace_pipe_req = DecoupledIO(new MainPipeReq)
     val replace_pipe_resp = Input(Bool())
 
     // main pipe: amo miss
@@ -121,9 +122,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
   val w_replace_resp = RegInit(true.B)
+  val w_refill_resp = RegInit(true.B)
   val w_mainpipe_resp = RegInit(true.B)
 
-  val release_entry = s_grantack && s_refill && w_mainpipe_resp
+  val release_entry = s_grantack && w_refill_resp && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantlast
@@ -156,6 +158,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     when (!io.req.bits.isAMO) {
       s_refill := false.B
+      w_refill_resp := false.B
     }
 
     when (!io.req.bits.hit && io.req.bits.replace_coh.isValid() && !io.req.bits.isAMO) {
@@ -253,6 +256,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     s_refill := true.B
   }
 
+  when (io.refill_pipe_resp) {
+    w_refill_resp := true.B
+  }
+
   when (io.main_pipe_req.fire()) {
     s_mainpipe_req := true.B
   }
@@ -341,10 +348,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.replace_pipe_req.valid := !s_replace_req
   val replace = io.replace_pipe_req.bits
+  replace := DontCare
+  replace.miss := false.B
   replace.miss_id := io.id
-  replace.way_en := req.way_en
-  replace.vaddr := req.vaddr
-  replace.tag := req.replace_tag
+  replace.miss_dirty := false.B
+  replace.probe := false.B
+  replace.probe_need_data := false.B
+  replace.source := LOAD_SOURCE.U
+  replace.vaddr := req.vaddr // only untag bits are needed
+  replace.addr := Cat(req.replace_tag, 0.U(pgUntagBits.W)) // only tag bits are needed
+  replace.store_mask := 0.U
+  replace.replace := true.B
+  replace.replace_way_en := req.way_en
 
   io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   val refill = io.refill_pipe_req.bits
@@ -393,7 +408,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.main_pipe_req.bits.amo_mask := req.amo_mask
   io.main_pipe_req.bits.id := req.id
 
-  io.block_addr.valid := req_valid && w_grantlast && !s_refill
+  io.block_addr.valid := req_valid && w_grantlast && !w_refill_resp
   io.block_addr.bits := req.addr
 
   io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
@@ -410,7 +425,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("penalty_from_grant_to_refill", !s_refill && w_grantlast)
+  XSPerfAccumulate("penalty_from_grant_to_refill", !w_refill_resp && w_grantlast)
   XSPerfAccumulate("soft_prefetch_number", primary_fire && io.req.bits.source === SOFT_PREFETCH.U)
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(primary_fire), release_entry)
@@ -439,9 +454,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
     val refill_pipe_req = DecoupledIO(new RefillPipeReq)
+    val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
-    val replace_pipe_req = DecoupledIO(new ReplacePipeReq)
-    val replace_pipe_resp = Flipped(Vec(numReplaceRespPorts, ValidIO(new ReplacePipeResp)))
+    val replace_pipe_req = DecoupledIO(new MainPipeReq)
+    val replace_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Flipped(ValidIO(new AtomicsResp))
@@ -472,7 +488,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
 
   val merge = Cat(secondary_ready_vec).orR
-  val reject = Cat(secondary_reject_vec).orR || io.req.bits.cancel
+  val reject = Cat(secondary_reject_vec).orR
   val alloc = !reject && !merge && Cat(primary_ready_vec).orR
   val accept = alloc || merge
 
@@ -483,30 +499,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // while it has the same set and the same way as mshr_1 (reject).
   // In this situation, the coming req should be merged by mshr_0
 //  assert(RegNext(PopCount(Seq(merge, reject)) <= 1.U))
-
-  def arbiter[T <: Bundle](
-    in: Seq[DecoupledIO[T]],
-    out: DecoupledIO[T],
-    name: Option[String] = None): Unit = {
-    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
-    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
-    for ((a, req) <- arb.io.in.zip(in)) {
-      a <> req
-    }
-    out <> arb.io.out
-  }
-
-  def rrArbiter[T <: Bundle](
-    in: Seq[DecoupledIO[T]],
-    out: DecoupledIO[T],
-    name: Option[String] = None): Unit = {
-    val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
-    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
-    for ((a, req) <- arb.io.in.zip(in)) {
-      a <> req
-    }
-    out <> arb.io.out
-  }
 
   def select_valid_one[T <: Bundle](
     in: Seq[DecoupledIO[T]],
@@ -544,7 +536,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
         e.io.mem_grant <> io.mem_grant
       }
 
-      e.io.replace_pipe_resp := Cat(io.replace_pipe_resp.map { case r => r.valid && r.bits.miss_id === i.U }).orR
+      e.io.refill_pipe_resp := io.refill_pipe_resp.valid && io.refill_pipe_resp.bits === i.U
+      e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       io.debug_early_replace(i) := e.io.debug_early_replace

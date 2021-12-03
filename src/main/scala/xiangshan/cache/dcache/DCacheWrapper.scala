@@ -158,6 +158,30 @@ trait HasDCacheParameters extends HasL1CacheParameters {
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
+  def arbiter[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new Arbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    out <> arb.io.out
+  }
+
+  def rrArbiter[T <: Bundle](
+    in: Seq[DecoupledIO[T]],
+    out: DecoupledIO[T],
+    name: Option[String] = None): Unit = {
+    val arb = Module(new RRArbiter[T](chiselTypeOf(out.bits), in.size))
+    if (name.nonEmpty) { arb.suggestName(s"${name.get}_arb") }
+    for ((a, req) <- arb.io.in.zip(in)) {
+      a <> req
+    }
+    out <> arb.io.out
+  }
+
   val numReplaceRespPorts = 2
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
@@ -369,7 +393,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = Module(new BankedDataArray)
-  val metaArray = Module(new AsynchronousMetaArray(readPorts = 4, writePorts = 3))
+  val metaArray = Module(new AsynchronousMetaArray(readPorts = 3, writePorts = 2))
   val tagArray = Module(new DuplicatedTagArray(readPorts = LoadPipelineWidth + 1))
   bankedDataArray.dump()
 
@@ -383,7 +407,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val atomicsReplayUnit = Module(new AtomicsReplayEntry)
   val mainPipe   = Module(new MainPipe)
   val refillPipe = Module(new RefillPipe)
-  val replacePipe = Module(new ReplacePipe)
+//  val replacePipe = Module(new ReplacePipe)
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
@@ -393,15 +417,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // meta array
   val meta_read_ports = ldu.map(_.io.meta_read) ++
-    Seq(mainPipe.io.meta_read,
-      replacePipe.io.meta_read)
+    Seq(mainPipe.io.meta_read/*,
+      replacePipe.io.meta_read*/)
   val meta_resp_ports = ldu.map(_.io.meta_resp) ++
-    Seq(mainPipe.io.meta_resp,
-      replacePipe.io.meta_resp)
+    Seq(mainPipe.io.meta_resp/*,
+      replacePipe.io.meta_resp*/)
   val meta_write_ports = Seq(
     mainPipe.io.meta_write,
-    refillPipe.io.meta_write,
-    replacePipe.io.meta_write
+    refillPipe.io.meta_write/*,
+    replacePipe.io.meta_write*/
   )
   meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
   meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
@@ -426,9 +450,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // data array
 
-  val dataReadLineArb = Module(new Arbiter(new L1BankedDataReadLineReq, 2))
-  dataReadLineArb.io.in(0) <> replacePipe.io.data_read
-  dataReadLineArb.io.in(1) <> mainPipe.io.data_read
+//  val dataReadLineArb = Module(new Arbiter(new L1BankedDataReadLineReq, 2))
+//  dataReadLineArb.io.in(0) <> replacePipe.io.data_read
+//  dataReadLineArb.io.in(1) <> mainPipe.io.data_read
 
   val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
   dataWriteArb.io.in(0) <> refillPipe.io.data_write
@@ -437,12 +461,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.write <> dataWriteArb.io.out
   bankedDataArray.io.read(0) <> ldu(0).io.banked_data_read
   bankedDataArray.io.read(1) <> ldu(1).io.banked_data_read
-  bankedDataArray.io.readline <> dataReadLineArb.io.out
+  bankedDataArray.io.readline <> mainPipe.io.data_read
 
   ldu(0).io.banked_data_resp := bankedDataArray.io.resp
   ldu(1).io.banked_data_resp := bankedDataArray.io.resp
   mainPipe.io.data_resp := bankedDataArray.io.resp
-  replacePipe.io.data_resp := bankedDataArray.io.resp
+//  replacePipe.io.data_resp := bankedDataArray.io.resp
 
   ldu(0).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(0)
   ldu(1).io.bank_conflict_fast := bankedDataArray.io.bank_conflict_fast(1)
@@ -512,19 +536,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  val refillPipeStatus, replacePipeStatusS0 = Wire(Valid(UInt(idxBits.W)))
+  val refillPipeStatus = Wire(Valid(UInt(idxBits.W)))
   refillPipeStatus.valid := refillPipe.io.req.valid
   refillPipeStatus.bits := get_idx(refillPipe.io.req.bits.paddrWithVirtualAlias)
-  replacePipeStatusS0.valid := replacePipe.io.req.valid
-  replacePipeStatusS0.bits := get_idx(replacePipe.io.req.bits.vaddr)
-  val blockMainPipeReqs = Seq(
-	  replacePipeStatusS0,
-    replacePipe.io.status.s1_set,
-    replacePipe.io.status.s2_set
-  )
-  val storeShouldBeBlocked = refillPipeStatus.valid || Cat(blockMainPipeReqs.map(r => r.valid && r.bits === io.lsu.store.req.bits.idx)).orR
-  val probeShouldBeBlocked = refillPipeStatus.valid || Cat(blockMainPipeReqs.map(r => r.valid && r.bits === get_idx(probeQueue.io.pipe_req.bits.vaddr))).orR
-
+  val storeShouldBeBlocked = refillPipeStatus.valid
+  val probeShouldBeBlocked = refillPipeStatus.valid
   block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, probeShouldBeBlocked)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, storeShouldBeBlocked)
 
@@ -541,14 +557,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // replace pipe
   val mpStatus = mainPipe.io.status
-  val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
-  val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
-  val replaceShouldBeBlocked = mpStatus.s1.valid ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
-    )).orR()
-  block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
-  missQueue.io.replace_pipe_resp := replacePipe.io.resp
+//  val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
+//  val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
+//  val replaceShouldBeBlocked = mpStatus.s1.valid ||
+//    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+//      s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
+//    )).orR()
+//  block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
+  mainPipe.io.replace_req <> missQueue.io.replace_pipe_req
+  missQueue.io.replace_pipe_resp := mainPipe.io.replace_resp
 
   //----------------------------------------
   // refill pipe
@@ -559,14 +576,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
   block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
+  missQueue.io.refill_pipe_resp := refillPipe.io.resp
   io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-  val wbArb = Module(new Arbiter(new WritebackReq, 2))
-  wbArb.io.in.zip(Seq(mainPipe.io.wb, replacePipe.io.wb)).foreach { case (arb, pipe) => arb <> pipe }
-  wb.io.req <> wbArb.io.out
+//  val wbArb = Module(new Arbiter(new WritebackReq, 2))
+//  wbArb.io.in.zip(Seq(mainPipe.io.wb, replacePipe.io.wb)).foreach { case (arb, pipe) => arb <> pipe }
+  wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update

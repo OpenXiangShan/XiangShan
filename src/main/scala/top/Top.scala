@@ -104,7 +104,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
+      misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
     case None =>
   }
 
@@ -114,11 +114,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     ElaborationArtefacts.add("json", json)
     ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
-//    val dma = IO(Flipped(misc.dma.cloneType))
+    val dma = IO(Flipped(misc.dma.cloneType))
     val peripheral = IO(misc.peripheral.cloneType)
     val memory = IO(misc.memory.cloneType)
 
-//    misc.dma <> dma
+    misc.dma <> dma
     peripheral <> misc.peripheral
     memory <> misc.memory
 
@@ -137,6 +137,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
+      val cacheable_check = new TLPMAIO()
     })
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -146,10 +147,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    dontTouch(io.sram_config)
-    dontTouch(io.pll0_lock)
+    dontTouch(dma)
+    dontTouch(io)
+    dontTouch(peripheral)
+    dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.pll0_lock := io.pll0_lock
+    misc.module.cacheable_check <> io.cacheable_check
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 

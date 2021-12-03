@@ -139,7 +139,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
   for(i <- 0 until 2) {
-    fetch_req(i).valid             := s0_fire
+    fetch_req(i).valid             := s0_valid
     fetch_req(i).bits.isDoubleLine := s0_double_line
     fetch_req(i).bits.vSetIdx      := s0_req_vsetIdx
   }
@@ -550,7 +550,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   (0 until PortNumber).map{ i =>
     io.setInfor.s2(i).valid := s2_bank_miss(i) && s2_valid
-    io.setInfor.s2(i).vidx  := s1_req_vsetIdx(i)
+    io.setInfor.s2(i).vidx  := s2_req_vsetIdx(i)
   }
 
   val miss_all_fix       =  wait_state === wait_finish
