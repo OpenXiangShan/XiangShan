@@ -266,7 +266,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
 
-    val pad1 = if (XLEN == 64) Output(UInt(27.W)) else null
+    val pad1 = if (XLEN == 64) Output(UInt(25.W)) else null
+    val mbe  = if (XLEN == 64) Output(UInt(1.W)) else null
+    val sbe  = if (XLEN == 64) Output(UInt(1.W)) else null
     val sxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val uxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val pad0 = if (XLEN == 64) Output(UInt(9.W))  else Output(UInt(8.W))
@@ -285,6 +287,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val pie = new Priv
     val ie = new Priv
     assert(this.getWidth == XLEN)
+
+    def ube = pie.h // a little ugly
+    def ube_(r: UInt): Unit = {
+      pie.h := r(0)
+    }
   }
 
   class Interrupt extends Bundle {
