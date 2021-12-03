@@ -24,28 +24,52 @@ import xiangshan._
 import chisel3.experimental.chiselName
 import xiangshan.cache.mmu.CAMTemplate
 
-trait MicroBTBParams extends HasXSParameter {
+trait MicroBTBParams extends HasBPUParameter {
   val numWays = 1024
   val tagSize = 20
   // val lowerBitSize = 20
   val untaggedBits = log2Ceil(numWays) + instOffsetBits
+  def ubtbAddr = new TableAddr(log2Up(numWays), 1)
+}
+
+class MicroBTBEntry(implicit p: Parameters) extends XSBundle with MicroBTBParams {
+  val valid = Bool()
+  val tag = UInt(tagSize.W)
+  val slot_valids = Vec(totalSlot, Bool())
+  val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
+  val targets = Vec(totalSlot, UInt(VAddrBits.W))
+  val fallThroughAddr = UInt(VAddrBits.W)
+  val oversize = Bool()
+  val last_is_br = Bool()
+  def brValids = VecInit(slot_valids.init :+ (slot_valids.last && last_is_br))
+  def jmpValid = VecInit(slot_valids.last && !last_is_br)
+  def fromBpuUpdateBundle(u: BranchPredictionUpdate) = {
+    this.valid := true.B
+    this.tag := ubtbAddr.getTag(u.pc)
+    this.slot_valids := VecInit(u.ftb_entry.brSlots.map(_.valid) :+ u.ftb_entry.tailSlot.valid)
+    this.offsets := u.ftb_entry.getOffsetVec
+    this.targets := u.ftb_entry.getTargetVec(u.pc)
+    this.fallThroughAddr := u.ftb_entry.getFallThrough(u.pc)
+    this.oversize := u.ftb_entry.oversize
+    this.last_is_br := u.ftb_entry.tailSlot.sharing
+  }
 }
 
 @chiselName
 class MicroBTB(implicit p: Parameters) extends BasePredictor
   with MicroBTBParams
 {
-  val ubtbAddr = new TableAddr(log2Up(numWays), 1)
+  
 
   class MicroBTBOutMeta extends XSBundle {
     val hit = Bool()
   }
 
-  class MicroBTBEntry extends FTBEntryWithTag {}
+
 
   override val meta_size = WireInit(0.U.asTypeOf(new MicroBTBOutMeta)).getWidth // TODO: ReadResp shouldn't save useless members
 
-  class UBTBBank(val nWays: Int) extends XSModule with BPUUtils {
+  class UBTBBank(val nWays: Int)(implicit p: Parameters) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val read_pc = Flipped(DecoupledIO(UInt(VAddrBits.W))) // TODO: Add ready
       // val read_taken_mask = Input(Vec(numBr, Bool()))
@@ -68,7 +92,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
     io.read_pc.ready := dataMem.io.r.req.ready
 
     val hit_entry = dataMem.io.r.resp.data(0)
-    val hit = hit_entry.entry.valid && hit_entry.tag === read_tag
+    val hit = hit_entry.valid && hit_entry.tag === read_tag
 
     io.read_entry := hit_entry
     io.read_hit := hit
@@ -92,8 +116,8 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp := io.in.bits.resp_in(0)
   io.out.resp.s1.pc := s1_pc
   io.out.resp.s1.preds.hit := bank.read_hit
-  io.out.resp.s1.ftb_entry := read_entry.entry
-  io.out.resp.s1.preds.fromFtbEntry(read_entry.entry, s1_pc)
+  io.out.resp.s1.ftb_entry := DontCare
+  io.out.resp.s1.preds.fromMicroBTBEntry(read_entry)
 
   outMeta.hit := bank.read_hit
   io.out.s3_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
@@ -110,13 +134,11 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
 
   bank.update_valid := u_valid && u_taken && ((u_meta.hit && !update.old_entry) || !u_meta.hit)
   bank.update_pc := u_pc
-  bank.update_write_entry.entry := update.ftb_entry
-  bank.update_write_entry.entry.valid := true.B
-  bank.update_write_entry.tag := u_tag
+  bank.update_write_entry.fromBpuUpdateBundle(update)
 
   XSDebug("req_v=%b, req_pc=%x, hit=%b\n", io.s1_fire, s1_pc, bank.read_hit)
   XSDebug("target=%x, real_taken_mask=%b, taken_mask=%b, brValids=%b, jmpValid=%b\n",
-    io.out.resp.s1.target, io.out.resp.s1.real_slot_taken_mask.asUInt, io.out.resp.s1.preds.br_taken_mask.asUInt, read_entry.entry.brValids.asUInt, read_entry.entry.jmpValid.asUInt)
+    io.out.resp.s1.target, io.out.resp.s1.real_slot_taken_mask.asUInt, io.out.resp.s1.preds.br_taken_mask.asUInt, read_entry.brValids.asUInt, read_entry.jmpValid.asUInt)
 
   XSDebug(u_valid, "[update]Update from ftq\n")
   XSDebug(u_valid, "[update]update_pc=%x, tag=%x\n", u_pc, ubtbAddr.getTag(u_pc))
