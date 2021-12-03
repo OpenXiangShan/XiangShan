@@ -523,51 +523,38 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
-//  val hasVictim = VecInit(Seq(
-//    mainPipe.io.victimInfor.s1(0).valid,
-//    mainPipe.io.victimInfor.s1(1).valid,
-//    mainPipe.io.victimInfor.s2(0).valid,
-//    mainPipe.io.victimInfor.s2(1).valid
-//  ))
-//
-//  val victimSetSeq = Seq(
-//    mainPipe.io.victimInfor.s1(0).vidx,
-//    mainPipe.io.victimInfor.s1(1).vidx,
-//    mainPipe.io.victimInfor.s2(0).vidx,
-//    mainPipe.io.victimInfor.s2(1).vidx
-//  )
-//
-//  val victimTagSeq = Seq(
-//    mainPipe.io.victimInfor.s1(0).ptag,
-//    mainPipe.io.victimInfor.s1(1).ptag,
-//    mainPipe.io.victimInfor.s2(0).ptag,
-//    mainPipe.io.victimInfor.s2(1).ptag
-//  )
+  /** Block set-conflict request */
+ val probeReqValid = probeQueue.io.pipe_req.valid
+ val probeReqVidx  = probeQueue.io.pipe_req.bits.vidx
 
-//  val probeReqValid = probe.io.req.valid
-//  val probeReqPtag  = get_phy_tag(probe.io.req.bits.addr)
-//  val probeReqVidx  = get_idx(probe.io.req.bits.vaddr)
+  val hasVictim = VecInit(missUnit.io.victimInfor.map(_.valid))
+  val victimSetSeq = VecInit(missUnit.io.victimInfor.map(_.vidx))
 
-  //send to probe state machine and cancel the probe
-//  val probe_need_merge = VecInit(hasVictim.zip(victimSetSeq).zip(victimTagSeq).map{case((valid, idx), tag) =>  valid && probeReqValid && idx === probeReqVidx && tag === probeReqPtag}).reduce(_||_)
-//  probe.io.probe_should_merge := RegNext(probe_need_merge)
+  val probeShouldBlock = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && probeReqValid && idx === probeReqVidx }).reduce(_||_)
 
-//   val hasMiss = VecInit(Seq(
-//    mainPipe.io.setInfor.s1(0).valid,
-//    mainPipe.io.setInfor.s1(1).valid,
-//    mainPipe.io.setInfor.s2(0).valid,
-//    mainPipe.io.setInfor.s2(1).valid
-//  ))
-//
-//  val missSetSeq = Seq(
-//    mainPipe.io.setInfor.s1(0).vidx,
-//    mainPipe.io.setInfor.s1(1).vidx,
-//    mainPipe.io.setInfor.s2(0).vidx,
-//    mainPipe.io.setInfor.s2(1).vidx
-//  )
-//
-//  val fetchReq = io.fetch.map(_.req)
-//  val fetchShouldBlock = VecInit(fetchReq.map(req => VecInit(hasMiss.zip(missSetSeq).map{case(valid, idx)=>  valid && idx === req.bits.vsetIdx}).reduce(_||_)))
+  when(probeShouldBlock){
+    probeQueue.io.pipe_req.ready := false.B
+  }
+
+ val releaseReqValid = missUnit.io.release_req.valid
+ val releaseReqVidx  = missUnit.io.release_req.bits.vidx
+
+  val hasConflict = VecInit(Seq(
+        replacePipe.io.status.r1_set.valid,
+        replacePipe.io.status.r2_set.valid
+  ))
+
+  val conflictIdx = VecInit(Seq(
+        replacePipe.io.status.r1_set.bits,
+        replacePipe.io.status.r2_set.bits
+  ))
+
+  val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)
+  
+  when(releaseShouldBlock){
+    missUnit.io.release_req.ready := false.B
+  }
+
   
   (0 until PortNumber).map{i => 
       mainPipe.io.fetch(i).req.valid := io.fetch(i).req.valid //&& !fetchShouldBlock(i)

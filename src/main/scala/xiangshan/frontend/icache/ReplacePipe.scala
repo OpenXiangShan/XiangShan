@@ -54,6 +54,10 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val release_req = DecoupledIO(new ReleaseReq)
 
     val pipe_resp = ValidIO(UInt(ReplaceIdWid.W))
+    
+    val status = new Bundle() {
+      val r1_set, r2_set = ValidIO(UInt(idxBits.W))
+    }
   })
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
@@ -107,6 +111,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   when(RegNext(io.meta_read.fire()) && r1_req.isProbe){
     assert(PopCount(probe_hit_vec) === 1.U, "Probe should always hit in L1I")
   }
+
+  io.status.r1_set.valid := r1_valid
+  io.status.r1_set.bits  := r1_req.vidx
 
   //---------------------------------------------
 
@@ -163,4 +170,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   //response to MissQueue
   io.pipe_resp.valid := r2_fire && !r2_req.isProbe
   io.pipe_resp.bits  := r2_req.id
+
+  io.status.r2_set.valid := r2_valid
+  io.status.r2_set.bits  := r2_req.vidx
+
 }
