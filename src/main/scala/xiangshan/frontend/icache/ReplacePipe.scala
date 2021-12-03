@@ -109,7 +109,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val release_addr     = get_block_addr(Cat(release_tag, get_untag(r1_req.vaddr)) )
 
   when(RegNext(io.meta_read.fire()) && r1_req.isProbe){
-    assert(PopCount(probe_hit_vec) === 1.U, "Probe should always hit in L1I")
+    assert(PopCount(probe_hit_vec) <= 1.U, "Probe Multi-Hit")
   }
 
   io.status.r1_set.valid := r1_valid
