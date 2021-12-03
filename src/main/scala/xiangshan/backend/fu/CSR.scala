@@ -913,7 +913,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
     val debugModeNew = WireInit(debugMode)
     when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
-    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
     mstatus := mstatusNew.asUInt
     priviledgeMode := dcsrNew.prv
     retTarget := dpc(VAddrBits-1, 0)
@@ -944,7 +943,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew.pie.s := true.B
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
-    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
+    when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
     // lr := false.B
     retTarget := sepc(VAddrBits-1, 0)
   }
@@ -956,7 +955,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew.ie.u := mstatusOld.pie.u
     priviledgeMode := ModeU
     mstatusNew.pie.u := true.B
-    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
     mstatus := mstatusNew.asUInt
     retTarget := uepc(VAddrBits-1, 0)
   }
