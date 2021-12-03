@@ -26,6 +26,8 @@ import xiangshan.{DebugOptions, DebugOptionsKey}
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
+import freechips.rocketchip.util.ElaborationArtefacts
+import top.TopMain.writeOutputFile
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -102,5 +104,8 @@ object SimTop extends App {
         DisableMonitors(p => new SimTop()(p))(config)
       })
     ))
+    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
+      writeOutputFile("./build", s"XSTop.${extension}", contents())
+    }
   }
 }
