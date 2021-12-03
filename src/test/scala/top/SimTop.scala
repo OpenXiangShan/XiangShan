@@ -34,7 +34,7 @@ class SimTop(implicit p: Parameters) extends Module {
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
 
-//  l_soc.module.dma <> DontCare
+  l_soc.module.dma <> 0.U.asTypeOf(l_soc.module.dma)
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
