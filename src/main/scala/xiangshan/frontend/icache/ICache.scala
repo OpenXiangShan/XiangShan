@@ -202,9 +202,9 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-   when(io.write.valid){
-       printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-   }
+  //  when(io.write.valid){
+  //      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
+  //  }
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -477,8 +477,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
 
-  meta_write_arb.io.in(ReplacePipeKey)  <> missUnit.io.meta_write
-  meta_write_arb.io.in(mainPipeKey)    <> replacePipe.io.meta_write
+  meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
+  meta_write_arb.io.in(mainPipeKey)     <> missUnit.io.meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
