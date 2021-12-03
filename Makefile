@@ -35,6 +35,15 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# emu for the release version
+RELEASE_ARGS = --disable-all --remove-assert --fpga-platform
+DEBUG_ARGS   = --enable-difftest
+ifeq ($(RELEASE),1)
+override SIM_ARGS += $(RELEASE_ARGS)
+else
+override SIM_ARGS += $(DEBUG_ARGS)
+endif
+
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -a -o $(TIMELOG)
 
@@ -45,12 +54,11 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                   \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F) \
-		--disable-all --remove-assert --infer-rw                 \
-		--repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf         \
-		--gen-mem-verilog full $(SIM_ARGS)                       \
-		--num-cores $(NUM_CORES)
+	mill -i XiangShan.runMain $(FPGATOP) -td $(@D)                      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
+		--infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf \
+		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
+		$(RELEASE_ARGS)
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -68,11 +76,11 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)   \
-		--config $(CONFIG) --full-stacktrace --output-file $(@F) \
-		--num-cores $(NUM_CORES) $(SIM_ARGS) --infer-rw          \
-		--repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf          \
-		--gen-mem-verilog full
+	$(TIME_CMD) mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D)      \
+		--config $(CONFIG) --full-stacktrace --output-file $(@F)    \
+		--infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf  \
+		--gen-mem-verilog full --num-cores $(NUM_CORES)             \
+		$(SIM_ARGS)
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__

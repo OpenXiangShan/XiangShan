@@ -33,7 +33,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   val io = IO(new TlbIO(Width, q))
 
   require(q.superAssociative == "fa")
-  if (q.sameCycle) {
+  if (q.sameCycle || q.missSameCycle) {
     require(q.normalAssociative == "fa")
   }
 
@@ -70,6 +70,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = q.normalNSets,
     nWays = q.normalNWays,
     sramSinglePort = sramSinglePort,
+    saveLevel = q.saveLevel,
     normalPage = true,
     superPage = false
   )
@@ -81,6 +82,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     nSets = q.superNSets,
     nWays = q.superNWays,
     sramSinglePort = sramSinglePort,
+    saveLevel = q.saveLevel,
     normalPage = q.normalAsVictim,
     superPage = true,
   )
@@ -90,32 +92,36 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     normalPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
     superPage.r_req_apply(
       valid = io.requestor(i).req.valid,
       vpn = vpn(i),
+      asid = csr.satp.asid,
       i = i
     )
   }
-
 
   normalPage.victim.in <> superPage.victim.out
   normalPage.victim.out <> superPage.victim.in
   normalPage.sfence <> io.sfence
   superPage.sfence <> io.sfence
+  normalPage.csr <> io.csr
+  superPage.csr <> io.csr
 
   def TLBNormalRead(i: Int) = {
-    val (normal_hit, normal_ppn, normal_perm, normal_hitVec) = normalPage.r_resp_apply(i)
-    val (super_hit, super_ppn, super_perm, super_hitVec) = superPage.r_resp_apply(i)
+    val (n_hit_sameCycle, normal_hit, normal_ppn, normal_perm) = normalPage.r_resp_apply(i)
+    val (s_hit_sameCycle, super_hit, super_ppn, super_perm) = superPage.r_resp_apply(i)
     assert(!(normal_hit && super_hit && vmEnable && RegNext(req(i).valid, init = false.B)))
 
     val hit = normal_hit || super_hit
+    val hit_sameCycle = n_hit_sameCycle || s_hit_sameCycle
     val ppn = Mux(normal_hit, normal_ppn, super_ppn)
     val perm = Mux(normal_hit, normal_perm, super_perm)
 
-    val pf = perm.pf && hit
-    val af = perm.af && hit
+    val pf = perm.pf
+    val af = perm.af
     val cmdReg = if (!q.sameCycle) RegNext(cmd(i)) else cmd(i)
     val validReg = if (!q.sameCycle) RegNext(valid(i)) else valid(i)
     val offReg = if (!q.sameCycle) RegNext(reqAddr(i).off) else reqAddr(i).off
@@ -123,6 +129,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
     /** *************** next cycle when two cycle is false******************* */
     val miss = !hit && vmEnable
+    val miss_sameCycle = !hit_sameCycle && vmEnable
     hit.suggestName(s"hit_${i}")
     miss.suggestName(s"miss_${i}")
 
@@ -134,7 +141,7 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
     resp(i).bits.paddr := Mux(vmEnable, paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
-    resp(i).bits.miss := miss
+    resp(i).bits.miss := { if (q.missSameCycle) miss_sameCycle else miss }
     resp(i).bits.ptwBack := io.ptw.resp.fire()
 
     pmp(i).valid := resp(i).valid
@@ -142,42 +149,35 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
-    val update = hit && (!perm.a || !perm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
+    val ldUpdate = !perm.a && TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg) // update A/D through exception
+    val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg)) // update A/D through exception
+    val instrUpdate = !perm.a && TlbCmd.isExec(cmdReg) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B /* TODO !isAMO*/)
-    val stPf = !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B /*TODO isAMO. */)
-    val instrPf = !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
-    resp(i).bits.excp.pf.ld := (ldPf || update || pf) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.st := (stPf || update || pf) && vmEnable && hit && !af
-    resp(i).bits.excp.pf.instr := (instrPf || update || pf) && vmEnable && hit && !af
+    val ldPermFail = !(modeCheck && (perm.r || priv.mxr && perm.x))
+    val stPermFail = !(modeCheck && perm.w)
+    val instrPermFail = !(modeCheck && perm.x)
+    val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmdReg) && !TlbCmd.isAmo(cmdReg))
+    val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
+    val fault_valid = vmEnable
+    val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
+    resp(i).bits.excp.pf.ld := (ldPf || ldUpdate) && fault_valid && !af
+    resp(i).bits.excp.pf.st := (stPf || stUpdate) && fault_valid && !af
+    resp(i).bits.excp.pf.instr := (instrPf || instrUpdate) && fault_valid && !af
     // NOTE: pf need && with !af, page fault has higher priority than access fault
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    // if vmenable, use pre-calcuated pma check result
-    resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !perm.pi, !perm.pd) && vmEnable && hit
-    resp(i).bits.excp.af.ld := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pr) && TlbCmd.isRead(cmdReg)) && vmEnable && hit
-    resp(i).bits.excp.af.st := (af || Mux(TlbCmd.isAtom(cmdReg), !perm.pa, !perm.pw) && TlbCmd.isWrite(cmdReg)) && vmEnable && hit
-    resp(i).bits.excp.af.instr := (af || Mux(TlbCmd.isAtom(cmdReg), false.B, !perm.pe)) && vmEnable && hit
+    resp(i).bits.excp.af.ld := af && TlbCmd.isRead(cmdReg) && fault_valid
+    resp(i).bits.excp.af.st := af && TlbCmd.isWrite(cmdReg) && fault_valid
+    resp(i).bits.excp.af.instr := af && TlbCmd.isExec(cmdReg) && fault_valid
 
-    // if !vmenable, check pma
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(resp(i).bits.paddr)
-    when(!vmEnable) {
-      resp(i).bits.mmio := Mux(TlbCmd.isExec(cmdReg), !PMAMode.icache(pmaMode), !PMAMode.dcache(pmaMode))
-      resp(i).bits.excp.af.ld := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.read(pmaMode)) && TlbCmd.isRead(cmdReg)
-      resp(i).bits.excp.af.st := Mux(TlbCmd.isAtom(cmdReg), !PMAMode.atomic(pmaMode), !PMAMode.write(pmaMode)) && TlbCmd.isWrite(cmdReg)
-      resp(i).bits.excp.af.instr := Mux(TlbCmd.isAtom(cmdReg), false.B, !PMAMode.execute(pmaMode))
-    }
-
-    (hit, miss, normal_hitVec, super_hitVec, validReg)
+    (hit, miss, validReg)
   }
 
   val readResult = (0 until Width).map(TLBNormalRead(_))
   val hitVec = readResult.map(_._1)
   val missVec = readResult.map(_._2)
-  val normalhitVecVec = readResult.map(_._3)
-  val superhitVecVec = readResult.map(_._4)
-  val validRegVec = readResult.map(_._5)
+  val validRegVec = readResult.map(_._3)
 
   // replacement
   def get_access(one_hot: UInt, valid: Bool): Valid[UInt] = {
@@ -188,35 +188,30 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
   }
 
   val normal_refill_idx = if (q.outReplace) {
-    io.replace.normalPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
-    io.replace.normalPage.access.touch_ways := normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))}
-    io.replace.normalPage.chosen_set := get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
+    io.replace.normalPage.access <> normalPage.access
+    io.replace.normalPage.chosen_set := get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets)
     io.replace.normalPage.refillIdx
   } else if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.access(normalPage.access.map(_.touch_ways)) // normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
     re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(vpn.map(get_idx(_, q.normalNSets)), normalhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))})
-    re.way(get_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
+    re.access(normalPage.access.map(_.sets), normalPage.access.map(_.touch_ways))
+    re.way(get_set_idx(io.ptw.resp.bits.entry.tag, q.normalNSets))
   }
 
   val super_refill_idx = if (q.outReplace) {
-    io.replace.superPage.access.sets := vpn.map(get_idx(_, q.normalNSets))
-    io.replace.superPage.access.touch_ways := superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv,
-      validRegVec(i))}
+    io.replace.superPage.access <> superPage.access
     io.replace.superPage.chosen_set := DontCare
     io.replace.superPage.refillIdx
   } else {
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(superhitVecVec.zipWithIndex.map{ case (hv, i) => get_access(hv, validRegVec(i))})
+    re.access(superPage.access.map(_.touch_ways))
     re.way
   }
 
-  val refill = ptw.resp.fire() && !sfence.valid
+  val refill = ptw.resp.fire() && !sfence.valid && !satp.changed
   normalPage.w_apply(
     valid = { if (q.normalAsVictim) false.B
     else refill && ptw.resp.bits.entry.level.get === 2.U },
@@ -279,6 +274,26 @@ class TLB(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModul
 
 //   // NOTE: just for simple tlb debug, comment it after tlb's debug
   // assert(!io.ptw.resp.valid || io.ptw.resp.bits.entry.tag === io.ptw.resp.bits.entry.ppn, "Simple tlb debug requires vpn === ppn")
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(2))
+  })
+    if(!q.shouldBlock) {
+      val perfEvents = Seq(
+        ("access         ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i)))                                         ),
+        ("miss           ", PopCount((0 until Width).map(i => vmEnable && validRegVec(i) && missVec(i)))                           ),
+        )
+      for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+        perf_out.incr_step := RegNext(perf)
+      }
+    } else {
+      val perfEvents = Seq(
+        ("access         ", PopCount((0 until Width).map(i => io.requestor(i).req.fire()))                           ),
+        ("miss           ", PopCount((0 until Width).map(i => ptw.req(i).fire()))                                    ),
+      )
+      for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+        perf_out.incr_step := RegNext(perf)
+      }
+    }
 }
 
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
@@ -286,21 +301,21 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
 
   if (q.normalAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(io.normalPage.access.touch_ways)
+    re.access(io.normalPage.access.map(_.touch_ways))
     io.normalPage.refillIdx := re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(io.normalPage.access.sets, io.normalPage.access.touch_ways)
+    re.access(io.normalPage.access.map(_.sets), io.normalPage.access.map(_.touch_ways))
     io.normalPage.refillIdx := { if (q.normalNWays == 1) 0.U else re.way(io.normalPage.chosen_set) }
   }
 
   if (q.superAssociative == "fa") {
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(io.superPage.access.touch_ways)
+    re.access(io.superPage.access.map(_.touch_ways))
     io.superPage.refillIdx := re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
-    re.access(io.superPage.access.sets, io.superPage.access.touch_ways)
+    re.access(io.superPage.access.map(_.sets), io.superPage.access.map(_.touch_ways))
     io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
   }
 }
@@ -341,12 +356,18 @@ object TLB {
         tlb.io.requestor(i).req.bits := in(i).req.bits
         in(i).req.ready := !tlb.io.requestor(i).resp.bits.miss && in(i).resp.ready && tlb.io.requestor(i).req.ready
 
-        in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
+        require(q.missSameCycle || q.sameCycle)
+        // NOTE: the resp.valid seems to be useless, it must be true when need
+        //       But don't know what happens when true but not need, so keep it correct value, not just true.B
+        if (q.missSameCycle && !q.sameCycle) {
+          in(i).resp.valid := tlb.io.requestor(i).resp.valid && !RegNext(tlb.io.requestor(i).resp.bits.miss)
+        } else {
+          in(i).resp.valid := tlb.io.requestor(i).resp.valid && !tlb.io.requestor(i).resp.bits.miss
+        }
         in(i).resp.bits := tlb.io.requestor(i).resp.bits
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
     }
-
     tlb.io.ptw
   }
 }

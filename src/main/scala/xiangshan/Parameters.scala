@@ -27,6 +27,10 @@ import huancun.{CacheParameters, HCCacheParameters}
 import xiangshan.frontend.{BIM, BasePredictor, BranchPredictionResp, FTB, FakePredictor, ICacheParameters, MicroBTB, RAS, Tage, ITTage, Tage_SC}
 import xiangshan.cache.mmu.{TLBParameters, L2TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
+import system.SoCParamsKey
+import scala.math.min
+
+case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
 case object XSCoreParamsKey extends Field[XSCoreParameters]
 
@@ -42,10 +46,10 @@ case class XSCoreParameters
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
+  AsidLength: Int = 16,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -55,7 +59,7 @@ case class XSCoreParameters
   EnbaleTlbDebug: Boolean = false,
   EnableJal: Boolean = false,
   EnableUBTB: Boolean = true,
-  HistoryLength: Int = 64,
+  HistoryLength: Int = 256,
   PathHistoryLength: Int = 16,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -64,8 +68,29 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
-  branchPredictor: Function3[BranchPredictionResp, Parameters, Boolean, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) => {
+  TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
+  //       Sets  Hist   Tag
+    Seq(( 128*8,    2,    7),
+        ( 128*8,    4,    7),
+        ( 256*8,    8,    8),
+        ( 256*8,   16,    8),
+        ( 128*8,   32,    9),
+        ( 128*8,   65,    9)),
+  TageBanks: Int = 2,
+  ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
+  //      Sets  Hist   Tag
+    Seq(( 512,    0,    0),
+        ( 256,    4,    8),
+        ( 256,    8,    8),
+        ( 512,   12,    8),
+        ( 512,   16,    8),
+        ( 512,   32,    8)),
+  SCNRows: Int = 1024,
+  SCNTables: Int = 6,
+  SCCtrBits: Int = 6,
+  numBr: Int = 2,
+  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
+    ((resp_in: BranchPredictionResp, p: Parameters) => {
       // val loop = Module(new LoopPredictor)
       // val tage = (if(EnableBPD) { if (EnableSC) Module(new Tage_SC)
       //                             else          Module(new Tage) }
@@ -73,7 +98,7 @@ case class XSCoreParameters
       val ftb = Module(new FTB()(p))
       val ubtb = Module(new MicroBTB()(p))
       val bim = Module(new BIM()(p))
-      val tage = if (enableSC) { Module(new Tage_SC()(p)) } else { Module(new Tage()(p)) }
+      val tage = Module(new Tage_SC()(p))
       val ras = Module(new RAS()(p))
       val ittage = Module(new ITTage()(p))
       // val tage = Module(new Tage()(p))
@@ -137,7 +162,9 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnableFastForward: Boolean = true,
+  EnableLdVioCheckAfterReset: Boolean = true,
   RefillSize: Int = 512,
+  MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -157,7 +184,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -167,7 +195,8 @@ case class XSCoreParameters
     normalReplacer = Some("setplru"),
     superNWays = 8,
     normalAsVictim = true,
-    outReplace = true
+    outReplace = true,
+    saveLevel = true
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -176,9 +205,9 @@ case class XSCoreParameters
     normalNWays = 64,
     superNWays = 4,
   ),
-  useBTlb: Boolean = false,
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPMP: Int = 16, // 0 or 16 or 64
+  NumPMA: Int = 16,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -191,8 +220,8 @@ case class XSCoreParameters
     dataECC = Some("secded"),
     replacer = Some("setplru"),
     nMissEntries = 16,
-    nProbeEntries = 16,
-    nReleaseEntries = 32
+    nProbeEntries = 8,
+    nReleaseEntries = 18
   )),
   L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
     name = "l2",
@@ -222,8 +251,10 @@ case object DebugOptionsKey extends Field[DebugOptions]
 
 case class DebugOptions
 (
-  FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = true,
+  FPGAPlatform: Boolean = false,
+  EnableDifftest: Boolean = false,
+  AlwaysBasicDiff: Boolean = true,
+  EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false
 )
@@ -232,11 +263,12 @@ trait HasXSParameter {
 
   implicit val p: Parameters
 
+  val PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+
   val coreParams = p(XSCoreParamsKey)
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
-  val hardId = coreParams.HartId
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -248,7 +280,7 @@ trait HasXSParameter {
   val HasDcache = coreParams.HasDCache
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
-  val PAddrBits = coreParams.PAddrBits // PAddrBits is Phyical Memory addr bits
+  val AsidLength = coreParams.AsidLength
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
@@ -273,9 +305,47 @@ trait HasXSParameter {
   val JbtacBanks = coreParams.JbtacBanks
   val RasSize = coreParams.RasSize
 
-  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters, enableSC: Boolean) = {
-    coreParams.branchPredictor(resp_in, p, enableSC)
+  def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
+    coreParams.branchPredictor(resp_in, p)
   }
+  val numBr = coreParams.numBr
+  val TageTableInfos = coreParams.TageTableInfos
+
+
+  val BankTageTableInfos = (0 until numBr).map(i =>
+    TageTableInfos.map{ case (s, h, t) => (s/(1 << i), h, t) }
+  )
+  val TageBanks = coreParams.TageBanks
+  val SCNRows = coreParams.SCNRows
+  val SCCtrBits = coreParams.SCCtrBits
+  val BankSCHistLens = BankTageTableInfos.map(info => 0 :: info.map{ case (_,h,_) => h}.toList)
+  val BankSCNTables = Seq.fill(numBr)(coreParams.SCNTables)
+
+  val BankSCTableInfos = (BankSCNTables zip BankSCHistLens).map {
+    case (ntable, histlens) =>
+      Seq.fill(ntable)((SCNRows, SCCtrBits)) zip histlens map {case ((n, cb), h) => (n, cb, h)}
+  }
+  val ITTageTableInfos = coreParams.ITTageTableInfos
+  type FoldedHistoryInfo = Tuple2[Int, Int]
+  val foldedGHistInfos =
+    (BankTageTableInfos.flatMap(_.map{ case (nRows, h, t) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toSet ++
+    BankSCTableInfos.flatMap(_.map{ case (nRows, _, h) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows/TageBanks), h)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toSet ++
+    ITTageTableInfos.map{ case (nRows, h, t) =>
+      if (h > 0)
+        Set((h, min(log2Ceil(nRows), h)), (h, min(h, t)), (h, min(h, t-1)))
+      else
+        Set[FoldedHistoryInfo]()
+    }.reduce(_++_)).toList
 
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
@@ -309,18 +379,25 @@ trait HasXSParameter {
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnableFastForward = coreParams.EnableFastForward
+  val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val RefillSize = coreParams.RefillSize
+  val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
-  val useBTlb = coreParams.useBTlb
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPMP = coreParams.NumPMP
+  val NumPMA = coreParams.NumPMA
   val PlatformGrain: Int = log2Up(coreParams.RefillSize/8) // set PlatformGrain to avoid itlb, dtlb, ptw size conflict
   val NumPerfCounters = coreParams.NumPerfCounters
+
+  val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 + 
+              (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 + 
+              (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
+              ((exuParameters.StuCnt+1)/2) + ((exuParameters.StuCnt+1)/2) 
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -356,4 +433,13 @@ trait HasXSParameter {
 
   val exuConfigs = coreParams.exuConfigs
 
+  val PCntIncrStep: Int = 6
+  val numPCntHc: Int = 25
+  val numPCntPtw: Int = 19
+
+  val numCSRPCntFrontend = 8
+  val numCSRPCntCtrl     = 8
+  val numCSRPCntLsu      = 8
+  val numCSRPCntHc       = 5
+  val print_perfcounter  = false
 }

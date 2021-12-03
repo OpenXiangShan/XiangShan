@@ -25,8 +25,10 @@ import xiangshan.backend.decode.{DecodeStage, ImmUnion}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
+import xiangshan.backend.fu.{PFEvent}
+import xiangshan.mem.mdp.{SSIT, LFST, WaitTable}
 import xiangshan.frontend.{FtqPtr, FtqRead}
-import xiangshan.mem.LsqEnqIO
+import xiangshan.mem.{LsqEnqIO}
 import difftest._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -40,6 +42,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val io = IO(new Bundle() {
+    val hartId = Input(UInt(8.W))
     val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -161,7 +164,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   if (!env.FPGAPlatform) {
     val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
     runahead_redirect.io.clock := clock
-    runahead_redirect.io.coreid := hardId.U
+    runahead_redirect.io.coreid := io.hartId
     runahead_redirect.io.valid := io.stage3Redirect.valid
     runahead_redirect.io.pc :=  s2_pc // for debug only
     runahead_redirect.io.target_pc := s2_target // for debug only
@@ -172,6 +175,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 class CtrlBlock(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
+    val hartId = Input(UInt(8.W))
     val frontend = Flipped(new FrontendToCtrlIO)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
@@ -180,7 +184,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
     val stOut = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuOutput)))
     val memoryViolation = Flipped(ValidIO(new Redirect))
-    val enqLsq = Flipped(new LsqEnqIO)
     val jumpPc = Output(UInt(VAddrBits.W))
     val jalr_target = Output(UInt(VAddrBits.W))
     val robio = new Bundle {
@@ -208,6 +211,8 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   val decode = Module(new DecodeStage)
   val rat = Module(new RenameTableWrapper)
+  val ssit = Module(new SSIT)
+  val waittable = Module(new WaitTable)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
@@ -255,6 +260,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   loadReplay.bits := RegEnable(io.memoryViolation.bits, io.memoryViolation.valid)
   io.frontend.fromFtq.getRedirectPcRead <> redirectGen.io.stage1PcRead
   io.frontend.fromFtq.getMemPredPcRead <> redirectGen.io.memPredPcRead
+  redirectGen.io.hartId := io.hartId
   redirectGen.io.exuMispredict <> exuRedirect
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := RegNext(rob.io.flushOut.valid)
@@ -268,11 +274,31 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.frontend.toFtq.stage3Redirect := stage3Redirect
 
   decode.io.in <> io.frontend.cfVec
-  // currently, we only update wait table when isReplay
-  decode.io.memPredUpdate(0) <> RegNext(redirectGen.io.memPredUpdate)
-  decode.io.memPredUpdate(1) := DontCare
-  decode.io.memPredUpdate(1).valid := false.B
-  decode.io.csrCtrl := RegNext(io.csrCtrl)
+  decode.io.csrCtrl := io.csrCtrl
+
+  // memory dependency predict
+  // when decode, send fold pc to mdp
+  for (i <- 0 until DecodeWidth) {
+    val mdp_foldpc = Mux(
+      decode.io.out(i).fire(),
+      decode.io.in(i).bits.foldpc,
+      rename.io.in(i).bits.cf.foldpc
+    )
+    ssit.io.raddr(i) := mdp_foldpc
+    waittable.io.raddr(i) := mdp_foldpc
+  }
+  // currently, we only update mdp info when isReplay
+  ssit.io.update <> RegNext(redirectGen.io.memPredUpdate)
+  ssit.io.csrCtrl := RegNext(io.csrCtrl)
+  waittable.io.update <> RegNext(redirectGen.io.memPredUpdate)
+  waittable.io.csrCtrl := RegNext(io.csrCtrl)
+
+  // LFST lookup and update
+  val lfst = Module(new LFST)
+  lfst.io.redirect <> RegNext(io.redirect)
+  lfst.io.storeIssue <> RegNext(io.stIn)
+  lfst.io.csrCtrl <> RegNext(io.csrCtrl)
+  lfst.io.dispatch <> dispatch.io.lfst
 
   rat.io.robCommits := rob.io.commits
   for ((r, i) <- rat.io.intReadPorts.zipWithIndex) {
@@ -300,22 +326,21 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
 
   rename.io.redirect <> stage2Redirect
   rename.io.robCommits <> rob.io.commits
+  rename.io.ssit <> ssit.io.rdata
+  rename.io.waittable <> RegNext(waittable.io.rdata)
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
     PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), stage2Redirect.valid)
   }
-  dispatch.io.preDpInfo := RegEnable(rename.io.dispatchInfo, rename.io.out(0).fire)
 
+  dispatch.io.hartId := io.hartId
   dispatch.io.redirect <> stage2Redirect
   dispatch.io.enqRob <> rob.io.enq
-  dispatch.io.enqLsq <> io.enqLsq
   dispatch.io.toIntDq <> intDq.io.enq
   dispatch.io.toFpDq <> fpDq.io.enq
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
-  dispatch.io.csrCtrl <> io.csrCtrl
-  dispatch.io.storeIssue <> io.stIn
   dispatch.io.singleStep := false.B
 
   intDq.io.redirect <> stage2Redirect
@@ -332,6 +357,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val jumpTargetRead = io.frontend.fromFtq.target_read
   io.jalr_target := jumpTargetRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
 
+  rob.io.hartId := io.hartId
   rob.io.redirect <> stage2Redirect
   val exeWbResults = VecInit(io.writeback ++ io.stOut)
   val timer = GTimer()
@@ -356,4 +382,42 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
+
+  val pfevent = Module(new PFEvent)
+  val csrevents = pfevent.io.hpmevent.slice(8,16)
+  val perfinfo = IO(new Bundle(){
+    val perfEvents        = Output(new PerfEventsBundle(csrevents.length))
+    val perfEventsRs      = Input(new PerfEventsBundle(NumRs))
+    val perfEventsEu0     = Input(new PerfEventsBundle(10))
+    val perfEventsEu1     = Input(new PerfEventsBundle(10))
+  })
+
+  if(print_perfcounter){
+    val decode_perf     = decode.perfEvents.map(_._1).zip(decode.perfinfo.perfEvents.perf_events)
+    val rename_perf     = rename.perfEvents.map(_._1).zip(rename.perfinfo.perfEvents.perf_events)
+    val dispat_perf     = dispatch.perfEvents.map(_._1).zip(dispatch.perfinfo.perfEvents.perf_events)
+    val intdq_perf      = intDq.perfEvents.map(_._1).zip(intDq.perfinfo.perfEvents.perf_events)
+    val fpdq_perf       = fpDq.perfEvents.map(_._1).zip(fpDq.perfinfo.perfEvents.perf_events)
+    val lsdq_perf       = lsDq.perfEvents.map(_._1).zip(lsDq.perfinfo.perfEvents.perf_events)
+    val rob_perf        = rob.perfEvents.map(_._1).zip(rob.perfinfo.perfEvents.perf_events)
+    val perfEvents =  decode_perf ++ rename_perf ++ dispat_perf ++ intdq_perf ++ fpdq_perf ++ lsdq_perf ++ rob_perf
+
+    for (((perf_name,perf),i) <- perfEvents.zipWithIndex) {
+      println(s"ctrl perf $i: $perf_name")
+    }
+  }
+
+  val hpmEvents = decode.perfinfo.perfEvents.perf_events ++ rename.perfinfo.perfEvents.perf_events ++ 
+                  dispatch.perfinfo.perfEvents.perf_events ++ 
+                  intDq.perfinfo.perfEvents.perf_events ++ fpDq.perfinfo.perfEvents.perf_events ++
+                  lsDq.perfinfo.perfEvents.perf_events ++ rob.perfinfo.perfEvents.perf_events ++
+                  perfinfo.perfEventsEu0.perf_events ++ perfinfo.perfEventsEu1.perf_events ++ 
+                  perfinfo.perfEventsRs.perf_events
+
+  val perf_length = hpmEvents.length
+  val hpm_ctrl = Module(new HPerfmonitor(perf_length,csrevents.length))
+  hpm_ctrl.io.hpm_event := csrevents
+  hpm_ctrl.io.events_sets.perf_events := hpmEvents
+  perfinfo.perfEvents := RegNext(hpm_ctrl.io.events_selected)
+  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
 }

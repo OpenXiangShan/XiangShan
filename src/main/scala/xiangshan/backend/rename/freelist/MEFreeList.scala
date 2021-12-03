@@ -24,10 +24,7 @@ import utils._
 
 
 class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) {
-  val freeList = RegInit(VecInit(Seq.tabulate(size){
-    case n if (n >= 0 && n < NRPhyRegs - 32) => (n + 32).U
-    case _ => DontCare
-  }))
+  val freeList = Mem(size, UInt(PhyRegIdxWidth.W))
 
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false.B, 0.U))
@@ -58,10 +55,30 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) {
       freeList(freePtr.value) := io.freePhyReg(i)
     }
   }
+  when (reset.asBool) {
+    for (i <- 0 until NRPhyRegs - 32) {
+      freeList(i) := (i + 32).U
+    }
+  }
+
   // update tail pointer
   val tailPtrNext = tailPtr + PopCount(io.freeReq)
   tailPtr := tailPtrNext
 
   val freeRegCnt = Mux(doRename, distanceBetween(tailPtrNext, headPtrNext), distanceBetween(tailPtrNext, headPtr))
   io.canAllocate := RegNext(freeRegCnt) >= RenameWidth.U
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(4))
+  })
+  val perfEvents = Seq(
+    ("me_freelist_1/4_valid          ", (freeRegCnt < ((NRPhyRegs-32).U/4.U))                                             ),
+    ("me_freelist_2/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U/4.U)) & (freeRegCnt <= ((NRPhyRegs-32).U/2.U))    ),
+    ("me_freelist_3/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U/2.U)) & (freeRegCnt <= ((NRPhyRegs-32).U*3.U/4.U))),
+    ("me_freelist_4/4_valid          ", (freeRegCnt > ((NRPhyRegs-32).U*3.U/4.U))                                         ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
 }

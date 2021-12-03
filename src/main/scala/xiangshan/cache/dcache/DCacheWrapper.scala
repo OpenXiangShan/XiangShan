@@ -24,9 +24,10 @@ import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.BundleFieldBase
+import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import huancun.{AliasField, AliasKey, PreferCacheField, PrefetchField, DirtyField}
+import huancun.{AliasField, AliasKey, DirtyField, PreferCacheField, PrefetchField}
+
 import scala.math.max
 
 // DCache specific parameters
@@ -37,7 +38,7 @@ case class DCacheParameters
   rowBits: Int = 128,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
-  replacer: Option[String] = Some("random"),
+  replacer: Option[String] = Some("setplru"),
   nMissEntries: Int = 1,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
@@ -74,7 +75,7 @@ case class DCacheParameters
 // | Above index  | Set | Bank | Offset |
 // --------------------------------------
 //                |     |      |        |
-//                |     |      |        DCacheWordOffset
+//                |     |      |        0
 //                |     |      DCacheBankOffset
 //                |     DCacheSetOffset
 //                DCacheAboveIndexOffset
@@ -90,6 +91,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def encRowBits = encWordBits * rowWords // for DuplicatedDataArray only
   def eccBits = encWordBits - wordBits
 
+  def encTagBits = cacheParams.tagCode.width(tagBits)
+  def eccTagBits = encTagBits - tagBits
+
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
   def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
@@ -104,29 +108,34 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = 64
 
-  require(isPow2(cfg.nMissEntries))
-  require(isPow2(cfg.nReleaseEntries))
-  val nEntries = max(cfg.nMissEntries, cfg.nReleaseEntries) << 1
-  val releaseIdBase = max(cfg.nMissEntries, cfg.nReleaseEntries)
+  require(isPow2(cfg.nMissEntries)) // TODO
+  // require(isPow2(cfg.nReleaseEntries))
+  require(cfg.nMissEntries < cfg.nReleaseEntries)
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
+  val releaseIdBase = cfg.nMissEntries
 
   // banked dcache support
   val DCacheSets = cacheParams.nSets
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 8
   val DCacheSRAMRowBits = 64 // hardcoded
+  val DCacheWordBits = 64 // hardcoded
+  val DCacheWordBytes = DCacheWordBits / 8
 
-  val DCacheLineBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
-  val DCacheLineBytes = DCacheLineBits / 8
-  val DCacheLineWords = DCacheLineBits / 64 // TODO
+  val DCacheSizeBits = DCacheSRAMRowBits * DCacheBanks * DCacheWays * DCacheSets
+  val DCacheSizeBytes = DCacheSizeBits / 8
+  val DCacheSizeWords = DCacheSizeBits / 64 // TODO
 
   val DCacheSameVPAddrLength = 12
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
-  val DCacheWordOffset = 0
-  val DCacheBankOffset = DCacheWordOffset + log2Up(DCacheSRAMRowBytes)
+  val DCacheWordOffset = log2Up(DCacheWordBytes)
+
+  val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
   val DCacheTagOffset = DCacheAboveIndexOffset min DCacheSameVPAddrLength
+  val DCacheLineOffset = DCacheSetOffset
   val DCacheIndexOffset = DCacheBankOffset
 
   def addr_to_dcache_bank(addr: UInt) = {
@@ -206,6 +215,7 @@ class DCacheLineReq(implicit p: Parameters)  extends DCacheBundle
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
   val vaddr = UInt(VAddrBits.W)
+  val wline = Bool()
 }
 
 class DCacheWordResp(implicit p: Parameters) extends DCacheBundle
@@ -248,6 +258,14 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   val refill_done = Bool()
   def dump() = {
     XSDebug("Refill: addr: %x data: %x\n", addr, data)
+  }
+}
+
+class Release(implicit p: Parameters) extends DCacheBundle
+{
+  val paddr  = UInt(PAddrBits.W)
+  def dump() = {
+    XSDebug("Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
   }
 }
 
@@ -300,10 +318,13 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new DCacheWordIOWithVaddr)  // atomics reqs
+  val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check 
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
+  val hartId = Input(UInt(8.W))
   val lsu = new DCacheToLsuIO
+  val csr = new L1CacheToCsrIO
   val error = new L1CacheErrorInfo
   val mshrFull = Output(Bool())
 }
@@ -366,6 +387,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue  = Module(new MissQueue(edge))
   val probeQueue = Module(new ProbeQueue(edge))
   val wb         = Module(new WritebackQueue(edge))
+
+  missQueue.io.hartId := io.hartId
 
   //----------------------------------------
   // meta array
@@ -453,7 +476,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val MainPipeMissReqPort = 0
 
   // Request
-  val missReqArb = Module(new RRArbiter(new MissReq, MissReqPortCount))
+  val missReqArb = Module(new Arbiter(new MissReq, MissReqPortCount))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss
   for (w <- 0 until LoadPipelineWidth) { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
@@ -478,50 +501,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // probeQueue.io.mem_probe <> bus.b
   block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe_block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
+  probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
   //----------------------------------------
   // mainPipe
-//  val MainPipeReqPortCount = 4
-//  val MissMainPipeReqPort = 0
-//  val StoreMainPipeReqPort = 1
-//  val AtomicsMainPipeReqPort = 2
-//  val ProbeMainPipeReqPort = 3
-//
-//  val mainPipeReqArb = Module(new RRArbiter(new MainPipeReq, MainPipeReqPortCount))
-//  mainPipeReqArb.io.in(MissMainPipeReqPort)    <> missQueue.io.pipe_req
-//  mainPipeReqArb.io.in(StoreMainPipeReqPort)   <> io.lsu.store.pipe_req
-//  mainPipeReqArb.io.in(AtomicsMainPipeReqPort) <> atomicsReplayUnit.io.pipe_req
-//  mainPipeReqArb.io.in(ProbeMainPipeReqPort)   <> probeQueue.io.pipe_req
-//
-//  // add a stage to break the Arbiter bits.addr to ready path
-//  val mainPipeReq_valid = RegInit(false.B)
-//  val mainPipeReq_fire  = mainPipeReq_valid && mainPipe.io.req.ready
-//  val mainPipeReq_req   = RegEnable(mainPipeReqArb.io.out.bits, mainPipeReqArb.io.out.fire())
-//
-//  mainPipeReqArb.io.out.ready := mainPipeReq_fire || !mainPipeReq_valid
-//  mainPipe.io.req.valid := mainPipeReq_valid
-//  mainPipe.io.req.bits  := mainPipeReq_req
-//
-//  when (mainPipeReqArb.io.out.fire()) { mainPipeReq_valid := true.B }
-//  when (!mainPipeReqArb.io.out.fire() && mainPipeReq_fire) { mainPipeReq_valid := false.B }
-//
-//  missQueue.io.pipe_resp         <> mainPipe.io.miss_resp
-//  io.lsu.store.pipe_resp         <> mainPipe.io.store_resp
-//  atomicsReplayUnit.io.pipe_resp <> mainPipe.io.amo_resp
-//
-//  probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
-//
-//  for(i <- 0 until LoadPipelineWidth) {
-//    mainPipe.io.replace_access(i) <> ldu(i).io.replace_access
-//  }
-
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  val refillPipeStatus = Wire(Valid(UInt(idxBits.W)))
+  val refillPipeStatus, replacePipeStatusS0 = Wire(Valid(UInt(idxBits.W)))
   refillPipeStatus.valid := refillPipe.io.req.valid
-  refillPipeStatus.bits := refillPipe.io.req.bits.paddrWithVirtualAlias
+  refillPipeStatus.bits := get_idx(refillPipe.io.req.bits.paddrWithVirtualAlias)
+  replacePipeStatusS0.valid := replacePipe.io.req.valid
+  replacePipeStatusS0.bits := get_idx(replacePipe.io.req.bits.vaddr)
   val blockMainPipeReqs = Seq(
     refillPipeStatus,
+	  replacePipeStatusS0,
     replacePipe.io.status.s1_set,
     replacePipe.io.status.s2_set
   )
@@ -546,8 +539,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   val replaceSet = addr_to_dcache_set(missQueue.io.replace_pipe_req.bits.vaddr)
   val replaceWayEn = missQueue.io.replace_pipe_req.bits.way_en
-  val replaceShouldBeBlocked = mpStatus.s0_set.valid && replaceSet === mpStatus.s0_set.bits ||
-    Cat(Seq(mpStatus.s1, mpStatus.s2, mpStatus.s3).map(s =>
+  val replaceShouldBeBlocked = mpStatus.s1.valid ||
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
       s.valid && s.bits.set === replaceSet && s.bits.way_en === replaceWayEn
     )).orR()
   block_decoupled(missQueue.io.replace_pipe_req, replacePipe.io.req, replaceShouldBeBlocked)
@@ -556,8 +549,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // refill pipe
   val refillShouldBeBlocked = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req.bits.idx) ||
-	Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-	  s.valid &&
+    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
+      s.valid &&
         s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
         s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
     )).orR
@@ -573,6 +566,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.c     <> wb.io.mem_release
   wb.io.release_wakeup := refillPipe.io.release_wakeup
   wb.io.release_update := mainPipe.io.release_update
+  io.lsu.release.valid := bus.c.fire()
+  io.lsu.release.bits.paddr := bus.c.bits.address
 
   // connect bus d
   missQueue.io.mem_grant.valid := false.B
@@ -637,6 +632,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   //----------------------------------------
+  // Customized csr cache op support
+  val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
+  cacheOpDecoder.io.csr <> io.csr
+  bankedDataArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  metaArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  tagArray.io.cacheOp.req := cacheOpDecoder.io.cache.req
+  cacheOpDecoder.io.cache.resp.valid := bankedDataArray.io.cacheOp.resp.valid ||
+    metaArray.io.cacheOp.resp.valid ||
+    tagArray.io.cacheOp.resp.valid
+  cacheOpDecoder.io.cache.resp.bits := Mux1H(List(
+    bankedDataArray.io.cacheOp.resp.valid -> bankedDataArray.io.cacheOp.resp.bits,
+    metaArray.io.cacheOp.resp.valid -> metaArray.io.cacheOp.resp.bits,
+    tagArray.io.cacheOp.resp.valid -> tagArray.io.cacheOp.resp.bits,
+  ))
+  assert(!((bankedDataArray.io.cacheOp.resp.valid +& metaArray.io.cacheOp.resp.valid +& tagArray.io.cacheOp.resp.valid) > 1.U))
+
+  //----------------------------------------
   // performance counters
   val num_loads = PopCount(ldu.map(e => e.io.lsu.req.fire()))
   XSPerfAccumulate("num_loads", num_loads)
@@ -667,6 +679,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       })
   }
   XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
+
+  val wb_perf      = wb.perfEvents.map(_._1).zip(wb.perfinfo.perfEvents.perf_events)
+  val mainp_perf     = mainPipe.perfEvents.map(_._1).zip(mainPipe.perfinfo.perfEvents.perf_events)
+  val missq_perf     = missQueue.perfEvents.map(_._1).zip(missQueue.perfinfo.perfEvents.perf_events)
+  val probq_perf     = probeQueue.perfEvents.map(_._1).zip(probeQueue.perfinfo.perfEvents.perf_events)
+  val ldu_0_perf     = ldu(0).perfEvents.map(_._1).zip(ldu(0).perfinfo.perfEvents.perf_events)
+  val ldu_1_perf     = ldu(1).perfEvents.map(_._1).zip(ldu(1).perfinfo.perfEvents.perf_events)
+  val perfEvents = wb_perf ++ mainp_perf ++ missq_perf ++ probq_perf ++ ldu_0_perf ++ ldu_1_perf
+  val perflist = wb.perfinfo.perfEvents.perf_events ++ mainPipe.perfinfo.perfEvents.perf_events ++
+                 missQueue.perfinfo.perfEvents.perf_events ++ probeQueue.perfinfo.perfEvents.perf_events ++
+                 ldu(0).perfinfo.perfEvents.perf_events ++ ldu(1).perfinfo.perfEvents.perf_events
+  val perf_length = perflist.length
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(perflist.length))
+  })
+  perfinfo.perfEvents.perf_events := perflist
+
 }
 
 class AMOHelper() extends ExtModule {
@@ -679,7 +708,6 @@ class AMOHelper() extends ExtModule {
   val rdata  = IO(Output(UInt(64.W)))
 }
 
-
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
@@ -691,6 +719,10 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new DCacheIO)
+    val perfinfo = IO(new Bundle(){
+      val perfEvents = Output(new PerfEventsBundle(dcache.asInstanceOf[DCache].module.perf_length))
+    })
+    val perfEvents = dcache.asInstanceOf[DCache].module.perfEvents.map(_._1).zip(dcache.asInstanceOf[DCache].module.perfinfo.perfEvents.perf_events)
     if (!useDcache) {
       // a fake dcache which uses dpi-c to access memory, only for debug usage!
       val fake_dcache = Module(new FakeDCache())
@@ -698,6 +730,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParam
     }
     else {
       io <> dcache.module.io
+      perfinfo := dcache.asInstanceOf[DCache].module.perfinfo
     }
   }
 }

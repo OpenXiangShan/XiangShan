@@ -48,20 +48,22 @@ class XSArgs(object):
         for (arg_in, env, default, set_func) in all_path:
             set_func(self.__extract_path(arg_in, env, default))
         # Chisel arguments
-        self.disable_log = args.disable_log
+        self.enable_log = args.enable_log
         self.num_cores = args.num_cores
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
+        self.is_release = 1 if args.release else None
         self.trace = 1 if args.trace or not args.disable_fork  else None
         self.config = args.config
         # emu arguments
         self.max_instr = args.max_instr
         self.seed = random.randint(0, 9999)
         self.numa = args.numa
+        self.diff = args.diff
         self.fork = not args.disable_fork
         # wave dump path
-        if args.wave_dump is not None:   
+        if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
         else:
             self.set_wave_home(self.default_wave_home)
@@ -78,7 +80,7 @@ class XSArgs(object):
 
     def get_chisel_args(self, prefix=None):
         chisel_args = [
-            (self.disable_log, "disable-log")
+            (self.enable_log, "enable-log")
         ]
         args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
         if prefix is not None:
@@ -89,6 +91,7 @@ class XSArgs(object):
         makefile_args = [
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
+            (self.is_release,    "RELEASE"),
             (self.trace,         "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES")
@@ -99,6 +102,7 @@ class XSArgs(object):
     def get_emu_args(self):
         emu_args = [
             (self.max_instr, "max-instr"),
+            (self.diff,      "diff"),
             (self.seed,      "seed")
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
@@ -147,7 +151,7 @@ class XSArgs(object):
 
     def set_wave_home(self, path):
         print(f"set wave home to {path}")
-        self.wave_home = path    
+        self.wave_home = path
 
 # XiangShan environment
 class XiangShan(object):
@@ -235,7 +239,9 @@ class XiangShan(object):
             "coremark_rv64gcb_o3/coremark-riscv64-xs.bin",
             "ext_intr/amtest-riscv64-xs.bin",
             "cache-alias/aliastest-riscv64-xs.bin",
+            "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
+            "asid/asid.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
@@ -296,15 +302,17 @@ if __name__ == "__main__":
     parser.add_argument('--rvtest', nargs='?', type=str, help='path to riscv-tests')
     parser.add_argument('--wave-dump', nargs='?', type=str , help='path to dump wave')
     # chisel arguments
-    parser.add_argument('--disable-log', action='store_true', help='disable log')
+    parser.add_argument('--enable-log', action='store_true', help='enable log')
     parser.add_argument('--num-cores', type=int, help='number of cores')
     # makefile arguments
+    parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--trace', action='store_true', help='enable waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
+    parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     # ci action head sha

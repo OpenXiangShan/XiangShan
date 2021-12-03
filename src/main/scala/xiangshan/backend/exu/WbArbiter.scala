@@ -19,11 +19,12 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
 
-class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
+class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
     val out = DecoupledIO(new ExuOutput)
@@ -60,6 +61,18 @@ class ExuWbArbiter(n: Int)(implicit p: Parameters) extends XSModule {
   }
   io.out.valid := ctrl_arb.io.out.valid
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
+
+  if (hasFastUopOut) {
+    io.out.valid := RegNext(ctrl_arb.io.out.valid)
+    // When hasFastUopOut, only uop comes at the same cycle with valid.
+    // Other bits like data, fflags come at the next cycle after valid,
+    // and they need to be selected with the fireVec.
+    val dataVec = VecInit(io.in.map(_.bits).zip(fastVec).map{ case (d, f) => if (f) d else RegNext(d) })
+    val sel = VecInit(io.in.map(_.fire)).asUInt
+    io.out.bits := Mux1H(RegNext(sel), dataVec)
+    // uop comes at the same cycle with valid and only RegNext is needed.
+    io.out.bits.uop := RegNext(ctrl_arb.io.out.bits.uop)
+  }
 }
 
 class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
@@ -155,22 +168,11 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val out = io.out(exclusiveIn.size + i)
     val shared = outer.sharedConnections(i).map(io.in(_))
     val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
-    val arb = Module(new ExuWbArbiter(shared.size))
+    val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
+    val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
-    if (hasFastUopOut) {
-      out.valid := RegNext(arb.io.out.valid)
-      // When hasFastUopOut, only uop comes at the same cycle with valid.
-      // Other bits like data, fflags come at the next cycle after valid,
-      // and they need to be selected with the fireVec.
-      val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
-      val dataVec = VecInit(shared.map(_.bits).zip(fastVec).map{ case (d, f) => if (f) d else RegNext(d) })
-      val sel = VecInit(arb.io.in.map(_.fire)).asUInt
-      out.bits := Mux1H(RegNext(sel), dataVec)
-      // uop comes at the same cycle with valid and only RegNext is needed.
-      out.bits.uop := RegNext(arb.io.out.bits.uop)
-    }
     arb.io.out.ready := true.B
   }
 
@@ -180,4 +182,75 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
   }
   XSPerfHistogram("in_count", PopCount(io.in.map(_.valid)), true.B, 0, outer.numInPorts, 1)
   XSPerfHistogram("out_count", PopCount(io.out.map(_.valid)), true.B, 0, outer.numInPorts, 1)
+}
+
+class WbArbiterWrapper(
+  exuConfigs: Seq[ExuConfig],
+  numIntOut: Int,
+  numFpOut: Int
+)(implicit p: Parameters) extends LazyModule {
+  val numInPorts = exuConfigs.length
+
+  val intConfigs = exuConfigs.filter(_.writeIntRf)
+  val intArbiter = LazyModule(new WbArbiter(intConfigs, numIntOut, isFp = false))
+  val intWbPorts = intArbiter.allConnections.map(c => c.map(intConfigs(_)))
+  val numIntWbPorts = intWbPorts.length
+  val intConnections = intArbiter.allConnections
+
+  val fpConfigs = exuConfigs.filter(_.writeFpRf)
+  val fpArbiter = LazyModule(new WbArbiter(fpConfigs, numFpOut, isFp = true))
+  val fpWbPorts = fpArbiter.allConnections.map(c => c.map(fpConfigs(_)))
+  val numFpWbPorts = fpWbPorts.length
+  val fpConnections = fpArbiter.allConnections
+
+  val numOutPorts = intArbiter.numOutPorts + fpArbiter.numOutPorts
+
+  lazy val module = new LazyModuleImp(this) with HasXSParameter {
+    val io = IO(new Bundle() {
+      val hartId = Input(UInt(8.W))
+      val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
+      val out = Vec(numOutPorts, ValidIO(new ExuOutput))
+    })
+
+    // ready is set to true.B as default (to be override later)
+    io.in.foreach(_.ready := true.B)
+
+    val intWriteback = io.in.zip(exuConfigs).filter(_._2.writeIntRf)
+    intArbiter.module.io.in.zip(intWriteback).foreach { case (arb, (wb, cfg)) =>
+      // When the function unit does not write fp regfile, we don't need to check fpWen
+      arb.valid := wb.valid && (!cfg.writeFpRf.B || !wb.bits.uop.ctrl.fpWen)
+      arb.bits := wb.bits
+      when (arb.valid) {
+        wb.ready := arb.ready
+      }
+    }
+    intArbiter.module.io.out.foreach(out => {
+      val difftest = Module(new DifftestIntWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := io.hartId
+      difftest.io.valid := out.valid
+      difftest.io.dest := out.bits.uop.pdest
+      difftest.io.data := out.bits.data
+    })
+
+    val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
+    fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
+      // When the function unit does not write fp regfile, we don't need to check fpWen
+      arb.valid := wb.valid && (!cfg.writeIntRf.B || wb.bits.uop.ctrl.fpWen)
+      arb.bits := wb.bits
+      when (arb.valid) {
+        wb.ready := arb.ready
+      }
+    }
+    fpArbiter.module.io.out.foreach(out => {
+      val difftest = Module(new DifftestFpWriteback)
+      difftest.io.clock := clock
+      difftest.io.coreid := io.hartId
+      difftest.io.valid := out.valid
+      difftest.io.dest := out.bits.uop.pdest
+      difftest.io.data := out.bits.data
+    })
+
+    io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
+  }
 }

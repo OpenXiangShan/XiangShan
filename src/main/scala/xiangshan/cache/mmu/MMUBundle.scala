@@ -30,12 +30,6 @@ import xiangshan.backend.fu.PMPReqBundle
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
 abstract class TlbModule(implicit p: Parameters) extends XSModule with HasTlbConst
 
-
-
-// case class ITLBKey
-// case class LDTLBKey
-// case class STTLBKey
-
 class VaBundle(implicit p: Parameters) extends TlbBundle {
   val vpn  = UInt(vpnLen.W)
   val off  = UInt(offLen.W)
@@ -67,13 +61,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  // pma perm (hardwired)
-  val pr = Bool() //readable
-  val pw = Bool() //writeable
-  val pe = Bool() //executable
-  val pa = Bool() //atom op permitted
-  val pi = Bool() //icacheable
-  val pd = Bool() //dcacheable
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
@@ -112,16 +99,20 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(impli
 class TlbSPMeta(implicit p: Parameters) extends TlbBundle {
   val tag = UInt(vpnLen.W) // tag is vpn
   val level = UInt(1.W) // 1 for 2MB, 0 for 1GB
+  val asid = UInt(asidLen.W)
 
-  def hit(vpn: UInt): Bool = {
+  def hit(vpn: UInt, asid: UInt): Bool = {
     val a = tag(vpnnLen*3-1, vpnnLen*2) === vpn(vpnnLen*3-1, vpnnLen*2)
     val b = tag(vpnnLen*2-1, vpnnLen*1) === vpn(vpnnLen*2-1, vpnnLen*1)
+    val asid_hit = this.asid === asid
+
     XSDebug(Mux(level.asBool, a&b, a), p"Hit superpage: hit:${Mux(level.asBool, a&b, a)} tag:${Hexadecimal(tag)} level:${level} a:${a} b:${b} vpn:${Hexadecimal(vpn)}\n")
-    Mux(level.asBool, a&b, a)
+    asid_hit && Mux(level.asBool, a&b, a)
   }
 
-  def apply(vpn: UInt, level: UInt) = {
+  def apply(vpn: UInt, asid: UInt, level: UInt) = {
     this.tag := vpn
+    this.asid := asid
     this.level := level(0)
 
     this
@@ -159,15 +150,6 @@ class TlbData(superpage: Boolean = false)(implicit p: Parameters) extends TlbBun
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
 
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
     this
   }
 
@@ -184,6 +166,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
 
   val tag = if (!pageNormal) UInt((vpnLen - vpnnLen).W)
             else UInt(vpnLen.W)
+  val asid = UInt(asidLen.W)
   val level = if (!pageNormal) Some(UInt(1.W))
               else if (!pageSuper) None
               else Some(UInt(2.W))
@@ -191,21 +174,26 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
             else UInt(ppnLen.W)
   val perm = new TlbPermBundle
 
-  def hit(vpn: UInt): Bool = {
-    if (!pageSuper) vpn === tag
-    else if (!pageNormal) MuxLookup(level.get, false.B, Seq(
+  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+
+    // NOTE: for timing, dont care low set index bits at hit check
+    //       do not need store the low bits actually
+    if (!pageSuper) asid_hit && drop_set_equal(vpn, tag, nSets)
+    else if (!pageNormal) asid_hit && MuxLookup(level.get, false.B, Seq(
       0.U -> (tag(vpnnLen*2-1, vpnnLen) === vpn(vpnLen-1, vpnnLen*2)),
       1.U -> (tag === vpn(vpnLen-1, vpnnLen)),
     ))
-    else MuxLookup(level.get, false.B, Seq(
+    else asid_hit && MuxLookup(level.get, false.B, Seq(
       0.U -> (tag(vpnLen-1, vpnnLen*2) === vpn(vpnLen-1, vpnnLen*2)),
       1.U -> (tag(vpnLen-1, vpnnLen) === vpn(vpnLen-1, vpnnLen)),
-      2.U -> (tag === vpn) // if pageNormal is false, this will always be false
+      2.U -> drop_set_equal(tag, vpn, nSets) // if pageNormal is false, this will always be false
     ))
   }
 
-  def apply(item: PtwResp): TlbEntry = {
+  def apply(item: PtwResp, asid: UInt): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
+    this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
     this.level.map(_ := { if (pageNormal && pageSuper) inner_level
                           else if (pageSuper) inner_level(0)
@@ -223,20 +211,11 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.w := ptePerm.w
     this.perm.r := ptePerm.r
 
-    // get pma perm
-    val (pmaMode, accessWidth) = AddressSpace.memmapAddrMatch(Cat(item.entry.ppn, 0.U(12.W)))
-    this.perm.pr := PMAMode.read(pmaMode)
-    this.perm.pw := PMAMode.write(pmaMode)
-    this.perm.pe := PMAMode.execute(pmaMode)
-    this.perm.pa := PMAMode.atomic(pmaMode)
-    this.perm.pi := PMAMode.icache(pmaMode)
-    this.perm.pd := PMAMode.dcache(pmaMode)
-
     this
   }
 
-  def genPPN(vpn: UInt) : UInt = {
-    if (!pageSuper) ppn
+  def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
+    val ppn_res = if (!pageSuper) ppn
     else if (!pageNormal) MuxLookup(level.get, 0.U, Seq(
       0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen*2-1, 0)),
       1.U -> Cat(ppn, vpn(vpnnLen-1, 0))
@@ -246,11 +225,15 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
       1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn(vpnnLen-1, 0)),
       2.U -> ppn
     ))
+
+    val static_part_length = ppn_res.getWidth - vpnnLen*2
+    if (saveLevel) Cat(ppn(ppn.getWidth-1, ppn.getWidth-static_part_length), RegEnable(ppn_res(vpnnLen*2-1, 0), valid))
+    else ppn_res
   }
 
   override def toPrintable: Printable = {
     val inner_level = level.getOrElse(2.U)
-    p"level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm}"
+    p"asid: ${asid} level:${inner_level} vpn:${Hexadecimal(tag)} ppn:${Hexadecimal(ppn)} perm:${perm}"
   }
 
   override def cloneType: this.type = (new TlbEntry(pageNormal, pageSuper)).asInstanceOf[this.type]
@@ -270,9 +253,10 @@ object TlbCmd {
   def isExec(a: UInt) = a(1,0)===exec
 
   def isAtom(a: UInt) = a(2)
+  def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
 
-class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends  TlbBundle {
+class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
@@ -281,26 +265,30 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
       val hit = Output(Bool())
       val ppn = Output(UInt(ppnLen.W))
       val perm = Output(new TlbPermBundle())
-      val hitVec = Output(UInt(nWays.W))
     }))
+    val resp_hit_sameCycle = Output(Vec(ports, Bool())) // req hit or not same cycle with req
   }
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
   }))
   val victim = new Bundle {
-    val out = ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false)))
-    val in = Flipped(ValidIO(Output(new TlbEntry(pageNormal = true, pageSuper = false))))
+    val out = ValidIO(Output(new Bundle {
+      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
+    }))
+    val in = Flipped(ValidIO(Output(new Bundle {
+      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
+    })))
   }
-  val sfence = Input(new SfenceBundle())
+  val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
+  def r_req_apply(valid: Bool, vpn: UInt, asid: UInt, i: Int): Unit = {
     this.r.req(i).valid := valid
     this.r.req(i).bits.vpn := vpn
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.hitVec)
+    (this.r.resp_hit_sameCycle(i), this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp): Unit = {
@@ -312,20 +300,23 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int)(implicit p: Parameters) e
   override def cloneType: this.type = new TlbStorageIO(nSets, nWays, ports).asInstanceOf[this.type]
 }
 
+class ReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
+  val sets = Output(UInt(log2Up(nSets).W))
+  val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
+
+  override def cloneType: this.type =new ReplaceAccessBundle(nSets, nWays).asInstanceOf[this.type]
+}
+
 class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
-  val access = Flipped(new Bundle {
-    val sets = Output(Vec(Width, UInt(log2Up(nSets).W)))
-    val touch_ways = Vec(Width, ValidIO(Output(UInt(log2Up(nWays).W))))
-  })
+  val access = Vec(Width, Flipped(new ReplaceAccessBundle(nSets, nWays)))
 
   val refillIdx = Output(UInt(log2Up(nWays).W))
   val chosen_set = Flipped(Output(UInt(log2Up(nSets).W)))
 
   def apply_sep(in: Seq[ReplaceIO], vpn: UInt): Unit = {
     for (i <- 0 until Width) {
-      this.access.sets(i) := in(i).access.sets(0)
-      this.access.touch_ways(i) := in(i).access.touch_ways(0)
-      this.chosen_set := get_idx(vpn, nSets)
+      this.access(i) := in(i).access(0)
+      this.chosen_set := get_set_idx(vpn, nSets)
       in(i).refillIdx := this.refillIdx
     }
   }
@@ -345,13 +336,13 @@ class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
-  val vaddr = UInt(VAddrBits.W)
-  val cmd = TlbCmd()
-  val size = UInt(log2Ceil(log2Ceil(XLEN/8)+1).W)
-  val robIdx = new RobPtr
+  val vaddr = Output(UInt(VAddrBits.W))
+  val cmd = Output(TlbCmd())
+  val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
+  val robIdx = Output(new RobPtr)
   val debug = new Bundle {
-    val pc = UInt(XLEN.W)
-    val isFirstIssue = Bool()
+    val pc = Output(UInt(XLEN.W))
+    val isFirstIssue = Output(Bool())
   }
 
   override def toPrintable: Printable = {
@@ -366,14 +357,13 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbResp(implicit p: Parameters) extends TlbBundle {
-  val paddr = UInt(PAddrBits.W)
-  val miss = Bool()
-  val mmio = Bool()
+  val paddr = Output(UInt(PAddrBits.W))
+  val miss = Output(Bool())
   val excp = new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
   }
-  val ptwBack = Bool() // when ptw back, wake up replay rs's state
+  val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
 
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr} ptwBack:${ptwBack}"
@@ -401,13 +391,13 @@ class TlbPtwIO(Width: Int = 1)(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbBaseBundle(implicit p: Parameters) extends TlbBundle {
+class MMUIOBaseBundle(implicit p: Parameters) extends TlbBundle {
   val sfence = Input(new SfenceBundle)
   val csr = Input(new TlbCsrBundle)
 }
 
 class TlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
-  TlbBaseBundle {
+  MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO(Width)
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
@@ -427,7 +417,7 @@ class BTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
 }
 /****************************  Bridge TLB *******************************/
 
-class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends TlbBaseBundle {
+class BridgeTLBIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val requestor = Vec(Width, Flipped(new TlbPtwIO()))
   val ptw = new BTlbPtwIO(Width)
 
@@ -488,39 +478,47 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
 
 class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwBundle {
   val tag = UInt(tagLen.W)
+  val asid = UInt(asidLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = if (hasPerm) Some(new PtePermBundle) else None
   val level = if (hasLevel) Some(UInt(log2Up(Level).W)) else None
   val prefetch = Bool()
 
-  def hit(vpn: UInt, allType: Boolean = false) = {
+  def hit(vpn: UInt, asid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false) = {
     require(vpn.getWidth == vpnLen)
+    require(this.asid.getWidth <= asid.getWidth)
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
     if (allType) {
       require(hasLevel)
       val hit0 = tag(tagLen - 1,    vpnnLen*2) === vpn(tagLen - 1, vpnnLen*2)
       val hit1 = tag(vpnnLen*2 - 1, vpnnLen)   === vpn(vpnnLen*2 - 1,  vpnnLen)
       val hit2 = tag(vpnnLen - 1,     0)         === vpn(vpnnLen - 1, 0)
-      Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
+
+      asid_hit && Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
     } else if (hasLevel) {
       val hit0 = tag(tagLen - 1, tagLen - vpnnLen) === vpn(vpnLen - 1, vpnLen - vpnnLen)
       val hit1 = tag(tagLen - vpnnLen - 1, tagLen - vpnnLen * 2) === vpn(vpnLen - vpnnLen - 1, vpnLen - vpnnLen * 2)
-      Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
+
+      asid_hit && Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
     } else {
-      tag === vpn(vpnLen - 1, vpnLen - tagLen)
+      asid_hit && tag === vpn(vpnLen - 1, vpnLen - tagLen)
     }
   }
 
-  def refill(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
+  def refill(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) {
+    require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
+
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
+    this.asid := asid
     this.prefetch := prefetch
     this.level.map(_ := level)
   }
 
-  def genPtwEntry(vpn: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) = {
+  def genPtwEntry(vpn: UInt, asid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool) = {
     val e = Wire(new PtwEntry(tagLen, hasPerm, hasLevel))
-    e.refill(vpn, pte, level, prefetch)
+    e.refill(vpn, asid, pte, level, prefetch)
     e
   }
 
@@ -539,6 +537,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   require(log2Up(num)==log2Down(num))
 
   val tag  = UInt(tagLen.W)
+  val asid = UInt(asidLen.W)
   val ppns = Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
@@ -554,16 +553,18 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     getVpnClip(vpn, level)(log2Up(num) - 1, 0)
   }
 
-  def hit(vpn: UInt) = {
-    tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
+  def hit(vpn: UInt, asid: UInt, ignoreAsid: Boolean = false) = {
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    asid_hit && tag === tagClip(vpn) && vs(sectorIdxClip(vpn, level)) // TODO: optimize this. don't need to compare each with tag
   }
 
-  def genEntries(vpn: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
+  def genEntries(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
+    ps.asid := asid
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
@@ -579,7 +580,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     // require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
     val permsInner = perms.getOrElse(0.U.asTypeOf(Vec(num, new PtePermBundle)))
-    p"tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
+    p"asid: ${Hexadecimal(asid)} tag:0x${Hexadecimal(tag)} ppns:${printVec(ppns)} vs:${Binary(vs.asUInt)} " +
       (if (hasPerm) p"perms:${printVec(permsInner)}" else p"")
   }
 }
@@ -587,9 +588,53 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
 class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   val entries = new PtwEntries(num, tagLen, level, hasPerm)
 
-  private val encBits = eccCode.width(entries.getWidth)
-  private val eccBits = encBits - entries.getWidth
-  val ecc = UInt(eccBits.W)
+  val ecc_block = XLEN
+  val ecc_info = get_ecc_info()
+  val ecc = UInt(ecc_info._1.W)
+
+  def get_ecc_info(): (Int, Int, Int, Int) = {
+    val eccBits_per = eccCode.width(ecc_block) - ecc_block
+
+    val data_length = entries.getWidth
+    val data_align_num = data_length / ecc_block
+    val data_not_align = (data_length % ecc_block) != 0 // ugly code
+    val data_unalign_length = data_length - data_align_num * ecc_block
+    val eccBits_unalign = eccCode.width(data_unalign_length) - data_unalign_length
+
+    val eccBits = eccBits_per * data_align_num + eccBits_unalign
+    (eccBits, eccBits_per, data_align_num, data_unalign_length)
+  }
+
+  def encode() = {
+    val data = entries.asUInt()
+    val ecc_slices = Wire(Vec(ecc_info._3, UInt(ecc_info._2.W)))
+    for (i <- 0 until ecc_info._3) {
+      ecc_slices(i) := eccCode.encode(data((i+1)*ecc_block-1, i*ecc_block)) >> ecc_block
+    }
+    if (ecc_info._4 != 0) {
+      val ecc_unaligned = eccCode.encode(data(data.getWidth-1, ecc_info._3*ecc_block)) >> ecc_info._4
+      ecc := Cat(ecc_unaligned, ecc_slices.asUInt())
+    } else { ecc := ecc_slices.asUInt() }
+  }
+
+  def decode(): Bool = {
+    val data = entries.asUInt()
+    val res = Wire(Vec(ecc_info._3 + 1, Bool()))
+    for (i <- 0 until ecc_info._3) {
+      res(i) := eccCode.decode(Cat(ecc((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error
+    }
+    if (ecc_info._4 != 0) {
+      res(ecc_info._3) := eccCode.decode(
+        Cat(ecc(ecc_info._1-1, ecc_info._2*ecc_info._3), data(data.getWidth-1, ecc_info._3*ecc_block))).error
+    } else { res(ecc_info._3) := false.B }
+
+    Cat(res).orR
+  }
+
+  def gen(vpn: UInt, asid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
+    this.entries := entries.genEntries(vpn, asid, data, levelUInt, prefetch)
+    this.encode()
+  }
 
   override def cloneType: this.type = new PTWEntriesWithEcc(eccCode, num, tagLen, level, hasPerm).asInstanceOf[this.type]
 }
@@ -607,12 +652,14 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   val pf = Bool()
   val af = Bool()
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt) = {
+
+  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
     this.entry.ppn := pte.ppn
     this.entry.prefetch := DontCare
+    this.entry.asid := asid
     this.pf := pf
     this.af := af
   }
@@ -629,9 +676,14 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
     val tlb = Input(new TlbCsrBundle)
     val distribute_csr = Flipped(new DistributedCSRIO)
   }
+  val perfEvents      = Output(new PerfEventsBundle(numPCntPtw))
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
   val addr = UInt(PAddrBits.W)
   val id = UInt(bMemID.W)
+}
+
+class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {
+  val source = UInt(bSourceWidth.W)
 }

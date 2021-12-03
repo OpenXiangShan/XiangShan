@@ -18,7 +18,9 @@ package utils
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import chisel3.util._
 import xiangshan.DebugOptionsKey
+import xiangshan._
 
 object XSPerfAccumulate {
   def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
@@ -46,7 +48,16 @@ object XSPerfHistogram {
   // instead of simply accumulating counters
   // this function draws a histogram
   def apply
-  (perfName: String, perfCnt: UInt, enable: Bool, start: Int, stop: Int, step: Int)
+  (
+    perfName: String, 
+    perfCnt: UInt, 
+    enable: Bool, 
+    start: Int, 
+    stop: Int, 
+    step: Int, 
+    left_strict: Boolean = false,
+    right_strict: Boolean = false
+  )
   (implicit p: Parameters) = {
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
@@ -69,9 +80,15 @@ object XSPerfHistogram {
         val inRange = perfCnt >= binRangeStart.U && perfCnt < binRangeStop.U
 
         // if perfCnt < start, it will go to the first bin
-        val leftOutOfRange = perfCnt < start.U && i.U === 0.U
+        val leftOutOfRange = if(left_strict)
+          false.B
+        else 
+          perfCnt < start.U && i.U === 0.U
         // if perfCnt >= stop, it will go to the last bin
-        val rightOutOfRange = perfCnt >= stop.U && i.U === (nBins - 1).U
+        val rightOutOfRange = if(right_strict)
+          false.B
+        else 
+          perfCnt >= stop.U && i.U === (nBins - 1).U
         val inc = inRange || leftOutOfRange || rightOutOfRange
 
         val counter = RegInit(0.U(64.W))
@@ -138,5 +155,64 @@ object TransactionLatencyCounter
 object XSPerfPrint {
   def apply(pable: Printable)(implicit p: Parameters): Any = {
     XSLog(XSLogLevel.PERF)(true, true.B, pable)
+  }
+}
+
+class PerfBundle(implicit p: Parameters) extends XSBundle {
+  val incr_step  = UInt(6.W)
+}
+
+class PerfEventsBundle (val numPCnt: Int) (implicit p: Parameters)extends XSBundle{
+
+  val perf_events = Vec(numPCnt, (new PerfBundle))
+  def length = numPCnt
+
+}
+
+class HPerfCounter (val numPCnt: Int) (implicit p: Parameters) extends XSModule{
+  val io = IO(new Bundle {
+    val hpm_event         = Input(UInt(XLEN.W))
+    val events_sets      = Input(new PerfEventsBundle(numPCnt))
+    val event_selected   = Output(new PerfBundle)
+  })
+  
+  val events_incr_0 = io.events_sets.perf_events(io.hpm_event(9,0))
+  val events_incr_1 = io.events_sets.perf_events(io.hpm_event(19,10))
+  val events_incr_2 = io.events_sets.perf_events(io.hpm_event(29,20))
+  val events_incr_3 = io.events_sets.perf_events(io.hpm_event(39,30))
+
+    val event_op_0 = io.hpm_event(44,40)
+    val event_op_1 = io.hpm_event(49,45)
+    val event_op_2 = io.hpm_event(54,50)
+
+
+    val event_step_0 = Mux(event_op_0(0),(events_incr_3.incr_step & events_incr_2.incr_step),
+                       Mux(event_op_0(1),(events_incr_3.incr_step ^ events_incr_2.incr_step),
+                       Mux(event_op_0(2),(events_incr_3.incr_step + events_incr_2.incr_step),  
+                                         (events_incr_3.incr_step | events_incr_2.incr_step))))
+    val event_step_1 = Mux(event_op_1(0),(events_incr_1.incr_step & events_incr_0.incr_step),
+                       Mux(event_op_1(1),(events_incr_1.incr_step ^ events_incr_0.incr_step),
+                       Mux(event_op_1(2),(events_incr_1.incr_step + events_incr_0.incr_step),  
+                                         (events_incr_1.incr_step | events_incr_0.incr_step))))
+
+    io.event_selected.incr_step  := Mux(event_op_1(0),(event_step_0 & event_step_1),
+                                    Mux(event_op_1(1),(event_step_0 ^ event_step_1),
+                                    Mux(event_op_1(2),(event_step_0 + event_step_1),
+                                                      (event_step_0 | event_step_1))))
+}
+
+class HPerfmonitor (val numPCnt: Int, val numCSRPCnt: Int) (implicit p: Parameters) extends XSModule{
+  val io = IO(new Bundle {
+    val hpm_event         = Input(Vec(numCSRPCnt, UInt(XLEN.W)))
+    val events_sets      = Input(new PerfEventsBundle(numPCnt))
+    //val Events_selected  = Output(Vec(numCSRPCnt,(new PerfBundle)))
+    val events_selected  = Output(new PerfEventsBundle(numCSRPCnt))
+  })
+  
+  for (i <- 0 until numCSRPCnt) {
+    val hpc = Module(new HPerfCounter(numPCnt))
+    hpc.io.events_sets       <> io.events_sets
+    hpc.io.hpm_event         := io.hpm_event(i)
+    hpc.io.event_selected    <> io.events_selected.perf_events(i)
   }
 }

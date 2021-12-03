@@ -77,6 +77,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val bank_conflict_fast = Output(Vec(LoadPipelineWidth, Bool()))
+    // customized cache op port 
+    val cacheOp = Flipped(new DCacheInnerOpIO)
   })
   assert(LoadPipelineWidth == 2) // BankedDataArray is designed for 2 port
 
@@ -126,6 +128,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     require(encWord.getWidth == encWordBits)
     encWord(encWordBits - 1, wordBits)
   }
+
+  val ReduceReadlineConflict = false
 
   io.write.ready := true.B
 
@@ -244,10 +248,20 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read each bank, get bank result
   val bank_result = Wire(Vec(DCacheBanks, new L1BankedDataReadResult()))
+  dontTouch(bank_result)
   val row_error = Wire(Vec(DCacheBanks, Bool()))
+  dontTouch(row_error)
   val rr_bank_conflict = bank_addrs(0) === bank_addrs(1) && io.read(0).valid && io.read(1).valid
-  val rrl_bank_conflict_0 = io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
-  val rrl_bank_conflict_1 = io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+  val rrl_bank_conflict_0 = Wire(Bool())
+  val rrl_bank_conflict_1 = Wire(Bool())
+  if (ReduceReadlineConflict) {
+    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(0))
+    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid && io.readline.bits.rmask(bank_addrs(1))
+  } else {
+    rrl_bank_conflict_0 := io.read(0).valid && io.readline.valid
+    rrl_bank_conflict_1 := io.read(1).valid && io.readline.valid
+  }
+  
   val rw_bank_conflict_0 = io.read(0).valid && rwhazard
   val rw_bank_conflict_1 = io.read(1).valid && rwhazard
   val perf_multi_read = io.read(0).valid && io.read(1).valid
@@ -284,7 +298,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
       bank_addrs(i) === bank_index.U && io.read(i).valid
     })))
-    val readline_match = io.readline.valid && io.readline.bits.rmask(bank_index)
+    val readline_match = Wire(Bool())
+    if (ReduceReadlineConflict) {
+      readline_match := io.readline.valid && io.readline.bits.rmask(bank_index)
+    } else {
+      readline_match := io.readline.valid
+    }
     val bank_way_en = Mux(readline_match,
       io.readline.bits.way_en,
       Mux(bank_addr_matchs(0), way_en(0), way_en(1))
@@ -349,4 +368,52 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
+  // deal with customized cache op
+  require(nWays <= 32)
+  io.cacheOp.resp.bits := DontCare
+  val cacheOpShouldResp = WireInit(false.B) 
+  when(io.cacheOp.req.valid){
+    when(
+      CacheInstrucion.isReadData(io.cacheOp.req.bits.opCode) ||
+      CacheInstrucion.isReadDataECC(io.cacheOp.req.bits.opCode)
+    ){
+      for (bank_index <- 0 until DCacheBanks) {
+        val data_bank = data_banks(bank_index)
+        data_bank.io.r.en := true.B
+        data_bank.io.r.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+        data_bank.io.r.addr := io.cacheOp.req.bits.index
+      }
+      cacheOpShouldResp := true.B
+    }
+    when(CacheInstrucion.isWriteData(io.cacheOp.req.bits.opCode)){
+      for (bank_index <- 0 until DCacheBanks) {
+        val data_bank = data_banks(bank_index)
+        data_bank.io.w.en := true.B
+        data_bank.io.w.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+        data_bank.io.w.addr := io.cacheOp.req.bits.index
+        data_bank.io.w.data := io.cacheOp.req.bits.write_data_vec(bank_index)
+      }
+      cacheOpShouldResp := true.B
+    }
+    when(CacheInstrucion.isWriteDataECC(io.cacheOp.req.bits.opCode)){
+      for (bank_index <- 0 until DCacheBanks) {
+        val ecc_bank = ecc_banks(bank_index)
+        ecc_bank.io.w.req.valid := true.B
+        ecc_bank.io.w.req.bits.apply(
+          setIdx = io.cacheOp.req.bits.index,
+          data = io.cacheOp.req.bits.write_data_ecc,
+          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+        )
+      }
+      cacheOpShouldResp := true.B
+    }
+  }
+  io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
+  for (bank_index <- 0 until DCacheBanks) {
+    io.cacheOp.resp.bits.read_data_vec(bank_index) := bank_result(bank_index).raw_data
+  }
+  io.cacheOp.resp.bits.read_data_ecc := Mux(io.cacheOp.resp.valid, 
+    bank_result(io.cacheOp.req.bits.bank_num).ecc, 
+    0.U
+  )
 }

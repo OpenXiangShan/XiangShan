@@ -221,4 +221,22 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String)(implicit 
   XSPerfAccumulate("out_try", PopCount(io.deq.map(_.valid)))
   val fake_block = currentValidCounter <= (size - enqnum).U && !canEnqueue
   XSPerfAccumulate("fake_block", fake_block)
-}
+
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(8))
+  })
+  val perfEvents = Seq(
+    ("dispatchq_in           ", numEnq                                                                                                                           ),
+    ("dispatchq_out          ", PopCount(io.deq.map(_.fire()))                                                                                                   ),
+    ("dispatchq_out_try      ", PopCount(io.deq.map(_.valid))                                                                                                    ),
+    ("dispatchq_fake_block   ", fake_block                                                                                                                       ),
+    ("dispatchq_1/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) < (size.U/4.U))                                                                     ),
+    ("dispatchq_2/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/4.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U/2.U))     ),
+    ("dispatchq_3/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U/2.U)) & (PopCount(stateEntries.map(_ =/= s_invalid)) <= (size.U*3.U/4.U)) ),
+    ("dispatchq_4/4_valid    ", (PopCount(stateEntries.map(_ =/= s_invalid)) > (size.U*3.U/4.U))                                                                 ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
+  }
+}                                                                                                                  

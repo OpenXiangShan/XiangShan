@@ -34,8 +34,13 @@ abstract trait DecodeConstants {
   def N = BitPat("b0")
   def Y = BitPat("b1")
 
+<<<<<<< HEAD
   def decodeDefault: List[BitPat] = { // illegal instruction
     //   srcType(0)   srcType(1)   srcType(2)   fuType      fuOpType    rfWen
+=======
+  def decodeDefault: List[BitPat] = // illegal instruction
+    //   srcType(0)   srcType(1)   srcType(2)   fuType      fuOpType    rfWen  
+>>>>>>> master
     //   |            |            |            |           |           |  fpWen
     //   |            |            |            |           |           |  |  isXSTrap
     //   |            |            |            |           |           |  |  |  noSpecExec
@@ -167,12 +172,21 @@ object XDecode extends DecodeConstants {
     CSRRSI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.seti, Y, N, N, Y, Y, N, N, SelImm.IMM_Z, N),
     CSRRCI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.clri, Y, N, N, Y, Y, N, N, SelImm.IMM_Z, N),
 
+<<<<<<< HEAD
     SFENCE_VMA->List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, Y, Y, Y, N, SelImm.IMM_X, N),
     EBREAK  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I, N),
     ECALL   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I, N),
     SRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I, N),
     MRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I, N),
     DRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I, N),
+=======
+    SFENCE_VMA->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, Y, Y, Y, N, SelImm.IMM_X),
+    EBREAK  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    ECALL   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    SRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    MRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    DRET    -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+>>>>>>> master
 
     WFI     -> List(SrcType.pc, SrcType.imm, SrcType.DC, FuType.alu, ALUOpType.sll, Y, N, N, N, N, N, N, SelImm.IMM_X, N),
 
@@ -392,6 +406,50 @@ object FDivSqrtDecode extends DecodeConstants {
 }
 
 /**
+ * Svinval extension Constants
+ */
+object SvinvalDecode extends DecodeConstants {
+  val table: Array[(BitPat, List[BitPat])] = Array(
+  /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma 
+   * must assure it is the ONLY instrucion executing in backend.
+   */
+  SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, N, SelImm.IMM_X),
+  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals 
+   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit 
+   * then dispatch and issue this instrucion to flush sbuffer to dcache
+   * after this instrucion commits , issue following sinval_vma instructions (out of order) to flush TLB
+   */
+  SFENCE_W_INVAL    ->List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, N, N, SelImm.IMM_X),
+  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals 
+   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit 
+   * then dispatch and issue this instrucion
+   * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map 
+   */
+  SFENCE_INVAL_IR   ->List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, Y, N, SelImm.IMM_X)
+  /* what is Svinval extension ? 
+   *                       ----->             sfecne.w.inval
+   * sfence.vma   vpn1     ----->             sinval_vma   vpn1
+   * sfence.vma   vpn2     ----->             sinval_vma   vpn2
+   *                       ----->             sfecne.inval.ir
+   * 
+   * sfence.vma should be executed in-order and it flushes the pipeline after committing
+   * we can parallel sfence instrucions with this extension 
+   */
+    )
+}
+/*
+ * CBO decode
+ */
+object CBODecode extends DecodeConstants {
+  val table: Array[(BitPat, List[BitPat])] = Array(
+    CBO_ZERO  -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_zero , N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_CLEAN -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_clean, N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_FLUSH -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_flush, N, N, N, N, N, N, N, SelImm.IMM_S),
+    CBO_INVAL -> List(SrcType.reg, SrcType.DC, SrcType.DC, FuType.stu, LSUOpType.cbo_inval, N, N, N, N, N, N, N, SelImm.IMM_S)
+  )
+}
+
+/**
  * XiangShan Trap Decode constants
  */
 object XSTrapDecode extends DecodeConstants {
@@ -541,6 +599,7 @@ object ImmUnion {
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
   val deq = new Bundle { val cf_ctrl = Output(new CfCtrl) }
+  val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
 /**
@@ -554,35 +613,45 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   ctrl_flow := io.enq.ctrl_flow
 
+<<<<<<< HEAD
   val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table ++ CustomDecode.table
+=======
+  val decode_table = XDecode.table ++ FDecode.table ++ FDivSqrtDecode.table ++ X64Decode.table ++ XSTrapDecode.table ++ BDecode.table ++ CBODecode.table ++ SvinvalDecode.table
+>>>>>>> master
 
   // output
   cf_ctrl.cf := ctrl_flow
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
   cs.singleStep := false.B
   cs.replayInst := false.B
-  cs.isSoftPrefetchRead := false.B
-  cs.isSoftPrefetchWrite := false.B
-
-  cs.isFused := 0.U
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  cs.isMove := isMove
+  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
 
   // read src1~3 location
-  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U,ctrl_flow.instr(RS1_MSB,RS1_LSB))
-  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB,RS2_LSB)
-  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB,RS3_LSB)
+  cs.lsrc(0) := Mux(ctrl_flow.instr === LUI, 0.U, ctrl_flow.instr(RS1_MSB, RS1_LSB))
+  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
+  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
   // read dest location
-  cs.ldest := Mux((cs.fpWen || cs.rfWen) && !(isMove && ctrl_flow.instr(RS1_MSB,RS1_LSB) === ctrl_flow.instr(RD_MSB,RD_LSB)), ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
+  cs.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
 
   // fill in exception vector
   cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
+
+  when (!io.csrCtrl.svinval_enable) {
+    val base_ii = cs.selImm === SelImm.INVALID_INSTR
+    val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
+    val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
+    val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
+    val svinval_ii = sinval || w_inval || inval_ir
+    cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
+    cs.flushPipe := false.B
+  }
 
   // fix frflags
   //                           fflags    zero csrrs rd    csr
@@ -598,19 +667,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   //to selectout prefetch.r/prefetch.w
   val isORI = BitPat("b?????????????????110?????0010011") === ctrl_flow.instr
-  cs.isORI := isORI
-  when(cs.isORI) {
+  when(isORI) {
+    // TODO: add CSR based Zicbop config
     when(cs.ldest === 0.U) {
-      when(cs.lsrc(1) === "b00001".U) {
-        cs.isSoftPrefetchRead := true.B
-        cs.isSoftPrefetchWrite := false.B
-      }.otherwise {
-        cs.isSoftPrefetchRead := false.B
-        cs.isSoftPrefetchWrite := true.B
-      }
       cs.selImm := SelImm.IMM_S
       cs.fuType := FuType.ldu
-      cs.fuOpType := LSUOpType.lb
+      when(cs.lsrc(1) === "b00001".U) {
+        cs.fuOpType := LSUOpType.prefetch_r
+      }.otherwise {
+        cs.fuOpType := LSUOpType.prefetch_w
+      }
     }
   }
 
@@ -646,10 +712,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
     io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
     io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d isORI=%x imm=%x\n",
+  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d imm=%x\n",
     io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
     io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
-    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.isORI, io.deq.cf_ctrl.ctrl.imm)
+    io.deq.cf_ctrl.ctrl.isRVF, io.deq.cf_ctrl.ctrl.imm)
   XSDebug("out: excepVec=%b intrVec=%b\n",
     io.deq.cf_ctrl.cf.exceptionVec.asUInt, io.deq.cf_ctrl.cf.intrVec.asUInt)
 }

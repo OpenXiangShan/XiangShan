@@ -22,7 +22,7 @@ import chisel3.util._
 
 import freechips.rocketchip.tilelink.{TLEdgeOut, TLBundleB, TLMessages, TLPermissions}
 
-import utils.{HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasTLDump, XSDebug, XSPerfAccumulate, PerfEventsBundle}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -81,8 +81,10 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   }
 
   when (state === s_pipe_req) {
+    // Note that probe req will be blocked in the next cycle if a lr updates lrsc_locked_block addr
+    // in this way, we can RegNext(lrsc_blocked) for better timing
     val lrsc_blocked = io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === req.addr
-    io.pipe_req.valid := !lrsc_blocked
+    io.pipe_req.valid := !RegNext(lrsc_blocked)
 
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
@@ -111,9 +113,10 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
+    val update_resv_set = Input(Bool())
   })
 
-  val pipe_req_arb = Module(new RRArbiter(new MainPipeReq, cfg.nProbeEntries))
+  val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nProbeEntries, Bool()))
@@ -129,7 +132,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   if(DCacheAboveIndexOffset > DCacheTagOffset) {
     // have alias problem, extra alias bits needed for index
     req.vaddr := Cat(
-      io.mem_probe.bits.address(VAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      io.mem_probe.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
       io.mem_probe.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )
@@ -158,6 +161,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   io.pipe_req <> pipe_req_arb.io.out
+  // When we update update_resv_set, block all probe req in the next cycle
+  // It should give Probe reservation set addr compare an independent cycle,
+  // which will lead to better timing
+  when(RegNext(io.update_resv_set)){
+    io.pipe_req.valid := false.B
+    pipe_req_arb.io.out.ready := false.B
+  }
 
   // print all input/output requests for debug purpose
   when (io.mem_probe.valid) {
@@ -180,5 +190,19 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   when (io.lrsc_locked_block.valid) {
     XSDebug("lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
+  }
+  val perfinfo = IO(new Bundle(){
+    val perfEvents = Output(new PerfEventsBundle(5))
+  })
+  val perfEvents = Seq(
+    ("dcache_probq_req          ", io.pipe_req.fire()                                                                                                                                                                       ),
+    ("dcache_probq_1/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) < (cfg.nProbeEntries.U/4.U))                                                                                       ),
+    ("dcache_probq_2/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/4.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U/2.U))    ),
+    ("dcache_probq_3/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U/2.U)) & (PopCount(entries.map(e => e.io.block_addr.valid)) <= (cfg.nProbeEntries.U*3.U/4.U))),
+    ("dcache_probq_4/4_valid    ", (PopCount(entries.map(e => e.io.block_addr.valid)) > (cfg.nProbeEntries.U*3.U/4.U))                                                                                   ),
+  )
+
+  for (((perf_out,(perf_name,perf)),i) <- perfinfo.perfEvents.perf_events.zip(perfEvents).zipWithIndex) {
+    perf_out.incr_step := RegNext(perf)
   }
 }

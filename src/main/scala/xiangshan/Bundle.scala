@@ -24,10 +24,11 @@ import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.GlobalHistory
+import xiangshan.frontend.{GlobalHistory, ShiftingGlobalHistory, CircularGlobalHistory, AllFoldedHistories}
 import xiangshan.frontend.RASEntry
 import xiangshan.frontend.BPUCtrl
 import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.CGHPtr
 import xiangshan.frontend.FtqRead
 import xiangshan.frontend.FtqToCtrlIO
 import utils._
@@ -38,6 +39,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.AllFoldedHistories
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -53,12 +55,13 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss = 0.U(2.W)
-  val mshrFull = 1.U(2.W)
-  val dataInvalid = 2.U(2.W)
-  val bankConflict = 3.U(2.W)
+  val tlbMiss = 0.U(3.W)
+  val mshrFull = 1.U(3.W)
+  val dataInvalid = 2.U(3.W)
+  val bankConflict = 3.U(3.W)
+  val ldVioCheckRedo = 4.U(3.W)
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(3.W)
 }
 
 class PredictorAnswer(implicit p: Parameters) extends XSBundle {
@@ -74,7 +77,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pd = new PreDecodeInfo
   val rasSp = UInt(log2Up(RasSize).W)
   val rasEntry = new RASEntry
-  val hist = new GlobalHistory
+  // val hist = new ShiftingGlobalHistory
+  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val histPtr = new CGHPtr
   val phist = UInt(PathHistoryLength.W)
   val specCnt = Vec(numBr, UInt(10.W))
   val phNewBit = Bool()
@@ -88,7 +93,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val addIntoHist = Bool()
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
-    this.hist := entry.ghist
+    // this.hist := entry.ghist
+    this.folded_hist := entry.folded_hist
+    this.histPtr := entry.histPtr
     this.phist := entry.phist
     this.phNewBit := entry.phNewBit
     this.rasSp := entry.rasSp
@@ -104,12 +111,13 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+  val trigger = new TriggerCf
   val intrVec = Vec(12, Bool())
   val pd = new PreDecodeInfo
   val pred_taken = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
-  val waitForSqIdx = new SqPtr // store set predicted previous store sqIdx
+  val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
   val loadWaitBit = Bool() 
@@ -123,6 +131,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
 }
+
 
 class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val isAddSub = Bool() // swap23
@@ -162,10 +171,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val fpu = new FPUCtrlSignals
   val isMove = Bool()
   val singleStep = Bool()
-  val isFused = UInt(3.W)
-  val isORI = Bool() //for softprefetch
-  val isSoftPrefetchRead = Bool() //for softprefetch
-  val isSoftPrefetchWrite = Bool() //for softprefetch
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
@@ -285,6 +290,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isMMIO = Bool()
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class ExuInput(implicit p: Parameters) extends XSBundle {
@@ -305,6 +311,7 @@ class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
   val mtip = Input(Bool())
   val msip = Input(Bool())
   val meip = Input(Bool())
+  val seip = Input(Bool())
   val debug = Input(Bool())
 }
 
@@ -328,12 +335,10 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val fpWen = Bool()
   val wflags = Bool()
   val commitType = CommitType()
-  val eliminatedMove = Bool()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isFused = UInt(3.W)
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
@@ -374,11 +379,27 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val toFtq = Flipped(new CtrlToFtqIO)
 }
 
+class SatpStruct extends Bundle {
+  val mode = UInt(4.W)
+  val asid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new Bundle {
+    val changed = Bool()
     val mode = UInt(4.W) // TODO: may change number to parameter
     val asid = UInt(16.W)
     val ppn = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
+
+    def apply(satp_value: UInt): Unit = {
+      require(satp_value.getWidth == XLEN)
+      val sa = satp_value.asTypeOf(new SatpStruct)
+      mode := sa.mode
+      asid := sa.asid
+      ppn := sa.ppn
+      changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+    }
   }
   val priv = new Bundle {
     val mxr = Bool()
@@ -399,6 +420,7 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+    val asid = UInt(AsidLength.W)
   }
 
   override def toPrintable: Printable = {
@@ -436,15 +458,73 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val bp_ctrl = Output(new BPUCtrl)
   // Memory Block
   val sbuffer_threshold = Output(UInt(4.W))
+  val ldld_vio_check = Output(Bool())
   // Rename
   val move_elim_enable = Output(Bool())
+  // Decode
+  val svinval_enable = Output(Bool())
+
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
+
+  val frontend_trigger = new FrontendTdataDistributeIO()
+  val mem_trigger = new MemTdataDistributeIO()
+  val trigger_enable = Output(Vec(10, Bool()))
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
+  // CSR has been writen by csr inst, copies of csr should be updated
   val w = ValidIO(new Bundle {
     val addr = Output(UInt(12.W))
     val data = Output(UInt(XLEN.W))
   })
+}
+
+class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
+  // Request csr to be updated
+  //
+  // Note that this request will ONLY update CSR Module it self,
+  // copies of csr will NOT be updated, use it with care!
+  //
+  // For each cycle, no more than 1 DistributedCSRUpdateReq is valid
+  val w = ValidIO(new Bundle {
+    val addr = Output(UInt(12.W))
+    val data = Output(UInt(XLEN.W))
+  })
+  def apply(valid: Bool, addr: UInt, data: UInt, src_description: String) = {
+    when(valid){
+      w.bits.addr := addr
+      w.bits.data := data
+    }
+    println("Distributed CSR update req registered for " + src_description)
+  }
+}
+
+class TriggerCf (implicit p: Parameters) extends XSBundle {
+  val triggerHitVec = Vec(10, Bool())
+  val triggerTiming = Vec(10, Bool())
+  val triggerChainVec = Vec(5, Bool())
+}
+
+class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+    val t = Valid(new Bundle {
+      val addr = Output(UInt(2.W))
+      val tdata = new MatchTriggerIO
+    })
+  }
+
+class MemTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
+  val t = Valid(new Bundle {
+    val addr = Output(UInt(3.W))
+    val tdata = new MatchTriggerIO
+  })
+}
+
+class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
+  val matchType = Output(UInt(2.W))
+  val select = Output(Bool())
+  val timing = Output(Bool())
+  val action = Output(Bool())
+  val chain = Output(Bool())
+  val tdata2 = Output(UInt(64.W))
 }

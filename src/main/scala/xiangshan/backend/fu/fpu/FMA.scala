@@ -19,7 +19,8 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import fudian.{FCMA, FCMA_ADD, FMUL, FMULToFADD}
+import fudian.utils.Multiplier
+import fudian.{FCMA, FCMA_ADD, FCMA_ADD_s1, FCMA_ADD_s2, FMUL, FMULToFADD, FMUL_s1, FMUL_s2, FMUL_s3, RawFloat}
 import xiangshan._
 import utils._
 
@@ -45,8 +46,46 @@ class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
   val fpCtrl = uopIn.ctrl.fpu
   val typeTagIn = fpCtrl.typeTagIn
 
+  val typeSel = VecInit(FPU.ftypes.zipWithIndex.map(_._2.U === typeTagIn))
+
   val src1 = FPU.unbox(io.in.bits.src(0), typeTagIn)
   val src2 = FPU.unbox(io.in.bits.src(1), typeTagIn)
+
+  val multiplier = Module(new Multiplier(FPU.ftypes.last.precision+1, pipeAt = Seq(1)))
+
+  val stages = FPU.ftypes.map{ t =>
+    // s1 -> s2 -> s3
+    val s1 = Module(new FMUL_s1(t.expWidth, t.precision))
+    val s2 = Module(new FMUL_s2(t.expWidth, t.precision))
+    val s3 = Module(new FMUL_s3(t.expWidth, t.precision))
+
+    val in1 = src1
+    val in2 = Mux(fpCtrl.fmaCmd(1), invert_sign(src2, t.len), src2)
+    s1.io.a := in1
+    s1.io.b := in2
+    s1.io.rm := rm
+
+    s2.io.in := S1Reg(s1.io.out)
+    s2.io.prod := multiplier.io.result
+    s3.io.in := S2Reg(s2.io.out)
+    (s1, s2, s3)
+  }
+
+  val (s1, s2, s3) = stages.unzip3
+  val (mul_a_sel, mul_b_sel) = s1.zipWithIndex.map{
+    case (s, i) =>
+      val raw_a = RawFloat.fromUInt(s.io.a, s.expWidth, s.precision)
+      val raw_b = RawFloat.fromUInt(s.io.b, s.expWidth, s.precision)
+      (
+        (typeTagIn === i.U) -> raw_a.sig,
+        (typeTagIn === i.U) -> raw_b.sig
+      )
+  }.unzip
+  multiplier.io.a := Mux1H(mul_a_sel)
+  multiplier.io.b := Mux1H(mul_b_sel)
+  multiplier.io.regEnables(0) := regEnable(1)
+
+  val outSel = S2Reg(S1Reg(typeSel))
 
   val s_mul :: d_mul :: Nil = FPU.ftypes.zipWithIndex.map{ case (ftype, i) =>
     val mul = Module(new FMUL(ftype.expWidth, ftype.precision))
@@ -57,41 +96,14 @@ class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
     mul.io.rm := rm
     mul
   }
-  val muls = Seq(s_mul, d_mul)
-  val singleOut = typeTagIn === FPU.S
-  val result = Mux(singleOut,
-    FPU.box(Cat(0.U(32.W), s_mul.io.result), FPU.S),
-    FPU.box(d_mul.io.result, FPU.D)
-  )
-  val exc = Mux(singleOut,
-    s_mul.io.fflags,
-    d_mul.io.fflags
-  )
-  val stages = Wire(Vec(latency, new Bundle() {
-    val data = UInt(XLEN.W)
-    val exc = UInt(5.W)
-    val toAdd = new MulToAddIO(FPU.ftypes)
-  }))
 
-  for((s, i) <- stages.zipWithIndex){
-    if(i == 0){
-      val en = regEnable(i+1)
-      s.data := RegEnable(result, en)
-      s.exc := RegEnable(exc, en)
-      s.toAdd.addend := RegEnable(io.in.bits.src(2), en)
-      for(i <- FPU.ftypes.indices){
-        s.toAdd.mul_out(i) := RegEnable(muls(i).io.to_fadd, en)
-      }
-      // we already save it in pipeline regs
-      s.toAdd.uop := DontCare
-    } else {
-      s := RegEnable(stages(i - 1), regEnable(i+1))
-    }
-  }
-  toAdd := stages.last.toAdd
+  toAdd.addend := S2Reg(S1Reg(io.in.bits.src(2)))
+  toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
   toAdd.uop := uopVec.last
-  io.out.bits.data := stages.last.data
-  fflags := stages.last.exc
+  io.out.bits.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
+    case (mod, t) => FPU.box(mod.io.result, t)
+  })
+  fflags := Mux1H(outSel, s3.map(_.io.fflags))
 }
 
 class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipelineModule {
@@ -101,65 +113,49 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   val mulToAdd = IO(Input(new MulToAddIO(FPU.ftypes)))
   val isFMA = IO(Input(Bool()))
 
-  val uopIn = Mux(isFMA, mulToAdd.uop, io.in.bits.uop)
+  val src1 = S1Reg(FPU.unbox(io.in.bits.src(0), io.in.bits.uop.ctrl.fpu.typeTagIn))
+  val src2 = S1Reg(FPU.unbox(
+    Mux(isFMA, mulToAdd.addend, io.in.bits.src(1)), io.in.bits.uop.ctrl.fpu.typeTagIn
+  ))
+
+  val uopIn = S1Reg(Mux(isFMA, mulToAdd.uop, io.in.bits.uop))
   val fpCtrl = uopIn.ctrl.fpu
   val typeTagIn = fpCtrl.typeTagIn
 
-  val src1 = FPU.unbox(io.in.bits.src(0), typeTagIn)
-  val src2 = FPU.unbox(
-    Mux(isFMA, mulToAdd.addend, io.in.bits.src(1)), typeTagIn
-  )
+  val fma = S1Reg(isFMA)
+  val mulProd = S1Reg(mulToAdd.mul_out)
 
-  // TODO: reuse hardware
-  val s_adder :: d_adder :: Nil = FPU.ftypes.zipWithIndex.map { case (ftype,i) =>
-    val fadder = Module(new FCMA_ADD(
-      ftype.expWidth, 2*ftype.precision, ftype.precision
-    ))
-    val w = ftype.len
-    val in1 = Mux(isFMA,
-      mulToAdd.mul_out(i).fp_prod.asUInt(),
-      Cat(src1(ftype.len - 1, 0), 0.U(ftype.precision.W))
-    )
-    val in2 = Cat(
-      Mux(fpCtrl.fmaCmd(0), invert_sign(src2, ftype.len), src2(ftype.len - 1, 0)),
-      0.U(ftype.precision.W)
-    )
-    fadder.io.a := in1
-    fadder.io.b := in2
-    fadder.io.b_inter_valid := isFMA
-    fadder.io.b_inter_flags := Mux(isFMA,
-      mulToAdd.mul_out(i).inter_flags,
-      0.U.asTypeOf(fadder.io.b_inter_flags)
-    )
-    fadder.io.rm := rm
-    fadder
+  val stages = FPU.ftypes.zipWithIndex.map{
+    case (t, i) =>
+      val s1 = Module(new FCMA_ADD_s1(t.expWidth, 2*t.precision, t.precision))
+      val s2 = Module(new FCMA_ADD_s2(t.expWidth, t.precision))
+      val in1 = Mux(fma,
+        mulProd(i).fp_prod.asUInt,
+        Cat(src1(t.len - 1, 0), 0.U(t.precision.W))
+      )
+      val in2 = Cat(
+        Mux(fpCtrl.fmaCmd(0), invert_sign(src2, t.len), src2(t.len - 1, 0)),
+        0.U(t.precision.W)
+      )
+      s1.io.a := in1
+      s1.io.b := in2
+      s1.io.b_inter_valid := fma
+      s1.io.b_inter_flags := Mux(fma,
+        mulProd(i).inter_flags,
+        0.U.asTypeOf(s1.io.b_inter_flags)
+      )
+      s1.io.rm := S1Reg(rm)
+      s2.io.in := S2Reg(s1.io.out)
+      (s1, s2)
   }
 
-  val singleOut = typeTagIn === FPU.S
-  val result = Mux(singleOut,
-    FPU.box(Cat(0.U(32.W), s_adder.io.result), FPU.S),
-    FPU.box(d_adder.io.result, FPU.D)
-  )
-  val exc = Mux(singleOut,
-    s_adder.io.fflags,
-    d_adder.io.fflags
-  )
-  val stages = Wire(Vec(latency, new Bundle() {
-    val data = UInt(XLEN.W)
-    val exc = UInt(5.W)
-  }))
+  val (s1, s2) = stages.unzip
 
-  for((s, i) <- stages.zipWithIndex){
-    if(i == 0){
-      s.data := RegEnable(result, regEnable(i+1))
-      s.exc := RegEnable(exc, regEnable(i+1))
-    } else {
-      s := RegEnable(stages(i - 1), regEnable(i+1))
-    }
-  }
-
-  io.out.bits.data := stages.last.data
-  fflags := stages.last.exc
+  val outSel = S2Reg(VecInit(FPU.ftypes.zipWithIndex.map(_._2.U === typeTagIn)))
+  io.out.bits.data := Mux1H(outSel, s2.zip(FPU.ftypes).map{
+    case (mod, t) => FPU.box(mod.io.result, t)
+  })
+  fflags := Mux1H(outSel, s2.map(_.io.fflags))
 }
 
 class FMAMidResult extends FMULToFADD(FPU.ftypes.last.expWidth, FPU.ftypes.last.precision) {
