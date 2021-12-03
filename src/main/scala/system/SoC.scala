@@ -110,7 +110,7 @@ trait HaveSlaveAXI4Port {
 
   error_xbar :=
     TLFIFOFixer() :=
-    TLWidthWidget(16) :=
+    TLWidthWidget(32) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
@@ -163,6 +163,7 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
@@ -202,6 +203,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
+    AXI4IdIndexer(idBits = 2) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
     AXI4UserYanker() :=
