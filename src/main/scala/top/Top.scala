@@ -146,8 +146,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    dontTouch(io.sram_config)
-    dontTouch(io.pll0_lock)
+    dontTouch(dma)
+    dontTouch(io)
+    dontTouch(peripheral)
+    dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.pll0_lock := io.pll0_lock
 
