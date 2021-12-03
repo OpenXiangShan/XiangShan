@@ -458,7 +458,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!storeUnits(1).io.feedbackSlow.valid)
   }
 
-  lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
 

@@ -637,6 +637,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
       s3_req.miss &&
         (io.meta_write.ready || !amo_update_meta) &&
         (io.data_write.ready || !update_data) &&
+        (s3_s_amoalu || !amo_wait_amoalu) &&
         io.tag_write.ready
     ) && need_wb
   io.wb.bits.addr := get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))

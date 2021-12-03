@@ -454,14 +454,14 @@ package object xiangshan {
     def aes64ks2    = "b100110".U
 
     // merge to two instruction sm4ks & sm4ed
-    def sm4ks0      = "b101000".U
-    def sm4ks1      = "b101001".U
-    def sm4ks2      = "b101010".U
-    def sm4ks3      = "b101011".U
-    def sm4ed0      = "b101100".U
-    def sm4ed1      = "b101101".U
-    def sm4ed2      = "b101110".U
-    def sm4ed3      = "b101111".U
+    def sm4ed0      = "b101000".U
+    def sm4ed1      = "b101001".U
+    def sm4ed2      = "b101010".U
+    def sm4ed3      = "b101011".U
+    def sm4ks0      = "b101100".U
+    def sm4ks1      = "b101101".U
+    def sm4ks2      = "b101110".U
+    def sm4ks3      = "b101111".U
 
     def sha256sum0  = "b110000".U
     def sha256sum1  = "b110001".U
@@ -666,7 +666,7 @@ package object xiangshan {
     fuGen = fdivSqrtGen,
     fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency(),
-    fastUopOut = true, fastImplemented = false, hasInputBuffer = true
+    fastUopOut = true, fastImplemented = true, hasInputBuffer = true
   )
 
   val lduCfg = FuConfig(
