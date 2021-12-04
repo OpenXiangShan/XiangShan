@@ -35,10 +35,10 @@ class ProbeReq(implicit p: Parameters) extends ICacheBundle
 
 }
 
-class ICacheProbeEntry(implicit p: Parameters) extends ICacheModule {
+class ICacheProbeEntry(id: Int)(implicit p: Parameters) extends ICacheModule {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new ProbeReq))
-    val pipe_req  = DecoupledIO(new ICacheProbeReq)
+    val pipe_req  = DecoupledIO(new ReplacePipeReq)
   })
 
   val s_invalid :: s_pipe_req :: Nil = Enum(2)
@@ -65,9 +65,11 @@ class ICacheProbeEntry(implicit p: Parameters) extends ICacheModule {
 
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
-    pipe_req.probe_param := req.param
-    pipe_req.addr   := req.addr
+    pipe_req.paddr   := req.addr
     pipe_req.vaddr  := req.vaddr
+    pipe_req.param := req.param
+    pipe_req.voluntary := false.B
+    pipe_req.id := Cat(ProbeKey.U, id.U)
 
     when (io.pipe_req.fire()) {
       state := s_invalid
@@ -79,10 +81,10 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
 {
   val io = IO(new Bundle {
     val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
-    val pipe_req  = DecoupledIO(new ICacheProbeReq)
+    val pipe_req  = DecoupledIO(new ReplacePipeReq)
   })
 
-  val pipe_req_arb = Module(new RRArbiter(new ICacheProbeReq, cacheParams.nProbeEntries))
+  val pipe_req_arb = Module(new RRArbiter(new ReplacePipeReq, cacheParams.nProbeEntries))
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cacheParams.nProbeEntries, Bool()))
@@ -112,7 +114,7 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
   io.mem_probe.ready := allocate
 
   val entries = (0 until cacheParams.nProbeEntries) map { i =>
-    val entry = Module(new ICacheProbeEntry)
+    val entry = Module(new ICacheProbeEntry(i))
 
     // entry req
     entry.io.req.valid := (i.U === alloc_idx) && allocate && io.mem_probe.valid
@@ -129,96 +131,96 @@ class ICacheProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMo
 
 }
 
-class ICacheProbe(implicit p: Parameters) extends ICacheModule{
-  val io = IO(new Bundle{
-    val req = Flipped(DecoupledIO(new ICacheProbeReq))
-
-    val meta_read = DecoupledIO(new ICacheReadBundle)
-    val data_read = DecoupledIO(new ICacheReadBundle)
-
-    val meta_response     = Input(new ICacheMetaRespBundle)
-    val data_response     = Input(new ICacheDataRespBundle)
-
-    val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
-
-    val release_req = DecoupledIO(new ReleaseReq)
-
-    val probe_should_merge = Input(Bool())
-  })
-
-  val s_idle :: s_read_array :: s_send_release :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
-  val state = RegInit(s_idle)
-
-  val req = Reg(new ICacheProbeReq)
-  val req_vidx = get_idx(req.vaddr)
-  val phy_tag = get_phy_tag(req.addr)
-
-  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid()})
-  val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
-  val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
-
-  val probeline_vec_reg  = RegEnable(next = hit_vec.asUInt, enable = RegNext(io.meta_read.fire()) )
-  val probeline_cohs_reg = RegEnable(next = hit_coh, enable = RegNext(io.meta_read.fire()) )
-  val probeline_data_reg = RegEnable(next = hit_data, enable = RegNext(io.data_read.fire()) )
-  val probeline_coh  = Mux(RegNext(io.meta_read.fire()), hit_coh, probeline_cohs_reg)
-  val probeline_data = Mux(RegNext(io.data_read.fire()), hit_data, probeline_data_reg)
-
-  io.req.ready := state === s_idle
-
-  val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = probeline_coh.onProbe(req.probe_param)
-
-  io.release_req.valid          := state === s_send_release
-  io.release_req.bits.addr      := req.addr
-  io.release_req.bits.param     := probe_shrink_param
-  io.release_req.bits.voluntary := false.B
-  io.release_req.bits.hasData   := true.B
-  io.release_req.bits.data      := probeline_data
-  io.release_req.bits.waymask   := DontCare
-  io.release_req.bits.vidx      := DontCare
-  io.release_req.bits.dirty      := false.B
-
-  io.meta_read.valid := state === s_read_array
-  io.meta_read.bits.isDoubleLine := false.B
-  io.meta_read.bits.vSetIdx(0) := req_vidx
-  io.meta_read.bits.vSetIdx(1) := DontCare
-
-  io.data_read.valid := state === s_read_array
-  io.data_read.bits.isDoubleLine := false.B
-  io.data_read.bits.vSetIdx(0) := req_vidx
-  io.data_read.bits.vSetIdx(1) := DontCare
-
-
-  io.meta_write.valid := (state === s_write_back)
-  io.meta_write.bits.generate(tag = phy_tag, coh = probe_new_coh, idx = get_idx(req.vaddr), waymask = probeline_vec_reg, bankIdx = req_vidx(0))
-
-  //state change
-  switch(state) {
-    is(s_idle) {
-      when(io.req.valid) {
-        state := s_read_array
-        req := io.req.bits
-      }
-    }
-
-    // memory request
-    is(s_read_array) {
-      when(io.meta_read.fire() && io.data_read.fire()) {
-        state := s_send_release
-      }
-    }
-
-    is(s_send_release) {
-      when(io.release_req.fire()){
-        state := s_write_back
-      }
-    }
-
-    is(s_write_back) {
-      state := Mux(io.meta_write.fire() , s_idle, s_write_back)
-    }
-  }
-
-  when(RegNext(io.meta_read.fire())){
-    assert(PopCount(hit_vec) === 1.U)
-  }
-}
+//class ICacheProbe(implicit p: Parameters) extends ICacheModule{
+//  val io = IO(new Bundle{
+//    val req = Flipped(DecoupledIO(new ICacheProbeReq))
+//
+//    val meta_read = DecoupledIO(new ICacheReadBundle)
+//    val data_read = DecoupledIO(new ICacheReadBundle)
+//
+//    val meta_response     = Input(new ICacheMetaRespBundle)
+//    val data_response     = Input(new ICacheDataRespBundle)
+//
+//    val meta_write = DecoupledIO(new ICacheMetaWriteBundle)
+//
+//    val release_req = DecoupledIO(new ReleaseReq)
+//
+//    val probe_should_merge = Input(Bool())
+//  })
+//
+//  val s_idle :: s_read_array :: s_send_release :: s_write_back :: s_send_grant_ack :: s_wait_resp :: Nil = Enum(6)
+//  val state = RegInit(s_idle)
+//
+//  val req = Reg(new ICacheProbeReq)
+//  val req_vidx = get_idx(req.vaddr)
+//  val phy_tag = get_phy_tag(req.addr)
+//
+//  val hit_vec = VecInit(io.meta_response.metaData(0).zipWithIndex.map{case(way,i) => way.tag === phy_tag && way.coh.isValid()})
+//  val hit_data = Mux1H(hit_vec, io.data_response.datas(0))
+//  val hit_coh  = Mux1H(hit_vec, VecInit(io.meta_response.metaData(0).map(way => way.coh)))
+//
+//  val probeline_vec_reg  = RegEnable(next = hit_vec.asUInt, enable = RegNext(io.meta_read.fire()) )
+//  val probeline_cohs_reg = RegEnable(next = hit_coh, enable = RegNext(io.meta_read.fire()) )
+//  val probeline_data_reg = RegEnable(next = hit_data, enable = RegNext(io.data_read.fire()) )
+//  val probeline_coh  = Mux(RegNext(io.meta_read.fire()), hit_coh, probeline_cohs_reg)
+//  val probeline_data = Mux(RegNext(io.data_read.fire()), hit_data, probeline_data_reg)
+//
+//  io.req.ready := state === s_idle
+//
+//  val (probe_has_dirty_data, probe_shrink_param, probe_new_coh) = probeline_coh.onProbe(req.probe_param)
+//
+//  io.release_req.valid          := state === s_send_release
+//  io.release_req.bits.addr      := req.addr
+//  io.release_req.bits.param     := probe_shrink_param
+//  io.release_req.bits.voluntary := false.B
+//  io.release_req.bits.hasData   := true.B
+//  io.release_req.bits.data      := probeline_data
+//  io.release_req.bits.waymask   := DontCare
+//  io.release_req.bits.vidx      := DontCare
+//  io.release_req.bits.dirty      := false.B
+//
+//  io.meta_read.valid := state === s_read_array
+//  io.meta_read.bits.isDoubleLine := false.B
+//  io.meta_read.bits.vSetIdx(0) := req_vidx
+//  io.meta_read.bits.vSetIdx(1) := DontCare
+//
+//  io.data_read.valid := state === s_read_array
+//  io.data_read.bits.isDoubleLine := false.B
+//  io.data_read.bits.vSetIdx(0) := req_vidx
+//  io.data_read.bits.vSetIdx(1) := DontCare
+//
+//
+//  io.meta_write.valid := (state === s_write_back)
+//  io.meta_write.bits.generate(tag = phy_tag, coh = probe_new_coh, idx = get_idx(req.vaddr), waymask = probeline_vec_reg, bankIdx = req_vidx(0))
+//
+//  //state change
+//  switch(state) {
+//    is(s_idle) {
+//      when(io.req.valid) {
+//        state := s_read_array
+//        req := io.req.bits
+//      }
+//    }
+//
+//    // memory request
+//    is(s_read_array) {
+//      when(io.meta_read.fire() && io.data_read.fire()) {
+//        state := s_send_release
+//      }
+//    }
+//
+//    is(s_send_release) {
+//      when(io.release_req.fire()){
+//        state := s_write_back
+//      }
+//    }
+//
+//    is(s_write_back) {
+//      state := Mux(io.meta_write.fire() , s_idle, s_write_back)
+//    }
+//  }
+//
+//  when(RegNext(io.meta_read.fire())){
+//    assert(PopCount(hit_vec) === 1.U)
+//  }
+//}
