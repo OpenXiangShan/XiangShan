@@ -36,8 +36,8 @@ class ICacheMetaRespBundle(implicit p: Parameters) extends ICacheBundle
   val valid      = Vec(2, Vec(nWays ,Bool()))
   val errors     = Vec(2, Vec(nWays ,Bool()))
 
-  def tags = VecInit(metaData.map(meta_way => VecInit(meta_way.map( meta=> meta.tag ))))
-  def cohs = VecInit(metaData.map(meta_way => VecInit(meta_way.map( meta=> meta.coh ))))
+  def tags = VecInit(metaData.map(port => VecInit(port.map( way=> way.tag ))))
+  def cohs = VecInit(metaData.map(port => VecInit(port.map( way=> way.coh ))))
 }
 
 class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
@@ -101,11 +101,6 @@ class ICacheProbeReq(implicit p: Parameters) extends ICacheBundle {
 
 class ICacheVictimInfor(implicit p: Parameters) extends ICacheBundle {
   val valid = Bool()
-  val ptag  = UInt(tagBits.W)
-  val vidx  = UInt(idxBits.W)
-}
-
-class ICacheSetInfor(implicit p: Parameters) extends ICacheBundle {
-  val valid = Bool()
+  //val ptag  = UInt(tagBits.W)
   val vidx  = UInt(idxBits.W)
 }

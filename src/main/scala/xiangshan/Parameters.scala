@@ -211,7 +211,7 @@ case class XSCoreParameters
   NumPMA: Int = 16,
   NumPerfCounters: Int = 16,
   icacheParameters: ICacheParameters = ICacheParameters(
-    tagECC = Some("secded"),
+    tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
     nMissEntries = 2,
