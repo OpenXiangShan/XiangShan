@@ -202,7 +202,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
         val lsdqFull  = Input(Bool())
       }
     })
-    val writeback = Vec(NRIntWritePorts + NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val writeback = Vec(NRIntWritePorts + NRFpWritePorts - exuParameters.LduCnt, Flipped(ValidIO(new ExuOutput)))
     // redirect out
     val redirect = ValidIO(new Redirect)
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
@@ -220,7 +220,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth, "ls"))
   val redirectGen = Module(new RedirectGenerator)
 
-  val robWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt
+  val robWbSize = io.writeback.length + io.stOut.length
   val rob = Module(new Rob(robWbSize))
 
   val robPcRead = io.frontend.fromFtq.getRobFlushPcRead
