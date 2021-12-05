@@ -199,6 +199,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
           ssid = ssidAllocate,
           strict = false.B
         )
+        when(memPredUpdateReqReg.stpc === memPredUpdateReqReg.ldpc){
+          // make SyncDataModuleTemplate happy
+          valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+          data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+        }
       }
       // 2. "If the load has been assigned a store set, but the store has not,
       // the store is assigned the load’s store set."
@@ -239,6 +244,11 @@ class SSIT(implicit p: Parameters) extends XSModule {
         when(ssidIsSame){
           data_sram.io.wdata(SSIT_UPDATE_LOAD_READ_PORT).strict := true.B
           debug_strict(memPredUpdateReqReg.ldpc) := false.B
+        }
+        when(memPredUpdateReqReg.stpc === memPredUpdateReqReg.ldpc){
+          // make SyncDataModuleTemplate happy
+          valid_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
+          data_sram.io.wen(SSIT_UPDATE_STORE_WRITE_PORT) := false.B
         }
       }
     }
