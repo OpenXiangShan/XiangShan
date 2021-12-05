@@ -94,9 +94,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_req = RegEnable(next = r0_req, enable = r0_fire)
 
-  val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(toMeta.fire()))
-  val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(toMeta.fire()))
-  val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(toData.fire()))
+  val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
+  val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
+  val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
