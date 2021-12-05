@@ -356,12 +356,14 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
       !s2_exception && 
       !s2_forward_fail &&
       !fullForward &&
-      !s2_is_prefetch
+      !s2_is_prefetch &&
+      !s2_tlb_miss
   } else {
     io.out.bits.miss := s2_cache_miss &&
       !s2_exception &&
       !s2_forward_fail &&
-      !s2_is_prefetch
+      !s2_is_prefetch &&
+      !s2_tlb_miss
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   // if forward fail, replay this inst from fetch
@@ -393,11 +395,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   when (io.in.bits.isSoftPrefetch) {
     io.rsFeedback.bits.hit := (!s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception))
   }.otherwise {
-    if (EnableFastForward) {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
-    } else {
-      io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception) && !s2_data_invalid
-    }
+    // if tlb hit && fullForward, there is no need to replay inst
+    io.rsFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio || s2_exception || fullForward) && !s2_data_invalid
   }
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
   io.rsFeedback.bits.flushState := io.in.bits.ptwBack
@@ -411,11 +410,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.rsFeedback.bits.dataInvalidSqIdx.flag := DontCare
 
   // s2_cache_replay is quite slow to generate, send it separately to LQ
-  if (EnableFastForward) {
-    io.needReplayFromRS := s2_cache_replay && !fullForward
-  } else {
-    io.needReplayFromRS := s2_cache_replay
-  }
+  io.needReplayFromRS := s2_cache_replay
 
   // fast load to load forward
   io.fastpath.valid := io.in.valid // for debug only

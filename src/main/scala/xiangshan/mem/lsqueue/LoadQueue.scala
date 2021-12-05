@@ -173,6 +173,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb.wen(i) := false.B
     val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
+
+    // most lq status need to be updated immediately after load writeback to lq
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
@@ -199,8 +201,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
         io.loadIn(i).bits.mmio
       )}
       datavalid(loadWbIndex) := (!io.loadIn(i).bits.miss || io.loadDataForwarded(i)) &&
-        !io.loadIn(i).bits.mmio && // mmio data is not valid until we finished uncache access
-        !io.needReplayFromRS(i) // do not writeback if that inst will be resend from rs
+        !io.loadIn(i).bits.mmio // mmio data is not valid until we finished uncache access
       writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
 
       val loadWbData = Wire(new LQDataEntry)
@@ -211,18 +212,28 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
       dataModule.io.wb.wen(i) := true.B
 
-
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
       debug_paddr(loadWbIndex) := io.loadIn(i).bits.paddr
 
       val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-      miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i) && !io.needReplayFromRS(i)
+      miss(loadWbIndex) := dcacheMissed && !io.loadDataForwarded(i)
       pending(loadWbIndex) := io.loadIn(i).bits.mmio
       uop(loadWbIndex).debugInfo := io.loadIn(i).bits.uop.debugInfo
       // update replayInst (replay from fetch) bit, 
       // for replayInst may be set to true in load pipeline
       uop(loadWbIndex).ctrl.replayInst := io.loadIn(i).bits.uop.ctrl.replayInst
     }
+
+    // needReplayFromRS will be used to update lq flag 1 cycle after for better timing
+    //
+    // io.needReplayFromRS comes from dcache miss req reject, which is quite slow to generate 
+    when(RegNext(io.loadIn(i).fire()) && RegNext(io.needReplayFromRS(i))) {
+      // do not writeback if that inst will be resend from rs
+      // rob writeback will not be triggered by a refill before inst replay
+      miss(RegNext(loadWbIndex)) := false.B // disable refill listening
+      assert(!datavalid(RegNext(loadWbIndex)))
+    }
+
     // vaddrModule write is delayed, as vaddrModule will not be read right after write
     vaddrModule.io.waddr(i) := RegNext(loadWbIndex)
     vaddrModule.io.wdata(i) := RegNext(io.loadIn(i).bits.vaddr)
