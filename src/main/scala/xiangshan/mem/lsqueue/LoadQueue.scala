@@ -221,7 +221,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       dataModule.io.wb.wen(i) := true.B
 
       vaddrTriggerResultModule.io.waddr(i) := loadWbIndex
-      vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).lqLoadAddrTriggerHitVec
+      vaddrTriggerResultModule.io.wdata(i) := io.trigger(i).hitLoadAddrTriggerHitVec
       vaddrTriggerResultModule.io.wen(i) := true.B
 
       debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
