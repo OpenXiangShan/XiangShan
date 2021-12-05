@@ -17,7 +17,6 @@ case class BinaryArbiterNode
 )(implicit valName: ValName) extends TLCustomNode {
 
   override def resolveStar(iKnown: Int, oKnown: Int, iStars: Int, oStars: Int): (Int, Int) = {
-    println(iKnown, oKnown, iStars, oStars)
     require(iStars == 0 && oKnown == 0 && oStars == 1)
     if(iKnown < 4) {
       (0, 1)
