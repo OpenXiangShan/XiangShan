@@ -436,6 +436,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mepc = Reg(UInt(XLEN.W))
+  // Page 36 in riscv-priv: The low bit of mepc (mepc[0]) is always zero.
+  val mepcMask = ~(0x1.U(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
@@ -459,13 +461,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), 0.U)
+  val mstatus = RegInit("ha00000000".U(XLEN.W))
 
   // mstatus Value Table
   // | sd   |
   // | pad1 |
   // | sxl  | hardlinked to 10, use 00 to pass xv6 test
-  // | uxl  | hardlinked to 00
+  // | uxl  | hardlinked to 10
   // | pad0 |
   // | tsr  |
   // | tw   |
@@ -488,11 +490,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew
   }
 
+  val mstatusWMask = (~ZeroExt((
+    GenMask(XLEN - 2, 36) | // WPRI
+    GenMask(35, 32)       | // SXL and UXL cannot be changed
+    GenMask(31, 23)       | // WPRI
+    GenMask(10, 9)        | // WPRI
+    GenMask(6)            | // WPRI
+    GenMask(2)              // WPRI
+  ), 64)).asUInt()
   val mstatusMask = (~ZeroExt((
-    GenMask(XLEN-2, 38) | GenMask(31, 23) | GenMask(10, 9) | GenMask(2) |
-    GenMask(37) | // MBE
-    GenMask(36) | // SBE
-    GenMask(6)    // UBE
+    GenMask(XLEN - 2, 36) | // WPRI
+    GenMask(31, 23)       | // WPRI
+    GenMask(10, 9)        | // WPRI
+    GenMask(6)            | // WPRI
+    GenMask(2)              // WPRI
   ), 64)).asUInt()
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
@@ -529,6 +540,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // val satpMask = "h8fffffffffffffff".U(XLEN.W) // enable asid, mode can only be 8 / 0
   val satpMask = Cat("h8".U(4.W),Asid_true_mask(AsidLength),"hfffffffffff".U((XLEN - 4 - 16).W))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
+  // Page 60 in riscv-priv: The low bit of sepc (sepc[0]) is always zero.
+  val sepcMask = ~(0x1.U(XLEN.W))
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
@@ -698,7 +711,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Supervisor Trap Handling ---
     MaskedRegMap(Sscratch, sscratch),
-    MaskedRegMap(Sepc, sepc),
+    MaskedRegMap(Sepc, sepc, sepcMask, MaskedRegMap.NoSideEffect, sepcMask),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
     MaskedRegMap(Sip, mip.asUInt, sipWMask, MaskedRegMap.Unwritable, sipMask),
@@ -721,7 +734,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
-    MaskedRegMap(Mstatus, mstatus, mstatusMask, mstatusUpdateSideEffect, mstatusMask),
+    MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
@@ -731,7 +744,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),
-    MaskedRegMap(Mepc, mepc),
+    MaskedRegMap(Mepc, mepc, mepcMask, MaskedRegMap.NoSideEffect, mepcMask),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
@@ -1135,6 +1148,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         cacheopRegs(name) := csrio.distributedUpdate.w.bits.data
       }
     }}
+  }
+
+  // Implicit add reset values for mepc[0] and sepc[0]
+  // TODO: rewrite mepc and sepc using a struct-like style with the LSB always being 0
+  when (reset.asBool) {
+    mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
+    sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
   }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
