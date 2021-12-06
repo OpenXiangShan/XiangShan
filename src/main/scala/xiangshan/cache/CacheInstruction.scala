@@ -249,7 +249,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
       isReadTag -> raw_cache_resp.read_tag_low,
       isReadData -> raw_cache_resp.read_data_vec(data_transfer_cnt),
     ))
-    data_transfer_finished := Mux(isReadData(translated_cache_req.opCode),
+    data_transfer_finished := Mux(isReadData,
       data_transfer_cnt === (maxDataRowSupport-1).U,
       true.B
     )
