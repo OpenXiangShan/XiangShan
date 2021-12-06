@@ -88,7 +88,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
     val hasNoSpecExec = Input(Bool())
-    val commitType = Input(CommitType())
+    val interrupt_safe = Input(Bool())
     val misPredBlock = Input(Bool())
     val isReplaying = Input(Bool())
     // output: the CommitWidth deqPtr
@@ -100,7 +100,7 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
   val exceptionEnable = io.deq_w(0) && io.exception_state.valid && !io.exception_state.bits.flushPipe && io.exception_state.bits.robIdx === deqPtrVec(0)
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
@@ -283,15 +283,15 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   println("Rob: size:" + RobSize + " wbports:" + numWbPorts  + " commitwidth:" + CommitWidth)
 
   // instvalid field
-  // val valid = RegInit(VecInit(List.fill(RobSize)(false.B)))
   val valid = Mem(RobSize, Bool())
   // writeback status
-  // val writebacked = Reg(Vec(RobSize, Bool()))
   val writebacked = Mem(RobSize, Bool())
   val store_data_writebacked = Mem(RobSize, Bool())
   // data for redirect, exception, etc.
-  // val flagBkup = RegInit(VecInit(List.fill(RobSize)(false.B)))
   val flagBkup = Mem(RobSize, Bool())
+  // some instructions are not allowed to trigger interrupts
+  // They have side effects on the states of the processor before they write back
+  val interrupt_safe = Mem(RobSize, Bool())
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -431,11 +431,8 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   val deqDispatchData = dispatchDataRead(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
-  // However, we cannot determine whether a load/store instruction is MMIO.
-  // Thus, we don't allow load/store instructions to trigger an interrupt.
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
+  val intrEnable = intrBitSetReg && !hasNoSpecExec && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val triggerBefore = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_before
   val triggerAfter = deqHasExceptionOrFlush && exceptionDataRead.bits.trigger_after && !exceptionDataRead.bits.trigger_before
@@ -611,7 +608,7 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   deqPtrGenModule.io.exception_state := exceptionDataRead
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
-  deqPtrGenModule.io.commitType := deqDispatchData.commitType
+  deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
 
   deqPtrGenModule.io.misPredBlock := misPredBlock
   deqPtrGenModule.io.isReplaying := isReplaying
@@ -740,6 +737,21 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     }
   }
 
+  // interrupt_safe
+  for (i <- 0 until RenameWidth) {
+    // We RegNext the updates for better timing.
+    // Note that instructions won't change the system's states in this cycle.
+    when (RegNext(canEnqueue(i))) {
+      // For now, we allow non-load-store instructions to trigger interrupts
+      // For MMIO instructions, they should not trigger interrupts since they may
+      // be sent to lower level before it writes back.
+      // However, we cannot determine whether a load/store instruction is MMIO.
+      // Thus, we don't allow load/store instructions to trigger an interrupt.
+      // TODO: support non-MMIO load-store instructions to trigger interrupts
+      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.ctrl.commitType)
+      interrupt_safe(RegNext(enqPtrVec(i).value)) := RegNext(allow_interrupts)
+    }
+  }
 
   /**
     * read and write of data modules
@@ -789,13 +801,6 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
   all_exception_possibilities.zipWithIndex.foreach{ case (p, i) => connect_exception(i, p) }
   def connect_exception(index: Int, wb_index: Int) = {
     exceptionGen.io.wb(index).valid             := io.exeWbResults(wb_index).valid
-    // A temporary fix for float load writeback
-    // TODO: let int/fp load use the same two wb ports
-    if (wb_index == atomic_wb_idx || load_wb_idxes.contains(wb_index)) {
-      when (io.exeWbResults(wb_index - exuParameters.AluCnt + numIntWbPorts + exuParameters.FmacCnt).valid) {
-        exceptionGen.io.wb(index).valid := true.B
-      }
-    }
     exceptionGen.io.wb(index).bits.robIdx       := io.exeWbResults(wb_index).bits.uop.robIdx
     val selectFunc = if (wb_index == csr_wb_idx) selectCSR _
     else if (wb_index == atomic_wb_idx) selectAtomics _
@@ -812,13 +817,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.wb(index).bits.trigger := io.exeWbResults(wb_index).bits.uop.cf.trigger
   }
 
-  // 4 fmac + 2 fmisc + 1 i2f
-  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + numIntWbPorts)
-  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt + 2)
-  val i2fWb = Seq(numIntWbPorts - 1) // last port in int
-  val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
-    (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
-  }).map(_._1)
+  // f2i + wb from fp arbiter (no load)
+  val fmiscIntWbPorts = Seq(exuParameters.FmiscCnt, exuParameters.MduCnt).min
+  // Drop alu + load + stu
+  val fflags_wb = io.exeWbResults.drop(NRIntWritePorts - fmiscIntWbPorts).dropRight(exuParameters.StuCnt)
   val fflagsDataModule = Module(new SyncDataModuleTemplate(
     UInt(5.W), RobSize, CommitWidth, fflags_wb.size)
   )

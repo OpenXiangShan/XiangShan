@@ -23,6 +23,8 @@ import subprocess
 import sys
 import time
 
+import psutil
+
 
 class XSArgs(object):
     script_path = os.path.realpath(__file__)
@@ -182,7 +184,8 @@ class XiangShan(object):
         self.show()
         emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
         print("workload:", workload)
-        numa_args = f"numactl -m 1 -C 64-{64+self.args.threads-1}" if self.args.numa else ""
+        numa_info = get_free_cores(self.args.threads)
+        numa_args = f"numactl -m {numa_info[0]} -C {numa_info[1]}-{numa_info[2]}" if self.args.numa else ""
         fork_args = "--enable-fork" if self.args.fork else ""
         return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args}')
         return return_code
@@ -242,6 +245,7 @@ class XiangShan(object):
             "Svinval/rv64mi-p-svinval.bin",
             "pmp/pmp.riscv.bin",
             "asid/asid.bin",
+            "isa_misc/xret_clear_mprv.bin",
             "cache-management/softprefetch-riscv64-noop.bin"
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
@@ -286,6 +290,18 @@ class XiangShan(object):
                     self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
                 return ret
         return 0
+
+def get_free_cores(n):
+    while True:
+        # To avoid potential conflicts, we allow CI to use SMT.
+        num_logical_core = psutil.cpu_count(logical=True)
+        core_usage = psutil.cpu_percent(interval=1, percpu=True)
+        num_window = num_logical_core // n
+        for i in range(num_window):
+            window_usage = core_usage[i * n : i * n + n]
+            if sum(window_usage) < 0.3 * n and True not in map(lambda x: x > 0.5, window_usage):
+                return (((i * n) % 128)// 64, i * n, i * n + n - 1)
+        print(f"No free {n} cores found. CPU usage: {core_usage}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Python wrapper for XiangShan')

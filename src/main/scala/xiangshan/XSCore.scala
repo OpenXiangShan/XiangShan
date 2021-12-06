@@ -20,7 +20,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.backend.exu.{ExuConfig, WbArbiter, WbArbiterWrapper}
+import xiangshan.backend.exu.WbArbiterWrapper
 import xiangshan.frontend._
 import xiangshan.cache.mmu._
 import chipsalliance.rocketchip.config
@@ -179,6 +179,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   outer.wbArbiter.module.io.hartId := io.hartId
 
 
+  outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
   require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
@@ -205,7 +206,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.stOut <> memBlock.io.stOut
   ctrlBlock.io.memoryViolation <> memBlock.io.memoryViolation
   exuBlocks.head.io.scheExtra.enqLsq.get <> memBlock.io.enqLsq
-  ctrlBlock.io.writeback <> rfWriteback
+  val intWriteback = rfWriteback.take(outer.wbArbiter.intArbiter.numOutPorts)
+  val fpWriteback = rfWriteback.drop(outer.wbArbiter.intArbiter.numOutPorts)
+  val fpWritbackNoLoad = fpWriteback.zip(outer.wbArbiter.fpWbPorts).filterNot(_._2.contains(LdExeUnitCfg)).map(_._1)
+  require(fpWritbackNoLoad.length + intWriteback.length == ctrlBlock.io.writeback.length)
+  ctrlBlock.io.writeback <> VecInit(intWriteback ++ fpWritbackNoLoad)
+  // Load Int and Fp have the same bits and we can re-use the write-back ports
+  for (i <- 0 until exuParameters.LduCnt) {
+    ctrlBlock.io.writeback(exuParameters.AluCnt + i).valid := memBlock.io.writeback(i).valid
+  }
 
   val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup
   require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
