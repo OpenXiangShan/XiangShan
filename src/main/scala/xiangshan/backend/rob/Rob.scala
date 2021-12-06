@@ -817,13 +817,10 @@ class Rob(numWbPorts: Int)(implicit p: Parameters) extends XSModule with HasCirc
     exceptionGen.io.wb(index).bits.trigger := io.exeWbResults(wb_index).bits.uop.cf.trigger
   }
 
-  // 4 fmac + 2 fmisc + 1 i2f
-  val fmacWb = (0 until exuParameters.FmacCnt).map(_ + numIntWbPorts)
-  val fmiscWb = (0 until exuParameters.FmiscCnt).map(_ + numIntWbPorts + exuParameters.FmacCnt)
-  val i2fWb = Seq(numIntWbPorts - 1) // last port in int
-  val fflags_wb = io.exeWbResults.zipWithIndex.filter(w => {
-    (fmacWb ++ fmiscWb ++ i2fWb).contains(w._2)
-  }).map(_._1)
+  // f2i + wb from fp arbiter (no load)
+  val fmiscIntWbPorts = Seq(exuParameters.FmiscCnt, exuParameters.MduCnt).min
+  // Drop alu + load + stu
+  val fflags_wb = io.exeWbResults.drop(NRIntWritePorts - fmiscIntWbPorts).dropRight(exuParameters.StuCnt)
   val fflagsDataModule = Module(new SyncDataModuleTemplate(
     UInt(5.W), RobSize, CommitWidth, fflags_wb.size)
   )
