@@ -108,8 +108,7 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
       if (in.size < n) {
         Seq(in) ++ Seq.fill(n - 1)(Seq())
       } else {
-        val m = in.size / n
-        in.take(m) +: splitN(in.drop(m), n - 1)
+        (0 until n).map(i => in.zipWithIndex.filter(_._2 % n == i).map(_._1).toSeq)
       }
     }
   }
