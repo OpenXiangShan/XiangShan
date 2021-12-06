@@ -266,7 +266,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
 
-    val pad1 = if (XLEN == 64) Output(UInt(27.W)) else null
+    val pad1 = if (XLEN == 64) Output(UInt(25.W)) else null
+    val mbe  = if (XLEN == 64) Output(UInt(1.W)) else null
+    val sbe  = if (XLEN == 64) Output(UInt(1.W)) else null
     val sxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val uxl  = if (XLEN == 64) Output(UInt(2.W))  else null
     val pad0 = if (XLEN == 64) Output(UInt(9.W))  else Output(UInt(8.W))
@@ -285,6 +287,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val pie = new Priv
     val ie = new Priv
     assert(this.getWidth == XLEN)
+
+    def ube = pie.h // a little ugly
+    def ube_(r: UInt): Unit = {
+      pie.h := r(0)
+    }
   }
 
   class Interrupt extends Bundle {
@@ -461,6 +468,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), csrio.hartId) // the hardware thread running the code
+  val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
   val mstatus = RegInit("ha00000000".U(XLEN.W))
 
   // mstatus Value Table
@@ -732,6 +740,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Marchid, marchid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Mimpid, mimpid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
     MaskedRegMap(Mhartid, mhartid, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+    MaskedRegMap(Mconfigptr, mconfigptr, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
@@ -947,7 +956,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatusNew.pie.s := true.B
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
-    mstatusNew.mprv := 0.U
+    when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
     // lr := false.B
     retTarget := sepc(VAddrBits-1, 0)
   }
