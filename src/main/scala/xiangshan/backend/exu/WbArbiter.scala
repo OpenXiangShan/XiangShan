@@ -26,6 +26,7 @@ import xiangshan._
 
 class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
     val in = Vec(n, Flipped(DecoupledIO(new ExuOutput)))
     val out = DecoupledIO(new ExuOutput)
   })
@@ -63,7 +64,8 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
   assert(ctrl_arb.io.out.valid === data_arb.io.out.valid)
 
   if (hasFastUopOut) {
-    io.out.valid := RegNext(ctrl_arb.io.out.valid)
+    val uop = ctrl_arb.io.out.bits.uop
+    io.out.valid := RegNext(ctrl_arb.io.out.valid && !uop.robIdx.needFlush(io.redirect))
     // When hasFastUopOut, only uop comes at the same cycle with valid.
     // Other bits like data, fflags come at the next cycle after valid,
     // and they need to be selected with the fireVec.
@@ -71,7 +73,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
     val sel = VecInit(io.in.map(_.fire)).asUInt
     io.out.bits := Mux1H(RegNext(sel), dataVec)
     // uop comes at the same cycle with valid and only RegNext is needed.
-    io.out.bits.uop := RegNext(ctrl_arb.io.out.bits.uop)
+    io.out.bits.uop := RegNext(uop)
   }
 }
 
@@ -85,6 +87,9 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
   val exclusivePorts = priorities.zipWithIndex.filter(_._1 == 0).map(_._2)
   val sharedPorts = priorities.zipWithIndex.filter(_._1 == 1).map(_._2)
   val otherPorts = priorities.zipWithIndex.filter(_._1 > 1).map(_._2)
+
+  // Dirty code for Load2Fp: should be delayed for one more cycle
+  val needRegNext = exclusivePorts.map(i => cfgs(i) == LdExeUnitCfg && isFp)
 
   val numInPorts = cfgs.length
   val numOutPorts = exclusivePorts.length + sharedPorts.length
@@ -103,8 +108,7 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
       if (in.size < n) {
         Seq(in) ++ Seq.fill(n - 1)(Seq())
       } else {
-        val m = in.size / n
-        in.take(m) +: splitN(in.drop(m), n - 1)
+        (0 until n).map(i => in.zipWithIndex.filter(_._2 % n == i).map(_._1).toSeq)
       }
     }
   }
@@ -142,6 +146,7 @@ class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Pa
 class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleImp(outer) {
 
   val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
     val in = Vec(outer.numInPorts, Flipped(DecoupledIO(new ExuOutput)))
     val out = Vec(outer.numOutPorts, ValidIO(new ExuOutput))
   })
@@ -155,10 +160,15 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
       val hasFastUopOut = outer.hasFastUopOut(i)
       out.valid := in.valid
       out.bits := in.bits
+      require(!hasFastUopOut || !outer.needRegNext(i))
       if (hasFastUopOut) {
         // When hasFastUopOut, only uop comes at the same cycle with valid.
-        out.valid := RegNext(in.valid)
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
         out.bits.uop := RegNext(in.bits.uop)
+      }
+      if (outer.needRegNext(i)) {
+        out.valid := RegNext(in.valid && !in.bits.uop.robIdx.needFlush(io.redirect))
+        out.bits := RegNext(in.bits)
       }
       in.ready := true.B
   }
@@ -170,6 +180,7 @@ class WbArbiterImp(outer: WbArbiter)(implicit p: Parameters) extends LazyModuleI
     val hasFastUopOut = outer.hasFastUopOut(i + exclusiveIn.length)
     val fastVec = outer.hasFastUopOutVec(i + exclusiveIn.length)
     val arb = Module(new ExuWbArbiter(shared.size, hasFastUopOut, fastVec))
+    arb.io.redirect <> io.redirect
     arb.io.in <> shared
     out.valid := arb.io.out.valid
     out.bits := arb.io.out.bits
@@ -208,6 +219,7 @@ class WbArbiterWrapper(
   lazy val module = new LazyModuleImp(this) with HasXSParameter {
     val io = IO(new Bundle() {
       val hartId = Input(UInt(8.W))
+      val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))
     })
@@ -215,6 +227,7 @@ class WbArbiterWrapper(
     // ready is set to true.B as default (to be override later)
     io.in.foreach(_.ready := true.B)
 
+    intArbiter.module.io.redirect <> io.redirect
     val intWriteback = io.in.zip(exuConfigs).filter(_._2.writeIntRf)
     intArbiter.module.io.in.zip(intWriteback).foreach { case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen
@@ -233,6 +246,7 @@ class WbArbiterWrapper(
       difftest.io.data := out.bits.data
     })
 
+    fpArbiter.module.io.redirect <> io.redirect
     val fpWriteback = io.in.zip(exuConfigs).filter(_._2.writeFpRf)
     fpArbiter.module.io.in.zip(fpWriteback).foreach{ case (arb, (wb, cfg)) =>
       // When the function unit does not write fp regfile, we don't need to check fpWen

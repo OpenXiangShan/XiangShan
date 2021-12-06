@@ -81,6 +81,7 @@ trait HasCSRConst {
   val Marchid       = 0xF12
   val Mimpid        = 0xF13
   val Mhartid       = 0xF14
+  val Mconfigptr    = 0xF15
 
   // Machine Trap Setup
   val Mstatus       = 0x300
@@ -104,7 +105,7 @@ trait HasCSRConst {
   val PmpaddrBase   = 0x3B0
   // Machine level PMA
   val PmacfgBase    = 0x7C0
-  val PmaaddrBase   = 0x7C8 // 84 entry at most
+  val PmaaddrBase   = 0x7C8 // 64 entry at most
 
   // Machine Counter/Timers
   // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers

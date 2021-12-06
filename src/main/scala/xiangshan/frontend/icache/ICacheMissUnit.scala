@@ -78,6 +78,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     val release_req    =  DecoupledIO(new ReplacePipeReq)
     val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
+    val victimInfor        =  Output(new ICacheVictimInfor())
   })
 
   /** default value for control signals */
@@ -97,6 +98,9 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   val req_waymask = req.waymask
   val release_id  = Cat(MissQueueKey.U, id.U)
   val victim_need_release = req.coh.isValid()
+
+  io.victimInfor.valid := state === s_send_replace || state === s_wait_replace || state === s_wait_resp
+  io.victimInfor.vidx  := req_idx
 
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
@@ -254,6 +258,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     val release_req    =  DecoupledIO(new ReplacePipeReq)
     val release_resp   =  Flipped(ValidIO(UInt(ReplaceIdWid.W)))
 
+    val victimInfor = Vec(PortNumber, Output(new ICacheVictimInfor()))
+
   })
   // assign default values to output signals
   io.mem_grant.ready := false.B
@@ -286,6 +292,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     }
 
     io.resp(i) <> entry.io.resp
+
+    io.victimInfor(i) := entry.io.victimInfor
 
     entry.io.release_resp <> io.release_resp
 

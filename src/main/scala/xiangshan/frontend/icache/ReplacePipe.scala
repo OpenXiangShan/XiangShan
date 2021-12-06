@@ -54,6 +54,10 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
     val release_req = DecoupledIO(new ReleaseReq)
 
     val pipe_resp = ValidIO(UInt(ReplaceIdWid.W))
+    
+    val status = new Bundle() {
+      val r1_set, r2_set = ValidIO(UInt(idxBits.W))
+    }
   })
 
   val (toMeta, metaResp) =  (io.meta_read, io.meta_response.metaData(0))
@@ -90,9 +94,9 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
 
   val r1_req = RegEnable(next = r0_req, enable = r0_fire)
 
-  val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(toMeta.fire()))
-  val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(toMeta.fire()))
-  val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(toData.fire()))
+  val r1_meta_ptags              = ResultHoldBypass(data = VecInit(metaResp.map(way => way.tag)),valid = RegNext(r0_fire))
+  val r1_meta_cohs               = ResultHoldBypass(data = VecInit(metaResp.map(way => way.coh)),valid = RegNext(r0_fire))
+  val r1_data_cacheline          = ResultHoldBypass(VecInit(dataResp.map(way => way)),valid = RegNext(r0_fire))
 
   /*** for Probe hit check ***/
   val probe_phy_tag   = r1_req.ptag
@@ -105,8 +109,11 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val release_addr     = get_block_addr(Cat(release_tag, get_untag(r1_req.vaddr)) )
 
   when(RegNext(io.meta_read.fire()) && r1_req.isProbe){
-    assert(PopCount(probe_hit_vec) === 1.U, "Probe should always hit in L1I")
+    assert(PopCount(probe_hit_vec) <= 1.U, "Probe Multi-Hit")
   }
+
+  io.status.r1_set.valid := r1_valid
+  io.status.r1_set.bits  := r1_req.vidx
 
   //---------------------------------------------
 
@@ -163,4 +170,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   //response to MissQueue
   io.pipe_resp.valid := r2_fire && !r2_req.isProbe
   io.pipe_resp.bits  := r2_req.id
+
+  io.status.r2_set.valid := r2_valid
+  io.status.r2_set.bits  := r2_req.vidx
+
 }

@@ -104,7 +104,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
+      misc.l3_out :*= l3.node :*= TLBuffer() :*= misc.l3_banked_xbar
     case None =>
   }
 
@@ -146,8 +146,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    dontTouch(io.sram_config)
-    dontTouch(io.pll0_lock)
+    dontTouch(dma)
+    dontTouch(io)
+    dontTouch(peripheral)
+    dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.pll0_lock := io.pll0_lock
 

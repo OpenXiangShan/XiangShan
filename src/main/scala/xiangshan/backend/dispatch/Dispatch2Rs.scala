@@ -189,7 +189,6 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     def isBlocked(index: Int): Bool = {
       if (index >= 2) {
         val pairs = (0 until index).flatMap(i => (i + 1 until index).map(j => (i, j)))
-        println(pairs)
         val foundLoad = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && !isStore(x._1) && !isStore(x._2))
         val foundStore = pairs.map(x => io.in(x._1).valid && io.in(x._2).valid && isStore(x._1) && isStore(x._2))
         Mux(isStore(index), VecInit(foundStore).asUInt.orR, VecInit(foundLoad).asUInt.orR) || isBlocked(index - 1)
@@ -225,7 +224,6 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
       io.out(idx).bits := Mux1H(selectIdxOH, in.map(_.bits))
       // Special case for STD
       if (config.contains(StdExeUnitCfg)) {
-        println(s"std: $idx")
         val sta = io.out(idx - 2)
         io.out(idx).valid := selectValid && sta.ready
         sta.valid := selectValid && io.out(idx).ready

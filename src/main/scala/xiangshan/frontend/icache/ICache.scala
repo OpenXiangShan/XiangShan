@@ -202,9 +202,9 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag, coh = write.coh).asUInt)
 
-   when(io.write.valid){
-       printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
-   }
+  //  when(io.write.valid){
+  //      printf("[time:%d ] idx:%x  ptag:%x  waymask:%x coh:%x\n", GTimer().asUInt, write.virIdx, write.phyTag, write.waymask, write.coh.asUInt)
+  //  }
 
   val readIdxNext = RegEnable(next = io.read.bits.vSetIdx, enable = io.read.fire())
   val validArray = RegInit(0.U((nSets * nWays).W))
@@ -477,8 +477,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.respStall := io.stop
   io.perfInfo := mainPipe.io.perfInfo
 
-  meta_write_arb.io.in(ReplacePipeKey)    <> replacePipe.io.meta_write
-  meta_write_arb.io.in(mainPipeKey)  <> missUnit.io.meta_write
+  meta_write_arb.io.in(ReplacePipeKey)  <> replacePipe.io.meta_write
+  meta_write_arb.io.in(mainPipeKey)     <> missUnit.io.meta_write
 
   metaArray.io.write <> meta_write_arb.io.out
   dataArray.io.write <> missUnit.io.data_write
@@ -517,12 +517,48 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
 
+
+  /** Block set-conflict request */
+ val probeReqValid = probeQueue.io.pipe_req.valid
+ val probeReqVidx  = probeQueue.io.pipe_req.bits.vidx
+
+  val hasVictim = VecInit(missUnit.io.victimInfor.map(_.valid))
+  val victimSetSeq = VecInit(missUnit.io.victimInfor.map(_.vidx))
+
+  val probeShouldBlock = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && probeReqValid && idx === probeReqVidx }).reduce(_||_)
+
+  when(probeShouldBlock){
+    probeQueue.io.pipe_req.ready := false.B
+  }
+
+ val releaseReqValid = missUnit.io.release_req.valid
+ val releaseReqVidx  = missUnit.io.release_req.bits.vidx
+
+  val hasConflict = VecInit(Seq(
+        replacePipe.io.status.r1_set.valid,
+        replacePipe.io.status.r2_set.valid
+  ))
+
+  val conflictIdx = VecInit(Seq(
+        replacePipe.io.status.r1_set.bits,
+        replacePipe.io.status.r2_set.bits
+  ))
+
+  val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)
+  
+  when(releaseShouldBlock){
+    missUnit.io.release_req.ready := false.B
+  }
+
   replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
+  replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
   replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
+  replace_req_arb.io.in(mainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
   replacePipe.io.pipe_req               <> replace_req_arb.io.out
 
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
+  
   (0 until PortNumber).map{i => 
       mainPipe.io.fetch(i).req.valid := io.fetch(i).req.valid //&& !fetchShouldBlock(i)
       io.fetch(i).req.ready          :=  mainPipe.io.fetch(i).req.ready //&& !fetchShouldBlock(i)

@@ -83,7 +83,7 @@ abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCP
   val bankedNode = BankBinder(L3NBanks, L3BlockSize)
   val peripheralXbar = TLXbar()
   val l3_xbar = TLXbar()
-  val l3_banked_xbar = BankedXbar(tiles.head.L2NBanks)
+  val l3_banked_xbar = TLXbar()
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -110,7 +110,7 @@ trait HaveSlaveAXI4Port {
 
   error_xbar :=
     TLFIFOFixer() :=
-    TLWidthWidget(16) :=
+    TLWidthWidget(32) :=
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
@@ -163,6 +163,7 @@ trait HaveAXI4MemPort {
     peripheralXbar
 
   memAXI4SlaveNode :=
+    AXI4IdIndexer(idBits = 14) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
@@ -202,6 +203,9 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   peripheralNode :=
+    AXI4IdIndexer(idBits = 2) :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
@@ -239,22 +243,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
     l3_banked_xbar :=*
       TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform) :=*
-      TLEdgeBuffer(idx => {
-        /*
-                  Core0     Core1
-            _____________________________
-           | L3   B0, B2     B1,B3      |
-            -----------------------------
-
-            Core(i)          0         1
-            Port(idx)      0   1     0  1
-            Buffer?        N   Y     Y  N
-         */
-        val insert_buffer = (i % 2) != (idx % 2)
-        insert_buffer
-      }, Some(s"core_${i}_to_l3_buffer")) :=* core_out
+      TLBuffer() :=
+      core_out
   }
-  l3_banked_xbar :=* BankBinder(tiles.head.L2NBanks, L3BlockSize) :*= l3_xbar
+  l3_banked_xbar := l3_xbar
 
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
