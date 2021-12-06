@@ -189,10 +189,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val pmp_check = VecInit(Seq.fill(exuParameters.LduCnt + exuParameters.StuCnt)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb.map(_.pmp(0))) {
-    p.env.pmp := pmp.io.pmp
-    p.env.pma := pmp.io.pma
-    p.env.mode := tlbcsr.priv.dmode
-    p.req := d
+    p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
   val tdata = Reg(Vec(6, new MatchTriggerIO))
