@@ -517,11 +517,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   //Probe through bus b
   probeQueue.io.mem_probe    <> bus.b
 
-  replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
-  replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
-  replacePipe.io.pipe_req               <> replace_req_arb.io.out
-
-  missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
   /** Block set-conflict request */
  val probeReqValid = probeQueue.io.pipe_req.valid
@@ -554,6 +549,14 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   when(releaseShouldBlock){
     missUnit.io.release_req.ready := false.B
   }
+
+  replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
+  replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
+  replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
+  replace_req_arb.io.in(mainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
+  replacePipe.io.pipe_req               <> replace_req_arb.io.out
+
+  missUnit.io.release_resp <> replacePipe.io.pipe_resp
 
   
   (0 until PortNumber).map{i => 
