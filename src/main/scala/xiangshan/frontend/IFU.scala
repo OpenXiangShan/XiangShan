@@ -177,6 +177,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
   val f1_pc                 = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + (i * 2).U))
+  val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
+                                  else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
   /** Fetch Stage 2  */
   val icacheRespAllValid = WireInit(false.B)
@@ -207,12 +209,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_cache_response_data = ResultHoldBypass(valid = f2_icache_all_resp_wire, data = VecInit(fromICache.map(_.bits.readData)))
 
-  val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
 
   val f2_pc           = RegEnable(next = f1_pc, enable = f1_fire)
+  val f2_cut_ptr      = RegEnable(next = f1_cut_ptr, enable = f1_fire)
 
 
   def isNextLine(pc: UInt, startAddr: UInt) = {
@@ -234,31 +236,26 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo
 
-  def cut(cacheline: UInt, start: UInt) : Vec[UInt] ={
+  def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
     if(HasCExtension){
       val result   = Wire(Vec(PredictWidth + 1, UInt(16.W)))
       val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 2, UInt(16.W)))
-      val startPtr = Cat(0.U(1.W), start(blockOffBits-1, 1))
       (0 until PredictWidth + 1).foreach( i =>
-        result(i) := dataVec(startPtr + i.U)
+        result(i) := dataVec(cutPtr(i))
       )
       result
     } else {
       val result   = Wire(Vec(PredictWidth, UInt(32.W)) )
       val dataVec  = cacheline.asTypeOf(Vec(blockBytes * 2/ 4, UInt(32.W)))
-      val startPtr = Cat(0.U(1.W), start(blockOffBits-1, 2))
       (0 until PredictWidth).foreach( i =>
-        result(i) := dataVec(startPtr + i.U)
+        result(i) := dataVec(cutPtr(i))
       )
       result
     }
   }
 
-//  val preDecoder      = Module(new PreDecode)
-//  val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)
-//  val predecodeOutValid = WireInit(false.B)
-
-  val f2_cut_data = cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_ftq_req.startAddr )
+  val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
+  val f2_cut_data = cut( Cat(f2_datas.map(cacheline => cacheline.asUInt ).reverse).asUInt, f2_cut_ptr )
 
   //** predecoder   **//
   preDecoderIn.data := f2_cut_data
@@ -497,14 +494,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_instr_range    = RegNext(io.toIbuffer.bits.enqEnable)
   val wb_pc             = RegNext(f3_pc)
   val wb_pd             = RegNext(f3_pd)
-//  when(backend_redirect)                                            {wb_valid := false.B}
-//  .elsewhen(f3_valid && !backend_redirect && !f3_req_is_mmio)       {wb_valid := true.B }
-//  .elsewhen(wb_valid)                                               {wb_valid := false.B}
-
-//  when(backend_redirect)                              {wb_valid  := false.B}
-//  .elsewhen(f3_valid && !f3_flush && !f3_req_is_mmio) {wb_valid  := true.B}
-//  .elsewhen(wb_valid)                                 {wb_valid  := false.B}
-
 
 
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
