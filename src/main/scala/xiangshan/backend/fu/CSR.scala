@@ -502,6 +502,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(XLEN - 2, 36) | // WPRI
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
+    GenMask(16, 15)       | // XS is ready-only
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
     GenMask(2)              // WPRI
