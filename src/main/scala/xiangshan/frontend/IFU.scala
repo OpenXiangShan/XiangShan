@@ -153,9 +153,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   fromFtq.req.ready := toICache(0).ready && toICache(1).ready && f2_ready && GTimer() > 500.U
 
-  toICache(0).valid       := fromFtq.req.fire() && !f0_flush
+  toICache(0).valid       := fromFtq.req.valid && !f0_flush
   toICache(0).bits.vaddr  := fromFtq.req.bits.startAddr
-  toICache(1).valid       := fromFtq.req.fire() && f0_doubleLine && !f0_flush
+  toICache(1).valid       := fromFtq.req.valid && f0_doubleLine && !f0_flush
   toICache(1).bits.vaddr  := fromFtq.req.bits.fallThruAddr
 
 

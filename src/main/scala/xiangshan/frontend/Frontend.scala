@@ -23,7 +23,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.frontend.icache._
-import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbPtwIO,TLB,TlbResp}
 import xiangshan.backend.fu.{HasExceptionNO, PMP, PMPChecker, PFEvent}
 
 

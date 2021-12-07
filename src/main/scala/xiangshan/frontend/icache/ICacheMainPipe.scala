@@ -121,8 +121,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_only_fisrt  = fromIFU(0).valid && !fromIFU(0).valid
   val s0_double_line = fromIFU(0).valid && fromIFU(1).valid
 
-  s0_fire        := s0_valid && s1_ready
-
   //fetch: send addr to Meta/TLB and Data simultaneously
   val fetch_req = List(toMeta, toData)
   for(i <- 0 until 2) {
@@ -130,8 +128,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     fetch_req(i).bits.isDoubleLine := s0_double_line
     fetch_req(i).bits.vSetIdx      := s0_req_vsetIdx
   }
-  //TODO: fix GTimer() condition
-  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready && s1_ready && GTimer() > 500.U)
 
   toITLB(0).valid         := s0_valid
   toITLB(0).bits.size     := 3.U // TODO: fix the size
@@ -149,6 +145,33 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port.bits.debug.isFirstIssue  := DontCare
   }
 
+  val t_idle :: t_miss :: t_fixed :: Nil = Enum(3)
+  val tlb_status = VecInit(Seq.fill(PortNumber)(RegInit(t_idle)))
+  dontTouch(tlb_status)
+
+  val tlb_miss_vec = VecInit((0 until PortNumber).map( i => toITLB(i).valid && fromITLB(i).bits.miss ))
+  val tlb_all_resp = Wire(Vec(2, Bool()))//VecInit((0 until PortNumber).map( i => !fromITLB(i).bits.miss  )).reduce(_&&_)
+  tlb_all_resp(0) := !fromITLB(0).bits.miss
+  tlb_all_resp(1) := !fromITLB(1).bits.miss || !s0_double_line
+  // val tlb_miss_slot = Seq.fill(PortNumber)(RegInit(0.U.asTypeOf(new TlbResp)))
+
+  (0 until PortNumber).map { i => 
+    when(tlb_miss_vec(i)){
+      tlb_status(i) := t_miss  
+    }
+
+    when(tlb_status(i) === t_miss && !fromITLB(i).bits.miss){
+      tlb_status(i) := t_idle  
+    }
+  }
+
+  s0_fire        := s0_valid && s1_ready && tlb_all_resp
+
+  //TODO: fix GTimer() condition
+  fromIFU.map(_.ready := fetch_req(0).ready && fetch_req(1).ready  && 
+                         tlb_all_resp && 
+                         s1_ready && GTimer() > 500.U )
+                         
 
 //  XSPerfAccumulate("ifu_bubble_ftq_not_valid",   !f0_valid )
 //  XSPerfAccumulate("ifu_bubble_pipe_stall",    f0_valid && fetch_req(0).ready && fetch_req(1).ready && !s1_ready )
@@ -179,8 +202,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   fromITLB.map(_.ready := true.B)
 
-  val tlbRespValid  = fromITLB.map(_.valid)
-  val s1_tlb_all_resp_wire       =  tlbRespValid(0)  && (tlbRespValid(1) || !s1_double_line) //TODO: if there is another iTLB req source, here should have ID/address compare
+  // val tlbRespValid  = fromITLB.map(_.valid)
+  val s1_tlb_all_resp_wire       =  RegNext(s0_fire) //TODO: if there is another iTLB req source, here should have ID/address compare
   val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
   when(s1_valid && s1_tlb_all_resp_wire && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
@@ -300,7 +323,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val port_miss_fix  = VecInit(Seq(fromMSHR(0).fire() && !s2_port_hit(0),   fromMSHR(1).fire() && s2_double_line && !s2_port_hit(1) ))
 
-  class MissSlot(implicit p: Parameters) extends  XSBundle with HasICacheParameters {
+  class MissSlot(implicit p: Parameters) extends  ICacheBundle {
     val m_vSetIdx   = UInt(idxBits.W)
     val m_pTag      = UInt(tagBits.W)
     val m_data      = UInt(blockBits.W)
