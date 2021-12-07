@@ -140,6 +140,8 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   val r2_release_data = Mux1H(r2_req.waymask, r2_data_cacheline)
   val r2_release_addr = RegEnable(next = release_addr, enable = r1_fire)
 
+  val release_need_send = r2_valid &&  r2_req.isRelease && r2_release_coh.isValid()
+
   val (release_has_dirty_data, release_shrink_param, release_new_coh) = r2_release_coh.onCacheControl(M_FLUSH)
 
   /*** to Release Unit ***/
@@ -157,7 +159,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.meta_write.bits.generate(tag = r2_probe_hit_ptag, coh = probe_new_coh, idx = r2_req.vidx, waymask = r2_probe_hit_vec.asUInt, bankIdx = r2_req.vidx(0))
 
   //NToN Release should not been send to slave
-  io.release_req.valid          := r2_valid && (r2_req.isProbe || (r2_req.isRelease && r2_release_coh.isValid()))
+  io.release_req.valid          := r2_valid && (r2_req.isProbe || release_need_send)
   io.release_req.bits.addr      := r2_paddr
   io.release_req.bits.param     := r2_param
   io.release_req.bits.voluntary := r2_req.voluntary
@@ -168,7 +170,7 @@ class ReplacePipe(implicit p: Parameters) extends ICacheModule{
   io.release_req.bits.vidx      := DontCare
 
   //response to MissQueue
-  io.pipe_resp.valid := r2_fire && !r2_req.isProbe
+  io.pipe_resp.valid := r2_fire && r2_req.isRelease
   io.pipe_resp.bits  := r2_req.id
 
   io.status.r2_set.valid := r2_valid
