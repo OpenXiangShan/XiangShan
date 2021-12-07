@@ -25,7 +25,7 @@ import chisel3.experimental.chiselName
 import xiangshan.cache.mmu.CAMTemplate
 
 trait MicroBTBParams extends HasBPUParameter {
-  val numWays = 1024
+  val numWays = 512
   val tagSize = 20
   // val lowerBitSize = 20
   val untaggedBits = log2Ceil(numWays) + instOffsetBits

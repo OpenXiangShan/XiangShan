@@ -29,7 +29,7 @@ import os.copy
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
-  val numEntries = 4096
+  val numEntries = 2048
   val numWays    = 4
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20
