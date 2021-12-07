@@ -137,6 +137,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         val version = Input(UInt(4.W))
       }
       val debug_reset = Output(Bool())
+      val cacheable_check = new TLPMAIO()
     })
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -152,6 +153,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.pll0_lock := io.pll0_lock
+    misc.module.cacheable_check <> io.cacheable_check
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 

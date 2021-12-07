@@ -527,10 +527,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val probeShouldBlock = VecInit(hasVictim.zip(victimSetSeq).map{case(valid, idx) =>  valid && probeReqValid && idx === probeReqVidx }).reduce(_||_)
 
-  when(probeShouldBlock){
-    probeQueue.io.pipe_req.ready := false.B
-  }
-
  val releaseReqValid = missUnit.io.release_req.valid
  val releaseReqVidx  = missUnit.io.release_req.bits.vidx
 
@@ -545,16 +541,21 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   ))
 
   val releaseShouldBlock = VecInit(hasConflict.zip(conflictIdx).map{case(valid, idx) =>  valid && releaseReqValid && idx === releaseReqVidx }).reduce(_||_)
-  
-  when(releaseShouldBlock){
-    missUnit.io.release_req.ready := false.B
-  }
 
   replace_req_arb.io.in(ReplacePipeKey) <> probeQueue.io.pipe_req
   replace_req_arb.io.in(ReplacePipeKey).valid := probeQueue.io.pipe_req.valid && !probeShouldBlock
   replace_req_arb.io.in(mainPipeKey)   <> missUnit.io.release_req
   replace_req_arb.io.in(mainPipeKey).valid := missUnit.io.release_req.valid && !releaseShouldBlock
   replacePipe.io.pipe_req               <> replace_req_arb.io.out
+
+  when(releaseShouldBlock){
+    missUnit.io.release_req.ready := false.B
+  }
+
+  when(probeShouldBlock){
+    probeQueue.io.pipe_req.ready := false.B
+  }
+
 
   missUnit.io.release_resp <> replacePipe.io.pipe_resp
 

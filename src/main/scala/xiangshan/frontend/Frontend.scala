@@ -81,10 +81,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csrCtrl.distribute_csr
   for (i <- pmp_check.indices) {
-    pmp_check(i).env.pmp  := pmp.io.pmp
-    pmp_check(i).env.pma  := pmp.io.pma
-    pmp_check(i).env.mode := tlbCsr.priv.imode
-    pmp_check(i).req <> icache.io.pmp(i).req
+    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, icache.io.pmp(i).req)
     icache.io.pmp(i).resp <> pmp_check(i).resp
   }
 
@@ -109,7 +106,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //IFU-ICache
   for(i <- 0 until 2){
     ifu.io.icacheInter(i).req       <>      icache.io.fetch(i).req
-    icache.io.fetch(i).req <> ifu.io.icacheInter(i).req 
+    icache.io.fetch(i).req <> ifu.io.icacheInter(i).req
     ifu.io.icacheInter(i).resp <> icache.io.fetch(i).resp
   }
   icache.io.stop := ifu.io.icacheStop
@@ -156,7 +153,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   }
 
   val hpmEvents = ifu.perfinfo.perfEvents.perf_events ++ ibuffer.perfinfo.perfEvents.perf_events ++
-                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++ 
+                  icache.perfinfo.perfEvents.perf_events ++ ftq.perfinfo.perfEvents.perf_events ++
                   bpu.perfinfo.perfEvents.perf_events
   val perf_length = hpmEvents.length
   val csrevents = pfevent.io.hpmevent.slice(0,8)
