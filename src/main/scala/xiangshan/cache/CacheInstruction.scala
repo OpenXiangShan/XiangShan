@@ -143,10 +143,10 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   })
 
   // CSRCacheOpDecoder state
-  val w_csr_op_req = RegInit(true.B) // waiting for csr "CACHE_OP" being write  
-  val w_cache_op_resp = RegInit(false.B) // waiting for dcache to finish dcache op
-  val s_csr_op_resp_data = RegInit(false.B) // ready to write data readed from cache back to csr  
-  val s_csr_op_resp_finish = RegInit(false.B) // ready to write "OP_FINISH" csr 
+  val wait_csr_op_req = RegInit(true.B) // waiting for csr "CACHE_OP" being write  
+  val wait_cache_op_resp = RegInit(false.B) // waiting for dcache to finish dcache op
+  val schedule_csr_op_resp_data = RegInit(false.B) // ready to write data readed from cache back to csr  
+  val schedule_csr_op_resp_finish = RegInit(false.B) // ready to write "OP_FINISH" csr 
   // val cache_op_resp_timer = RegInit(0.U(4.W))
   val data_transfer_finished = WireInit(false.B)
   val data_transfer_cnt = RegInit(0.U(log2Up(maxDataRowSupport).W))
@@ -169,7 +169,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
       cacheop_csr_is_being_write(csr_name)
     ){
       req_field := io.csr.distribute_csr.w.bits.data
-      assert(w_csr_op_req)
+      assert(wait_csr_op_req)
     }
   }
 
@@ -193,42 +193,42 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   val cache_op_start = WireInit(cacheop_csr_is_being_write("CACHE_OP") && id.U === translated_cache_req.level)
   when(cache_op_start) {
-    w_csr_op_req := false.B
+    wait_csr_op_req := false.B
   }
 
   // Send cache op to cache
   io.cache.req.valid := RegNext(cache_op_start)
   io.cache.req.bits := translated_cache_req
   when(io.cache.req.fire()){
-    w_cache_op_resp := true.B
+    wait_cache_op_resp := true.B
   }
 
   // Receive cache op resp from cache
   val raw_cache_resp = Reg(new CacheCtrlRespInfo)
   when(io.cache.resp.fire()){
-    w_cache_op_resp := false.B
+    wait_cache_op_resp := false.B
     raw_cache_resp := io.cache.resp.bits
     when(CacheInstrucion.isReadOp(translated_cache_req.opCode)){
-      s_csr_op_resp_data := true.B
-      s_csr_op_resp_finish := false.B
+      schedule_csr_op_resp_data := true.B
+      schedule_csr_op_resp_finish := false.B
       assert(data_transfer_cnt === 0.U)
     }.otherwise{
-      s_csr_op_resp_data := false.B
-      s_csr_op_resp_finish := true.B
+      schedule_csr_op_resp_data := false.B
+      schedule_csr_op_resp_finish := true.B
     }
   }
 
   // Translate cache op resp to CSR write, send it back to CSR
-  when(io.csr.update.w.fire() && s_csr_op_resp_data && data_transfer_finished){
-    s_csr_op_resp_data := false.B
-    s_csr_op_resp_finish := true.B
+  when(io.csr.update.w.fire() && schedule_csr_op_resp_data && data_transfer_finished){
+    schedule_csr_op_resp_data := false.B
+    schedule_csr_op_resp_finish := true.B
   }
-  when(io.csr.update.w.fire() && s_csr_op_resp_finish){
-    s_csr_op_resp_finish := false.B
-    w_csr_op_req := true.B
+  when(io.csr.update.w.fire() && schedule_csr_op_resp_finish){
+    schedule_csr_op_resp_finish := false.B
+    wait_csr_op_req := true.B
   }
 
-  io.csr.update.w.valid := s_csr_op_resp_data || s_csr_op_resp_finish
+  io.csr.update.w.valid := schedule_csr_op_resp_data || schedule_csr_op_resp_finish
   io.csr.update.w.bits := DontCare
 
   val isReadTagECC = WireInit(CacheInstrucion.isReadTagECC(translated_cache_req.opCode))
@@ -236,7 +236,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   val isReadTag = WireInit(CacheInstrucion.isReadTag(translated_cache_req.opCode))
   val isReadData = WireInit(CacheInstrucion.isReadData(translated_cache_req.opCode))
 
-  when(s_csr_op_resp_data){
+  when(schedule_csr_op_resp_data){
     io.csr.update.w.bits.addr := Mux1H(List(
       isReadTagECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_TAG_ECC")("offset").toInt + Scachebase).U,
       isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_BANK_NUM")("offset").toInt + Scachebase).U,
@@ -249,14 +249,14 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
       isReadTag -> raw_cache_resp.read_tag_low,
       isReadData -> raw_cache_resp.read_data_vec(data_transfer_cnt),
     ))
-    data_transfer_finished := Mux(isReadData(translated_cache_req.opCode),
+    data_transfer_finished := Mux(isReadData,
       data_transfer_cnt === (maxDataRowSupport-1).U,
       true.B
     )
     data_transfer_cnt := data_transfer_cnt + 1.U
   }
 
-  when(s_csr_op_resp_finish){
+  when(schedule_csr_op_resp_finish){
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("OP_FINISH")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := CacheInstrucion.COP_RESULT_CODE_OK
     data_transfer_cnt := 0.U
