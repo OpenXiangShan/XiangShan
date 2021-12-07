@@ -168,7 +168,7 @@ class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4,
   io.w.req.ready := array.io.w.req.ready
 
   val raddr = io.r.req.bits.setIdx >> log2Ceil(width)
-  val ridx = RegNext(io.r.req.bits.setIdx(log2Ceil(width)-1, 0))
+  val ridx = RegNext(if (width != 1) io.r.req.bits.setIdx(log2Ceil(width)-1, 0) else 0.U(1.W))
   val ren  = io.r.req.valid
 
   array.io.r.req.valid := ren
@@ -178,7 +178,7 @@ class FoldedSRAMTemplate[T <: Data](gen: T, set: Int, width: Int = 4,
   val wen = io.w.req.valid
   val wdata = VecInit(Seq.fill(width)(io.w.req.bits.data(0)))
   val waddr = io.w.req.bits.setIdx >> log2Ceil(width)
-  val wmask = UIntToOH(io.w.req.bits.setIdx(log2Ceil(width)-1, 0))
+  val wmask = UIntToOH(if (width != 1) io.w.req.bits.setIdx(log2Ceil(width)-1, 0) else 1.U(1.W))
 
   array.io.w.apply(wen, wdata, waddr, wmask)
 }

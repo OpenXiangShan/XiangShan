@@ -36,7 +36,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
   val ITTageNTables = ITTageTableInfos.size // Number of tage tables
   val UBitPeriod = 2048
   val ITTageCtrBits = 2
-  val uFoldedWidth = 8
+  val uFoldedWidth = 16
   val TickWidth = 8
   def ctr_null(ctr: UInt, ctrBits: Int = ITTageCtrBits) = {
     ctr === 0.U
@@ -149,10 +149,22 @@ class ITTageTable
 )(implicit p: Parameters)
   extends ITTageModule with HasFoldedHistory {
   val io = IO(new Bundle() {
-    val req = Input(Valid(new ITTageReq))
+    val req = Flipped(DecoupledIO(new ITTageReq))
     val resp = Output(Valid(new ITTageResp))
     val update = Input(new ITTageUpdate)
   })
+
+  val SRAM_SIZE=128
+  val nBanks = 2
+  val bankSize = nRows / nBanks
+  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
+
+  if (bankSize < SRAM_SIZE) {
+    println(f"warning: ittage table $tableIdx has small sram depth of $bankSize")
+  }
+  val bankIdxWidth = log2Ceil(nBanks)
+  def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth-1, 0) === _.U))
+  def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
 
   // override val debug = true
   // bypass entries for tage update
@@ -186,11 +198,13 @@ class ITTageTable
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, ITTageCtrBits, taken)
 
   class ITTageEntry() extends ITTageBundle {
-    val valid = Bool()
+    // val valid = Bool()
     val tag = UInt(tagLen.W)
     val ctr = UInt(ITTageCtrBits.W)
     val target = UInt(VAddrBits.W)
   }
+
+  val validArray = RegInit(0.U(nRows.W))
 
   // Why need add instOffsetBits?
   val ittageEntrySz = 1 + tagLen + ITTageCtrBits + VAddrBits
@@ -204,60 +218,58 @@ class ITTageTable
 
   // val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.hist, io.req.bits.phist)
   val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
-  val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.valid), RegEnable(s0_tag, io.req.valid))
+  val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
+  val s0_bank_req_1h = get_bank_mask(s0_idx)
+  val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
+  
+  val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
+  // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
+  val table_banks = Seq.fill(nBanks)(
+    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=false, holdRead=true, singlePort=true)))
 
-  val us = Module(new SyncDataModuleTemplate(Bool(), nRows, 1, 1))
-  val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-
-  table.io.r.req.valid := io.req.valid
-  table.io.r.req.bits.setIdx := s0_idx
+  for (b <- 0 until nBanks) {
+    table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
+    table_banks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+  }
 
   us.io.raddr(0) := s0_idx
 
-  val s1_table_r = table.io.r.resp.data(0)
+  val table_banks_r = table_banks.map(_.io.r.resp.data(0))
 
-
-  val s1_req_rhit = s1_table_r.valid && s1_table_r.tag === s1_tag
+  val resp_selected = Mux1H(s1_bank_req_1h, table_banks_r)
+  val s1_req_rhit = validArray(s1_idx) && resp_selected.tag === s1_tag
 
   io.resp.valid := (if (tagLen != 0) s1_req_rhit else true.B) // && s1_mask(b)
-  io.resp.bits.ctr := s1_table_r.ctr
+  io.resp.bits.ctr := resp_selected.ctr
   io.resp.bits.u := us.io.rdata(0)
-  io.resp.bits.target := s1_table_r.target
+  io.resp.bits.target := resp_selected.target
 
-  // TODO: reset all us at once?
-  val doing_reset_u = RegInit(true.B)
-  val resetRow = RegInit(0.U(log2Ceil(nRows).W))
-  resetRow := resetRow + doing_reset_u
-  when (io.update.reset_u) {
-    doing_reset_u := true.B
-  }.elsewhen (resetRow === (nRows-1).U) {
-    doing_reset_u := false.B
-  }
 
 
   // Use fetchpc to compute hash
   // val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist, io.update.phist)
   val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
+  val update_req_bank_1h = get_bank_mask(update_idx)
+  val update_idx_in_bank = get_bank_idx(update_idx)
   val update_target = io.update.target
-
   val update_wdata = Wire(new ITTageEntry)
+  
+  for (b <- 0 until nBanks) {
+    table_banks(b).io.w.apply(
+      valid   = io.update.valid && update_req_bank_1h(b),
+      data    = update_wdata,
+      setIdx  = update_idx_in_bank,
+      waymask = true.B
+    )
+  }
 
-  table.io.w.apply(
-    valid = io.update.valid,
-    data = update_wdata,
-    setIdx = update_idx,
-    waymask = io.update.valid
-  )
+  val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
+  io.req.ready := !bank_conflict
+  XSPerfAccumulate(f"ittage_table_bank_conflict", bank_conflict)
 
-  val update_u = io.update.u
-
-  val u_wen = io.update.uValid || doing_reset_u
-  val u_waddr = Mux(doing_reset_u, resetRow, update_idx)
-  val u_wdata = Mux(doing_reset_u, false.B,  update_u)
-
-  us.io.wen(0) := u_wen
-  us.io.waddr(0) := u_waddr
-  us.io.wdata(0) := u_wdata
+  us.io.wen := io.update.uValid
+  us.io.waddr := update_idx
+  us.io.wdata := io.update.u
 
   val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows), tagWidth=tagLen))
 
@@ -268,21 +280,30 @@ class ITTageTable
 
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
-  update_wdata.valid := true.B
   update_wdata.tag   := update_tag
   // only when ctr is null
   update_wdata.target := Mux(ctr_null(old_ctr), update_target, io.update.old_target)
+  
+  val newValidArray = VecInit(validArray.asBools)
+  when (io.update.valid) {
+    newValidArray(update_idx) := true.B
+    validArray := newValidArray.asUInt
+  }
 
+  // reset all us in 32 cycles
+  us.io.resetEn.map(_ := io.update.reset_u)
+
+  XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
 
   if (BPUDebug && debug) {
     val u = io.update
     val idx = s0_idx
     val tag = s0_tag
-    XSDebug(io.req.valid,
+    XSDebug(io.req.fire,
       p"ITTageTableReq: pc=0x${Hexadecimal(io.req.bits.pc)}, " +
       p"idx=$idx, tag=$tag\n")
-    XSDebug(RegNext(io.req.valid) && s1_req_rhit,
+    XSDebug(RegNext(io.req.fire) && s1_req_rhit,
       p"ITTageTableResp: idx=$s1_idx, hit:${s1_req_rhit}, " +
       p"ctr:${io.resp.bits.ctr}, u:${io.resp.bits.u}, tar:${Hexadecimal(io.resp.bits.target)}\n")
     XSDebug(io.update.valid,
@@ -293,7 +314,7 @@ class ITTageTable
       p"update ITTAGE Table: writing tag:${update_tag}, " +
       p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target)}" +
       p" in idx $update_idx\n")
-    XSDebug(RegNext(io.req.valid) && !s1_req_rhit, "TageTableResp: no hits!\n")
+    XSDebug(RegNext(io.req.fire) && !s1_req_rhit, "TageTableResp: no hits!\n")
 
 
     // ------------------------------Debug-------------------------------------
@@ -342,11 +363,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
-      // t.io.req.valid := io.pc.valid
-      // t.io.req.bits.pc := io.pc.bits
-      // t.io.req.bits.hist := io.hist
-      // t.io.req.bits.mask := io.inMask
-
       t.io.req.valid := io.s0_fire
       t.io.req.bits.pc := s0_pc
       t.io.req.bits.folded_hist := io.in.bits.folded_hist
@@ -620,6 +636,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.folded_hist := RegNext(updateFhist)
   }
 
+  // all should be ready for req
+  io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
+  XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
   // Debug and perf info
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire)
