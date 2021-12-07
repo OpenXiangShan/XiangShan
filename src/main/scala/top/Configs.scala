@@ -42,7 +42,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
-  case EnableJtag => false.B
+  case EnableJtag => true.B
 })
 
 // Synthesizable minimal XiangShan
