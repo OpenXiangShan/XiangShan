@@ -24,7 +24,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.fu.FuConfig
-import xiangshan.mem.{SqPtr, StoreDataBundle, MemWaitUpdateReq}
+import xiangshan.mem.{SqPtr, MemWaitUpdateReq}
 import xiangshan.backend.fu.fpu.{FMAMidResult, FMAMidResultIO}
 
 import scala.math.max
@@ -179,9 +179,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (io.checkwait.isDefined) {
      rs.foreach(_.io.checkwait.get <> io.checkwait.get)
     }
-    if (io.store.isDefined) {
-      io.store.get.stData <> rs.flatMap(_.io.store.get.stData)
-    }
     if (io.load.isDefined) {
       io.load.get.fastMatch <> rs.flatMap(_.io.load.get.fastMatch)
     }
@@ -230,9 +227,6 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val stIssuePtr = Input(new SqPtr())
     val stIssue = Flipped(Vec(exuParameters.StuCnt, ValidIO(new ExuInput)))
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
-  }) else None
-  val store = if (params.isStore) Some(new Bundle {
-    val stData = Vec(params.numDeq, ValidIO(new StoreDataBundle))
   }) else None
   val load = if (params.isLoad) Some(new Bundle() {
     val fastMatch = Vec(params.numDeq, Output(UInt(exuParameters.LduCnt.W)))
@@ -632,12 +626,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       for (j <- 0 until params.numFastWakeup) {
         XSPerfAccumulate(s"source_bypass_${j}_$i", s1_out(i).fire() && wakeupBypassMask(j).asUInt().orR())
       }
-    }
-
-    if (io.store.isDefined) {
-      io.store.get.stData(i).valid := s2_deq(i).valid
-      io.store.get.stData(i).bits.data := s2_deq(i).bits.src(1)
-      io.store.get.stData(i).bits.uop := s2_deq(i).bits.uop
     }
   }
 

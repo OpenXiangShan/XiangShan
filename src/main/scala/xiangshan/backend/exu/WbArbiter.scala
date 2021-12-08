@@ -23,6 +23,7 @@ import difftest.{DifftestFpWriteback, DifftestIntWriteback}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils.{XSPerfAccumulate, XSPerfHistogram}
 import xiangshan._
+import xiangshan.backend.HasExuWbHelper
 
 class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
@@ -199,7 +200,7 @@ class WbArbiterWrapper(
   exuConfigs: Seq[ExuConfig],
   numIntOut: Int,
   numFpOut: Int
-)(implicit p: Parameters) extends LazyModule {
+)(implicit p: Parameters) extends LazyModule with HasWritebackSource {
   val numInPorts = exuConfigs.length
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -216,13 +217,47 @@ class WbArbiterWrapper(
 
   val numOutPorts = intArbiter.numOutPorts + fpArbiter.numOutPorts
 
-  lazy val module = new LazyModuleImp(this) with HasXSParameter {
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    // To optimize write ports, we can remove the duplicate ports.
+    val duplicatePorts = fpWbPorts.filter(cfgs => cfgs.length == 1 && intWbPorts.contains(cfgs))
+    val duplicateSource = exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.contains(Seq(cfg._1))).map(_._2)
+    val duplicateSink = intWbPorts.zipWithIndex.filter(cfgs => duplicatePorts.contains(cfgs._1)).map(_._2)
+    require(duplicateSource.length == duplicatePorts.length)
+    require(duplicateSink.length == duplicatePorts.length)
+    val effectiveConfigs = intWbPorts ++ fpWbPorts.filterNot(cfg => duplicatePorts.contains(cfg))
+    val simpleConfigs = exuConfigs.filter(cfg => !cfg.writeFpRf && !cfg.writeIntRf).map(p => Seq(p))
+    Seq(new WritebackSourceParams(effectiveConfigs ++ simpleConfigs))
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
+
+  lazy val module = new LazyModuleImp(this)
+    with HasXSParameter with HasWritebackSourceImp with HasExuWbHelper {
+
     val io = IO(new Bundle() {
       val hartId = Input(UInt(8.W))
       val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))
     })
+
+    override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
+      // To optimize write ports, we can remove the duplicate ports.
+      val duplicatePorts = fpWbPorts.zipWithIndex.filter(cfgs => cfgs._1.length == 1 && intWbPorts.contains(cfgs._1))
+      val duplicateSource = exuConfigs.zipWithIndex.filter(cfg => duplicatePorts.map(_._1).contains(Seq(cfg._1))).map(_._2)
+      val duplicateSink = intWbPorts.zipWithIndex.filter(cfgs => duplicatePorts.map(_._1).contains(cfgs._1)).map(_._2)
+      require(duplicateSource.length == duplicatePorts.length)
+      require(duplicateSink.length == duplicatePorts.length)
+      // effectivePorts: distinct write-back ports that write to the regfile
+      val effectivePorts = io.out.zipWithIndex.filterNot(i => duplicatePorts.map(_._2).contains(i._2 - numIntWbPorts))
+      // simplePorts: write-back ports that don't write to the regfile but update the ROB states
+      val simplePorts = exuConfigs.zip(io.in).filter(cfg => !cfg._1.writeFpRf && !cfg._1.writeIntRf)
+      val simpleWriteback = simplePorts.map(_._2).map(decoupledIOToValidIO)
+      val writeback = WireInit(VecInit(effectivePorts.map(_._1) ++ simpleWriteback))
+      for ((sink, source) <- duplicateSink.zip(duplicateSource)) {
+        writeback(sink).valid := io.in(source).valid
+      }
+      Some(Seq(writeback))
+    }
 
     // ready is set to true.B as default (to be override later)
     io.in.foreach(_.ready := true.B)
@@ -267,4 +302,41 @@ class WbArbiterWrapper(
 
     io.out <> intArbiter.module.io.out ++ fpArbiter.module.io.out
   }
+}
+
+class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModule
+  with HasWritebackSource with HasWritebackSink {
+  override def generateWritebackIO(
+    thisMod: Option[HasWritebackSource],
+    thisModImp: Option[HasWritebackSourceImp]
+  ): Unit = {
+    require(writebackSinks.length == 1)
+    val sink = writebackSinks.head
+    val sourceMod = writebackSinksMod(thisMod, thisModImp).head
+    module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
+  }
+
+  lazy val module = new LazyModuleImp(this) with HasWritebackSourceImp {
+    val io = IO(new Bundle {
+      val redirect = Flipped(ValidIO(new Redirect))
+      val in = Vec(configs.length, Input(Decoupled(new ExuOutput)))
+      val out = Vec(configs.length, ValidIO(new ExuOutput))
+    })
+
+    for (((out, in), config) <- io.out.zip(io.in).zip(configs)) {
+      out.valid := in.fire
+      out.bits := in.bits
+      if (config.hasFastUopOut) {
+        out.valid := RegNext(in.fire && !in.bits.uop.robIdx.needFlush(io.redirect))
+        out.bits.uop := RegNext(in.bits.uop)
+      }
+    }
+
+    override def writebackSource: Option[Seq[Seq[ValidIO[ExuOutput]]]] = Some(Seq(io.out))
+  }
+
+  override val writebackSourceParams: Seq[WritebackSourceParams] = {
+    Seq(new WritebackSourceParams(configs.map(cfg => Seq(cfg))))
+  }
+  override lazy val writebackSourceImp: HasWritebackSourceImp = module
 }

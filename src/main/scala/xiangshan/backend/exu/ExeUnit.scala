@@ -23,7 +23,6 @@ import chisel3.experimental.hierarchy.{Definition, instantiable, public}
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
 
@@ -92,17 +91,6 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
   if (fmaModules.nonEmpty) {
     require(fmaModules.length == 1)
     fmaModules.head.midResult <> fmaMid.get
-  }
-
-  if (config.fuConfigs.contains(stdCfg)) {
-    val std = functionUnits.collectFirst {
-      case s: Std => s
-    }.get
-    stData.get.valid := std.io.out.valid
-    stData.get.bits.uop := std.io.out.bits.uop
-    stData.get.bits.data := std.io.out.bits.data
-    io.out.valid := false.B
-    io.out.bits := DontCare
   }
 
   if (config.readIntRf) {
