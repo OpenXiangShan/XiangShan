@@ -198,6 +198,13 @@ trait HasSC extends HasSCParameter { this: Tage =>
   
     val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
     val useThresholds = VecInit(scThresholds map (_.thres))
+    def belowThreshold(sum: SInt, threshold: UInt) = {
+      def sign(x: SInt) = x(x.getWidth-1)
+      def pos(x: SInt) = !sign(x)
+      def neg(x: SInt) = sign(x)
+      val signedThres = threshold.zext
+      sum <= signedThres && pos(sum) || sum >= -signedThres && neg(sum)
+    }
     val updateThresholds = VecInit(useThresholds map (t => (t << 3) +& 21.U))
   
     val s1_scResps = MixedVecInit(bank_scTables.map(b => VecInit(b.map(t => t.io.resp))))
@@ -237,13 +244,11 @@ trait HasSC extends HasSCParameter { this: Tage =>
       val providerCtr = s1_providerCtrs(w)
       val s1_pvdrCtrCentered = getPvdrCentered(providerCtr)
       val s1_totalSums = VecInit(s1_scTableSums.map(_  +& s1_pvdrCtrCentered))
-      val s1_sumAbs = VecInit(s1_totalSums.map(_.abs.asUInt))
-      val s1_sumBelowThresholds = VecInit(s1_sumAbs map (_ <= useThresholds(w)))
+      val s1_sumBelowThresholds = VecInit((s1_totalSums zip useThresholds) map { case (sum, thres) => belowThreshold(sum, thres)})
       val s1_scPreds = VecInit(s1_totalSums.map (_ >= 0.S))
-  
+      
       val s2_sumBelowThresholds = RegEnable(s1_sumBelowThresholds, io.s1_fire)
       val s2_scPreds = RegEnable(s1_scPreds, io.s1_fire)
-      val s2_sumAbs = RegEnable(s1_sumAbs, io.s1_fire)
   
       val s2_scCtrs = RegEnable(VecInit(s1_scResps(w).map(r => r.ctr(s1_tageTakens(w).asUInt))), io.s1_fire)
       val s2_chooseBit = s2_tageTakens(w)
@@ -258,7 +263,6 @@ trait HasSC extends HasSCParameter { this: Tage =>
         s2_conf(w) := !s2_sumBelowThresholds(s2_chooseBit)
         // Use prediction from Statistical Corrector
         XSDebug(p"---------tage_bank_${w} provided so that sc used---------\n")
-        XSDebug(p"scCtrs:$s2_scCtrs, prdrCtr:${s2_providerCtrs(w)}, sumAbs:$s2_sumAbs, tageTaken:${s2_chooseBit}\n")
         when (!s2_sumBelowThresholds(s2_chooseBit)) {
           val pred = s2_scPreds(s2_chooseBit)
           val debug_pc = Cat(debug_pc_s2, w.U, 0.U(instOffsetBits.W))
@@ -280,13 +284,14 @@ trait HasSC extends HasSCParameter { this: Tage =>
         val pvdrCtr = updateTageMeta.providerCtr
         val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
         val sumAbs = sum.abs.asUInt
+        val sumBelowThreshold = belowThreshold(sum, useThresholds(w))
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
   
         update_sc_used(w) := true.B
-        update_unconf(w) := sumAbs < useThresholds(w)
-        update_conf(w) := sumAbs >= useThresholds(w)
+        update_unconf(w) := sumBelowThreshold
+        update_conf(w) := !sumBelowThreshold
         update_agree(w) := scPred === tagePred
         update_disagree(w) := scPred =/= tagePred
         sc_corr_tage_misp(w) := scPred === taken && tagePred =/= taken && update_conf(w)
@@ -300,7 +305,7 @@ trait HasSC extends HasSCParameter { this: Tage =>
         }
   
         val updateThres = updateThresholds(w)
-        when (scPred =/= taken || sumAbs < updateThres) {
+        when (scPred =/= taken || sumBelowThreshold) {
           scUpdateMask(w).foreach(_ := true.B)
           XSDebug(sum < 0.S,
             p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
