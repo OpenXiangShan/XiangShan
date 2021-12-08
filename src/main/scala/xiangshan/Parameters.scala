@@ -70,14 +70,14 @@ case class XSCoreParameters
   BtbWays: Int = 2,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    Seq(( 128*8,    3,    9),
-        ( 128*8,    6,    9),
-        ( 128*8,   10,    9),
-        ( 128*8,   21,    9),
-        ( 128*8,   40,    9),
-        ( 128*8,   80,    9),
-        ( 128*8,  160,    9),
-        ( 128*8,  260,    9)),
+    Seq(( 128*8,    2,    9),
+        ( 128*8,    8,    9),
+        ( 128*8,   12,    9),
+        ( 128*8,   13,    9),
+        ( 128*8,   28,    9),
+        ( 128*8,   54,    9),
+        ( 128*8,  119,    9),
+        ( 128*8,  256,    9)),
   TageBanks: Int = 2,
   ITTageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //      Sets  Hist   Tag
