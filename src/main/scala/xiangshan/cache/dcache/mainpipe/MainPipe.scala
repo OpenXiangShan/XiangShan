@@ -157,9 +157,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule {
   arbiter(
     in = Seq(
       io.probe_req,
+      io.replace_req,
       store_req,
-      io.atomic_req,
-      io.replace_req
+      io.atomic_req
     ),
     out = req,
     name = Some("main_pipe_req")
