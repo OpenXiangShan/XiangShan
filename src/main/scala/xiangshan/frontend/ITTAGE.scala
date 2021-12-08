@@ -352,7 +352,6 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
   // io.s0_ready := true.B
   io.s1_ready := true.B
   io.s2_ready := true.B
-  io.s3_ready := true.B
 }
 // TODO: check target related logics
 @chiselName
@@ -385,7 +384,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
 
   val s1_tageTaken         = Wire(Bool())
   val s1_tageTarget        = Wire(UInt(VAddrBits.W))
@@ -417,7 +415,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val resp_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
 
   io.out.resp := io.in.bits.resp_in(0)
-  io.out.s3_meta := RegEnable(resp_meta.asUInt, io.s2_fire)
+  io.out.last_stage_meta := resp_meta.asUInt
 
   val ftb_hit = io.in.bits.resp_in(0).s2.preds.hit
   val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry

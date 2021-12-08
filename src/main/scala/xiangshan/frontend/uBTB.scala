@@ -120,7 +120,7 @@ class MicroBTB(implicit p: Parameters) extends BasePredictor
   io.out.resp.s1.preds.fromMicroBTBEntry(read_entry)
 
   outMeta.hit := bank.read_hit
-  io.out.s3_meta := RegEnable(RegEnable(outMeta.asUInt, io.s1_fire), io.s2_fire)
+  io.out.last_stage_meta := RegEnable(outMeta.asUInt, io.s1_fire)
 
   // Update logic
   val update = RegNext(io.update.bits)

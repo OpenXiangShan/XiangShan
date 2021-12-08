@@ -138,8 +138,8 @@ with HasCircularQueuePtrHelper
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
   val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
 
-  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx) ||
-                       fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx)
+  from_bpu_f0_flush := fromFtq.flushFromBpu.shouldFlushByStage2(f0_ftq_req.ftqIdx)/*  ||
+                       fromFtq.flushFromBpu.shouldFlushByStage3(f0_ftq_req.ftqIdx) */
 
   val f3_redirect = WireInit(false.B)
   f3_flush := fromFtq.redirect.valid
@@ -185,7 +185,8 @@ with HasCircularQueuePtrHelper
 
   f1_ready := f2_ready && tlbRespAllValid || !f1_valid
 
-  from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
+  // from_bpu_f1_flush := fromFtq.flushFromBpu.shouldFlushByStage3(f1_ftq_req.ftqIdx)
+  from_bpu_f1_flush := false.B
 
   val preDecoder      = Module(new PreDecode)
   val (preDecoderIn, preDecoderOut)   = (preDecoder.io.in, preDecoder.io.out)

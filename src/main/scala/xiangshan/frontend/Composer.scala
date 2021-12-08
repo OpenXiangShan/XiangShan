@@ -39,12 +39,11 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
     c.io.s0_fire := io.s0_fire
     c.io.s1_fire := io.s1_fire
     c.io.s2_fire := io.s2_fire
-    c.io.s3_fire := io.s3_fire
 
     c.io.redirect := io.redirect
 
     if (c.meta_size > 0) {
-      metas = (metas << c.meta_size) | c.io.out.s3_meta(c.meta_size-1,0)
+      metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size-1,0)
     }
     meta_sz = meta_sz + c.meta_size
   }
@@ -54,10 +53,9 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst {
 
   io.s1_ready := components.map(_.io.s1_ready).reduce(_ && _)
   io.s2_ready := components.map(_.io.s2_ready).reduce(_ && _)
-  io.s3_ready := components.map(_.io.s3_ready).reduce(_ && _)
 
   require(meta_sz < MaxMetaLength)
-  io.out.s3_meta := metas
+  io.out.last_stage_meta := metas
 
   var update_meta = io.update.bits.meta
   for (c <- components.reverse) {

@@ -58,8 +58,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   io.out.resp.s1.preds.br_taken_mask := s1_latch_taken_mask
   io.out.resp.s2.preds.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
-  io.out.resp.s3.preds.br_taken_mask := RegEnable(RegEnable(s1_latch_taken_mask, io.s1_fire), io.s2_fire)
-  io.out.s3_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire)
+  io.out.last_stage_meta := RegEnable(s1_latch_meta, io.s1_fire) // TODO: configurable with total-stages
 
   // Update logic
   val u_valid = RegNext(io.update.valid)

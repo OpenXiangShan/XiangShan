@@ -419,7 +419,6 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
   // io.s0_ready := true.B
   io.s1_ready := true.B
   io.s2_ready := true.B
-  io.s3_ready := true.B
 }
 
 @chiselName
@@ -449,7 +448,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
   val tage_fh_info = bank_tables.flatMap(_.map(_.getFoldedHistoryInfo).reduce(_++_)).toSet
   override def getFoldedHistoryInfo = Some(tage_fh_info)
-  // Keep the table responses to process in s3
 
   val s1_resps = MixedVecInit(bank_tables.map(b => VecInit(b.map(t => t.io.resp))))
 
@@ -459,7 +457,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val debug_pc_s0 = s0_pc
   val debug_pc_s1 = RegEnable(s0_pc, enable=io.s0_fire)
   val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s2_fire)
 
   val s1_tageTakens    = Wire(Vec(TageBanks, Bool()))
   val s1_provideds     = Wire(Vec(TageBanks, Bool()))
@@ -488,7 +485,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val s2_basecnts      = RegEnable(s1_basecnts, io.s1_fire)
 
   io.out.resp := io.in.bits.resp_in(0)
-  io.out.s3_meta := RegEnable(resp_meta.asUInt, io.s2_fire)
+  io.out.last_stage_meta := resp_meta.asUInt
 
   // val ftb_hit = io.in.bits.resp_in(0).s2.preds.hit
   val ftb_entry = io.in.bits.resp_in(0).s2.ftb_entry
@@ -677,7 +674,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   for (i <- 0 until numBr) {
     resp_s2.preds.br_taken_mask(i) := s2_tageTakens(i)
   }
-  // io.out.resp.s3 := RegEnable(resp_s2, io.s2_fire)
 
   for (w <- 0 until TageBanks) {
     for (i <- 0 until BankTageNTables(w)) {

@@ -167,7 +167,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   io.out.resp.s2.rasSp  := spec_ras.sp
   io.out.resp.s2.rasTop := spec_ras.top
 
-  io.out.resp.s3 := RegEnable(io.out.resp.s2, io.s2_fire)
 
   val redirect = RegNext(io.redirect)
   val do_recover = redirect.valid
