@@ -165,13 +165,16 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix = Bool()
   val trigger = new TriggerCf
 
-  // make sure chains are fired at same timing
+  // trigger vec fix obtains the triggers that actually hits after considering chain and timing
+  // this might not fit into the csr and current exception mechanism so these functions are merely demos of how triggers work
+  def trigger_timing_match(i, j): Bool = trigger.triggerTiming(i) === trigger.triggerTiming(j)
+
   def trigger_vec_fix = VecInit(trigger.triggerHitVec.zipWithIndex.map{ case (hit, i) =>
     def chain = trigger.triggerChainVec(i / 2)
     if (i % 2 == 0)
-      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i + 1)), trigger.triggerHitVec(i))
+      Mux(chain, trigger.triggerHitVec(i) && trigger.triggerHitVec(i + 1) && trigger_timing_match(i, i + 1), trigger.triggerHitVec(i))
     else
-      Mux(chain, (trigger.triggerHitVec(i ) && trigger.triggerHitVec(i - 1)), trigger.triggerHitVec(i))
+      Mux(chain, trigger.triggerHitVec(i) && trigger.triggerHitVec(i + 1) && trigger_timing_match(i, i - 1), trigger.triggerHitVec(i))
   })
 
   def trigger_before = trigger_vec_fix.zip(trigger.triggerTiming).map{ case (hit, timing) => hit && !timing}.reduce(_ | _)

@@ -499,12 +499,25 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
   }
 }
 
+// This bundle carries trigger hit info along the pipeline
+// Now there are 10 triggers divided into 5 groups of 2
+// These groups are
+// (if if) (store store) (load loid) (if store) (if load)
+
+// Triggers in the same group can chain, meaning that they only
+// fire is both triggers in the group matches (the triggerHitVec bit is asserted)
+// Chaining of trigger No. (2i) and (2i+1) is indicated by triggerChainVec(i)
+// Timing of 0 means trap at current inst, 1 means trap at next inst
+// Chaining and timing and the validness of a trigger is controlled by csr
+// In two chained triggers, if they have different timing, both won't fire
 class TriggerCf (implicit p: Parameters) extends XSBundle {
   val triggerHitVec = Vec(10, Bool())
   val triggerTiming = Vec(10, Bool())
   val triggerChainVec = Vec(5, Bool())
 }
 
+// these 3 bundles help distribute trigger control signals from CSR
+// to Frontend, Load and Store.
 class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
     val t = Valid(new Bundle {
       val addr = Output(UInt(2.W))
