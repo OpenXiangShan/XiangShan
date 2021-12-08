@@ -38,6 +38,11 @@ import freechips.rocketchip.devices.debug._
 // to simplify the code we remove options for apb, cjtag and dmi
 // this module creates wrapped dm and dtm
 
+// TODO
+// 1 cannot write csrs using gdb ?
+// 2 Memory reads (0) on gdb connection ?
+// 3 Trigger Stuff
+
 class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
   val debug = LazyModule(new TLDebugModule(8)(p))

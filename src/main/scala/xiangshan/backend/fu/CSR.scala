@@ -129,7 +129,7 @@ trait HasTriggerConst {
   def I_Trigger = 0.U
   def S_Trigger = 1.U
   def L_Trigger = 2.U
-  def GenESL(triggerType: UInt) = Cat((triggerType === I_Trigger), (triggerType === I_Trigger), (triggerType === I_Trigger))
+  def GenESL(triggerType: UInt) = Cat((triggerType === I_Trigger), (triggerType === S_Trigger), (triggerType === L_Trigger))
 }
 
 class TdataBundle extends Bundle {
@@ -340,7 +340,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val tdata1_function = Map(
    0.U -> (true, I_Trigger), 1.U -> (false, I_Trigger),
    2.U -> (true, S_Trigger), 3.U -> (false, S_Trigger),
-   4.U -> (true, L_Trigger), 5.U -> (false, L_Trigger),
+   4.U -> (true, L_Trigger), 5.U -> (false, L_Trigger), // No.5 Load Trigger
    6.U -> (true, I_Trigger), 7.U -> (false, S_Trigger),
    8.U -> (true, I_Trigger), 9.U -> (false, L_Trigger)
   ).withDefaultValue((false, I_Trigger))
@@ -384,7 +384,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   def ReadTselect(rdata: UInt) = Cat(0.U(60.W), tselectPhy)
   def WriteTselect(wdata: UInt) = {
-    when (wdata <= 10.U){
+    when (wdata < 10.U){
       tselectPhy := wdata(3, 0)
     }
     0.U
@@ -893,7 +893,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall)
+  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
   retTarget := DontCare
   // val illegalEret = TODO
