@@ -218,7 +218,8 @@ with HasCircularQueuePtrHelper
   val f2_datas        = VecInit((0 until PortNumber).map(i => f2_cache_response_data(i)))
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
-  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault
+  val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault && 
+                                                           !fromICache(0).bits.tlbExcp.pageFault
 
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo
