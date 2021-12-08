@@ -119,7 +119,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   //icache.io.missQueue.flush := ifu.io.ftqInter.fromFtq.redirect.valid || (ifu.io.ftqInter.toFtq.pdWb.valid && ifu.io.ftqInter.toFtq.pdWb.bits.misOffset.valid)
 
   icache.io.csr.distribute_csr <> io.csrCtrl.distribute_csr
-  icache.io.csr.update <> io.csrUpdate
+  io.csrUpdate := RegNext(icache.io.csr.update)
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in
