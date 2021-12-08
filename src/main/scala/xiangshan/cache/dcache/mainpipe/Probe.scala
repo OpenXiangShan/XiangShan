@@ -188,18 +188,25 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   // delay probe req for 1 cycle
+  val selected_req_valid = RegInit(false.B) 
+  val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire())
   val selected_lrsc_blocked = Mux(
     pipe_req_arb.io.out.fire(),
     io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === pipe_req_arb.io.out.bits.addr,
-    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === io.pipe_req.bits.addr && io.pipe_req.valid
+    io.lrsc_locked_block.valid && io.lrsc_locked_block.bits === selected_req_bits.addr && selected_req_valid
   )
   val resvsetProbeBlock = RegNext(io.update_resv_set || selected_lrsc_blocked)
-  PipelineConnect(pipe_req_arb.io.out, io.pipe_req, io.pipe_req.fire() && !resvsetProbeBlock, false.B, resvsetProbeBlock)
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
-  when(resvsetProbeBlock){
-    io.pipe_req.valid := false.B
+  pipe_req_arb.io.out.ready := !selected_req_valid || io.pipe_req.fire()
+  io.pipe_req.valid := selected_req_valid && !resvsetProbeBlock
+  io.pipe_req.bits := selected_req_bits
+  when(io.pipe_req.fire()){
+    selected_req_valid := false.B
+  }
+  when(pipe_req_arb.io.out.fire()){
+    selected_req_valid := true.B
   }
 
   // print all input/output requests for debug purpose
