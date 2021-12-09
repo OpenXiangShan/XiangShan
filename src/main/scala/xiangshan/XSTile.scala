@@ -42,6 +42,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
 {
   val l1_xbar = TLXbar()
   val mmio_xbar = TLXbar()
+  val mmio_port = TLIdentityNode() // to L3
   val memory_port = TLIdentityNode()
   val beu = LazyModule(new BusErrorUnit(
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000), new GenericLogicalTreeNode
@@ -63,9 +64,10 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
       memory_port := l1_xbar
   }
 
-  mmio_xbar := TLBuffer() := i_mmio_port
-  mmio_xbar := TLBuffer() := d_mmio_port
-  beu.node := TLBuffer() := mmio_xbar
+  mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
+  mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
+  beu.node := TLBuffer.chainNode(1) := mmio_xbar
+  mmio_port := TLBuffer() := mmio_xbar
 
   lazy val module = new LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
@@ -87,7 +89,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // public ports
   val memory_port = misc.memory_port
-  val uncache = misc.mmio_xbar
+  val uncache = misc.mmio_port
   val clint_int_sink = core.clint_int_sink
   val plic_int_sink = core.plic_int_sink
   val debug_int_sink = core.debug_int_sink
@@ -112,7 +114,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   }
   l2cache match {
     case Some(l2) =>
-      misc.l2_binder.get :*= l2.node :*= misc.l1_xbar
+      misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= misc.l1_xbar
     case None =>
   }
 

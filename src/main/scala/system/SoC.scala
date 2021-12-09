@@ -114,6 +114,8 @@ trait HaveSlaveAXI4Port {
     AXI4ToTL() :=
     AXI4UserYanker(Some(1)) :=
     AXI4Fragmenter() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4IdIndexer(1) :=
     l3FrontendAXI4Node
   errorDevice.node := error_xbar
@@ -206,9 +208,12 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     AXI4IdIndexer(idBits = 2) :=
     AXI4Buffer() :=
     AXI4Buffer() :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(8) :=
     TLToAXI4() :=
+    TLBuffer() :=
     peripheralXbar
 
   val peripheral = InModuleBody {
@@ -238,7 +243,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   }
 
   for(port <- peripheral_ports) {
-    peripheralXbar := TLBuffer.chainNode(1, Some("L2_to_L3_peripheral_buffer")) := port
+    peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
   for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
