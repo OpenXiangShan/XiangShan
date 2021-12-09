@@ -179,7 +179,7 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
       !(ptwResp_valid && ptwResp.entry.hit(io.tlb.req(i).bits.vpn, 0.U, true, true)) &&
       !Cat(lastReqMatchVec_early(i)).orR,
       init = false.B)
-    tlb_req(i).bits := RegNext(io.tlb.req(i).bits)
+    tlb_req(i).bits := RegEnable(io.tlb.req(i).bits, io.tlb.req(i).valid)
   }
 
   val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
@@ -228,9 +228,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   io.tlb.resp.bits.vector := resp_vector
 
   val issue_valid = v(issPtr) && !isEmptyIss
-  val issue_not_filtered = !(ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true))
-  val issue_fire_fake = issue_valid && io.ptw.req(0).ready
-  io.ptw.req(0).valid := issue_valid && issue_not_filtered
+  val issue_filtered = ptwResp_valid && ptwResp.entry.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true)
+  val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
+  io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.resp.ready := true.B
 
@@ -259,6 +259,9 @@ class PTWFilter(Width: Int, Size: Int)(implicit p: Parameters) extends XSModule 
   }
   when (do_iss) {
     issPtr := issPtr + 1.U
+  }
+  when (issue_fire_fake && issue_filtered) { // issued but is filtered
+    v(issPtr) := false.B
   }
   when (do_enq =/= do_deq) {
     mayFullDeq := do_enq
