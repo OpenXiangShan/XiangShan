@@ -291,8 +291,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
 
-  val write_bank_0 = io.write.valid && !io.write.bits.bankIdx
-  val write_bank_1 = io.write.valid &&  io.write.bits.bankIdx
+  val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
+  val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
 
   val write_data_bits = Wire(UInt(dataEntryBits.W))
 
@@ -335,7 +335,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
   //Parity Encode
   val write = io.write.bits
-  val write_data = write.data.asTypeOf(Vec(dataUnitNum, UInt(dataCodeUnit.W)))
+  val write_data = WireInit(write.data.asTypeOf(Vec(dataUnitNum, UInt(dataCodeUnit.W))))
   val write_data_encoded = VecInit(write_data.map( unit_bits => cacheParams.dataCode.encode(unit_bits) ))
   write_data_bits := write_data_encoded.asUInt
 
@@ -362,31 +362,20 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     when(CacheInstrucion.isWriteData(io.cacheOp.req.bits.opCode)){
       (0 until 2).map(i => {
         dataArrays(i).io.w.req.valid := io.cacheOp.req.bits.bank_num === i.U
-        dataArrays(i).io.w.req.bits.apply(
-          data = io.cacheOp.req.bits.write_data_vec.asUInt,
-          setIdx = io.cacheOp.req.bits.index,
-          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-        )
+        dataArrays(i).io.w.req.bits.setIdx := io.cacheOp.req.bits.index
+        dataArrays(i).io.w.req.bits.waymask match {
+          case Some(waymask) => waymask := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+          case None =>
+        }
       })
+      write_data := io.cacheOp.req.bits.write_data_vec.asTypeOf(write_data.cloneType)
       cacheOpShouldResp := true.B
     }
-    // when(CacheInstrucion.isWriteDataECC(io.cacheOp.req.bits.opCode)){
-    //   for (bank_index <- 0 until DCacheBanks) {
-    //     val ecc_bank = ecc_banks(bank_index)
-    //     ecc_bank.io.w.req.valid := true.B
-    //     ecc_bank.io.w.req.bits.apply(
-    //       setIdx = io.cacheOp.req.bits.index,
-    //       data = io.cacheOp.req.bits.write_data_ecc,
-    //       waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-    //     )
-    //   }
-    //   cacheOpShouldResp := true.B
-    // }
   }
   io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
   val dataresp = Mux(io.cacheOp.req.bits.bank_num(0).asBool,
-    dataArrays(0).io.r.resp.data.asTypeOf(Vec(nWays, UInt(blockBits.W))),
-    dataArrays(1).io.r.resp.data.asTypeOf(Vec(nWays, UInt(blockBits.W)))
+    read_datas(1),
+    read_datas(0)
   )
   
   val numICacheLineWords = blockBits / 64 
